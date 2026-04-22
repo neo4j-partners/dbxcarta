@@ -214,15 +214,15 @@ wheels = [
 
 [[package]]
 name = "databricks-job-runner"
-version = "0.4.4"
+version = "0.4.5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "databricks-sdk" },
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/97/c3/22bb148fc91fb998451de6fac984568e57526008d8d48d7b1b6322b927bb/databricks_job_runner-0.4.4.tar.gz", hash = "sha256:8c690bc6f567b0b3081897efbc6a18fb1fe4c93f8913f6618b8bf562e4d0dd52", size = 26941, upload-time = "2026-04-21T19:51:51.194Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/18/cc/68d8b28a30905a2a4b9487cbb8150ebaf3d171500df8fd8924fea3ff2c68/databricks_job_runner-0.4.5.tar.gz", hash = "sha256:51717796a4f0db2cdfe3d18ee0ca95a6fcc53ba61dc559e555d8d14847816d33", size = 27243, upload-time = "2026-04-21T21:06:33.95Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/34/4c/e7f81bd8e2a9967aafc1f1f3570ffcd3fc6c30a3d49d6b2a38d4a42dc66d/databricks_job_runner-0.4.4-py3-none-any.whl", hash = "sha256:a4c9d799b99135aacb1ceb145719f628a2b0d9f5a19f8734f1c6dd05751429c4", size = 33767, upload-time = "2026-04-21T19:51:49.926Z" },
+    { url = "https://files.pythonhosted.org/packages/06/0f/d1a001ed9628e189939529920198d0dd6aa51a255802ed544e77b63a68d8/databricks_job_runner-0.4.5-py3-none-any.whl", hash = "sha256:d41ad745db939b3895320e90130b078d879ce748c79d6cbc3e962156f520ba1c", size = 34058, upload-time = "2026-04-21T21:06:32.652Z" },
 ]
 
 [[package]]
@@ -241,7 +241,7 @@ wheels = [
 
 [[package]]
 name = "dbxcarta"
-version = "0.2.0"
+version = "0.2.2"
 source = { editable = "." }
 dependencies = [
     { name = "databricks-job-runner" },
@@ -259,7 +259,7 @@ test = [
 
 [package.metadata]
 requires-dist = [
-    { name = "databricks-job-runner", specifier = ">=0.4.4" },
+    { name = "databricks-job-runner", specifier = ">=0.4.5" },
     { name = "databricks-sdk", specifier = ">=0.40" },
     { name = "neo4j", specifier = ">=5.0" },
     { name = "pydantic", specifier = ">=2" },

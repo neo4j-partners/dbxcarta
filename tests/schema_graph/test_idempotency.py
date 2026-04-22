@@ -16,7 +16,7 @@ def _counts(session) -> dict[str, int]:
     counts = {}
     for record in session.run("MATCH (n) RETURN labels(n)[0] AS label, count(*) AS cnt"):
         counts[record["label"]] = record["cnt"]
-    for rel in ("HAS_SCHEMA", "HAS_TABLE", "HAS_COLUMN"):
+    for rel in ("HAS_SCHEMA", "HAS_TABLE", "HAS_COLUMN", "REFERENCES"):
         counts[rel] = session.run(f"MATCH ()-[r:{rel}]->() RETURN count(r) AS cnt").single()["cnt"]
     return counts
 

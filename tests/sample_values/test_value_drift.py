@@ -70,9 +70,6 @@ def test_value_drift_replaces_stale_values(
     try:
         _seed(_SEED_VALUES_A)
 
-        os.environ["DBXCARTA_JOB"] = "schema"
-        runner.submit("run_dbxcarta.py")
-        os.environ["DBXCARTA_JOB"] = "sample"
         runner.submit("run_dbxcarta.py")
 
         with neo4j_driver.session() as s:

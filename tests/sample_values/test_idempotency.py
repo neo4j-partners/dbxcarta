@@ -4,7 +4,6 @@ Marked slow — this test submits the job a second time and waits for it to fini
 Run explicitly with: pytest tests/sample_values -m slow
 """
 
-import os
 from pathlib import Path
 
 import pytest
@@ -29,7 +28,6 @@ def test_second_run_produces_same_counts(neo4j_driver: Driver) -> None:
     with neo4j_driver.session() as s:
         before = _counts(s)
 
-    os.environ["DBXCARTA_JOB"] = "sample"
     runner.submit("run_dbxcarta.py")
 
     with neo4j_driver.session() as s:

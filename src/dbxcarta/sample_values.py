@@ -1,66 +1,45 @@
-"""Phase 2 — Sample Value Job.
+"""Sample value transforms: discover and sample distinct values for categorical columns.
 
-For every STRING/BOOLEAN column in Neo4j whose approx_count_distinct is
-below DBXCARTA_SAMPLE_CARDINALITY_THRESHOLD, sample up to
-DBXCARTA_SAMPLE_LIMIT most-frequent distinct values and emit them as
-:Value nodes with (:Column)-[:HAS_VALUE]->(:Value) edges.
-
-All data-plane work is per-table batched via LATERAL VIEW STACK so the
-whole job is one Spark SQL statement per table, not per column.
+Candidate discovery reads from the cached columns_df produced by the extract stage;
+no Neo4j read occurs here. All Neo4j interaction (stale-value purge, node and
+relationship writes) lives in pipeline.py.
 """
 
 from __future__ import annotations
 
 import logging
-import os
-import re
 import time
-import traceback
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-from pydantic import field_validator
-from pydantic_settings import BaseSettings
+from dbxcarta.contract import CONTRACT_VERSION, generate_id, generate_value_id
 
-from dbxcarta.contract import (
-    CONTRACT_VERSION,
-    LABEL_COLUMN,
-    LABEL_VALUE,
-    REL_HAS_VALUE,
-    generate_value_id,
-)
-from dbxcarta.summary import RunSummary
-from dbxcarta.writer import Neo4jConfig, write_nodes, write_relationship
+if TYPE_CHECKING:
+    from pyspark.sql import DataFrame, SparkSession
 
 logger = logging.getLogger(__name__)
 
-_IDENTIFIER_RE = re.compile(r"^[a-zA-Z0-9_.`\-]+$")
 _SCHEMA_PROBE_LIMIT = 3
 
 
-class Settings(BaseSettings):
-    databricks_secret_scope: str = "dbxcarta-neo4j"
-    dbxcarta_catalog: str
-    dbxcarta_schemas: str = ""
-    dbxcarta_summary_volume: str
-    dbxcarta_summary_table: str
-    dbxcarta_write_partitions: int = 8
-    dbxcarta_sample_limit: int = 10
-    dbxcarta_sample_cardinality_threshold: int = 50
-    dbxcarta_stack_chunk_size: int = 50
-
-    @field_validator("dbxcarta_catalog", "dbxcarta_summary_table")
-    @classmethod
-    def _validate_identifier(cls, v: str) -> str:
-        if not _IDENTIFIER_RE.match(v):
-            raise ValueError(f"Invalid Databricks identifier: {v!r}")
-        return v
-
-    @field_validator("dbxcarta_sample_limit")
-    @classmethod
-    def _validate_sample_limit(cls, v: int) -> int:
-        if v <= 0:
-            raise ValueError(f"DBXCARTA_SAMPLE_LIMIT must be > 0, got {v}")
-        return v
+@dataclass
+class SampleStats:
+    candidate_col_ids: list[str]
+    candidate_columns: int
+    sampled_columns: int
+    skipped_columns: int
+    skipped_schemas: int
+    cardinality_failed_tables: int
+    cardinality_wall_clock_ms: int
+    sample_wall_clock_ms: int
+    value_nodes: int
+    has_value_edges: int
+    cardinality_min: int | None = None
+    cardinality_p25: int | None = None
+    cardinality_p50: int | None = None
+    cardinality_p75: int | None = None
+    cardinality_p95: int | None = None
+    cardinality_max: int | None = None
 
 
 @dataclass
@@ -75,148 +54,141 @@ class TableCandidate:
         return f"`{self.catalog}`.`{self.schema_name}`.`{self.table_name}`"
 
 
-def run_sample() -> None:
-    settings = Settings()
+def sample(
+    spark: "SparkSession",
+    columns_df: "DataFrame",
+    catalog: str,
+    schema_list: list[str],
+    sample_limit: int,
+    cardinality_threshold: int,
+    stack_chunk_size: int,
+) -> tuple["DataFrame", "DataFrame", SampleStats]:
+    """Discover and sample distinct values for STRING/BOOLEAN columns.
 
-    from pyspark.sql import SparkSession
+    Returns (value_node_df, has_value_rel_df, stats). DataFrames may be empty
+    when no qualifying values are found; check stats.value_nodes before writing.
+    stats.candidate_col_ids is used by the pipeline for stale-value purge.
+    """
+    from pyspark.sql import Row
+    from pyspark.sql.types import LongType, StringType, StructField, StructType
 
-    spark = SparkSession.builder.getOrCreate()
-    run_id = os.environ.get("DATABRICKS_JOB_RUN_ID", "local")
-    schema_list = [s.strip() for s in settings.dbxcarta_schemas.split(",") if s.strip()]
+    value_schema = StructType([
+        StructField("id", StringType(), nullable=False),
+        StructField("value", StringType()),
+        StructField("count", LongType()),
+        StructField("contract_version", StringType()),
+    ])
+    rel_schema = StructType([
+        StructField("source_id", StringType(), nullable=False),
+        StructField("target_id", StringType(), nullable=False),
+    ])
 
-    summary = RunSummary(
-        run_id=run_id,
-        job_name="sample_values",
-        contract_version=CONTRACT_VERSION,
-        catalog=settings.dbxcarta_catalog,
-        schemas=schema_list,
+    candidates = _candidates_from_columns_df(columns_df, schema_list)
+    total_candidate_cols = sum(len(c.column_names) for c in candidates)
+
+    candidates, skipped_schemas = _filter_readable_schemas(spark, candidates)
+
+    # candidate_col_ids: post-schema-probe, pre-cardinality-filter.
+    # Covers all drift cases including columns filtered out by cardinality this
+    # run that had Value nodes from a prior run.
+    candidate_col_ids = [cid for cand in candidates for cid in cand.column_ids]
+
+    t0 = time.perf_counter_ns()
+    sampled_candidates, cardinality_values, cardinality_failed = _cardinality_filter(
+        spark, candidates, cardinality_threshold, stack_chunk_size,
+    )
+    cardinality_wall_ms = (time.perf_counter_ns() - t0) // 1_000_000
+    sampled_cols = sum(len(c.column_names) for c in sampled_candidates)
+
+    t0 = time.perf_counter_ns()
+    rows = _sample_values(spark, sampled_candidates, sample_limit, stack_chunk_size)
+    sample_wall_ms = (time.perf_counter_ns() - t0) // 1_000_000
+
+    stats = SampleStats(
+        candidate_col_ids=candidate_col_ids,
+        candidate_columns=total_candidate_cols,
+        sampled_columns=sampled_cols,
+        skipped_columns=total_candidate_cols - sampled_cols,
+        skipped_schemas=skipped_schemas,
+        cardinality_failed_tables=cardinality_failed,
+        cardinality_wall_clock_ms=cardinality_wall_ms,
+        sample_wall_clock_ms=sample_wall_ms,
+        value_nodes=0,
+        has_value_edges=0,
+    )
+    _add_cardinality_stats(stats, cardinality_values)
+
+    if not rows:
+        logger.warning("[dbxcarta] no value rows produced")
+        return (
+            spark.createDataFrame([], schema=value_schema),
+            spark.createDataFrame([], schema=rel_schema),
+            stats,
+        )
+
+    value_node_rows: list[Row] = []
+    has_value_rows: list[Row] = []
+    seen_value_ids: set[str] = set()
+    for (col_id, _col_name, val, cnt) in rows:
+        vid = generate_value_id(col_id, val)
+        has_value_rows.append(Row(source_id=col_id, target_id=vid))
+        if vid in seen_value_ids:
+            continue
+        seen_value_ids.add(vid)
+        value_node_rows.append(
+            Row(id=vid, value=val, count=int(cnt), contract_version=CONTRACT_VERSION)
+        )
+
+    stats.value_nodes = len(value_node_rows)
+    stats.has_value_edges = len(has_value_rows)
+
+    return (
+        spark.createDataFrame(value_node_rows, schema=value_schema),
+        spark.createDataFrame(has_value_rows, schema=rel_schema),
+        stats,
     )
 
-    try:
-        _run(spark, settings, schema_list, summary)
-        summary.finish(status="success")
-    except Exception as exc:
-        summary.finish(status="failure", error=traceback.format_exc())
-        raise
-    finally:
-        summary.emit(spark, settings.dbxcarta_summary_volume, settings.dbxcarta_summary_table)
 
+def _candidates_from_columns_df(
+    columns_df: "DataFrame",
+    schema_list: list[str],
+) -> list[TableCandidate]:
+    """Build TableCandidate list from the extract-stage columns DataFrame.
 
-def _run(spark, settings: Settings, schema_list: list[str], summary: RunSummary) -> None:
-    from databricks.sdk.runtime import dbutils
-    from neo4j import GraphDatabase
+    Filters to STRING/BOOLEAN data types in memory. The extract stage already
+    applies schema_list filtering, but we re-apply it here as a defensive guard
+    so the function is correct when called with an unfiltered DataFrame in tests.
+    """
+    from pyspark.sql.functions import col, collect_list
 
-    scope = settings.databricks_secret_scope
-    neo4j = Neo4jConfig(
-        uri=dbutils.secrets.get(scope=scope, key="uri"),
-        username=dbutils.secrets.get(scope=scope, key="username"),
-        password=dbutils.secrets.get(scope=scope, key="password"),
+    df = columns_df.filter(col("data_type").isin("STRING", "BOOLEAN"))
+    if schema_list:
+        df = df.filter(col("table_schema").isin(schema_list))
+
+    rows = (
+        df
+        .groupBy("table_catalog", "table_schema", "table_name")
+        .agg(collect_list("column_name").alias("column_names"))
+        .orderBy("table_catalog", "table_schema", "table_name")
+        .collect()
     )
 
-    with GraphDatabase.driver(neo4j.uri, auth=(neo4j.username, neo4j.password)) as driver:
-        _preflight(spark, settings, driver)
-        _bootstrap_constraints(driver)
-
-        candidates = _read_candidates(driver, settings.dbxcarta_catalog, schema_list)
-        total_candidate_cols = sum(len(c.column_names) for c in candidates)
-        summary.row_counts["candidate_columns"] = total_candidate_cols
-        logger.info(
-            "[dbxcarta] candidates: tables=%d columns=%d",
-            len(candidates), total_candidate_cols,
-        )
-
-        # Per-schema read probe: drop schemas we cannot SELECT from.
-        candidates, skipped_schemas = _filter_readable_schemas(spark, candidates)
-        summary.row_counts["skipped_schemas"] = skipped_schemas
-
-        # --- Cardinality pre-pass ---
-        t0 = time.perf_counter_ns()
-        sampled_candidates, cardinality_values, cardinality_failed = _cardinality_filter(
-            spark, candidates,
-            settings.dbxcarta_sample_cardinality_threshold,
-            settings.dbxcarta_stack_chunk_size,
-        )
-        summary.row_counts["cardinality_wall_clock_ms"] = (time.perf_counter_ns() - t0) // 1_000_000
-        sampled_cols = sum(len(c.column_names) for c in sampled_candidates)
-        summary.row_counts["sampled_columns"] = sampled_cols
-        summary.row_counts["skipped_columns"] = total_candidate_cols - sampled_cols
-        summary.row_counts["cardinality_failed_tables"] = cardinality_failed
-        _record_cardinality_stats(summary, cardinality_values)
-        logger.info(
-            "[dbxcarta] cardinality filter: kept=%d dropped=%d",
-            sampled_cols, total_candidate_cols - sampled_cols,
-        )
-
-        # --- Sampling ---
-        t0 = time.perf_counter_ns()
-        rows = _sample_values(
-            spark, sampled_candidates,
-            settings.dbxcarta_sample_limit,
-            settings.dbxcarta_stack_chunk_size,
-        )
-        summary.row_counts["sample_wall_clock_ms"] = (time.perf_counter_ns() - t0) // 1_000_000
-        logger.info("[dbxcarta] sampled value rows: %d", len(rows))
-
-        # Drop stale Values for every candidate column the current run read
-        # (post schema-probe, pre-cardinality-filter). Covers three drift
-        # cases: top-K shifted, column went all-NULL/all-empty, and column
-        # rose above the cardinality threshold (filtered out this run, but
-        # had Values from a prior run that must not persist).
-        resampled_col_ids = [cid for cand in candidates for cid in cand.column_ids]
-        _delete_stale_values(driver, resampled_col_ids)
-
-        if not rows:
-            logger.warning("[dbxcarta] no value rows produced; skipping writes")
-            summary.row_counts["value_nodes"] = 0
-            summary.row_counts["has_value_edges"] = 0
-            summary.neo4j_counts = _query_neo4j_counts(driver)
-            return
-
-        # --- Build node + relationship DataFrames ---
-        from pyspark.sql import Row
-        from pyspark.sql.types import LongType, StringType, StructField, StructType
-
-        value_node_rows = []
-        has_value_rows = []
-        seen_value_ids: set[str] = set()
-        for (col_id, col_name, val, cnt) in rows:
-            vid = generate_value_id(col_id, val)
-            has_value_rows.append(Row(source_id=col_id, target_id=vid))
-            if vid in seen_value_ids:
-                continue
-            seen_value_ids.add(vid)
-            value_node_rows.append(
-                Row(id=vid, value=val, count=int(cnt), contract_version=CONTRACT_VERSION)
-            )
-
-        summary.row_counts["value_nodes"] = len(value_node_rows)
-        summary.row_counts["has_value_edges"] = len(has_value_rows)
-
-        value_schema = StructType([
-            StructField("id", StringType(), nullable=False),
-            StructField("value", StringType()),
-            StructField("count", LongType()),
-            StructField("contract_version", StringType()),
-        ])
-        rel_schema = StructType([
-            StructField("source_id", StringType(), nullable=False),
-            StructField("target_id", StringType(), nullable=False),
-        ])
-
-        value_node_df = spark.createDataFrame(value_node_rows, schema=value_schema)
-        has_value_df = spark.createDataFrame(has_value_rows, schema=rel_schema)
-
-        partitions = settings.dbxcarta_write_partitions
-        logger.info("[dbxcarta] writing nodes: Value (%d)", len(value_node_rows))
-        write_nodes(value_node_df.repartition(partitions), neo4j, LABEL_VALUE)
-
-        logger.info("[dbxcarta] writing relationships: HAS_VALUE (%d)", len(has_value_rows))
-        write_relationship(
-            has_value_df.repartition(partitions), neo4j, REL_HAS_VALUE, LABEL_COLUMN, LABEL_VALUE,
-        )
-
-        summary.neo4j_counts = _query_neo4j_counts(driver)
-        logger.info("[dbxcarta] neo4j counts: %s", summary.neo4j_counts)
+    out: list[TableCandidate] = []
+    for row in rows:
+        cat = row["table_catalog"]
+        sch = row["table_schema"]
+        tbl = row["table_name"]
+        names: list[str] = list(row["column_names"])
+        # IDs are computed from generate_id(), byte-identical to id_expr() in Spark.
+        ids = [generate_id(cat, sch, tbl, name) for name in names]
+        out.append(TableCandidate(
+            catalog=cat,
+            schema_name=sch,
+            table_name=tbl,
+            column_names=names,
+            column_ids=ids,
+        ))
+    return out
 
 
 def _chunk(lst: list, n: int):
@@ -225,7 +197,6 @@ def _chunk(lst: list, n: int):
 
 
 def _cardinality_query(fq_table: str, column_names: list[str]) -> str:
-    """Flat single-row aggregate: one approx_count_distinct per column."""
     aggs = ", ".join(
         f"approx_count_distinct(`{c}`) AS `card_{i}`"
         for i, c in enumerate(column_names)
@@ -250,15 +221,12 @@ def _sample_query(fq_table: str, column_names: list[str]) -> str:
 
 
 def _cardinality_filter(
-    spark, candidates: list[TableCandidate], threshold: int, chunk_size: int,
+    spark,
+    candidates: list[TableCandidate],
+    threshold: int,
+    chunk_size: int,
 ) -> tuple[list[TableCandidate], list[int], int]:
-    """Return (filtered candidates, observed cardinalities, failed-table count).
-
-    Per-chunk try/except: a failing chunk does not discard sibling chunks'
-    results. A table contributes to ``failed_tables`` if any of its chunks
-    raised, and the cardinality distribution disclaims those tables via the
-    ``cardinality_failed_tables`` summary counter.
-    """
+    """Return (filtered candidates, observed cardinalities, failed-table count)."""
     kept: list[TableCandidate] = []
     all_cards: list[int] = []
     failed_tables = 0
@@ -298,13 +266,12 @@ def _cardinality_filter(
 
 
 def _sample_values(
-    spark, candidates: list[TableCandidate], limit: int, chunk_size: int,
+    spark,
+    candidates: list[TableCandidate],
+    limit: int,
+    chunk_size: int,
 ) -> list[tuple[str, str, str, int]]:
-    """Return list of (col_id, col_name, val, cnt), top-`limit` per column.
-
-    Per-chunk try/except: a failing chunk on a wide table does not discard
-    sibling chunks' results.
-    """
+    """Return list of (col_id, col_name, val, cnt), top-`limit` per column."""
     out: list[tuple[str, str, str, int]] = []
     for cand in candidates:
         id_by_name = dict(zip(cand.column_names, cand.column_ids))
@@ -330,9 +297,10 @@ def _sample_values(
 
 
 def _filter_readable_schemas(
-    spark, candidates: list[TableCandidate],
+    spark,
+    candidates: list[TableCandidate],
 ) -> tuple[list[TableCandidate], int]:
-    """Probe up to K=3 tables per schema; drop schemas where all probes raise."""
+    """Probe up to K tables per schema; drop schemas where all probes fail."""
     by_schema: dict[tuple[str, str], list[TableCandidate]] = {}
     for c in candidates:
         by_schema.setdefault((c.catalog, c.schema_name), []).append(c)
@@ -362,150 +330,18 @@ def _filter_readable_schemas(
     return readable, skipped
 
 
-def _record_cardinality_stats(summary: RunSummary, values: list[int]) -> None:
+def _add_cardinality_stats(stats: SampleStats, values: list[int]) -> None:
     if not values:
         return
     s = sorted(values)
 
     def _pct(p: float) -> int:
-        if not s:
-            return 0
         idx = min(len(s) - 1, max(0, int(round(p * (len(s) - 1)))))
         return int(s[idx])
 
-    summary.row_counts["cardinality_min"] = int(s[0])
-    summary.row_counts["cardinality_p25"] = _pct(0.25)
-    summary.row_counts["cardinality_p50"] = _pct(0.50)
-    summary.row_counts["cardinality_p75"] = _pct(0.75)
-    summary.row_counts["cardinality_p95"] = _pct(0.95)
-    summary.row_counts["cardinality_max"] = int(s[-1])
-
-
-def _read_candidates(
-    driver, catalog: str, schema_list: list[str],
-) -> list[TableCandidate]:
-    query = """
-    MATCH (col:Column)
-    WHERE col.data_type IN ['STRING', 'BOOLEAN']
-    MATCH (tbl:Table)-[:HAS_COLUMN]->(col)
-    MATCH (sch:Schema)-[:HAS_TABLE]->(tbl)
-    MATCH (db:Database)-[:HAS_SCHEMA]->(sch)
-    WHERE db.name = $catalog
-    RETURN db.name AS catalog, sch.name AS schema_name, tbl.name AS table_name,
-           collect(col.name) AS column_names, collect(col.id) AS column_ids
-    ORDER BY catalog, schema_name, table_name
-    """
-    out: list[TableCandidate] = []
-    with driver.session() as session:
-        for r in session.run(query, catalog=catalog):
-            sch = r["schema_name"]
-            if schema_list and sch not in schema_list:
-                continue
-            out.append(TableCandidate(
-                catalog=r["catalog"],
-                schema_name=sch,
-                table_name=r["table_name"],
-                column_names=list(r["column_names"]),
-                column_ids=list(r["column_ids"]),
-            ))
-    return out
-
-
-def _preflight(spark, settings: Settings, driver) -> None:
-    catalog = settings.dbxcarta_catalog
-    spark.sql(
-        f"SELECT 1 FROM `{catalog}`.information_schema.schemata LIMIT 1"
-    ).collect()
-
-    volume_path = settings.dbxcarta_summary_volume
-    parts = volume_path.lstrip("/").split("/")
-    if len(parts) < 4 or parts[0] != "Volumes":
-        raise RuntimeError(
-            f"[dbxcarta] DBXCARTA_SUMMARY_VOLUME must be a /Volumes/<catalog>/<schema>/<volume> path,"
-            f" got {volume_path!r}"
-        )
-    vol_catalog, vol_schema, vol_name = parts[1], parts[2], parts[3]
-    spark.sql(
-        f"CREATE VOLUME IF NOT EXISTS `{vol_catalog}`.`{vol_schema}`.`{vol_name}`"
-    )
-
-    table = settings.dbxcarta_summary_table
-    quoted_table = ".".join(f"`{p}`" for p in table.split("."))
-    spark.sql(f"""
-        CREATE TABLE IF NOT EXISTS {quoted_table} (
-            run_id STRING NOT NULL,
-            job_name STRING,
-            contract_version STRING,
-            catalog STRING,
-            schemas ARRAY<STRING>,
-            started_at TIMESTAMP,
-            ended_at TIMESTAMP,
-            status STRING,
-            row_counts MAP<STRING, BIGINT>,
-            neo4j_counts MAP<STRING, BIGINT>,
-            error STRING
-        ) USING DELTA
-    """)
-
-    # Phase 2-specific: require Column nodes from Phase 1.
-    with driver.session() as session:
-        cnt = session.run("MATCH (n:Column) RETURN count(n) AS cnt").single()["cnt"]
-        if cnt == 0:
-            raise RuntimeError(
-                "[dbxcarta] Phase 2 preflight failed: no Column nodes in Neo4j. "
-                "Run Phase 1 (DBXCARTA_JOB=schema) before Phase 2."
-            )
-
-    logger.info(
-        "[dbxcarta] preflight passed: %s.information_schema accessible, volume/table ready, columns=%d",
-        catalog, cnt,
-    )
-
-
-def _bootstrap_constraints(driver) -> None:
-    from neo4j.exceptions import ClientError
-
-    with driver.session() as session:
-        try:
-            session.run(
-                f"CREATE CONSTRAINT {LABEL_VALUE.lower()}_id IF NOT EXISTS "
-                f"FOR (n:{LABEL_VALUE}) REQUIRE n.id IS UNIQUE"
-            )
-        except ClientError as exc:
-            if "ConstraintAlreadyExists" not in (exc.code or ""):
-                raise
-    logger.info("[dbxcarta] neo4j Value constraint bootstrapped")
-
-
-def _delete_stale_values(driver, col_ids: list[str]) -> None:
-    """Drop Value nodes attached to columns the current run will replace.
-
-    Scoped to ``col_ids`` (the columns surviving the cardinality filter)
-    rather than the columns that produced output, so resampled columns
-    that go all-NULL or all-empty also drop their stale Values. Columns
-    in skipped schemas are left untouched, consistent with the per-schema
-    probe's best-effort coverage contract.
-    """
-    if not col_ids:
-        return
-    with driver.session() as session:
-        session.run(
-            "MATCH (c:Column)-[:HAS_VALUE]->(v:Value) "
-            "WHERE c.id IN $col_ids "
-            "DETACH DELETE v",
-            col_ids=col_ids,
-        )
-    logger.info("[dbxcarta] deleted stale Values for %d columns", len(col_ids))
-
-
-def _query_neo4j_counts(driver) -> dict[str, int]:
-    counts: dict[str, int] = {}
-    with driver.session() as session:
-        for record in session.run(
-            "MATCH (n) RETURN labels(n)[0] AS label, count(*) AS cnt"
-        ):
-            counts[record["label"]] = record["cnt"]
-        for rel_type in ("HAS_SCHEMA", "HAS_TABLE", "HAS_COLUMN", REL_HAS_VALUE):
-            result = session.run(f"MATCH ()-[r:{rel_type}]->() RETURN count(r) AS cnt")
-            counts[rel_type] = result.single()["cnt"]
-    return counts
+    stats.cardinality_min = int(s[0])
+    stats.cardinality_p25 = _pct(0.25)
+    stats.cardinality_p50 = _pct(0.50)
+    stats.cardinality_p75 = _pct(0.75)
+    stats.cardinality_p95 = _pct(0.95)
+    stats.cardinality_max = int(s[-1])

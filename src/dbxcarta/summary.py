@@ -37,6 +37,14 @@ class RunSummary:
     row_counts: dict[str, int] = field(default_factory=dict)
     neo4j_counts: dict[str, int] = field(default_factory=dict)
     error: str | None = None
+    # Embedding fields — None/empty when no embedding flags are enabled.
+    embedding_model: str | None = None
+    embedding_flags: dict[str, bool] = field(default_factory=dict)
+    embedding_attempts: dict[str, int] = field(default_factory=dict)
+    embedding_successes: dict[str, int] = field(default_factory=dict)
+    embedding_failure_rate_per_label: dict[str, float] = field(default_factory=dict)
+    embedding_failure_rate: float | None = None
+    embedding_failure_threshold: float | None = None
 
     def finish(self, *, status: str, error: str | None = None) -> None:
         self.status = status
@@ -76,6 +84,8 @@ class RunSummary:
         from pyspark.sql import Row
         from pyspark.sql.types import (
             ArrayType,
+            BooleanType,
+            DoubleType,
             LongType,
             MapType,
             StringType,
@@ -96,6 +106,13 @@ class RunSummary:
             StructField("row_counts", MapType(StringType(), LongType())),
             StructField("neo4j_counts", MapType(StringType(), LongType())),
             StructField("error", StringType()),
+            StructField("embedding_model", StringType()),
+            StructField("embedding_flags", MapType(StringType(), BooleanType())),
+            StructField("embedding_attempts", MapType(StringType(), LongType())),
+            StructField("embedding_successes", MapType(StringType(), LongType())),
+            StructField("embedding_failure_rate_per_label", MapType(StringType(), DoubleType())),
+            StructField("embedding_failure_rate", DoubleType()),
+            StructField("embedding_failure_threshold", DoubleType()),
         ])
 
         quoted_table = ".".join(f"`{p}`" for p in table_name.split("."))
@@ -104,6 +121,7 @@ class RunSummary:
             spark.createDataFrame([row], schema=schema)
             .write.format("delta")
             .mode("append")
+            .option("mergeSchema", "true")
             .saveAsTable(quoted_table)
         )
 
