@@ -31,13 +31,109 @@ _STAGING_ARMS = _LLM_ARMS | {"graph_rag"}
 _FENCE_RE = re.compile(r"^```(?:sql)?\s*\n?(.*?)\n?```\s*$", re.DOTALL | re.IGNORECASE)
 _SQL_START_RE = re.compile(r"^\s*(SELECT|WITH|INSERT|UPDATE|DELETE|CREATE|EXPLAIN)\b", re.IGNORECASE)
 
+# Result-set comparison algorithm boundaries. Not runtime tunables.
+_COMPARE_ROW_THRESHOLD = 500      # rows below this → exact set equality; at or above → sampled
+_LARGE_COUNT_TOLERANCE = 0.10     # row count divergence above 10% → immediately False
+_LARGE_SAMPLE_MATCH_RATE = 0.80   # fraction of stride-sampled rows that must match exactly
 
-def _load_questions(path: str) -> list[dict[str, Any]]:
-    text = Path(path).read_text()
+
+def _is_table_ref(source: str) -> bool:
+    """Return True when source looks like a three-part catalog.schema.table name."""
+    return len(source.split(".")) == 3 and not source.startswith(("/", "."))
+
+
+def _load_questions(source: str, spark: Any = None) -> list[dict[str, Any]]:
+    if _is_table_ref(source):
+        if spark is None:
+            raise RuntimeError("spark is required to load questions from a Delta table")
+        return [row.asDict() for row in spark.table(source).collect()]
+    text = Path(source).read_text()
     data = json.loads(text)
     if not isinstance(data, list):
         raise ValueError(f"questions file must be a JSON array, got {type(data)}")
     return data
+
+
+def _normalize_row(row: list, col_names: list[str]) -> tuple:
+    """Reorder row values by sorted column name, stringifying each value.
+
+    Normalises differences in column ordering between generated and reference SQL.
+    Falls back to value-sort when column names are unavailable or mismatched.
+    """
+    if col_names and len(col_names) == len(row):
+        return tuple(str(v) for _, v in sorted(zip(col_names, row)))
+    return tuple(sorted(str(v) for v in row))
+
+
+def _normalize_result_set(col_names: list[str], rows: list[list]) -> list[tuple]:
+    normalized = [_normalize_row(row, col_names) for row in rows]
+    return sorted(normalized)
+
+
+def _compare_result_sets(
+    gen_cols: list[str],
+    gen_rows: list[list],
+    ref_cols: list[str],
+    ref_rows: list[list],
+) -> tuple[bool, str | None]:
+    """Compare two result sets, ignoring column ordering.
+
+    Small result sets (< _COMPARE_ROW_THRESHOLD): exact equality after normalization.
+    Large result sets: short-circuit on >10% row-count divergence, then require
+    80% of stride-sampled sorted rows to match exactly.
+    """
+    gen_count = len(gen_rows)
+    ref_count = len(ref_rows)
+
+    if gen_count >= _COMPARE_ROW_THRESHOLD or ref_count >= _COMPARE_ROW_THRESHOLD:
+        max_count = max(gen_count, ref_count)
+        if max_count > 0 and abs(gen_count - ref_count) / max_count > _LARGE_COUNT_TOLERANCE:
+            return False, (
+                f"row count divergence >10%: generated={gen_count} reference={ref_count}"
+            )
+        gen_sorted = _normalize_result_set(gen_cols, gen_rows)
+        ref_sorted = _normalize_result_set(ref_cols, ref_rows)
+        sample_size = min(50, gen_count)
+        stride = max(1, gen_count // sample_size) if sample_size else 1
+        gen_sample = gen_sorted[::stride][:sample_size]
+        ref_sample = ref_sorted[::stride][:sample_size]
+        if not gen_sample:
+            return True, None
+        match_rate = sum(g == r for g, r in zip(gen_sample, ref_sample)) / len(gen_sample)
+        if match_rate < _LARGE_SAMPLE_MATCH_RATE:
+            return False, f"sampled match rate {match_rate:.1%} < {_LARGE_SAMPLE_MATCH_RATE:.0%}"
+        return True, None
+
+    if gen_count != ref_count:
+        return False, f"row count mismatch: generated={gen_count} reference={ref_count}"
+    if _normalize_result_set(gen_cols, gen_rows) != _normalize_result_set(ref_cols, ref_rows):
+        return False, "result set values differ"
+    return True, None
+
+
+def _grade_correct(
+    generated_sql: str,
+    reference_sql: str,
+    ws: WorkspaceClient,
+    warehouse_id: str,
+    timeout_sec: int,
+) -> tuple[bool, str | None]:
+    """Execute both SQL statements and compare result sets.
+
+    Returns (correct, error). correct is False when either statement fails or the
+    result sets do not match.
+    """
+    from dbxcarta.client.executor import fetch_rows
+
+    gen_cols, gen_rows, gen_err = fetch_rows(ws, warehouse_id, generated_sql, timeout_sec)
+    if gen_rows is None:
+        return False, f"generated SQL failed: {gen_err}"
+
+    ref_cols, ref_rows, ref_err = fetch_rows(ws, warehouse_id, reference_sql, timeout_sec)
+    if ref_rows is None:
+        return False, f"reference SQL failed: {ref_err}"
+
+    return _compare_result_sets(gen_cols, gen_rows, ref_cols, ref_rows)
 
 
 def _parse_sql(text: str | None) -> tuple[str | None, bool]:
@@ -72,12 +168,14 @@ def _resolve_staging_path(settings: ClientSettings) -> str:
 def _preflight(ws: WorkspaceClient, settings: ClientSettings) -> None:
     preflight_warehouse(ws, settings.databricks_warehouse_id)
 
-    questions_path = Path(settings.dbxcarta_client_questions)
-    if not questions_path.exists():
-        raise RuntimeError(
-            f"Questions file not found: {settings.dbxcarta_client_questions}\n"
-            "Upload it with: dbxcarta upload --data examples/client/questions/"
-        )
+    source = settings.dbxcarta_client_questions
+    if not _is_table_ref(source):
+        questions_path = Path(source)
+        if not questions_path.exists():
+            raise RuntimeError(
+                f"Questions file not found: {source}\n"
+                "Upload it with: dbxcarta upload --data examples/client/questions/"
+            )
 
     active_arms = settings.arms
     if any(a in _STAGING_ARMS for a in active_arms) and not settings.dbxcarta_chat_endpoint:
@@ -174,6 +272,17 @@ def _run_llm_arm(
             cleaned_sql,
             settings.dbxcarta_client_timeout_sec,
         )
+        reference_sql = q.get("reference_sql")
+        gradable = bool(reference_sql) and executed
+        correct = False
+        if gradable:
+            correct, _ = _grade_correct(
+                cleaned_sql,
+                reference_sql,
+                ws,
+                settings.databricks_warehouse_id,
+                settings.dbxcarta_client_timeout_sec,
+            )
         summary.add_result(
             question_id=qid,
             question=q["question"],
@@ -182,25 +291,34 @@ def _run_llm_arm(
             parsed=True,
             executed=executed,
             non_empty=non_empty,
+            correct=correct,
+            gradable=gradable,
             error=exec_error,
         )
 
 
 def _embed_questions(
     ws: WorkspaceClient, endpoint: str, texts: list[str]
-) -> list[list[float]]:
-    """Embed all questions in a single batch call to the serving endpoint."""
+) -> tuple[list[list[float]] | None, str | None]:
+    """Embed all questions in a single batch call.
+
+    Returns (embeddings, error). On HTTP or network failure the first element
+    is None so callers can record a per-question warning without aborting the run.
+    """
     headers = ws.config.authenticate()
-    resp = requests.post(
-        f"{ws.config.host.rstrip('/')}/serving-endpoints/{endpoint}/invocations",
-        headers=headers,
-        json={"input": texts},
-        timeout=60,
-    )
-    resp.raise_for_status()
+    try:
+        resp = requests.post(
+            f"{ws.config.host.rstrip('/')}/serving-endpoints/{endpoint}/invocations",
+            headers=headers,
+            json={"input": texts},
+            timeout=60,
+        )
+        resp.raise_for_status()
+    except requests.RequestException as exc:
+        return None, str(exc)
     data = resp.json()["data"]
     data.sort(key=lambda x: x["index"])
-    return [item["embedding"] for item in data]
+    return [item["embedding"] for item in data], None
 
 
 def _run_graph_rag_arm(
@@ -219,7 +337,19 @@ def _run_graph_rag_arm(
     schemas = settings.schemas_list
 
     texts = [q["question"] for q in questions]
-    embeddings = _embed_questions(ws, settings.dbxcarta_embed_endpoint, texts)
+    embeddings, embed_error = _embed_questions(ws, settings.dbxcarta_embed_endpoint, texts)
+    if embeddings is None:
+        for q in questions:
+            summary.add_result(
+                question_id=q["question_id"],
+                question=q["question"],
+                arm="graph_rag",
+                parsed=False,
+                executed=False,
+                non_empty=False,
+                error=f"embedding failed: {embed_error}",
+            )
+        return
 
     retriever = GraphRetriever(settings)
     try:
@@ -267,6 +397,17 @@ def _run_graph_rag_arm(
             cleaned_sql,
             settings.dbxcarta_client_timeout_sec,
         )
+        reference_sql = q.get("reference_sql")
+        gradable = bool(reference_sql) and executed
+        correct = False
+        if gradable:
+            correct, _ = _grade_correct(
+                cleaned_sql,
+                reference_sql,
+                ws,
+                settings.databricks_warehouse_id,
+                settings.dbxcarta_client_timeout_sec,
+            )
         summary.add_result(
             question_id=qid,
             question=q["question"],
@@ -276,6 +417,8 @@ def _run_graph_rag_arm(
             parsed=True,
             executed=executed,
             non_empty=non_empty,
+            correct=correct,
+            gradable=gradable,
             error=exec_error,
         )
 
@@ -291,7 +434,7 @@ def run_client() -> None:
 
     _preflight(ws, settings)
 
-    questions = _load_questions(settings.dbxcarta_client_questions)
+    questions = _load_questions(settings.dbxcarta_client_questions, spark)
     active_arms = settings.arms
     staging_path = _resolve_staging_path(settings) if any(
         a in _STAGING_ARMS for a in active_arms
@@ -335,3 +478,48 @@ def run_client() -> None:
 
     finally:
         summary.emit(spark, settings.dbxcarta_summary_volume, settings.dbxcarta_summary_table)
+
+
+def manage_questions(spark: Any, settings: ClientSettings, questions_path: str) -> None:
+    """Write a questions JSON file to a managed Delta table alongside run_summary.
+
+    The target table is derived from dbxcarta_summary_table: same catalog and
+    schema, table name client_questions. Overwrites existing data so the table
+    stays in sync with the checked-in source file.
+    """
+    from pyspark.sql.types import StringType, StructField, StructType
+
+    parts = settings.dbxcarta_summary_table.split(".")
+    if len(parts) != 3:
+        raise RuntimeError(
+            f"Cannot derive questions table from "
+            f"DBXCARTA_SUMMARY_TABLE={settings.dbxcarta_summary_table!r}. "
+            "Expected catalog.schema.table."
+        )
+    target_table = f"{parts[0]}.{parts[1]}.client_questions"
+
+    questions = _load_questions(questions_path)
+
+    schema = StructType([
+        StructField("question_id", StringType(), nullable=False),
+        StructField("question", StringType()),
+        StructField("notes", StringType()),
+        StructField("reference_sql", StringType()),
+    ])
+    rows = [
+        (
+            q.get("question_id"),
+            q.get("question"),
+            q.get("notes"),
+            q.get("reference_sql"),
+        )
+        for q in questions
+    ]
+    quoted = ".".join(f"`{p}`" for p in target_table.split("."))
+    (
+        spark.createDataFrame(rows, schema=schema)
+        .write.format("delta")
+        .mode("overwrite")
+        .option("overwriteSchema", "true")
+        .saveAsTable(quoted)
+    )

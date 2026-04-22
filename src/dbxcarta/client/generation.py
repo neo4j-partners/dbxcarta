@@ -21,7 +21,7 @@ def generate_sql_batch(
     and ``prompt``.  Returns a mapping from question_id to
     ``(sql_text, error_message)``.
 
-    Materializesto Delta after ai_query (best-practices Spark §4) so the
+    Materializes to Delta after ai_query (best-practices Spark §4) so the
     downstream execute loop never re-triggers inference.
     """
     from pyspark.sql import Row

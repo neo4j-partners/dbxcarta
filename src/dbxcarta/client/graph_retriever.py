@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import os
-
 from neo4j import GraphDatabase
 
+from dbxcarta.client.neo4j_utils import neo4j_credentials
 from dbxcarta.client.retriever import ColumnEntry, ContextBundle, Retriever
 from dbxcarta.client.settings import ClientSettings
 
@@ -14,27 +13,10 @@ _TABLE_INDEX = "table_embedding"
 _MAX_VALUES = 30
 
 
-def _neo4j_credentials(settings: ClientSettings) -> tuple[str, str, str]:
-    try:
-        from databricks.sdk.runtime import dbutils
-        scope = settings.databricks_secret_scope
-        return (
-            dbutils.secrets.get(scope=scope, key="uri"),
-            dbutils.secrets.get(scope=scope, key="username"),
-            dbutils.secrets.get(scope=scope, key="password"),
-        )
-    except Exception:
-        return (
-            os.environ["NEO4J_URI"],
-            os.environ["NEO4J_USERNAME"],
-            os.environ["NEO4J_PASSWORD"],
-        )
-
-
 class GraphRetriever(Retriever):
     def __init__(self, settings: ClientSettings) -> None:
         self._settings = settings
-        uri, username, password = _neo4j_credentials(settings)
+        uri, username, password = neo4j_credentials(settings)
         self._driver = GraphDatabase.driver(uri, auth=(username, password))
 
     def close(self) -> None:
@@ -43,15 +25,17 @@ class GraphRetriever(Retriever):
     def retrieve(self, question: str, embedding: list[float]) -> ContextBundle:
         top_k = self._settings.dbxcarta_client_top_k
         catalog = self._settings.dbxcarta_catalog
+        schemas = self._settings.schemas_list
 
         with self._driver.session() as session:
             col_seeds = _query_vector_seeds(session, _COL_INDEX, embedding, top_k)
             tbl_seeds = _query_vector_seeds(session, _TABLE_INDEX, embedding, top_k)
             parent_tbl_ids = _parent_table_ids(session, col_seeds)
+            ref_tbl_ids = _references_table_ids(session, col_seeds)
 
-            all_tbl_ids = list(dict.fromkeys(tbl_seeds + parent_tbl_ids))
-            columns = _fetch_columns(session, all_tbl_ids, catalog)
-            values = _fetch_values(session, col_seeds[:5])
+            all_tbl_ids = list(dict.fromkeys(tbl_seeds + parent_tbl_ids + ref_tbl_ids))
+            columns = _fetch_columns(session, all_tbl_ids, catalog, schemas)
+            values = _fetch_values(session, col_seeds)
 
         return ContextBundle(
             columns=columns,
@@ -83,18 +67,36 @@ def _parent_table_ids(session, col_ids: list[str]) -> list[str]:
     return [row["tid"] for row in result]
 
 
-def _fetch_columns(session, table_ids: list[str], catalog: str) -> list[ColumnEntry]:
+def _references_table_ids(session, col_ids: list[str]) -> list[str]:
+    """Follow REFERENCES edges in both directions to find joinable tables."""
+    if not col_ids:
+        return []
+    result = session.run(
+        "UNWIND $col_ids AS cid "
+        "MATCH (c:Column {id: cid})-[:REFERENCES]-(other:Column) "
+        "MATCH (other)<-[:HAS_COLUMN]-(t:Table) "
+        "RETURN DISTINCT t.id AS tid",
+        col_ids=col_ids,
+    )
+    return [row["tid"] for row in result]
+
+
+def _fetch_columns(
+    session, table_ids: list[str], catalog: str, schemas: list[str]
+) -> list[ColumnEntry]:
     if not table_ids:
         return []
     result = session.run(
         "UNWIND $tids AS tid "
         "MATCH (s:Schema)-[:HAS_TABLE]->(t:Table {id: tid}) "
         "MATCH (t)-[:HAS_COLUMN]->(c:Column) "
+        "WHERE size($schemas) = 0 OR s.name IN $schemas "
         "RETURN s.name AS schema_name, t.name AS table_name, "
         "       c.name AS col_name, c.data_type AS data_type, "
         "       c.comment AS comment, c.ordinal_position AS pos "
         "ORDER BY schema_name, table_name, pos",
         tids=table_ids,
+        schemas=schemas,
     )
     entries: list[ColumnEntry] = []
     for row in result:

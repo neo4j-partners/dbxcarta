@@ -18,10 +18,14 @@ from __future__ import annotations
 import logging
 import os
 import re
-from dataclasses import fields as dc_fields
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings
+
+if TYPE_CHECKING:
+    from pyspark.sql import DataFrame
 
 from dbxcarta.contract import (
     CONTRACT_VERSION,
@@ -46,8 +50,6 @@ logger = logging.getLogger(__name__)
 
 _IDENTIFIER_RE = re.compile(r"^[a-zA-Z0-9_.`\-]+$")
 
-# Text fed to the embedding model for Table nodes on the first green run.
-# Schema-qualified name + pipe separator + comment (empty comment omitted cleanly).
 _TABLE_EMBEDDING_TEXT_EXPR = (
     "concat_ws(' | ', concat_ws('.', table_schema, name), nullif(trim(comment), ''))"
 )
@@ -60,6 +62,14 @@ _SCHEMA_EMBEDDING_TEXT_EXPR = (
 )
 _DATABASE_EMBEDDING_TEXT_EXPR = "name"
 _VALUE_EMBEDDING_TEXT_EXPR = "value"
+
+_EMBEDDING_TEXT_EXPRS = {
+    LABEL_TABLE: _TABLE_EMBEDDING_TEXT_EXPR,
+    LABEL_COLUMN: _COLUMN_EMBEDDING_TEXT_EXPR,
+    LABEL_SCHEMA: _SCHEMA_EMBEDDING_TEXT_EXPR,
+    LABEL_DATABASE: _DATABASE_EMBEDDING_TEXT_EXPR,
+    LABEL_VALUE: _VALUE_EMBEDDING_TEXT_EXPR,
+}
 
 
 class Settings(BaseSettings):
@@ -82,10 +92,10 @@ class Settings(BaseSettings):
     dbxcarta_embedding_failure_threshold: float = 0.05
     dbxcarta_embedding_endpoint: str = "databricks-gte-large-en"
     dbxcarta_embedding_dimension: int = 1024
-    # Stage 2: materialize-once between ai_query and downstream actions.
+    # Materialize-once between ai_query and downstream actions.
     # If blank, derived at runtime as sibling to DBXCARTA_SUMMARY_VOLUME.
     dbxcarta_staging_path: str = ""
-    # Stage 2: Neo4j Spark Connector batch.size (per best-practices Neo4j §2).
+    # Neo4j Spark Connector batch.size (per best-practices Neo4j §2).
     dbxcarta_neo4j_batch_size: int = 20000
 
     @field_validator("dbxcarta_catalog", "dbxcarta_summary_table")
@@ -95,6 +105,39 @@ class Settings(BaseSettings):
             raise ValueError(f"Invalid Databricks identifier: {v!r}")
         return v
 
+
+# ---------------------------------------------------------------------------
+# Container types for decomposed _run phases
+# ---------------------------------------------------------------------------
+
+@dataclass
+class _ExtractResult:
+    database_df: DataFrame
+    schema_node_df: DataFrame
+    table_node_df: DataFrame
+    column_node_df: DataFrame
+    has_schema_df: DataFrame
+    has_table_df: DataFrame
+    has_column_df: DataFrame
+    references_df: DataFrame
+    schemata_df: DataFrame
+    tables_df: DataFrame
+    columns_df: DataFrame
+    fk_pairs_df: DataFrame
+    declared_df: DataFrame
+    fk_references: int
+
+
+@dataclass
+class _ValueResult:
+    value_node_df: DataFrame | None
+    has_value_df: DataFrame | None
+    sample_stats: sv.SampleStats | None
+
+
+# ---------------------------------------------------------------------------
+# Public entry point
+# ---------------------------------------------------------------------------
 
 def run_dbxcarta() -> None:
     settings = Settings()
@@ -134,9 +177,13 @@ def run_dbxcarta() -> None:
         summary.emit(spark, settings.dbxcarta_summary_volume, settings.dbxcarta_summary_table)
 
 
+# ---------------------------------------------------------------------------
+# Orchestrator
+# ---------------------------------------------------------------------------
+
 def _run(spark, settings: Settings, schema_list: list[str], summary: RunSummary) -> None:
     from databricks.sdk.runtime import dbutils
-    from pyspark.sql.functions import col
+    from neo4j import GraphDatabase
 
     scope = settings.databricks_secret_scope
     neo4j = Neo4jConfig(
@@ -149,11 +196,31 @@ def _run(spark, settings: Settings, schema_list: list[str], summary: RunSummary)
     _preflight(spark, settings)
     staging_path = _resolve_staging_path(settings)
     _truncate_staging_root(staging_path)
-    _bootstrap_constraints(neo4j, settings)
+
+    with GraphDatabase.driver(neo4j.uri, auth=(neo4j.username, neo4j.password)) as driver:
+        _bootstrap_constraints(driver, settings)
+        extract = _extract(spark, settings, schema_list, summary)
+        _transform_embeddings(settings, extract, staging_path, summary)
+        values = _transform_sample_values(spark, settings, schema_list, extract, staging_path, summary)
+        _check_thresholds(settings, summary)
+        _load(neo4j, driver, settings, extract, values, summary)
+        summary.neo4j_counts = _query_neo4j_counts(driver)
+
+    _cleanup(extract)
+    logger.info("[dbxcarta] neo4j counts: %s", summary.neo4j_counts)
+
+
+# ---------------------------------------------------------------------------
+# Phase functions
+# ---------------------------------------------------------------------------
+
+def _extract(
+    spark, settings: Settings, schema_list: list[str], summary: RunSummary,
+) -> _ExtractResult:
+    from pyspark.sql.functions import col
 
     catalog = settings.dbxcarta_catalog
 
-    # --- Extract ---
     schemata_df = (
         spark.sql(
             f"SELECT catalog_name, schema_name, comment"
@@ -213,9 +280,6 @@ def _run(spark, settings: Settings, schema_list: list[str], summary: RunSummary)
         f" FROM `{catalog}`.information_schema.referential_constraints"
     )
     if schema_list:
-        # Both sides of a cross-schema FK must be in scope; otherwise the target
-        # Column node won't exist and the edge would dangle. Drop dangling edges
-        # at read time so the skip is explicit and auditable.
         fk_pairs_df = fk_pairs_df.filter(
             col("fk_schema").isin(schema_list) & col("tgt_schema").isin(schema_list)
         )
@@ -246,7 +310,6 @@ def _run(spark, settings: Settings, schema_list: list[str], summary: RunSummary)
         fk_declared, fk_resolved, fk_skipped, fk_references,
     )
 
-    # --- Transform: schema graph ---
     database_df = sg.build_database_node(spark, catalog)
     schema_node_df = sg.build_schema_nodes(schemata_df)
     table_node_df = sg.build_table_nodes(tables_df)
@@ -256,166 +319,126 @@ def _run(spark, settings: Settings, schema_list: list[str], summary: RunSummary)
     has_column_df = sg.build_has_column_rel(columns_df)
     references_df = sg.build_references_rel(fk_pairs_df)
 
-    # --- Transform: embeddings ---
-    # Enabled labels are enriched via ai_query, then materialized to a Delta
-    # staging table (best-practices Spark §4) so the failure-rate agg and the
-    # Neo4j node write both consume the staged data — ai_query is invoked
-    # exactly once. Threshold is checked per-label and in aggregate; a breach
-    # on either aborts before any Neo4j write.
-    total_emb_attempts = 0
-    total_emb_successes = 0
+    return _ExtractResult(
+        database_df=database_df,
+        schema_node_df=schema_node_df,
+        table_node_df=table_node_df,
+        column_node_df=column_node_df,
+        has_schema_df=has_schema_df,
+        has_table_df=has_table_df,
+        has_column_df=has_column_df,
+        references_df=references_df,
+        schemata_df=schemata_df,
+        tables_df=tables_df,
+        columns_df=columns_df,
+        fk_pairs_df=fk_pairs_df,
+        declared_df=declared_df,
+        fk_references=fk_references,
+    )
 
-    if settings.dbxcarta_include_embeddings_tables:
-        enriched = emb.add_embedding_column(
-            table_node_df,
-            _TABLE_EMBEDDING_TEXT_EXPR,
-            settings.dbxcarta_embedding_endpoint,
-            settings.dbxcarta_embedding_dimension,
-            label=LABEL_TABLE,
-        )
-        # Materialize-once: writing to Delta staging before downstream actions
-        # prevents ai_query re-execution across the failure-rate aggregation
-        # and the Neo4j node write (best-practices Spark §4).
-        table_node_df = _stage_embedded_nodes(
-            enriched, staging_path, LABEL_TABLE,
-        )
-        rate, attempts, successes = emb.compute_failure_stats(table_node_df)
-        summary.embedding_attempts[LABEL_TABLE] = attempts
-        summary.embedding_successes[LABEL_TABLE] = successes
-        summary.embedding_failure_rate_per_label[LABEL_TABLE] = rate
-        total_emb_attempts += attempts
-        total_emb_successes += successes
-        logger.info(
-            "[dbxcarta] Table embeddings: attempts=%d successes=%d failure_rate=%.2f%%",
-            attempts, successes, rate * 100,
-        )
 
-    if settings.dbxcarta_include_embeddings_columns:
-        enriched = emb.add_embedding_column(
-            column_node_df,
-            _COLUMN_EMBEDDING_TEXT_EXPR,
-            settings.dbxcarta_embedding_endpoint,
-            settings.dbxcarta_embedding_dimension,
-            label=LABEL_COLUMN,
-        )
-        column_node_df = _stage_embedded_nodes(enriched, staging_path, LABEL_COLUMN)
-        rate, attempts, successes = emb.compute_failure_stats(column_node_df)
-        summary.embedding_attempts[LABEL_COLUMN] = attempts
-        summary.embedding_successes[LABEL_COLUMN] = successes
-        summary.embedding_failure_rate_per_label[LABEL_COLUMN] = rate
-        total_emb_attempts += attempts
-        total_emb_successes += successes
-        logger.info(
-            "[dbxcarta] Column embeddings: attempts=%d successes=%d failure_rate=%.2f%%",
-            attempts, successes, rate * 100,
+def _transform_embeddings(
+    settings: Settings, extract: _ExtractResult,
+    staging_path: str, summary: RunSummary,
+) -> None:
+    """Enrich node DataFrames with embeddings in-place on `extract`.
+
+    Materialize-once: each enabled label is written to a Delta staging table
+    so the failure-rate aggregation and the Neo4j node write both consume the
+    staged data — ai_query is invoked exactly once (best-practices Spark §4).
+    Threshold is checked after all labels are processed.
+    """
+    enabled = {
+        LABEL_TABLE: settings.dbxcarta_include_embeddings_tables,
+        LABEL_COLUMN: settings.dbxcarta_include_embeddings_columns,
+        LABEL_SCHEMA: settings.dbxcarta_include_embeddings_schemas,
+        LABEL_DATABASE: settings.dbxcarta_include_embeddings_databases,
+    }
+    node_dfs = {
+        LABEL_TABLE: extract.table_node_df,
+        LABEL_COLUMN: extract.column_node_df,
+        LABEL_SCHEMA: extract.schema_node_df,
+        LABEL_DATABASE: extract.database_df,
+    }
+
+    for label in (LABEL_TABLE, LABEL_COLUMN, LABEL_SCHEMA, LABEL_DATABASE):
+        if not enabled[label]:
+            continue
+        node_dfs[label] = _embed_and_stage(
+            node_dfs[label], _EMBEDDING_TEXT_EXPRS[label], label,
+            settings, staging_path, summary,
         )
 
-    if settings.dbxcarta_include_embeddings_schemas:
-        enriched = emb.add_embedding_column(
-            schema_node_df,
-            _SCHEMA_EMBEDDING_TEXT_EXPR,
-            settings.dbxcarta_embedding_endpoint,
-            settings.dbxcarta_embedding_dimension,
-            label=LABEL_SCHEMA,
-        )
-        schema_node_df = _stage_embedded_nodes(enriched, staging_path, LABEL_SCHEMA)
-        rate, attempts, successes = emb.compute_failure_stats(schema_node_df)
-        summary.embedding_attempts[LABEL_SCHEMA] = attempts
-        summary.embedding_successes[LABEL_SCHEMA] = successes
-        summary.embedding_failure_rate_per_label[LABEL_SCHEMA] = rate
-        total_emb_attempts += attempts
-        total_emb_successes += successes
-        logger.info(
-            "[dbxcarta] Schema embeddings: attempts=%d successes=%d failure_rate=%.2f%%",
-            attempts, successes, rate * 100,
+    extract.table_node_df = node_dfs[LABEL_TABLE]
+    extract.column_node_df = node_dfs[LABEL_COLUMN]
+    extract.schema_node_df = node_dfs[LABEL_SCHEMA]
+    extract.database_df = node_dfs[LABEL_DATABASE]
+
+
+def _transform_sample_values(
+    spark, settings: Settings, schema_list: list[str],
+    extract: _ExtractResult, staging_path: str, summary: RunSummary,
+) -> _ValueResult:
+    """Sample distinct values and optionally embed the Value nodes."""
+    if not settings.dbxcarta_include_values:
+        if settings.dbxcarta_include_embeddings_values:
+            logger.warning(
+                "[dbxcarta] DBXCARTA_INCLUDE_EMBEDDINGS_VALUES=true but"
+                " DBXCARTA_INCLUDE_VALUES=false; Value embeddings will be skipped."
+                " Set DBXCARTA_INCLUDE_VALUES=true to enable."
+            )
+        return _ValueResult(value_node_df=None, has_value_df=None, sample_stats=None)
+
+    value_node_df, has_value_df, sample_stats = sv.sample(
+        spark, extract.columns_df, settings.dbxcarta_catalog, schema_list,
+        settings.dbxcarta_sample_limit,
+        settings.dbxcarta_sample_cardinality_threshold,
+        settings.dbxcarta_stack_chunk_size,
+    )
+    for name in (
+        "candidate_columns", "sampled_columns", "skipped_columns", "skipped_schemas",
+        "cardinality_failed_tables", "cardinality_wall_clock_ms", "sample_wall_clock_ms",
+        "value_nodes", "has_value_edges",
+        "cardinality_min", "cardinality_p25", "cardinality_p50",
+        "cardinality_p75", "cardinality_p95", "cardinality_max",
+    ):
+        val = getattr(sample_stats, name)
+        if val is not None:
+            summary.row_counts[name] = val
+    logger.info(
+        "[dbxcarta] sample values: candidates=%d sampled=%d value_nodes=%d",
+        sample_stats.candidate_columns,
+        sample_stats.sampled_columns,
+        sample_stats.value_nodes,
+    )
+
+    if settings.dbxcarta_include_embeddings_values and sample_stats.value_nodes > 0:
+        value_node_df = _embed_and_stage(
+            value_node_df, _EMBEDDING_TEXT_EXPRS[LABEL_VALUE], LABEL_VALUE,
+            settings, staging_path, summary,
         )
 
-    if settings.dbxcarta_include_embeddings_databases:
-        enriched = emb.add_embedding_column(
-            database_df,
-            _DATABASE_EMBEDDING_TEXT_EXPR,
-            settings.dbxcarta_embedding_endpoint,
-            settings.dbxcarta_embedding_dimension,
-            label=LABEL_DATABASE,
-        )
-        database_df = _stage_embedded_nodes(enriched, staging_path, LABEL_DATABASE)
-        rate, attempts, successes = emb.compute_failure_stats(database_df)
-        summary.embedding_attempts[LABEL_DATABASE] = attempts
-        summary.embedding_successes[LABEL_DATABASE] = successes
-        summary.embedding_failure_rate_per_label[LABEL_DATABASE] = rate
-        total_emb_attempts += attempts
-        total_emb_successes += successes
-        logger.info(
-            "[dbxcarta] Database embeddings: attempts=%d successes=%d failure_rate=%.2f%%",
-            attempts, successes, rate * 100,
-        )
+    return _ValueResult(
+        value_node_df=value_node_df,
+        has_value_df=has_value_df,
+        sample_stats=sample_stats,
+    )
 
-    # --- Transform: sample values ---
-    # Runs before the threshold check so Value embeddings can be included in the
-    # aggregate before any Neo4j write is attempted.
-    sample_stats: sv.SampleStats | None = None
-    value_node_df = None
-    has_value_df = None
-    if settings.dbxcarta_include_values:
-        value_node_df, has_value_df, sample_stats = sv.sample(
-            spark, columns_df, catalog, schema_list,
-            settings.dbxcarta_sample_limit,
-            settings.dbxcarta_sample_cardinality_threshold,
-            settings.dbxcarta_stack_chunk_size,
-        )
-        for f in dc_fields(sample_stats):
-            if f.name == "candidate_col_ids":
-                continue
-            val = getattr(sample_stats, f.name)
-            if val is not None:
-                summary.row_counts[f.name] = val
-        logger.info(
-            "[dbxcarta] sample values: candidates=%d sampled=%d value_nodes=%d",
-            sample_stats.candidate_columns,
-            sample_stats.sampled_columns,
-            sample_stats.value_nodes,
-        )
 
-    if settings.dbxcarta_include_embeddings_values and not settings.dbxcarta_include_values:
-        logger.warning(
-            "[dbxcarta] DBXCARTA_INCLUDE_EMBEDDINGS_VALUES=true but"
-            " DBXCARTA_INCLUDE_VALUES=false; Value embeddings will be skipped."
-            " Set DBXCARTA_INCLUDE_VALUES=true to enable."
-        )
-
-    if settings.dbxcarta_include_embeddings_values and value_node_df is not None:
-        enriched = emb.add_embedding_column(
-            value_node_df,
-            _VALUE_EMBEDDING_TEXT_EXPR,
-            settings.dbxcarta_embedding_endpoint,
-            settings.dbxcarta_embedding_dimension,
-            label=LABEL_VALUE,
-        )
-        value_node_df = _stage_embedded_nodes(enriched, staging_path, LABEL_VALUE)
-        rate, attempts, successes = emb.compute_failure_stats(value_node_df)
-        summary.embedding_attempts[LABEL_VALUE] = attempts
-        summary.embedding_successes[LABEL_VALUE] = successes
-        summary.embedding_failure_rate_per_label[LABEL_VALUE] = rate
-        total_emb_attempts += attempts
-        total_emb_successes += successes
-        logger.info(
-            "[dbxcarta] Value embeddings: attempts=%d successes=%d failure_rate=%.2f%%",
-            attempts, successes, rate * 100,
-        )
-
-    # Per-label check first so the error message names the specific label.
+def _check_thresholds(settings: Settings, summary: RunSummary) -> None:
+    """Raise RuntimeError if any per-label or aggregate embedding failure rate exceeds the threshold."""
     threshold = settings.dbxcarta_embedding_failure_threshold
-    for lbl, per_label_rate in summary.embedding_failure_rate_per_label.items():
-        if per_label_rate > threshold:
+    for lbl, rate in summary.embedding_failure_rate_per_label.items():
+        if rate > threshold:
             raise RuntimeError(
-                f"[dbxcarta] {lbl} embedding failure rate {per_label_rate:.2%} exceeds"
+                f"[dbxcarta] {lbl} embedding failure rate {rate:.2%} exceeds"
                 f" threshold {threshold:.2%}; aborting before Neo4j write"
             )
 
-    # Aggregate check catches the case where no single label trips but the
-    # combined rate does (e.g. 2% Table + 8% Column aggregates above threshold).
-    if total_emb_attempts > 0:
-        aggregate_rate = (total_emb_attempts - total_emb_successes) / total_emb_attempts
+    total_attempts = sum(summary.embedding_attempts.values())
+    total_successes = sum(summary.embedding_successes.values())
+    if total_attempts > 0:
+        aggregate_rate = (total_attempts - total_successes) / total_attempts
         summary.embedding_failure_rate = aggregate_rate
         if aggregate_rate > threshold:
             raise RuntimeError(
@@ -423,73 +446,132 @@ def _run(spark, settings: Settings, schema_list: list[str], summary: RunSummary)
                 f" threshold {threshold:.2%}; aborting before Neo4j write"
             )
 
-    # --- Load: nodes ---
-    logger.info("[dbxcarta] writing nodes: Database (1)")
-    database_write_df = database_df
-    if "embedding_error" in database_write_df.columns:
-        database_write_df = database_write_df.drop("embedding_error")
-    write_nodes(database_write_df.coalesce(1), neo4j, LABEL_DATABASE)
 
-    # Stage 2: all writes land on Neo4j as a single partition. Relationship
-    # writes lock both endpoint nodes, so parallel partitions cause lock
-    # contention (best-practices Neo4j §1); node writes match for first green
-    # run until throughput benchmarking in Stage 7.
+def _load(
+    neo4j: Neo4jConfig,
+    driver,
+    settings: Settings,
+    extract: _ExtractResult,
+    values: _ValueResult,
+    summary: RunSummary,
+) -> None:
+    """Node writes omit coalesce(1); connector parallelizes at batch_size (Neo4j §2).
+    Relationship writes keep coalesce(1) to prevent lock contention (Neo4j §1)."""
+    # Always purge regardless of INCLUDE_VALUES — UC is the only source of truth (Project §1).
+    candidate_col_ids = sv.get_candidate_col_ids(extract.columns_df)
+    _purge_stale_values(driver, candidate_col_ids)
+
+    logger.info("[dbxcarta] writing nodes: Database (1)")
+    write_nodes(_drop_cols(extract.database_df, "embedding_error"), neo4j, LABEL_DATABASE)
+
     logger.info("[dbxcarta] writing nodes: Schema (%d)", summary.row_counts["schemas"])
-    schema_write_df = schema_node_df
-    for _c in ("catalog_name", "embedding_error"):
-        if _c in schema_write_df.columns:
-            schema_write_df = schema_write_df.drop(_c)
-    write_nodes(schema_write_df.coalesce(1), neo4j, LABEL_SCHEMA)
+    write_nodes(_drop_cols(extract.schema_node_df, "catalog_name", "embedding_error"), neo4j, LABEL_SCHEMA)
 
     logger.info("[dbxcarta] writing nodes: Table (%d)", summary.row_counts["tables"])
-    table_write_df = table_node_df
-    if "embedding_error" in table_write_df.columns:
-        table_write_df = table_write_df.drop("embedding_error")
-    write_nodes(table_write_df.coalesce(1), neo4j, LABEL_TABLE)
+    write_nodes(_drop_cols(extract.table_node_df, "embedding_error"), neo4j, LABEL_TABLE)
 
     logger.info("[dbxcarta] writing nodes: Column (%d)", summary.row_counts["columns"])
-    column_write_df = column_node_df
-    for _c in ("table_schema", "table_name", "embedding_error"):
-        if _c in column_write_df.columns:
-            column_write_df = column_write_df.drop(_c)
-    write_nodes(column_write_df.coalesce(1), neo4j, LABEL_COLUMN)
+    write_nodes(_drop_cols(extract.column_node_df, "table_schema", "table_name", "embedding_error"), neo4j, LABEL_COLUMN)
 
-    if settings.dbxcarta_include_values and sample_stats is not None:
-        _purge_stale_values(neo4j, sample_stats.candidate_col_ids)
-        if sample_stats.value_nodes > 0:
-            logger.info("[dbxcarta] writing nodes: Value (%d)", sample_stats.value_nodes)
-            value_write_df = value_node_df
-            if "embedding_error" in value_write_df.columns:
-                value_write_df = value_write_df.drop("embedding_error")
-            write_nodes(value_write_df.coalesce(1), neo4j, LABEL_VALUE)
-            logger.info("[dbxcarta] writing relationships: HAS_VALUE (%d)", sample_stats.has_value_edges)
-            write_relationship(has_value_df.coalesce(1), neo4j, REL_HAS_VALUE, LABEL_COLUMN, LABEL_VALUE)
-
-    # --- Load: relationships ---
-    logger.info("[dbxcarta] writing relationships: HAS_SCHEMA")
-    write_relationship(has_schema_df.coalesce(1), neo4j, REL_HAS_SCHEMA, LABEL_DATABASE, LABEL_SCHEMA)
-
-    logger.info("[dbxcarta] writing relationships: HAS_TABLE")
-    write_relationship(has_table_df.coalesce(1), neo4j, REL_HAS_TABLE, LABEL_SCHEMA, LABEL_TABLE)
-
-    logger.info("[dbxcarta] writing relationships: HAS_COLUMN")
-    write_relationship(has_column_df.coalesce(1), neo4j, REL_HAS_COLUMN, LABEL_TABLE, LABEL_COLUMN)
-
-    logger.info("[dbxcarta] writing relationships: REFERENCES (%d)", fk_references)
-    if fk_references > 0:
+    if values.sample_stats is not None and values.sample_stats.value_nodes > 0:
+        logger.info("[dbxcarta] writing nodes: Value (%d)", values.sample_stats.value_nodes)
+        write_nodes(_drop_cols(values.value_node_df, "embedding_error"), neo4j, LABEL_VALUE)
+        logger.info("[dbxcarta] writing relationships: HAS_VALUE (%d)", values.sample_stats.has_value_edges)
         write_relationship(
-            references_df.coalesce(1), neo4j, REL_REFERENCES, LABEL_COLUMN, LABEL_COLUMN,
+            values.has_value_df.coalesce(1), neo4j, REL_HAS_VALUE, LABEL_COLUMN, LABEL_VALUE,
         )
 
-    # --- Cleanup ---
-    schemata_df.unpersist()
-    tables_df.unpersist()
-    columns_df.unpersist()
-    fk_pairs_df.unpersist()
-    declared_df.unpersist()
+    logger.info("[dbxcarta] writing relationships: HAS_SCHEMA")
+    write_relationship(
+        extract.has_schema_df.coalesce(1), neo4j, REL_HAS_SCHEMA, LABEL_DATABASE, LABEL_SCHEMA,
+    )
 
-    summary.neo4j_counts = _query_neo4j_counts(neo4j)
-    logger.info("[dbxcarta] neo4j counts: %s", summary.neo4j_counts)
+    logger.info("[dbxcarta] writing relationships: HAS_TABLE")
+    write_relationship(
+        extract.has_table_df.coalesce(1), neo4j, REL_HAS_TABLE, LABEL_SCHEMA, LABEL_TABLE,
+    )
+
+    logger.info("[dbxcarta] writing relationships: HAS_COLUMN")
+    write_relationship(
+        extract.has_column_df.coalesce(1), neo4j, REL_HAS_COLUMN, LABEL_TABLE, LABEL_COLUMN,
+    )
+
+    logger.info("[dbxcarta] writing relationships: REFERENCES (%d)", extract.fk_references)
+    if extract.fk_references > 0:
+        write_relationship(
+            extract.references_df.coalesce(1), neo4j, REL_REFERENCES, LABEL_COLUMN, LABEL_COLUMN,
+        )
+
+
+def _cleanup(extract: _ExtractResult) -> None:
+    extract.schemata_df.unpersist()
+    extract.tables_df.unpersist()
+    extract.columns_df.unpersist()
+    extract.fk_pairs_df.unpersist()
+    extract.declared_df.unpersist()
+
+
+# ---------------------------------------------------------------------------
+# DataFrame helpers
+# ---------------------------------------------------------------------------
+
+def _drop_cols(df, *names: str) -> DataFrame:
+    """Drop named columns from df if they exist; return the (possibly modified) df."""
+    for name in names:
+        if name in df.columns:
+            df = df.drop(name)
+    return df
+
+
+# ---------------------------------------------------------------------------
+# Embedding helper
+# ---------------------------------------------------------------------------
+
+def _embed_and_stage(
+    df, text_expr: str, label: str,
+    settings: Settings, staging_path: str, summary: RunSummary,
+) -> DataFrame:
+    """Embed df, stage to Delta once, compute failure stats into summary."""
+    enriched = emb.add_embedding_column(
+        df,
+        text_expr,
+        settings.dbxcarta_embedding_endpoint,
+        settings.dbxcarta_embedding_dimension,
+        label=label,
+    )
+    staged = _stage_embedded_nodes(enriched, staging_path, label)
+    rate, attempts, successes = emb.compute_failure_stats(staged)
+    summary.embedding_attempts[label] = attempts
+    summary.embedding_successes[label] = successes
+    summary.embedding_failure_rate_per_label[label] = rate
+    logger.info(
+        "[dbxcarta] %s embeddings: attempts=%d successes=%d failure_rate=%.2f%%",
+        label, attempts, successes, rate * 100,
+    )
+    return staged
+
+
+# ---------------------------------------------------------------------------
+# Path / staging helpers
+# ---------------------------------------------------------------------------
+
+def _parse_volume_path(path: str) -> list[str]:
+    """Validate a /Volumes path and return its parts (after lstrip).
+
+    Requires at least /Volumes/<cat>/<schema>/<vol>/<subdir> (5 segments).
+    Raises RuntimeError for bare volume roots (/Volumes/cat/schema/vol) so
+    neither preflight nor _resolve_staging_path silently accepts a path
+    that will fail at runtime (Project §3).
+    """
+    parts = path.lstrip("/").split("/")
+    if len(parts) < 5 or parts[0] != "Volumes":
+        raise RuntimeError(
+            f"[dbxcarta] volume path must be at least"
+            f" /Volumes/<cat>/<schema>/<vol>/<subdir>, got {path!r}."
+            f" Set DBXCARTA_SUMMARY_VOLUME to a path with a subdirectory"
+            f" under the volume root (e.g. /Volumes/cat/schema/vol/dbxcarta)."
+        )
+    return parts
 
 
 def _resolve_staging_path(settings: Settings) -> str:
@@ -497,25 +579,14 @@ def _resolve_staging_path(settings: Settings) -> str:
 
     If DBXCARTA_STAGING_PATH is set, use it verbatim. Otherwise derive a sibling
     "staging" directory under the same UC volume as DBXCARTA_SUMMARY_VOLUME by
-    stripping the summary subdir. The derivation requires summary_volume to be
-    of the form /Volumes/<catalog>/<schema>/<volume>/<subdir> (six segments);
-    a bare volume root has no sibling position and is rejected so we never
-    silently escape the volume into the schema directory.
+    stripping the summary subdir.
     """
     configured = settings.dbxcarta_staging_path.strip()
     if configured:
         return configured.rstrip("/")
     summary_root = settings.dbxcarta_summary_volume.rstrip("/")
-    parts = summary_root.split("/")
-    # Expected shape: ['', 'Volumes', cat, schema, volume, subdir, ...]
-    if len(parts) < 6 or parts[1] != "Volumes":
-        raise RuntimeError(
-            "[dbxcarta] cannot derive DBXCARTA_STAGING_PATH from"
-            f" DBXCARTA_SUMMARY_VOLUME={settings.dbxcarta_summary_volume!r};"
-            " expected /Volumes/<cat>/<schema>/<volume>/<subdir>."
-            " Set DBXCARTA_STAGING_PATH explicitly."
-        )
-    parent = "/".join(parts[:-1])
+    parts = _parse_volume_path(summary_root)
+    parent = "/" + "/".join(parts[:-1])
     return f"{parent}/staging"
 
 
@@ -538,10 +609,10 @@ def _truncate_staging_root(staging_root: str) -> None:
 def _stage_embedded_nodes(df, staging_root: str, label: str):
     """Write df to <staging_root>/<label>_nodes as Delta and read back.
 
-    overwriteSchema is enabled so future column additions (e.g. new transform
-    outputs) don't require a manual drop of the staging table. The returned
-    DataFrame is a fresh read off the staging table, so the failure-rate
-    aggregation and the Neo4j write do not re-invoke ai_query.
+    overwriteSchema is enabled so future column additions don't require a
+    manual drop of the staging table. The returned DataFrame is a fresh read
+    off the staging table, so the failure-rate aggregation and the Neo4j write
+    do not re-invoke ai_query.
     """
     out = f"{staging_root.rstrip('/')}/{label.lower()}_nodes"
     (
@@ -560,13 +631,7 @@ def _preflight(spark, settings: Settings) -> None:
         f"SELECT 1 FROM `{catalog}`.information_schema.schemata LIMIT 1"
     ).collect()
 
-    volume_path = settings.dbxcarta_summary_volume
-    parts = volume_path.lstrip("/").split("/")
-    if len(parts) < 4 or parts[0] != "Volumes":
-        raise RuntimeError(
-            f"[dbxcarta] DBXCARTA_SUMMARY_VOLUME must be a /Volumes/<catalog>/<schema>/<volume> path,"
-            f" got {volume_path!r}"
-        )
+    parts = _parse_volume_path(settings.dbxcarta_summary_volume)
     vol_catalog, vol_schema, vol_name = parts[1], parts[2], parts[3]
     spark.sql(
         f"CREATE VOLUME IF NOT EXISTS `{vol_catalog}`.`{vol_schema}`.`{vol_name}`"
@@ -574,8 +639,6 @@ def _preflight(spark, settings: Settings) -> None:
 
     table = settings.dbxcarta_summary_table
     quoted_table = ".".join(f"`{p}`" for p in table.split("."))
-    # v5 schema — ALTER TABLE ADD COLUMN if upgrading from v4 (which lacks the
-    # embedding_* columns). emit_delta uses mergeSchema=true to handle existing tables.
     spark.sql(f"""
         CREATE TABLE IF NOT EXISTS {quoted_table} (
             run_id STRING NOT NULL,
@@ -609,8 +672,8 @@ def _preflight(spark, settings: Settings) -> None:
     if any_embeddings:
         endpoint = settings.dbxcarta_embedding_endpoint
         try:
-            spark.sql(
-                f"SELECT ai_query('{endpoint}', 'preflight', failOnError => false)"
+            rows = spark.sql(
+                f"SELECT ai_query('{endpoint}', 'preflight', failOnError => false) AS response"
             ).collect()
         except Exception as exc:
             raise RuntimeError(
@@ -618,57 +681,74 @@ def _preflight(spark, settings: Settings) -> None:
                 f" or missing invoke permission: {exc}"
             ) from exc
 
+        resp = rows[0]["response"]
+        if resp["errorMessage"] is not None:
+            raise RuntimeError(
+                f"[dbxcarta] preflight: embedding endpoint '{endpoint}' returned an error:"
+                f" {resp['errorMessage']}"
+            )
+        vec = resp["result"]
+        if vec is None or len(vec) != settings.dbxcarta_embedding_dimension:
+            actual = len(vec) if vec is not None else 0
+            raise RuntimeError(
+                f"[dbxcarta] preflight: embedding endpoint '{endpoint}' returned a vector of"
+                f" length {actual}, expected {settings.dbxcarta_embedding_dimension}."
+                f" Set DBXCARTA_EMBEDDING_DIMENSION to match the endpoint."
+            )
+
     logger.info(
         "[dbxcarta] preflight passed: %s.information_schema accessible, volume and table ready",
         catalog,
     )
 
 
-def _bootstrap_constraints(config: Neo4jConfig, settings: Settings) -> None:
-    from neo4j import GraphDatabase
+# ---------------------------------------------------------------------------
+# Neo4j helpers
+# ---------------------------------------------------------------------------
+
+def _bootstrap_constraints(driver, settings: Settings) -> None:
     from neo4j.exceptions import ClientError
 
-    with GraphDatabase.driver(config.uri, auth=(config.username, config.password)) as driver:
-        with driver.session() as session:
-            for label in (LABEL_DATABASE, LABEL_SCHEMA, LABEL_TABLE, LABEL_COLUMN, LABEL_VALUE):
-                try:
-                    session.run(
-                        f"CREATE CONSTRAINT {label.lower()}_id IF NOT EXISTS "
-                        f"FOR (n:{label}) REQUIRE n.id IS UNIQUE"
-                    )
-                except ClientError as exc:
-                    if "ConstraintAlreadyExists" not in (exc.code or ""):
-                        raise
-                    logger.info(
-                        "[dbxcarta] constraint for %s already satisfied, skipping", label,
-                    )
+    with driver.session() as session:
+        for label in (LABEL_DATABASE, LABEL_SCHEMA, LABEL_TABLE, LABEL_COLUMN, LABEL_VALUE):
+            try:
+                session.run(
+                    f"CREATE CONSTRAINT {label.lower()}_id IF NOT EXISTS "
+                    f"FOR (n:{label}) REQUIRE n.id IS UNIQUE"
+                )
+            except ClientError as exc:
+                if "ConstraintAlreadyExists" not in (exc.code or ""):
+                    raise
+                logger.info(
+                    "[dbxcarta] constraint for %s already satisfied, skipping", label,
+                )
 
-            session.run(
-                f"CREATE INDEX {LABEL_COLUMN.lower()}_data_type IF NOT EXISTS "
-                f"FOR (n:{LABEL_COLUMN}) ON (n.data_type)"
-            )
+        session.run(
+            f"CREATE INDEX {LABEL_COLUMN.lower()}_data_type IF NOT EXISTS "
+            f"FOR (n:{LABEL_COLUMN}) ON (n.data_type)"
+        )
 
-            embedding_label_flags = [
-                (settings.dbxcarta_include_embeddings_tables, LABEL_TABLE),
-                (settings.dbxcarta_include_embeddings_columns, LABEL_COLUMN),
-                (settings.dbxcarta_include_embeddings_values, LABEL_VALUE),
-                (settings.dbxcarta_include_embeddings_schemas, LABEL_SCHEMA),
-                (settings.dbxcarta_include_embeddings_databases, LABEL_DATABASE),
-            ]
-            dim = settings.dbxcarta_embedding_dimension
-            for enabled, label in embedding_label_flags:
-                if enabled:
-                    session.run(
-                        f"CREATE VECTOR INDEX {label.lower()}_embedding IF NOT EXISTS "
-                        f"FOR (n:{label}) ON n.embedding "
-                        f"OPTIONS {{indexConfig: {{`vector.dimensions`: {dim},"
-                        f" `vector.similarity_function`: 'cosine'}}}}"
-                    )
+        embedding_label_flags = [
+            (settings.dbxcarta_include_embeddings_tables, LABEL_TABLE),
+            (settings.dbxcarta_include_embeddings_columns, LABEL_COLUMN),
+            (settings.dbxcarta_include_embeddings_values, LABEL_VALUE),
+            (settings.dbxcarta_include_embeddings_schemas, LABEL_SCHEMA),
+            (settings.dbxcarta_include_embeddings_databases, LABEL_DATABASE),
+        ]
+        dim = settings.dbxcarta_embedding_dimension
+        for enabled, label in embedding_label_flags:
+            if enabled:
+                session.run(
+                    f"CREATE VECTOR INDEX {label.lower()}_embedding IF NOT EXISTS "
+                    f"FOR (n:{label}) ON n.embedding "
+                    f"OPTIONS {{indexConfig: {{`vector.dimensions`: {dim},"
+                    f" `vector.similarity_function`: 'cosine'}}}}"
+                )
 
     logger.info("[dbxcarta] neo4j constraints and indexes bootstrapped")
 
 
-def _purge_stale_values(config: Neo4jConfig, col_ids: list[str]) -> None:
+def _purge_stale_values(driver, col_ids: list[str]) -> None:
     """Delete Value nodes attached to columns the current run will replace.
 
     Scoped to col_ids (post-schema-probe, pre-cardinality-filter) so columns
@@ -677,18 +757,32 @@ def _purge_stale_values(config: Neo4jConfig, col_ids: list[str]) -> None:
     """
     if not col_ids:
         return
-    from neo4j import GraphDatabase
 
-    with GraphDatabase.driver(config.uri, auth=(config.username, config.password)) as driver:
-        with driver.session() as session:
-            session.run(
-                "MATCH (c:Column)-[:HAS_VALUE]->(v:Value) "
-                "WHERE c.id IN $col_ids "
-                "DETACH DELETE v",
-                col_ids=col_ids,
-            )
+    with driver.session() as session:
+        session.run(
+            "MATCH (c:Column)-[:HAS_VALUE]->(v:Value) "
+            "WHERE c.id IN $col_ids "
+            "DETACH DELETE v",
+            col_ids=col_ids,
+        )
     logger.info("[dbxcarta] purged stale Values for %d columns", len(col_ids))
 
+
+def _query_neo4j_counts(driver) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    with driver.session() as session:
+        for label in (LABEL_DATABASE, LABEL_SCHEMA, LABEL_TABLE, LABEL_COLUMN, LABEL_VALUE):
+            result = session.run(f"MATCH (n:{label}) RETURN count(n) AS cnt")
+            counts[label] = result.single()["cnt"]
+        for rel_type in (REL_HAS_SCHEMA, REL_HAS_TABLE, REL_HAS_COLUMN, REL_HAS_VALUE, REL_REFERENCES):
+            result = session.run(f"MATCH ()-[r:{rel_type}]->() RETURN count(r) AS cnt")
+            counts[rel_type] = result.single()["cnt"]
+    return counts
+
+
+# ---------------------------------------------------------------------------
+# FK logging
+# ---------------------------------------------------------------------------
 
 def _log_unresolved_fks(fk_skipped: int, fk_pairs_df, declared_df) -> None:
     if fk_skipped <= 0:
@@ -710,19 +804,3 @@ def _log_unresolved_fks(fk_skipped: int, fk_pairs_df, declared_df) -> None:
             row["constraint_schema"],
             row["constraint_name"],
         )
-
-
-def _query_neo4j_counts(config: Neo4jConfig) -> dict[str, int]:
-    from neo4j import GraphDatabase
-
-    counts: dict[str, int] = {}
-    with GraphDatabase.driver(config.uri, auth=(config.username, config.password)) as driver:
-        with driver.session() as session:
-            for record in session.run(
-                "MATCH (n) RETURN labels(n)[0] AS label, count(*) AS cnt"
-            ):
-                counts[record["label"]] = record["cnt"]
-            for rel_type in (REL_HAS_SCHEMA, REL_HAS_TABLE, REL_HAS_COLUMN, REL_HAS_VALUE, REL_REFERENCES):
-                result = session.run(f"MATCH ()-[r:{rel_type}]->() RETURN count(r) AS cnt")
-                counts[rel_type] = result.single()["cnt"]
-    return counts

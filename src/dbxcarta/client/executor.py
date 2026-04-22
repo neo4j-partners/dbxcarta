@@ -45,6 +45,50 @@ def execute_sql(
     return False, False, f"statement did not complete within {timeout_sec}s (state={state})"
 
 
+def fetch_rows(
+    ws: WorkspaceClient,
+    warehouse_id: str,
+    sql: str,
+    timeout_sec: int = 30,
+) -> tuple[list[str] | None, list[list] | None, str | None]:
+    """Execute SQL and return (column_names, rows, error).
+
+    Returns (None, None, error_message) on failure.
+    Column names come from the statement manifest; rows are returned as-is from
+    the JSON_ARRAY disposition.
+    """
+    response = ws.statement_execution.execute_statement(
+        statement=sql,
+        warehouse_id=warehouse_id,
+        wait_timeout=f"{timeout_sec}s",
+        disposition=Disposition.INLINE,
+        format=Format.JSON_ARRAY,
+    )
+
+    state = response.status.state
+
+    if state == StatementState.SUCCEEDED:
+        columns: list[str] = []
+        if (
+            response.manifest
+            and response.manifest.schema
+            and response.manifest.schema.columns
+        ):
+            columns = [col.name for col in response.manifest.schema.columns]
+        data = (response.result and response.result.data_array) or []
+        return columns, data, None
+
+    if state in (StatementState.FAILED, StatementState.CANCELED):
+        msg = (
+            response.status.error.message
+            if response.status and response.status.error
+            else str(state)
+        )
+        return None, None, msg
+
+    return None, None, f"statement did not complete within {timeout_sec}s (state={state})"
+
+
 def preflight_warehouse(ws: WorkspaceClient, warehouse_id: str) -> None:
     """Raise RuntimeError if the warehouse is unreachable or returns an error."""
     executed, _, error = execute_sql(ws, warehouse_id, "SELECT 1", timeout_sec=30)

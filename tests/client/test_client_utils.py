@@ -1,0 +1,290 @@
+"""Unit tests for client utilities: _parse_sql, _resolve_staging_path,
+_format_schema, and ClientRunSummary aggregates."""
+
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+import pytest
+
+from dbxcarta.client.client import (
+    _compare_result_sets,
+    _is_table_ref,
+    _parse_sql,
+    _resolve_staging_path,
+)
+from dbxcarta.client.schema_dump import _format_schema
+from dbxcarta.client.summary import ClientRunSummary
+
+
+# ---------------------------------------------------------------------------
+# _parse_sql
+# ---------------------------------------------------------------------------
+
+def test_parse_sql_plain_select():
+    sql, ok = _parse_sql("SELECT * FROM t")
+    assert ok
+    assert sql == "SELECT * FROM t"
+
+
+def test_parse_sql_with_keyword():
+    sql, ok = _parse_sql("WITH cte AS (SELECT 1) SELECT * FROM cte")
+    assert ok
+    assert "WITH" in sql
+
+
+def test_parse_sql_strips_sql_fence():
+    sql, ok = _parse_sql("```sql\nSELECT 1\n```")
+    assert ok
+    assert sql == "SELECT 1"
+
+
+def test_parse_sql_strips_plain_fence():
+    sql, ok = _parse_sql("```\nSELECT 1\n```")
+    assert ok
+    assert sql == "SELECT 1"
+
+
+def test_parse_sql_rejects_prose():
+    _, ok = _parse_sql("I cannot write that query.")
+    assert not ok
+
+
+def test_parse_sql_none_returns_false():
+    sql, ok = _parse_sql(None)
+    assert not ok
+    assert sql is None
+
+
+def test_parse_sql_empty_string_returns_false():
+    _, ok = _parse_sql("")
+    assert not ok
+
+
+def test_parse_sql_case_insensitive_fence():
+    sql, ok = _parse_sql("```SQL\nSELECT 1\n```")
+    assert ok
+    assert sql == "SELECT 1"
+
+
+# ---------------------------------------------------------------------------
+# _resolve_staging_path
+# ---------------------------------------------------------------------------
+
+def _fake_settings(summary_volume: str):
+    return SimpleNamespace(dbxcarta_summary_volume=summary_volume)
+
+
+def test_resolve_staging_path_standard():
+    path = _resolve_staging_path(_fake_settings("/Volumes/cat/schema/vol/runs"))
+    assert path == "/Volumes/cat/schema/vol/client_staging"
+
+
+def test_resolve_staging_path_trailing_slash():
+    path = _resolve_staging_path(_fake_settings("/Volumes/cat/schema/vol/runs/"))
+    assert path == "/Volumes/cat/schema/vol/client_staging"
+
+
+def test_resolve_staging_path_rejects_short_path():
+    with pytest.raises(RuntimeError):
+        _resolve_staging_path(_fake_settings("/short/path"))
+
+
+def test_resolve_staging_path_rejects_non_volumes():
+    with pytest.raises(RuntimeError):
+        _resolve_staging_path(_fake_settings("/dbfs/cat/schema/vol/runs"))
+
+
+# ---------------------------------------------------------------------------
+# _format_schema
+# ---------------------------------------------------------------------------
+
+def _rows(*specs):
+    return [
+        {
+            "schema_name": s,
+            "table_name": t,
+            "column_name": c,
+            "data_type": d,
+            "comment": comment,
+        }
+        for s, t, c, d, comment in specs
+    ]
+
+
+def test_format_schema_groups_by_table():
+    rows = _rows(
+        ("s", "t1", "id", "BIGINT", "pk"),
+        ("s", "t1", "name", "STRING", ""),
+        ("s", "t2", "val", "INT", None),
+    )
+    text = _format_schema(rows, "cat")
+    assert "cat.s.t1" in text
+    assert "cat.s.t2" in text
+    assert "\n\n" in text  # blank line between tables
+
+
+def test_format_schema_appends_comment():
+    rows = _rows(("s", "t", "id", "INT", "primary key"))
+    text = _format_schema(rows, "cat")
+    assert "— primary key" in text
+
+
+def test_format_schema_omits_blank_comment():
+    rows = _rows(("s", "t", "id", "INT", ""))
+    text = _format_schema(rows, "cat")
+    assert "—" not in text
+
+
+def test_format_schema_omits_none_comment():
+    rows = _rows(("s", "t", "id", "INT", None))
+    text = _format_schema(rows, "cat")
+    assert "—" not in text
+
+
+# ---------------------------------------------------------------------------
+# ClientRunSummary._compute_aggregates (via finish)
+# ---------------------------------------------------------------------------
+
+def _make_summary():
+    return ClientRunSummary(
+        run_id="test-1",
+        job_name="test",
+        catalog="cat",
+        schemas=[],
+        arms=["no_context", "schema_dump"],
+    )
+
+
+def test_compute_aggregates_counts():
+    summary = _make_summary()
+    summary.add_result("q1", "q?", "no_context", parsed=True, executed=True, non_empty=True)
+    summary.add_result("q2", "q?", "no_context", parsed=True, executed=False)
+    summary.add_result("q3", "q?", "no_context", parsed=False, executed=False)
+    summary.finish(status="success")
+
+    assert summary.arm_attempted["no_context"] == 3
+    assert summary.arm_parsed["no_context"] == 2
+    assert summary.arm_executed["no_context"] == 1
+    assert summary.arm_non_empty["no_context"] == 1
+
+
+def test_compute_aggregates_rates():
+    summary = _make_summary()
+    summary.add_result("q1", "q?", "schema_dump", parsed=True, executed=True, non_empty=True)
+    summary.add_result("q2", "q?", "schema_dump", parsed=True, executed=True, non_empty=True)
+    summary.add_result("q3", "q?", "schema_dump", parsed=True, executed=True, non_empty=False)
+    summary.finish(status="success")
+
+    assert summary.arm_execution_rate["schema_dump"] == 1.0
+    assert summary.arm_non_empty_rate["schema_dump"] == round(2 / 3, 3)
+
+
+def test_compute_aggregates_no_division_by_zero():
+    summary = _make_summary()
+    summary.finish(status="success")
+    assert summary.arm_attempted == {}
+    assert summary.arm_execution_rate == {}
+
+
+def test_finish_records_status_and_time():
+    summary = _make_summary()
+    summary.finish(status="error", error="something broke")
+    assert summary.status == "error"
+    assert summary.error == "something broke"
+    assert summary.ended_at is not None
+
+
+def test_compute_aggregates_correct_rate():
+    summary = _make_summary()
+    summary.add_result("q1", "q?", "no_context", parsed=True, executed=True, non_empty=True, correct=True, gradable=True)
+    summary.add_result("q2", "q?", "no_context", parsed=True, executed=True, non_empty=True, correct=False, gradable=True)
+    summary.add_result("q3", "q?", "no_context", parsed=True, executed=True, non_empty=True, correct=False, gradable=False)
+    summary.finish(status="success")
+
+    assert summary.arm_correct["no_context"] == 1
+    assert summary.arm_gradable["no_context"] == 2
+    assert summary.arm_correct_rate["no_context"] == 0.5
+
+
+def test_compute_aggregates_no_gradable_excludes_correct_rate():
+    summary = _make_summary()
+    summary.add_result("q1", "q?", "no_context", parsed=True, executed=True, non_empty=True)
+    summary.finish(status="success")
+
+    assert summary.arm_correct.get("no_context", 0) == 0
+    assert summary.arm_gradable.get("no_context", 0) == 0
+    assert "no_context" not in summary.arm_correct_rate
+
+
+# ---------------------------------------------------------------------------
+# _is_table_ref
+# ---------------------------------------------------------------------------
+
+def test_is_table_ref_three_part_name():
+    assert _is_table_ref("cat.schema.table")
+
+
+def test_is_table_ref_absolute_path():
+    assert not _is_table_ref("/Volumes/cat/schema/vol/questions.json")
+
+
+def test_is_table_ref_relative_path():
+    assert not _is_table_ref("./questions.json")
+
+
+def test_is_table_ref_two_parts():
+    assert not _is_table_ref("schema.table")
+
+
+# ---------------------------------------------------------------------------
+# _compare_result_sets
+# ---------------------------------------------------------------------------
+
+def test_compare_exact_match():
+    cols = ["id", "name"]
+    rows = [[1, "Alice"], [2, "Bob"]]
+    correct, err = _compare_result_sets(cols, rows, cols, [row[:] for row in rows])
+    assert correct
+    assert err is None
+
+
+def test_compare_column_reorder_matches():
+    gen_cols = ["name", "id"]
+    gen_rows = [["Alice", 1], ["Bob", 2]]
+    ref_cols = ["id", "name"]
+    ref_rows = [[1, "Alice"], [2, "Bob"]]
+    correct, err = _compare_result_sets(gen_cols, gen_rows, ref_cols, ref_rows)
+    assert correct, err
+
+
+def test_compare_row_count_mismatch():
+    correct, err = _compare_result_sets(["id"], [[1], [2]], ["id"], [[1]])
+    assert not correct
+    assert err is not None
+
+
+def test_compare_value_mismatch():
+    correct, err = _compare_result_sets(["id"], [[1], [2]], ["id"], [[1], [3]])
+    assert not correct
+
+
+def test_compare_large_short_circuit_on_count_divergence():
+    gen_rows = [[i] for i in range(600)]
+    ref_rows = [[i] for i in range(1200)]
+    correct, err = _compare_result_sets(["id"], gen_rows, ["id"], ref_rows)
+    assert not correct
+    assert "10%" in err or "divergence" in err.lower()
+
+
+def test_compare_large_identical_rows():
+    rows = [[i, f"name_{i}"] for i in range(600)]
+    correct, err = _compare_result_sets(["id", "name"], rows, ["id", "name"], [r[:] for r in rows])
+    assert correct, err
+
+
+def test_compare_large_sample_mismatch():
+    gen_rows = [[i, "gen"] for i in range(600)]
+    ref_rows = [[i, "ref"] for i in range(600)]
+    correct, err = _compare_result_sets(["id", "label"], gen_rows, ["id", "label"], ref_rows)
+    assert not correct

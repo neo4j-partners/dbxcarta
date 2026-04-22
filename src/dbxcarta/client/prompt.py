@@ -9,7 +9,9 @@ _SQL_INSTRUCTION = (
 
 def no_context_prompt(question: str, catalog: str, schemas: list[str]) -> str:
     schema_hint = (
-        f"schema '{schemas[0]}'" if len(schemas) == 1 else f"schemas {schemas}"
+        f"schema '{schemas[0]}'"
+        if len(schemas) == 1
+        else "schemas " + ", ".join(f"'{s}'" for s in schemas)
     )
     return (
         f"You are a SQL expert. Write a single SQL SELECT query to answer the following question.\n"
@@ -23,7 +25,9 @@ def schema_dump_prompt(
     question: str, catalog: str, schemas: list[str], schema_text: str
 ) -> str:
     schema_hint = (
-        f"schema '{schemas[0]}'" if len(schemas) == 1 else f"schemas {schemas}"
+        f"schema '{schemas[0]}'"
+        if len(schemas) == 1
+        else "schemas " + ", ".join(f"'{s}'" for s in schemas)
     )
     return (
         f"You are a SQL expert. Write a single SQL SELECT query to answer the following question.\n"
@@ -38,7 +42,9 @@ def graph_rag_prompt(
     question: str, catalog: str, schemas: list[str], context_text: str
 ) -> str:
     schema_hint = (
-        f"schema '{schemas[0]}'" if len(schemas) == 1 else f"schemas {schemas}"
+        f"schema '{schemas[0]}'"
+        if len(schemas) == 1
+        else "schemas " + ", ".join(f"'{s}'" for s in schemas)
     )
     return (
         f"You are a SQL expert. Write a single SQL SELECT query to answer the following question.\n"

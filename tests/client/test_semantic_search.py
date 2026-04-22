@@ -43,7 +43,9 @@ def _embed_texts(ws, endpoint: str, texts: list[str]) -> list[list[float]]:
         timeout=30,
     )
     resp.raise_for_status()
-    return [item["embedding"] for item in resp.json()["data"]]
+    data = resp.json()["data"]
+    data.sort(key=lambda x: x["index"])
+    return [item["embedding"] for item in data]
 
 
 def test_embedding_endpoint_returns_correct_dimension(neo4j_driver, ws, run_summary) -> None:

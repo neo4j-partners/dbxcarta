@@ -29,6 +29,8 @@ class ArmResult:
     parsed: bool = False
     executed: bool = False
     non_empty: bool = False
+    correct: bool = False
+    gradable: bool = False
     error: str | None = None
 
 
@@ -57,9 +59,12 @@ class ClientRunSummary:
     arm_parsed: dict[str, int] = field(default_factory=dict)
     arm_executed: dict[str, int] = field(default_factory=dict)
     arm_non_empty: dict[str, int] = field(default_factory=dict)
+    arm_correct: dict[str, int] = field(default_factory=dict)
+    arm_gradable: dict[str, int] = field(default_factory=dict)
     arm_parse_rate: dict[str, float] = field(default_factory=dict)
     arm_execution_rate: dict[str, float] = field(default_factory=dict)
     arm_non_empty_rate: dict[str, float] = field(default_factory=dict)
+    arm_correct_rate: dict[str, float] = field(default_factory=dict)
 
     def add_result(
         self,
@@ -72,37 +77,30 @@ class ClientRunSummary:
         parsed: bool = False,
         executed: bool = False,
         non_empty: bool = False,
+        correct: bool = False,
+        gradable: bool = False,
         error: str | None = None,
     ) -> None:
+        result = ArmResult(
+            arm=arm,
+            sql=sql,
+            context_ids=context_ids or [],
+            parsed=parsed,
+            executed=executed,
+            non_empty=non_empty,
+            correct=correct,
+            gradable=gradable,
+            error=error,
+        )
         for qr in self.question_results:
             if qr.question_id == question_id:
-                qr.arm_results.append(
-                    ArmResult(
-                        arm=arm,
-                        sql=sql,
-                        context_ids=context_ids or [],
-                        parsed=parsed,
-                        executed=executed,
-                        non_empty=non_empty,
-                        error=error,
-                    )
-                )
+                qr.arm_results.append(result)
                 return
         self.question_results.append(
             QuestionResult(
                 question_id=question_id,
                 question=question,
-                arm_results=[
-                    ArmResult(
-                        arm=arm,
-                        sql=sql,
-                        context_ids=context_ids or [],
-                        parsed=parsed,
-                        executed=executed,
-                        non_empty=non_empty,
-                        error=error,
-                    )
-                ],
+                arm_results=[result],
             )
         )
 
@@ -111,7 +109,10 @@ class ClientRunSummary:
         for qr in self.question_results:
             for ar in qr.arm_results:
                 if ar.arm not in counts:
-                    counts[ar.arm] = {"attempted": 0, "parsed": 0, "executed": 0, "non_empty": 0}
+                    counts[ar.arm] = {
+                        "attempted": 0, "parsed": 0, "executed": 0,
+                        "non_empty": 0, "correct": 0, "gradable": 0,
+                    }
                 counts[ar.arm]["attempted"] += 1
                 if ar.parsed:
                     counts[ar.arm]["parsed"] += 1
@@ -119,15 +120,23 @@ class ClientRunSummary:
                     counts[ar.arm]["executed"] += 1
                 if ar.non_empty:
                     counts[ar.arm]["non_empty"] += 1
+                if ar.correct:
+                    counts[ar.arm]["correct"] += 1
+                if ar.gradable:
+                    counts[ar.arm]["gradable"] += 1
         for arm, c in counts.items():
             self.arm_attempted[arm] = c["attempted"]
             self.arm_parsed[arm] = c["parsed"]
             self.arm_executed[arm] = c["executed"]
             self.arm_non_empty[arm] = c["non_empty"]
+            self.arm_correct[arm] = c["correct"]
+            self.arm_gradable[arm] = c["gradable"]
             attempted = c["attempted"] or 1
             self.arm_parse_rate[arm] = round(c["parsed"] / attempted, 3)
             self.arm_execution_rate[arm] = round(c["executed"] / attempted, 3)
             self.arm_non_empty_rate[arm] = round(c["non_empty"] / attempted, 3)
+            if c["gradable"] > 0:
+                self.arm_correct_rate[arm] = round(c["correct"] / c["gradable"], 3)
 
     def finish(self, *, status: str, error: str | None = None) -> None:
         self.status = status
@@ -150,9 +159,12 @@ class ClientRunSummary:
             "arm_parsed": self.arm_parsed,
             "arm_executed": self.arm_executed,
             "arm_non_empty": self.arm_non_empty,
+            "arm_correct": self.arm_correct,
+            "arm_gradable": self.arm_gradable,
             "arm_parse_rate": self.arm_parse_rate,
             "arm_execution_rate": self.arm_execution_rate,
             "arm_non_empty_rate": self.arm_non_empty_rate,
+            "arm_correct_rate": self.arm_correct_rate,
         }
 
     def _to_json_dict(self) -> dict:
@@ -174,10 +186,12 @@ class ClientRunSummary:
             non_empty = self.arm_non_empty.get(arm, 0)
             exec_rate = self.arm_execution_rate.get(arm, 0.0)
             non_empty_rate = self.arm_non_empty_rate.get(arm, 0.0)
+            correct_rate = self.arm_correct_rate.get(arm, 0.0)
             print(
                 f"  {arm}: attempted={attempted} parsed={parsed} "
                 f"executed={executed} non_empty={non_empty} "
-                f"exec_rate={exec_rate:.1%} non_empty_rate={non_empty_rate:.1%}"
+                f"exec_rate={exec_rate:.1%} non_empty_rate={non_empty_rate:.1%} "
+                f"correct_rate={correct_rate:.1%}"
             )
         if self.error:
             print(f"  error: {self.error}")
@@ -215,9 +229,12 @@ class ClientRunSummary:
             StructField("arm_parsed", MapType(StringType(), LongType())),
             StructField("arm_executed", MapType(StringType(), LongType())),
             StructField("arm_non_empty", MapType(StringType(), LongType())),
+            StructField("arm_correct", MapType(StringType(), LongType())),
+            StructField("arm_gradable", MapType(StringType(), LongType())),
             StructField("arm_parse_rate", MapType(StringType(), DoubleType())),
             StructField("arm_execution_rate", MapType(StringType(), DoubleType())),
             StructField("arm_non_empty_rate", MapType(StringType(), DoubleType())),
+            StructField("arm_correct_rate", MapType(StringType(), DoubleType())),
         ])
         quoted = ".".join(f"`{p}`" for p in table_name.split("."))
         row = Row(**self._to_delta_dict())

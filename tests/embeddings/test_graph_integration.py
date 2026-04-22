@@ -7,8 +7,6 @@ sibling conftest. Skips cleanly when those preconditions aren't met.
 
 from __future__ import annotations
 
-import hashlib
-
 import pytest
 
 # Reuse integration fixtures from the schema_graph sibling conftest.
@@ -27,7 +25,7 @@ def _columns_enabled(run_summary: dict) -> bool:
     return bool(flags.get("Column"))
 
 
-def test_table_nodes_carry_five_embedding_properties(neo4j_driver, run_summary) -> None:
+def test_table_nodes_carry_four_embedding_properties(neo4j_driver, run_summary) -> None:
     if not _tables_enabled(run_summary):
         pytest.skip("Table embeddings not enabled in the latest run")
 
@@ -42,27 +40,23 @@ def test_table_nodes_carry_five_embedding_properties(neo4j_driver, run_summary) 
             "  count(n.embedded_at) AS has_ts"
         ).single()
     assert result["total"] > 0, "No Table nodes in graph"
-    assert result["has_text"] == result["total"]
+    assert result["has_text"] == 0
     assert result["has_hash"] == result["total"]
     assert result["has_embedding"] == result["total"]
     assert result["has_model"] == result["total"]
     assert result["has_ts"] == result["total"]
 
 
-def test_embedding_text_hash_matches_sha256(neo4j_driver, run_summary) -> None:
+def test_table_embedding_text_not_persisted(neo4j_driver, run_summary) -> None:
+    """embedding_text must not be stored on Table nodes; hash-only like all other labels."""
     if not _tables_enabled(run_summary):
         pytest.skip("Table embeddings not enabled in the latest run")
 
     with neo4j_driver.session() as session:
-        rows = list(session.run(
-            "MATCH (n:Table) "
-            "RETURN n.embedding_text AS text, n.embedding_text_hash AS hash "
-            "LIMIT 25"
-        ))
-    assert rows, "No Table nodes sampled"
-    for r in rows:
-        expected = hashlib.sha256(r["text"].encode()).hexdigest()
-        assert r["hash"] == expected, f"hash mismatch for text={r['text']!r}"
+        count = session.run(
+            "MATCH (n:Table) WHERE n.embedding_text IS NOT NULL RETURN count(n) AS c"
+        ).single()["c"]
+    assert count == 0
 
 
 def test_embedding_error_not_persisted_to_neo4j(neo4j_driver, run_summary) -> None:

@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import os
-
 from neo4j import GraphDatabase
 
+from dbxcarta.client.neo4j_utils import neo4j_credentials
 from dbxcarta.client.settings import ClientSettings
 
 _CYPHER = """
@@ -22,28 +21,9 @@ ORDER BY s.name, t.name, c.ordinal_position
 """
 
 
-def _neo4j_credentials(settings: ClientSettings) -> tuple[str, str, str]:
-    """Return (uri, username, password) from secret scope or env vars."""
-    try:
-        from databricks.sdk.runtime import dbutils
-
-        scope = settings.databricks_secret_scope
-        return (
-            dbutils.secrets.get(scope=scope, key="uri"),
-            dbutils.secrets.get(scope=scope, key="username"),
-            dbutils.secrets.get(scope=scope, key="password"),
-        )
-    except Exception:
-        return (
-            os.environ["NEO4J_URI"],
-            os.environ["NEO4J_USERNAME"],
-            os.environ["NEO4J_PASSWORD"],
-        )
-
-
 def fetch_schema_dump(settings: ClientSettings) -> str:
     """Query Neo4j and return a formatted schema string for the prompt."""
-    uri, username, password = _neo4j_credentials(settings)
+    uri, username, password = neo4j_credentials(settings)
     driver = GraphDatabase.driver(uri, auth=(username, password))
 
     rows: list[dict] = []

@@ -40,7 +40,17 @@ Two downstream actions exist by default: the failure-rate aggregation, and the N
 
 Source: derived from Spark lazy-evaluation semantics and `ai_query` billing behavior (tokens charged per invocation). No single vendor doc states this in one place; see the Spark programming guide on [RDD persistence and lazy evaluation](https://spark.apache.org/docs/latest/rdd-programming-guide.html#rdd-persistence) as background.
 
-### 5. Cache metadata DataFrames once, read them many times
+### 5. Accumulate per-table DataFrames in Spark; never collect value rows to the driver
+
+When building the Value node DataFrame from sampled values, each `spark.sql(sample_query)` call already returns a Spark DataFrame. Collecting these per-table results to the driver and rebuilding a new DataFrame via `spark.createDataFrame(rows)` scales driver memory with total sample size across the entire catalog. At 10 values × 10,000 STRING columns, that is 100,000 Python objects in the driver before any Node write begins.
+
+Instead, accumulate per-table DataFrames with `unionByName` and apply the per-column top-N limit using a `row_number()` window function. The value ID (`generate_value_id` equivalent) is applied as a Spark `concat(..., md5(col))` expression, and `dropDuplicates(["id"])` is added as a defensive dedup step before returning.
+
+**How we apply it:** `_sample_values` in `sample_values.py` returns a Spark DataFrame (or None when all queries fail). The `sample()` function constructs `value_node_df` and `has_value_df` from that DataFrame using Spark expressions. Two `.count()` actions are triggered to populate run-summary stats; the counts are the only driver-bound results.
+
+Source: derived from Spark lazy-evaluation semantics and the driver memory constraint for large catalogs.
+
+### 6. Cache metadata DataFrames once, read them many times
 
 `columns_df` is referenced by the sample-values transform (for candidate discovery) and by the column-node builder (for Neo4j writes) and would be read twice against `information_schema.columns` without caching. `information_schema` reads are cheap, but DAG stability and predictability are not.
 

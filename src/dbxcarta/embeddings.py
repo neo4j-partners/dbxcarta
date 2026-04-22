@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from dbxcarta.contract import LABEL_TABLE
-
 if TYPE_CHECKING:
     from pyspark.sql import Column, DataFrame
 
@@ -57,9 +55,8 @@ def add_embedding_column(
     failure) or the returned vector length does not match expected_dimension
     (shape failure) — both count as failures in compute_failure_stats().
     embedding_error carries the reason: endpoint-wins precedence.
-    embedding_text is dropped for every label except Table; the hash alone
-    is sufficient for drift detection on labels where storing the full text
-    is not warranted. embedding_error is dropped by the caller before the
+    embedding_text is dropped for all labels; the hash alone is sufficient
+    for drift detection. embedding_error is dropped by the caller before the
     Neo4j node write (it lives only in the Delta staging table from Stage 2
     and the run-summary breakdown).
     """
@@ -78,10 +75,8 @@ def add_embedding_column(
         .withColumn("embedding_model", lit(endpoint))
         .withColumn("embedded_at", current_timestamp())
         .drop("_emb_raw")
+        .drop("embedding_text")
     )
-
-    if label != LABEL_TABLE:
-        df = df.drop("embedding_text")
 
     return df
 

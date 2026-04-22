@@ -12,7 +12,7 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from dbxcarta.contract import CONTRACT_VERSION, generate_id, generate_value_id
+from dbxcarta.contract import CONTRACT_VERSION, generate_id, value_id_expr
 
 if TYPE_CHECKING:
     from pyspark.sql import DataFrame, SparkSession
@@ -54,6 +54,17 @@ class TableCandidate:
         return f"`{self.catalog}`.`{self.schema_name}`.`{self.table_name}`"
 
 
+def get_candidate_col_ids(columns_df: "DataFrame") -> list[str]:
+    """Return column IDs for all STRING/BOOLEAN columns in the DataFrame.
+
+    Used by the pipeline to scope the stale-Value purge even when
+    DBXCARTA_INCLUDE_VALUES is disabled — derives IDs from the cached
+    columns_df without re-probing UC schemas.
+    """
+    candidates = _candidates_from_columns_df(columns_df, [])
+    return [cid for cand in candidates for cid in cand.column_ids]
+
+
 def sample(
     spark: "SparkSession",
     columns_df: "DataFrame",
@@ -69,7 +80,7 @@ def sample(
     when no qualifying values are found; check stats.value_nodes before writing.
     stats.candidate_col_ids is used by the pipeline for stale-value purge.
     """
-    from pyspark.sql import Row
+    from pyspark.sql.functions import col, lit
     from pyspark.sql.types import LongType, StringType, StructField, StructType
 
     value_schema = StructType([
@@ -101,7 +112,7 @@ def sample(
     sampled_cols = sum(len(c.column_names) for c in sampled_candidates)
 
     t0 = time.perf_counter_ns()
-    rows = _sample_values(spark, sampled_candidates, sample_limit, stack_chunk_size)
+    raw_df = _sample_values(spark, sampled_candidates, sample_limit, stack_chunk_size)
     sample_wall_ms = (time.perf_counter_ns() - t0) // 1_000_000
 
     stats = SampleStats(
@@ -118,7 +129,7 @@ def sample(
     )
     _add_cardinality_stats(stats, cardinality_values)
 
-    if not rows:
+    if raw_df is None:
         logger.warning("[dbxcarta] no value rows produced")
         return (
             spark.createDataFrame([], schema=value_schema),
@@ -126,27 +137,39 @@ def sample(
             stats,
         )
 
-    value_node_rows: list[Row] = []
-    has_value_rows: list[Row] = []
-    seen_value_ids: set[str] = set()
-    for (col_id, _col_name, val, cnt) in rows:
-        vid = generate_value_id(col_id, val)
-        has_value_rows.append(Row(source_id=col_id, target_id=vid))
-        if vid in seen_value_ids:
-            continue
-        seen_value_ids.add(vid)
-        value_node_rows.append(
-            Row(id=vid, value=val, count=int(cnt), contract_version=CONTRACT_VERSION)
+    # Cache raw_df so the two .count() actions and the downstream Neo4j writes
+    # all read from Spark cache instead of re-running the window shuffle and
+    # N UC table queries on every action.
+    raw_df = raw_df.cache()
+    vid_expr = value_id_expr()
+
+    value_node_df = (
+        raw_df
+        .select(
+            vid_expr.alias("id"),
+            col("val").alias("value"),
+            col("cnt").alias("count"),
+            lit(CONTRACT_VERSION).alias("contract_version"),
         )
-
-    stats.value_nodes = len(value_node_rows)
-    stats.has_value_edges = len(has_value_rows)
-
-    return (
-        spark.createDataFrame(value_node_rows, schema=value_schema),
-        spark.createDataFrame(has_value_rows, schema=rel_schema),
-        stats,
+        .dropDuplicates(["id"])
     )
+    has_value_df = raw_df.select(
+        col("col_id").alias("source_id"),
+        vid_expr.alias("target_id"),
+    )
+
+    stats.value_nodes = value_node_df.count()  # materializes raw_df into cache
+    if stats.value_nodes == 0:
+        raw_df.unpersist()
+        logger.warning("[dbxcarta] no value rows produced")
+        return (
+            spark.createDataFrame([], schema=value_schema),
+            spark.createDataFrame([], schema=rel_schema),
+            stats,
+        )
+    stats.has_value_edges = has_value_df.count()  # reads from cache
+
+    return (value_node_df, has_value_df, stats)
 
 
 def _candidates_from_columns_df(
@@ -270,30 +293,48 @@ def _sample_values(
     candidates: list[TableCandidate],
     limit: int,
     chunk_size: int,
-) -> list[tuple[str, str, str, int]]:
-    """Return list of (col_id, col_name, val, cnt), top-`limit` per column."""
-    out: list[tuple[str, str, str, int]] = []
+) -> "DataFrame | None":
+    """Return top-`limit` distinct values per column as a Spark DataFrame.
+
+    Columns: col_id, col_name, val, cnt. Returns None when all table queries
+    fail. Per-column top-N is applied via a window function so no value rows
+    are collected to the driver (best-practices Spark §5).
+    """
+    from pyspark.sql.functions import col, concat, lit, lower, row_number, translate
+    from pyspark.sql.window import Window
+
+    dfs = []
     for cand in candidates:
-        id_by_name = dict(zip(cand.column_names, cand.column_ids))
-        per_col: dict[str, list[tuple[str, int]]] = {}
+        # Compute the catalog.schema.table prefix in Python; only col_name varies in Spark.
+        col_id_prefix = generate_id(cand.catalog, cand.schema_name, cand.table_name) + "."
         for chunk_index, chunk_cols in enumerate(_chunk(cand.column_names, chunk_size)):
             try:
                 query = _sample_query(cand.fq(), chunk_cols)
-                for r in spark.sql(query).collect():
-                    per_col.setdefault(r["col_name"], []).append(
-                        (r["val"], int(r["cnt"]))
-                    )
+                chunk_df = spark.sql(query).withColumn(
+                    "col_id",
+                    concat(lit(col_id_prefix), lower(translate(col("col_name"), " -", "__"))),
+                )
+                dfs.append(chunk_df)
             except Exception as exc:
                 logger.warning(
                     "[dbxcarta] sampling failed for %s chunk=%d cols=%s: %s",
                     cand.fq(), chunk_index, chunk_cols, exc,
                 )
-                continue
-        for name, pairs in per_col.items():
-            top = sorted(pairs, key=lambda p: p[1], reverse=True)[:limit]
-            for val, cnt in top:
-                out.append((id_by_name[name], name, val, cnt))
-    return out
+
+    if not dfs:
+        return None
+
+    raw_df = dfs[0]
+    for df in dfs[1:]:
+        raw_df = raw_df.unionByName(df)
+
+    w = Window.partitionBy("col_id").orderBy(col("cnt").desc())
+    return (
+        raw_df
+        .withColumn("_rn", row_number().over(w))
+        .filter(col("_rn") <= limit)
+        .drop("_rn")
+    )
 
 
 def _filter_readable_schemas(

@@ -53,3 +53,15 @@ def id_expr(*column_names: str):
 
     parts = [F.col(c) for c in column_names]
     return F.lower(F.translate(F.concat_ws(".", *parts), _TRANSLATE_FROM, _TRANSLATE_TO))
+
+
+def value_id_expr():
+    """Return a PySpark Column expression equivalent to generate_value_id().
+
+    Computes concat(col_id, ".", md5(val)) where col_id and val are column
+    names in the calling DataFrame. Byte-identical to generate_value_id() for
+    UTF-8 string values (Spark md5() returns lowercase hex, as does hashlib).
+    """
+    from pyspark.sql import functions as F
+
+    return F.concat(F.col("col_id"), F.lit("."), F.md5(F.col("val")))
