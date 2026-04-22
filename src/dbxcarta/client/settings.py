@@ -21,7 +21,7 @@ class ClientSettings(BaseSettings):
 
     # Client-specific — runtime
     dbxcarta_client_questions: str = ""  # defaults to {volume_path}/questions.json
-    dbxcarta_client_arms: str = "no_context,schema_dump"
+    dbxcarta_client_arms: str = "no_context,schema_dump,graph_rag"
     dbxcarta_client_top_k: int = 5
     dbxcarta_client_timeout_sec: int = 30
 

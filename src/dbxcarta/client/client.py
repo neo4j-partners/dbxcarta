@@ -4,6 +4,8 @@ Phase 1: reference arm — feeds reference_sql through the executor to validate
          the grading path end to end.
 Phase 2: no_context and schema_dump arms — LLM generation via ai_query batch,
          SQL parsing, warehouse execution, and pass-rate comparison.
+Phase 3: graph_rag arm — question embeddings via serving endpoint, Neo4j
+         vector seed + structural walk for context, LLM generation via ai_query.
 """
 
 from __future__ import annotations
@@ -11,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import requests
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +25,7 @@ from dbxcarta.client.summary import ClientRunSummary
 
 _REFERENCE_ARM = "reference"
 _LLM_ARMS = {"no_context", "schema_dump"}
+_STAGING_ARMS = _LLM_ARMS | {"graph_rag"}
 
 # Matches optional ```sql ... ``` or ``` ... ``` fences.
 _FENCE_RE = re.compile(r"^```(?:sql)?\s*\n?(.*?)\n?```\s*$", re.DOTALL | re.IGNORECASE)
@@ -76,7 +80,7 @@ def _preflight(ws: WorkspaceClient, settings: ClientSettings) -> None:
         )
 
     active_arms = settings.arms
-    if any(a in _LLM_ARMS for a in active_arms) and not settings.dbxcarta_chat_endpoint:
+    if any(a in _STAGING_ARMS for a in active_arms) and not settings.dbxcarta_chat_endpoint:
         raise RuntimeError(
             "DBXCARTA_CHAT_ENDPOINT is required for LLM arms but is not set."
         )
@@ -182,6 +186,100 @@ def _run_llm_arm(
         )
 
 
+def _embed_questions(
+    ws: WorkspaceClient, endpoint: str, texts: list[str]
+) -> list[list[float]]:
+    """Embed all questions in a single batch call to the serving endpoint."""
+    headers = ws.config.authenticate()
+    resp = requests.post(
+        f"{ws.config.host.rstrip('/')}/serving-endpoints/{endpoint}/invocations",
+        headers=headers,
+        json={"input": texts},
+        timeout=60,
+    )
+    resp.raise_for_status()
+    data = resp.json()["data"]
+    data.sort(key=lambda x: x["index"])
+    return [item["embedding"] for item in data]
+
+
+def _run_graph_rag_arm(
+    spark: Any,
+    ws: WorkspaceClient,
+    settings: ClientSettings,
+    questions: list[dict[str, Any]],
+    summary: ClientRunSummary,
+    staging_path: str,
+) -> None:
+    from dbxcarta.client.generation import generate_sql_batch
+    from dbxcarta.client.graph_retriever import GraphRetriever
+    from dbxcarta.client.prompt import graph_rag_prompt
+
+    catalog = settings.dbxcarta_catalog
+    schemas = settings.schemas_list
+
+    texts = [q["question"] for q in questions]
+    embeddings = _embed_questions(ws, settings.dbxcarta_embed_endpoint, texts)
+
+    retriever = GraphRetriever(settings)
+    try:
+        questions_with_prompts = []
+        context_ids_map: dict[str, list[str]] = {}
+        for q, emb in zip(questions, embeddings):
+            bundle = retriever.retrieve(q["question"], emb)
+            context_text = bundle.to_text()
+            prompt = graph_rag_prompt(q["question"], catalog, schemas, context_text)
+            questions_with_prompts.append({"question_id": q["question_id"], "prompt": prompt})
+            context_ids_map[q["question_id"]] = bundle.seed_ids
+    finally:
+        retriever.close()
+
+    responses = generate_sql_batch(
+        spark,
+        settings.dbxcarta_chat_endpoint,
+        questions_with_prompts,
+        staging_path,
+        "graph_rag",
+    )
+
+    for q in questions:
+        qid = q["question_id"]
+        raw_sql, ai_error = responses.get(qid, (None, "no response"))
+        cleaned_sql, parse_ok = _parse_sql(raw_sql)
+
+        if not parse_ok:
+            summary.add_result(
+                question_id=qid,
+                question=q["question"],
+                arm="graph_rag",
+                sql=raw_sql,
+                context_ids=context_ids_map.get(qid, []),
+                parsed=False,
+                executed=False,
+                non_empty=False,
+                error=ai_error or "response did not contain valid SQL",
+            )
+            continue
+
+        executed, non_empty, exec_error = execute_sql(
+            ws,
+            settings.databricks_warehouse_id,
+            cleaned_sql,
+            settings.dbxcarta_client_timeout_sec,
+        )
+        summary.add_result(
+            question_id=qid,
+            question=q["question"],
+            arm="graph_rag",
+            sql=cleaned_sql,
+            context_ids=context_ids_map.get(qid, []),
+            parsed=True,
+            executed=executed,
+            non_empty=non_empty,
+            error=exec_error,
+        )
+
+
 def run_client() -> None:
     settings = ClientSettings()
 
@@ -196,7 +294,7 @@ def run_client() -> None:
     questions = _load_questions(settings.dbxcarta_client_questions)
     active_arms = settings.arms
     staging_path = _resolve_staging_path(settings) if any(
-        a in _LLM_ARMS for a in active_arms
+        a in _STAGING_ARMS for a in active_arms
     ) else ""
 
     summary = ClientRunSummary(
@@ -223,7 +321,9 @@ def run_client() -> None:
                     schema_text=schema_text if arm == "schema_dump" else None,
                 )
             elif arm == "graph_rag":
-                print("[dbxcarta_client] graph_rag arm skipped — not yet implemented (Phase 3)")
+                _run_graph_rag_arm(
+                    spark, ws, settings, questions, summary, staging_path,
+                )
             else:
                 raise ValueError(f"Unknown arm: {arm!r}")
 

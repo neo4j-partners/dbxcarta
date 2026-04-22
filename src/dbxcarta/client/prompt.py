@@ -32,3 +32,18 @@ def schema_dump_prompt(
         f"{_SQL_INSTRUCTION}\n\n"
         f"Question: {question}"
     )
+
+
+def graph_rag_prompt(
+    question: str, catalog: str, schemas: list[str], context_text: str
+) -> str:
+    schema_hint = (
+        f"schema '{schemas[0]}'" if len(schemas) == 1 else f"schemas {schemas}"
+    )
+    return (
+        f"You are a SQL expert. Write a single SQL SELECT query to answer the following question.\n"
+        f"The data lives in Databricks Unity Catalog: catalog '{catalog}', {schema_hint}.\n\n"
+        f"Relevant schema context retrieved from the knowledge graph:\n{context_text}\n\n"
+        f"{_SQL_INSTRUCTION}\n\n"
+        f"Question: {question}"
+    )
