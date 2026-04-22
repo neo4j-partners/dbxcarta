@@ -1,6 +1,6 @@
 [project]
 name = "dbxcarta"
-version = "0.2.2"
+version = "0.2.3"
 description = "Unity Catalog to Neo4j ingestion pipeline via Databricks Spark jobs"
 authors = [
     { name = "Ryan Knight"}
@@ -21,6 +21,7 @@ dbxcarta = "dbxcarta.cli:runner.main"
 [project.optional-dependencies]
 test = [
     "pytest",
+    "pyspark>=3.5",
 ]
 
 [build-system]

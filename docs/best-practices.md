@@ -99,3 +99,9 @@ The preflight enumerates every grant and endpoint permission the enabled flags r
 ### 4. Embedding failures are counted, not thrown
 
 `ai_query` with `failOnError => false` returns nulls rather than exceptions. The pipeline counts attempts and successes per label, computes a failure rate both per-label and in aggregate, and fails the run only if either exceeds the configured threshold. This catches the case where one label silently degrades while another masks it in aggregate.
+
+### 5. Verify the cluster runs the current source before interpreting run output
+
+`submit` is a reference operation, not a build operation. The runner attaches the wheel last uploaded to the UC Volume and executes the script last uploaded to the Databricks workspace; it does not rebuild or re-upload either on `submit`. Running stale code against real infrastructure produces misleading signal — apparent failures may be old bugs already fixed, apparent successes may hide regressions in new code, and the run summary reflects whatever the cluster actually ran, not what the local source says.
+
+Any time source files change, run `dbxcarta upload --wheel && dbxcarta upload --all` before `dbxcarta submit`. Treat `job_name` and `contract_version` in the JSON run summary as a quick sanity check that the expected code ran; a wrong prefix (e.g. `schema_graph_*` instead of `dbxcarta_*`) means the workspace script is stale. See `worklog/stage3-first-green-run.md` for a concrete example where a pre-v6 wheel and workspace script ran silently against a v6 environment.

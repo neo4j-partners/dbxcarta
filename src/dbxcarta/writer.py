@@ -16,6 +16,7 @@ class Neo4jConfig:
     uri: str
     username: str
     password: str
+    batch_size: int = 20000
 
     def _base_opts(self) -> dict[str, str]:
         return {
@@ -23,6 +24,7 @@ class Neo4jConfig:
             "authentication.type": "basic",
             "authentication.basic.username": self.username,
             "authentication.basic.password": self.password,
+            "batch.size": str(self.batch_size),
         }
 
 

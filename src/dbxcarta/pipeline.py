@@ -59,7 +59,6 @@ class Settings(BaseSettings):
     dbxcarta_schemas: str = ""
     dbxcarta_summary_volume: str
     dbxcarta_summary_table: str
-    dbxcarta_write_partitions: int = 8
     # Sample values
     dbxcarta_include_values: bool = True
     dbxcarta_sample_limit: int = 10
@@ -72,8 +71,13 @@ class Settings(BaseSettings):
     dbxcarta_include_embeddings_schemas: bool = False
     dbxcarta_include_embeddings_databases: bool = False
     dbxcarta_embedding_failure_threshold: float = 0.05
-    dbxcarta_embedding_endpoint: str = "databricks-bge-large-en"
+    dbxcarta_embedding_endpoint: str = "databricks-gte-large-en"
     dbxcarta_embedding_dimension: int = 1024
+    # Stage 2: materialize-once between ai_query and downstream actions.
+    # If blank, derived at runtime as sibling to DBXCARTA_SUMMARY_VOLUME.
+    dbxcarta_staging_path: str = ""
+    # Stage 2: Neo4j Spark Connector batch.size (per best-practices Neo4j §2).
+    dbxcarta_neo4j_batch_size: int = 20000
 
     @field_validator("dbxcarta_catalog", "dbxcarta_summary_table")
     @classmethod
@@ -130,13 +134,15 @@ def _run(spark, settings: Settings, schema_list: list[str], summary: RunSummary)
         uri=dbutils.secrets.get(scope=scope, key="uri"),
         username=dbutils.secrets.get(scope=scope, key="username"),
         password=dbutils.secrets.get(scope=scope, key="password"),
+        batch_size=settings.dbxcarta_neo4j_batch_size,
     )
 
     _preflight(spark, settings)
+    staging_path = _resolve_staging_path(settings)
+    _truncate_staging_root(staging_path)
     _bootstrap_constraints(neo4j, settings)
 
     catalog = settings.dbxcarta_catalog
-    partitions = settings.dbxcarta_write_partitions
 
     # --- Extract ---
     schemata_df = (
@@ -242,20 +248,28 @@ def _run(spark, settings: Settings, schema_list: list[str], summary: RunSummary)
     references_df = sg.build_references_rel(fk_pairs_df)
 
     # --- Transform: embeddings ---
-    # All labels are computed and cached before any Neo4j write. Threshold is
-    # checked both per-label and in aggregate; a breach on either aborts cleanly
-    # with no partial graph written.
+    # Enabled labels are enriched via ai_query, then materialized to a Delta
+    # staging table (best-practices Spark §4) so the failure-rate agg and the
+    # Neo4j node write both consume the staged data — ai_query is invoked
+    # exactly once. Threshold is checked per-label and in aggregate; a breach
+    # on either aborts before any Neo4j write.
     total_emb_attempts = 0
     total_emb_successes = 0
 
     if settings.dbxcarta_include_embeddings_tables:
-        table_node_df = emb.add_embedding_column(
+        enriched = emb.add_embedding_column(
             table_node_df,
             _TABLE_EMBEDDING_TEXT_EXPR,
             settings.dbxcarta_embedding_endpoint,
             settings.dbxcarta_embedding_dimension,
             label=LABEL_TABLE,
-        ).cache()
+        )
+        # Materialize-once: writing to Delta staging before downstream actions
+        # prevents ai_query re-execution across the failure-rate aggregation
+        # and the Neo4j node write (best-practices Spark §4).
+        table_node_df = _stage_embedded_nodes(
+            enriched, staging_path, LABEL_TABLE,
+        )
         rate, attempts, successes = emb.compute_failure_stats(table_node_df)
         summary.embedding_attempts[LABEL_TABLE] = attempts
         summary.embedding_successes[LABEL_TABLE] = successes
@@ -315,37 +329,44 @@ def _run(spark, settings: Settings, schema_list: list[str], summary: RunSummary)
     logger.info("[dbxcarta] writing nodes: Database (1)")
     write_nodes(database_df, neo4j, LABEL_DATABASE)
 
+    # Stage 2: all writes land on Neo4j as a single partition. Relationship
+    # writes lock both endpoint nodes, so parallel partitions cause lock
+    # contention (best-practices Neo4j §1); node writes match for first green
+    # run until throughput benchmarking in Stage 7.
     logger.info("[dbxcarta] writing nodes: Schema (%d)", summary.row_counts["schemas"])
-    write_nodes(schema_node_df.repartition(partitions), neo4j, LABEL_SCHEMA)
+    write_nodes(schema_node_df.coalesce(1), neo4j, LABEL_SCHEMA)
 
     logger.info("[dbxcarta] writing nodes: Table (%d)", summary.row_counts["tables"])
-    write_nodes(table_node_df.repartition(partitions), neo4j, LABEL_TABLE)
+    table_write_df = table_node_df
+    if "embedding_error" in table_write_df.columns:
+        table_write_df = table_write_df.drop("embedding_error")
+    write_nodes(table_write_df.coalesce(1), neo4j, LABEL_TABLE)
 
     logger.info("[dbxcarta] writing nodes: Column (%d)", summary.row_counts["columns"])
-    write_nodes(column_node_df.repartition(partitions), neo4j, LABEL_COLUMN)
+    write_nodes(column_node_df.coalesce(1), neo4j, LABEL_COLUMN)
 
     if settings.dbxcarta_include_values and sample_stats is not None:
         _purge_stale_values(neo4j, sample_stats.candidate_col_ids)
         if sample_stats.value_nodes > 0:
             logger.info("[dbxcarta] writing nodes: Value (%d)", sample_stats.value_nodes)
-            write_nodes(value_node_df.repartition(partitions), neo4j, LABEL_VALUE)
+            write_nodes(value_node_df.coalesce(1), neo4j, LABEL_VALUE)
             logger.info("[dbxcarta] writing relationships: HAS_VALUE (%d)", sample_stats.has_value_edges)
-            write_relationship(has_value_df.repartition(partitions), neo4j, REL_HAS_VALUE, LABEL_COLUMN, LABEL_VALUE)
+            write_relationship(has_value_df.coalesce(1), neo4j, REL_HAS_VALUE, LABEL_COLUMN, LABEL_VALUE)
 
     # --- Load: relationships ---
     logger.info("[dbxcarta] writing relationships: HAS_SCHEMA")
-    write_relationship(has_schema_df.repartition(partitions), neo4j, REL_HAS_SCHEMA, LABEL_DATABASE, LABEL_SCHEMA)
+    write_relationship(has_schema_df.coalesce(1), neo4j, REL_HAS_SCHEMA, LABEL_DATABASE, LABEL_SCHEMA)
 
     logger.info("[dbxcarta] writing relationships: HAS_TABLE")
-    write_relationship(has_table_df.repartition(partitions), neo4j, REL_HAS_TABLE, LABEL_SCHEMA, LABEL_TABLE)
+    write_relationship(has_table_df.coalesce(1), neo4j, REL_HAS_TABLE, LABEL_SCHEMA, LABEL_TABLE)
 
     logger.info("[dbxcarta] writing relationships: HAS_COLUMN")
-    write_relationship(has_column_df.repartition(partitions), neo4j, REL_HAS_COLUMN, LABEL_TABLE, LABEL_COLUMN)
+    write_relationship(has_column_df.coalesce(1), neo4j, REL_HAS_COLUMN, LABEL_TABLE, LABEL_COLUMN)
 
     logger.info("[dbxcarta] writing relationships: REFERENCES (%d)", fk_references)
     if fk_references > 0:
         write_relationship(
-            references_df.repartition(partitions), neo4j, REL_REFERENCES, LABEL_COLUMN, LABEL_COLUMN,
+            references_df.coalesce(1), neo4j, REL_REFERENCES, LABEL_COLUMN, LABEL_COLUMN,
         )
 
     # --- Cleanup ---
@@ -354,11 +375,71 @@ def _run(spark, settings: Settings, schema_list: list[str], summary: RunSummary)
     columns_df.unpersist()
     fk_pairs_df.unpersist()
     declared_df.unpersist()
-    if settings.dbxcarta_include_embeddings_tables:
-        table_node_df.unpersist()
 
     summary.neo4j_counts = _query_neo4j_counts(neo4j)
     logger.info("[dbxcarta] neo4j counts: %s", summary.neo4j_counts)
+
+
+def _resolve_staging_path(settings: Settings) -> str:
+    """Return the Delta staging root.
+
+    If DBXCARTA_STAGING_PATH is set, use it verbatim. Otherwise derive a sibling
+    "staging" directory under the same UC volume as DBXCARTA_SUMMARY_VOLUME by
+    stripping the summary subdir. The derivation requires summary_volume to be
+    of the form /Volumes/<catalog>/<schema>/<volume>/<subdir> (six segments);
+    a bare volume root has no sibling position and is rejected so we never
+    silently escape the volume into the schema directory.
+    """
+    configured = settings.dbxcarta_staging_path.strip()
+    if configured:
+        return configured.rstrip("/")
+    summary_root = settings.dbxcarta_summary_volume.rstrip("/")
+    parts = summary_root.split("/")
+    # Expected shape: ['', 'Volumes', cat, schema, volume, subdir, ...]
+    if len(parts) < 6 or parts[1] != "Volumes":
+        raise RuntimeError(
+            "[dbxcarta] cannot derive DBXCARTA_STAGING_PATH from"
+            f" DBXCARTA_SUMMARY_VOLUME={settings.dbxcarta_summary_volume!r};"
+            " expected /Volumes/<cat>/<schema>/<volume>/<subdir>."
+            " Set DBXCARTA_STAGING_PATH explicitly."
+        )
+    parent = "/".join(parts[:-1])
+    return f"{parent}/staging"
+
+
+def _truncate_staging_root(staging_root: str) -> None:
+    """Remove the staging root so each run starts clean.
+
+    Overwrite-per-label would leave orphan subdirs when a label's embedding
+    flag flips off between runs; truncating the whole root once per run keeps
+    the staging volume faithful to the current config.
+    """
+    from databricks.sdk.runtime import dbutils
+
+    try:
+        dbutils.fs.rm(staging_root, recurse=True)
+        logger.info("[dbxcarta] truncated staging root %s", staging_root)
+    except Exception as exc:  # noqa: BLE001 — missing path is not fatal
+        logger.info("[dbxcarta] staging root %s not present (%s)", staging_root, exc)
+
+
+def _stage_embedded_nodes(df, staging_root: str, label: str):
+    """Write df to <staging_root>/<label>_nodes as Delta and read back.
+
+    overwriteSchema is enabled so future column additions (e.g. new transform
+    outputs) don't require a manual drop of the staging table. The returned
+    DataFrame is a fresh read off the staging table, so the failure-rate
+    aggregation and the Neo4j write do not re-invoke ai_query.
+    """
+    out = f"{staging_root.rstrip('/')}/{label.lower()}_nodes"
+    (
+        df.write.format("delta")
+        .mode("overwrite")
+        .option("overwriteSchema", "true")
+        .save(out)
+    )
+    logger.info("[dbxcarta] staged %s nodes at %s", label, out)
+    return df.sparkSession.read.format("delta").load(out)
 
 
 def _preflight(spark, settings: Settings) -> None:
