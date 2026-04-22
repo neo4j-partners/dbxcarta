@@ -138,6 +138,47 @@ All pipeline behavior is controlled by `.env`. See `.env.sample` for the full se
 
 For the first green run, enable `DBXCARTA_INCLUDE_EMBEDDINGS_TABLES=true` only and constrain `DBXCARTA_SCHEMAS` to a single small schema. Expand coverage one label at a time after verifying failure rates and the vector index.
 
+## Client quick start
+
+The client is a batch evaluation job that measures whether GraphRAG retrieval from the Neo4j semantic layer produces more accurate SQL than a raw schema dump or no context at all. It runs three retrieval arms (no-context, schema-dump, GraphRAG hybrid) against a curated questions file and records execution rates per arm in a Delta run-summary table.
+
+Prerequisites: the server pipeline must have run at least once with `DBXCARTA_INCLUDE_EMBEDDINGS_TABLES=true` so the `table_embedding` vector index is ONLINE.
+
+**1. Set client variables in `.env`:**
+
+```bash
+DBXCARTA_CHAT_ENDPOINT=<model-serving-endpoint-name>   # required; no default
+# Optional — defaults shown
+DBXCARTA_EMBED_ENDPOINT=databricks-gte-large-en
+DBXCARTA_CLIENT_ARMS=no_context,schema_dump,graph_rag
+DBXCARTA_CLIENT_TOP_K=5
+DBXCARTA_CLIENT_TIMEOUT_SEC=30
+DBXCARTA_CLIENT_SERVERLESS=false                       # set true to run on serverless instead of the cluster
+```
+
+**2. Upload and submit:**
+
+```bash
+uv run dbxcarta upload --wheel
+uv run dbxcarta submit --upload run_dbxcarta_client.py
+```
+
+**3. Verify:** the run summary printed to the job log shows per-arm `executed` counts and `non_empty` rates. A JSON artifact lands in `DBXCARTA_SUMMARY_VOLUME` and a row is appended to `DBXCARTA_SUMMARY_TABLE`.
+
+Run the client test suite locally:
+
+```bash
+uv run pytest tests/client
+```
+
+**Questions file.** `examples/client/questions/questions.json` contains 20 curated questions spanning single-table counts, filter-with-literal, multi-table joins, and FK-walk queries. All 20 carry `reference_sql` for ground-truth grading. Edit this file to add questions for your catalog before the first run; the distribution of question types is what determines whether the harness can distinguish the retrieval arms.
+
+**Arms.** Run a single arm to iterate without paying the cost of the others:
+
+```bash
+DBXCARTA_CLIENT_ARMS=graph_rag uv run dbxcarta submit --upload run_dbxcarta_client.py
+```
+
 ## Upload and submit
 
 `upload --wheel` builds the `dbxcarta` package, bumps the patch version in `pyproject.toml`, and uploads the wheel to `DATABRICKS_VOLUME_PATH/wheels/`. `upload --all` copies every `*.py` in `scripts/` to `DATABRICKS_WORKSPACE_DIR/scripts/` in the workspace. Re-run `upload --wheel` when `src/dbxcarta/` changes; re-run `upload --all` when `scripts/` changes.

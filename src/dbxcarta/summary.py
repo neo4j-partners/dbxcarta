@@ -45,6 +45,7 @@ class RunSummary:
     embedding_failure_rate_per_label: dict[str, float] = field(default_factory=dict)
     embedding_failure_rate: float | None = None
     embedding_failure_threshold: float | None = None
+    embedding_ledger_hits: dict[str, int] = field(default_factory=dict)
 
     def finish(self, *, status: str, error: str | None = None) -> None:
         self.status = status
@@ -113,6 +114,7 @@ class RunSummary:
             StructField("embedding_failure_rate_per_label", MapType(StringType(), DoubleType())),
             StructField("embedding_failure_rate", DoubleType()),
             StructField("embedding_failure_threshold", DoubleType()),
+            StructField("embedding_ledger_hits", MapType(StringType(), LongType())),
         ])
 
         quoted_table = ".".join(f"`{p}`" for p in table_name.split("."))

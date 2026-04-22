@@ -84,7 +84,7 @@ Affected files:
 - [ ] Run `pytest tests/schema_graph/ -v` and confirm all tests pass or skip (no failures).
 - [ ] Run `pytest tests/sample_values/ -v` and confirm all tests pass or skip.
 - [ ] Run `pytest tests/embeddings/ -v` and confirm all tests pass or skip.
-- [ ] All three suites pass (or skip with a documented reason) against a run where all five embedding labels are enabled and `fk_references > 0`. Record the run ID here and in a `worklog/stage4b-verification.md`.
+- [ ] All three suites pass (or skip with a documented reason) against a run where all five embedding labels are enabled and `fk_references > 0`. Record the run ID here and in a `docs/stage4b-verification.md`.
 
 ### Stage 7: Operational hardening
 
@@ -96,7 +96,7 @@ Three additive improvements. Implement in order; each does not block the pipelin
 
 **Design decisions (to resolve before implementation):**
 
-1. **Ledger table location and lifetime** — the ledger is a pipeline-owned Delta table (not a staging table; it persists across runs). Literal default: `/Volumes/dbxcarta-catalog/dbxcarta-schema/dbxcartavolume/ledger`. In `Settings`, derive programmatically as `Path(summary_volume).parent / "ledger"` (same sibling pattern as staging). Add `DBXCARTA_LEDGER_PATH` to `.env` commented out, matching the style of `DBXCARTA_STAGING_PATH`.
+1. **Ledger table location and lifetime** — the ledger is a pipeline-owned Delta table (not a staging table; it persists across runs). Literal default: `/Volumes/dbxcarta-catalog/dbxcarta-schema/dbxcartavolume/ledger`. In `Settings`, derive programmatically as `Path(summary_volume).parent / "ledger"` (same sibling pattern as staging). Add `DBXCARTA_LEDGER_PATH` to `.env.sample` commented out, matching the style of `DBXCARTA_STAGING_PATH`.
 
 2. **Hit condition** — the ledger is one Delta table per label, stored at `<ledger_root>/<label>` (e.g. `…/ledger/table`). Within a per-label table the merge key is `(id, embedding_model)`, eliminating any cross-label id collision. A hit requires: `id` and `embedding_model` match and `embedding_text_hash` in the ledger equals the current hash. Any mismatch is a miss and triggers a new `ai_query` call. Model changes (endpoint swapped) invalidate all cached vectors for that label. Rows where `embedding_error != null` are excluded from the ledger upsert and re-attempted on every subsequent run until they succeed.
 
@@ -110,13 +110,13 @@ Three additive improvements. Implement in order; each does not block the pipelin
 
 **Checklist:**
 
-- [ ] Add `DBXCARTA_LEDGER_ENABLED` and `DBXCARTA_LEDGER_PATH` to `Settings` and `.env`. Default path derived as sibling to staging root.
-- [ ] Add `_read_ledger(spark, path, label) -> DataFrame | None` — returns the ledger DataFrame for a label (or None if the ledger table doesn't exist yet).
-- [ ] Modify `_embed_and_stage` to: (1) when `DBXCARTA_LEDGER_ENABLED`, left-join input against the ledger to separate hits from misses; (2) call `add_embedding_column` on misses only — the miss branch produces `(embedding_text_hash, embedding, embedding_error, embedding_model, embedded_at)`; (3) synthesize the same five columns on the hit branch before the union: compute `embedding_text_hash` from `text_expr` using `sha2`, set `embedding_error = null`, pull `embedding`/`embedding_model`/`embedded_at` from the ledger row; (4) union hits and newly-embedded misses — both branches must have identical column names and types; (5) write union to staging (unchanged from v6); (6) upsert the newly-embedded rows (misses only) to the ledger.
-- [ ] Add `_upsert_ledger(staged_df, path, label)` — writes the `(id, embedding_text_hash, embedding, embedding_model, embedded_at)` subset of the staged DataFrame to the ledger using Delta `MERGE` on `(id, embedding_model)`. Schema: `id STRING, embedding_text_hash STRING, embedding ARRAY<DOUBLE>, embedding_model STRING, embedded_at TIMESTAMP`.
-- [ ] Extend run summary to record per-label ledger hits (`embedding_ledger_hits MAP<STRING, BIGINT>`); add the field to the `RunSummary` dataclass, the Delta schema, and the `CREATE TABLE IF NOT EXISTS` DDL in preflight.
-- [ ] Add a unit test in `tests/embeddings/test_transform_unit.py` asserting that when all input rows match the ledger, `misses_df.count() == 0` and hits carry their stored vectors. In local mode Spark never evaluates the `ai_query` expression on an empty DataFrame, so no mock is needed.
-- [ ] Enable `DBXCARTA_LEDGER_ENABLED=true` in `.env`, submit, and confirm: (a) first run computes all vectors; (b) second run with no catalog changes hits 100% of vectors from the ledger (0 `ai_query` calls); (c) changing one table comment causes a hash miss for that table only; (d) per-label hit counts recorded in run summary.
+- [x] Add `DBXCARTA_LEDGER_ENABLED` and `DBXCARTA_LEDGER_PATH` to `Settings` and `.env.sample`. Default path derived as sibling to staging root. (`pipeline.py` Settings; `.env.sample` Stage 7.1 section)
+- [x] Add `_read_ledger(spark, path, label) -> DataFrame | None` — returns the ledger DataFrame for a label (or None if the ledger table doesn't exist yet). (`pipeline.py:_read_ledger`)
+- [x] Modify `_embed_and_stage` to: (1) when `DBXCARTA_LEDGER_ENABLED`, left-join input against the ledger to separate hits from misses; (2) call `add_embedding_column` on misses only; (3) synthesize the same five columns on the hit branch; (4) union hits and newly-embedded misses; (5) write union to staging; (6) upsert newly-embedded rows to the ledger. Hit/miss split extracted into `_split_by_ledger` for testability. (`pipeline.py:_embed_and_stage`, `_split_by_ledger`)
+- [x] Add `_upsert_ledger(staged_df, path, label)` — Delta MERGE on `(id, embedding_model)`; error rows excluded. (`pipeline.py:_upsert_ledger`)
+- [x] Extend run summary with `embedding_ledger_hits MAP<STRING, BIGINT>`; added to `RunSummary` dataclass, `emit_delta` schema, and `CREATE TABLE IF NOT EXISTS` DDL. (`summary.py`, `pipeline.py:_preflight`)
+- [x] Unit tests added: `test_ledger_all_rows_hit_misses_empty` (misses empty when all rows match), `test_ledger_hash_mismatch_is_miss`, `test_ledger_model_mismatch_is_miss`. All 3 pass locally. (`tests/embeddings/test_transform_unit.py`)
+- [ ] Enable `DBXCARTA_LEDGER_ENABLED=true` in `.env`, submit, and confirm: (a) first run computes all vectors; (b) second run with no catalog changes hits 100% of vectors from the ledger (0 `ai_query` calls); (c) changing one table comment causes a hash miss for that table only; (d) per-label hit counts recorded in run summary. — **Pending user-driven Databricks submit.**
 
 #### 7.2 Incremental scope via `last_altered`
 
@@ -143,7 +143,7 @@ Three additive improvements. Implement in order; each does not block the pipelin
 **Checklist:**
 
 - [ ] Verify empirically that a column-comment edit advances `last_altered` in `information_schema.tables`: alter a test table's column comment, then query `SELECT last_altered FROM information_schema.tables WHERE ...`. Document the observed behaviour in a one-line comment in `pipeline.py` near `_last_successful_run_ended_at`.
-- [ ] Add `DBXCARTA_INCREMENTAL` to `Settings`. Default `false`.
+- [ ] Add `DBXCARTA_INCREMENTAL` to `Settings` and `.env.sample`. Default `false`.
 - [ ] Add `_last_successful_run_ended_at(spark, summary_table) -> datetime | None` — queries the run-summary Delta table for the most recent row where `status = 'success'` and returns `ended_at`.
 - [ ] In `_extract`, when incremental mode is on and a prior `ended_at` is found, filter `tables_df` (and cascade to `columns_df` via an inner join on `table_schema`, `table_name`) to only tables where `last_altered > ended_at`. Log the count of in-scope vs. total tables.
 - [ ] Add `row_counts["incremental_cutoff_ts"]` and `row_counts["tables_in_scope"]` to the run summary so the incremental filter is auditable.
@@ -158,13 +158,13 @@ Three additive improvements. Implement in order; each does not block the pipelin
 
 1. **Rule** — node writes use `df.repartition(N, "id")` before the Neo4j write. Relationship writes remain `coalesce(1)` per the Neo4j Spark Connector guidance in `docs/best-practices.md` Neo4j §1 (relationships lock two endpoint nodes, so disjoint-id partitioning does not generalize to them).
 
-2. **Default `N`** — `DBXCARTA_NEO4J_NODE_PARTITIONS=4` in `.env`. Raising `N` is a config change; evidence for a different value comes from `benchmarking_plan.md` when that work is picked up.
+2. **Default `N`** — `DBXCARTA_NEO4J_NODE_PARTITIONS=4` in `.env.sample`. Raising `N` is a config change; evidence for a different value comes from `benchmarking_plan.md` when that work is picked up.
 
 3. **Scope** — applies to all five node labels (Database, Schema, Table, Column, Value).
 
 **Checklist:**
 
-- [ ] Add `DBXCARTA_NEO4J_NODE_PARTITIONS` to `Settings` and `.env`. Default `4`.
+- [ ] Add `DBXCARTA_NEO4J_NODE_PARTITIONS` to `Settings` and `.env.sample`. Default `4`.
 - [ ] In the load stage, replace each `<node_df>.coalesce(1).write…` with `<node_df>.repartition(settings.neo4j_node_partitions, "id").write…`. Leave relationship writes on `coalesce(1)`.
 - [ ] Submit once and confirm idempotency: node counts and relationship counts are unchanged from a v6-equivalent reference run.
 - [ ] Update `docs/best-practices.md` Neo4j §1 (already amended with the standing rule; add a run ID once observed).

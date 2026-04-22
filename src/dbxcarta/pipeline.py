@@ -97,6 +97,10 @@ class Settings(BaseSettings):
     dbxcarta_staging_path: str = ""
     # Neo4j Spark Connector batch.size (per best-practices Neo4j §2).
     dbxcarta_neo4j_batch_size: int = 20000
+    # Re-embedding ledger (Stage 7.1): skip ai_query for unchanged nodes.
+    # DBXCARTA_LEDGER_PATH defaults to <DBXCARTA_SUMMARY_VOLUME's parent>/ledger when unset.
+    dbxcarta_ledger_enabled: bool = False
+    dbxcarta_ledger_path: str = ""
 
     @field_validator("dbxcarta_catalog", "dbxcarta_summary_table")
     @classmethod
@@ -195,13 +199,14 @@ def _run(spark, settings: Settings, schema_list: list[str], summary: RunSummary)
 
     _preflight(spark, settings)
     staging_path = _resolve_staging_path(settings)
+    ledger_path = _resolve_ledger_path(settings)
     _truncate_staging_root(staging_path)
 
     with GraphDatabase.driver(neo4j.uri, auth=(neo4j.username, neo4j.password)) as driver:
         _bootstrap_constraints(driver, settings)
         extract = _extract(spark, settings, schema_list, summary)
-        _transform_embeddings(settings, extract, staging_path, summary)
-        values = _transform_sample_values(spark, settings, schema_list, extract, staging_path, summary)
+        _transform_embeddings(settings, extract, staging_path, ledger_path, summary)
+        values = _transform_sample_values(spark, settings, schema_list, extract, staging_path, ledger_path, summary)
         _check_thresholds(settings, summary)
         _load(neo4j, driver, settings, extract, values, summary)
         summary.neo4j_counts = _query_neo4j_counts(driver)
@@ -339,7 +344,7 @@ def _extract(
 
 def _transform_embeddings(
     settings: Settings, extract: _ExtractResult,
-    staging_path: str, summary: RunSummary,
+    staging_path: str, ledger_path: str, summary: RunSummary,
 ) -> None:
     """Enrich node DataFrames with embeddings in-place on `extract`.
 
@@ -366,7 +371,7 @@ def _transform_embeddings(
             continue
         node_dfs[label] = _embed_and_stage(
             node_dfs[label], _EMBEDDING_TEXT_EXPRS[label], label,
-            settings, staging_path, summary,
+            settings, staging_path, ledger_path, summary,
         )
 
     extract.table_node_df = node_dfs[LABEL_TABLE]
@@ -377,7 +382,7 @@ def _transform_embeddings(
 
 def _transform_sample_values(
     spark, settings: Settings, schema_list: list[str],
-    extract: _ExtractResult, staging_path: str, summary: RunSummary,
+    extract: _ExtractResult, staging_path: str, ledger_path: str, summary: RunSummary,
 ) -> _ValueResult:
     """Sample distinct values and optionally embed the Value nodes."""
     if not settings.dbxcarta_include_values:
@@ -415,7 +420,7 @@ def _transform_sample_values(
     if settings.dbxcarta_include_embeddings_values and sample_stats.value_nodes > 0:
         value_node_df = _embed_and_stage(
             value_node_df, _EMBEDDING_TEXT_EXPRS[LABEL_VALUE], LABEL_VALUE,
-            settings, staging_path, summary,
+            settings, staging_path, ledger_path, summary,
         )
 
     return _ValueResult(
@@ -529,24 +534,68 @@ def _drop_cols(df, *names: str) -> DataFrame:
 
 def _embed_and_stage(
     df, text_expr: str, label: str,
-    settings: Settings, staging_path: str, summary: RunSummary,
+    settings: Settings, staging_path: str, ledger_path: str, summary: RunSummary,
 ) -> DataFrame:
-    """Embed df, stage to Delta once, compute failure stats into summary."""
-    enriched = emb.add_embedding_column(
-        df,
-        text_expr,
-        settings.dbxcarta_embedding_endpoint,
-        settings.dbxcarta_embedding_dimension,
-        label=label,
-    )
+    """Embed df, stage to Delta once, compute failure stats into summary.
+
+    When DBXCARTA_LEDGER_ENABLED, rows whose embedding_text_hash and model
+    already exist in the per-label ledger are served from the ledger (no
+    ai_query call). Only misses call the endpoint; the ledger is then upserted
+    with the newly-computed vectors (excluding error rows).
+    """
+    from pyspark.sql.functions import col, expr as spark_expr, lit, sha2
+    from pyspark.sql.types import ArrayType, DoubleType
+
+    endpoint = settings.dbxcarta_embedding_endpoint
+    dimension = settings.dbxcarta_embedding_dimension
+
+    if settings.dbxcarta_ledger_enabled:
+        spark = df.sparkSession
+        ledger_df = _read_ledger(spark, ledger_path, label)
+
+        if ledger_df is not None:
+            df_hashed = df.withColumn("_curr_hash", sha2(spark_expr(text_expr), 256))
+            hits_df, misses_df = _split_by_ledger(df_hashed, ledger_df, endpoint)
+            hit_count = hits_df.count()
+            summary.embedding_ledger_hits[label] = hit_count
+
+            # Hit branch: synthesize the five embedding columns from the ledger row.
+            # Cast embedding to ARRAY<DOUBLE> to match the type add_embedding_column produces.
+            hit_final = hits_df.select(
+                *[col(c) for c in df.columns],
+                col("_curr_hash").alias("embedding_text_hash"),
+                col("_led_embedding").cast(ArrayType(DoubleType())).alias("embedding"),
+                lit(None).cast("string").alias("embedding_error"),
+                col("_led_model").alias("embedding_model"),
+                col("_led_embedded_at").alias("embedded_at"),
+            )
+
+            # Miss branch: call ai_query only on rows whose hash or model changed.
+            embedded_misses = emb.add_embedding_column(
+                misses_df, text_expr, endpoint, dimension, label=label,
+            )
+
+            enriched = hit_final.unionByName(embedded_misses)
+        else:
+            # Ledger doesn't exist yet — treat everything as a miss.
+            summary.embedding_ledger_hits[label] = 0
+            enriched = emb.add_embedding_column(df, text_expr, endpoint, dimension, label=label)
+    else:
+        enriched = emb.add_embedding_column(df, text_expr, endpoint, dimension, label=label)
+
     staged = _stage_embedded_nodes(enriched, staging_path, label)
     rate, attempts, successes = emb.compute_failure_stats(staged)
     summary.embedding_attempts[label] = attempts
     summary.embedding_successes[label] = successes
     summary.embedding_failure_rate_per_label[label] = rate
+
+    if settings.dbxcarta_ledger_enabled:
+        _upsert_ledger(staged, ledger_path, label)
+
     logger.info(
-        "[dbxcarta] %s embeddings: attempts=%d successes=%d failure_rate=%.2f%%",
+        "[dbxcarta] %s embeddings: attempts=%d successes=%d failure_rate=%.2f%% ledger_hits=%d",
         label, attempts, successes, rate * 100,
+        summary.embedding_ledger_hits.get(label, 0),
     )
     return staged
 
@@ -588,6 +637,116 @@ def _resolve_staging_path(settings: Settings) -> str:
     parts = _parse_volume_path(summary_root)
     parent = "/" + "/".join(parts[:-1])
     return f"{parent}/staging"
+
+
+def _resolve_ledger_path(settings: Settings) -> str:
+    """Return the Delta ledger root.
+
+    If DBXCARTA_LEDGER_PATH is set, use it verbatim. Otherwise derive a sibling
+    "ledger" directory under the same UC volume as DBXCARTA_SUMMARY_VOLUME.
+    The ledger is never truncated between runs — it persists as a durable cache.
+    """
+    configured = settings.dbxcarta_ledger_path.strip()
+    if configured:
+        return configured.rstrip("/")
+    summary_root = settings.dbxcarta_summary_volume.rstrip("/")
+    parts = _parse_volume_path(summary_root)
+    parent = "/" + "/".join(parts[:-1])
+    return f"{parent}/ledger"
+
+
+def _read_ledger(spark, ledger_root: str, label: str) -> "DataFrame | None":
+    """Return the ledger DataFrame for label, or None if it doesn't exist yet."""
+    ledger_path = f"{ledger_root.rstrip('/')}/{label.lower()}"
+    try:
+        return spark.read.format("delta").load(ledger_path)
+    except Exception:  # noqa: BLE001 — missing table is expected on first run
+        return None
+
+
+def _split_by_ledger(df_hashed, ledger_df, endpoint: str) -> tuple["DataFrame", "DataFrame"]:
+    """Split df_hashed into (hits_df, misses_df) against the ledger.
+
+    A hit requires: the ledger has a row with the same id, the same
+    embedding_model as the current endpoint, and a matching embedding_text_hash.
+    Hits carry five _led_* columns from the ledger row. Misses have those
+    columns dropped so the result is schema-compatible with the original df.
+    """
+    from pyspark.sql.functions import col
+
+    ledger_filtered = (
+        ledger_df
+        .filter(col("embedding_model") == endpoint)
+        .select(
+            col("id").alias("_led_id"),
+            col("embedding_text_hash").alias("_led_hash"),
+            col("embedding").alias("_led_embedding"),
+            col("embedding_model").alias("_led_model"),
+            col("embedded_at").alias("_led_embedded_at"),
+        )
+    )
+
+    joined = df_hashed.join(
+        ledger_filtered, df_hashed["id"] == ledger_filtered["_led_id"], "left",
+    )
+    hit_cond = col("_led_id").isNotNull() & (col("_curr_hash") == col("_led_hash"))
+
+    ledger_cols = ["_curr_hash", "_led_id", "_led_hash", "_led_embedding", "_led_model", "_led_embedded_at"]
+    hits_df = joined.filter(hit_cond)
+    misses_df = joined.filter(~hit_cond).drop(*ledger_cols)
+
+    return hits_df, misses_df
+
+
+def _upsert_ledger(staged_df, ledger_root: str, label: str) -> None:
+    """Upsert newly-embedded rows (excluding errors) into the per-label ledger.
+
+    Merge key: (id, embedding_model). Rows where embedding_error is non-null
+    are excluded so failed rows are re-attempted on every subsequent run.
+    Schema: id STRING, embedding_text_hash STRING, embedding ARRAY<DOUBLE>,
+    embedding_model STRING, embedded_at TIMESTAMP.
+    """
+    from delta.tables import DeltaTable
+    from pyspark.sql.functions import col
+
+    ledger_path = f"{ledger_root.rstrip('/')}/{label.lower()}"
+    spark = staged_df.sparkSession
+
+    # Deduplicate on merge key — Delta MERGE requires at most one source row per
+    # target row; while node IDs should be unique in practice, guard explicitly.
+    rows_to_upsert = (
+        staged_df
+        .filter(col("embedding_error").isNull())
+        .select("id", "embedding_text_hash", "embedding", "embedding_model", "embedded_at")
+        .dropDuplicates(["id", "embedding_model"])
+    )
+
+    # Use forPath in a try/except rather than isDeltaTable to avoid AnalysisException
+    # edge cases observed with isDeltaTable on /Volumes paths (Delta docs community reports).
+    # Only the forPath call is wrapped — a merge failure propagates as-is.
+    try:
+        existing = DeltaTable.forPath(spark, ledger_path)
+    except Exception:  # noqa: BLE001 — path doesn't exist on first run
+        (
+            rows_to_upsert.write
+            .format("delta")
+            .mode("overwrite")
+            .save(ledger_path)
+        )
+        logger.info("[dbxcarta] created ledger for %s at %s", label, ledger_path)
+        return
+
+    (
+        existing.alias("existing")
+        .merge(
+            rows_to_upsert.alias("updates"),
+            "existing.id = updates.id AND existing.embedding_model = updates.embedding_model",
+        )
+        .whenMatchedUpdateAll()
+        .whenNotMatchedInsertAll()
+        .execute()
+    )
+    logger.info("[dbxcarta] upserted ledger for %s at %s", label, ledger_path)
 
 
 def _truncate_staging_root(staging_root: str) -> None:
@@ -658,7 +817,8 @@ def _preflight(spark, settings: Settings) -> None:
             embedding_successes MAP<STRING, BIGINT>,
             embedding_failure_rate_per_label MAP<STRING, DOUBLE>,
             embedding_failure_rate DOUBLE,
-            embedding_failure_threshold DOUBLE
+            embedding_failure_threshold DOUBLE,
+            embedding_ledger_hits MAP<STRING, BIGINT>
         ) USING DELTA
     """)
 
