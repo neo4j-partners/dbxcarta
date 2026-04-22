@@ -376,6 +376,13 @@ def _run(spark, settings: Settings, schema_list: list[str], summary: RunSummary)
             sample_stats.value_nodes,
         )
 
+    if settings.dbxcarta_include_embeddings_values and not settings.dbxcarta_include_values:
+        logger.warning(
+            "[dbxcarta] DBXCARTA_INCLUDE_EMBEDDINGS_VALUES=true but"
+            " DBXCARTA_INCLUDE_VALUES=false; Value embeddings will be skipped."
+            " Set DBXCARTA_INCLUDE_VALUES=true to enable."
+        )
+
     if settings.dbxcarta_include_embeddings_values and value_node_df is not None:
         enriched = emb.add_embedding_column(
             value_node_df,
@@ -421,7 +428,7 @@ def _run(spark, settings: Settings, schema_list: list[str], summary: RunSummary)
     database_write_df = database_df
     if "embedding_error" in database_write_df.columns:
         database_write_df = database_write_df.drop("embedding_error")
-    write_nodes(database_write_df, neo4j, LABEL_DATABASE)
+    write_nodes(database_write_df.coalesce(1), neo4j, LABEL_DATABASE)
 
     # Stage 2: all writes land on Neo4j as a single partition. Relationship
     # writes lock both endpoint nodes, so parallel partitions cause lock

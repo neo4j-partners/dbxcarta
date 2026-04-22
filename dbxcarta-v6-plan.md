@@ -181,7 +181,7 @@ Re-validated 2026-04-22 against `dbxcarta-catalog.dbxcarta-schema` after a Neo4j
 - [x] Constrain the scope so only a handful of tables hit the serving endpoint. `DBXCARTA_SCHEMAS=graph-enriched-schema` — 13 tables, appropriate for Stage 3.
 - [X] Wipe the target Neo4j instance manually (Aura console reset, or `MATCH (n) DETACH DELETE n`) before the first green run. No automated reset path ships with v6.
 - [x] Bootstrap step creates the Neo4j vector index on `Table.embedding` with the dimension read from `DBXCARTA_EMBEDDING_DIMENSION` and cosine similarity. Index `table_embedding` confirmed ONLINE post-run.
-- [x] Run `dbxcarta submit run_dbxcarta.py` (correct invocation; `scripts/` prefix is added by the runner from `scripts_dir`). Required `upload --wheel` + `upload --all` first — see worklog note below. On `databricks-job-runner 0.4.6+`, `dbxcarta submit --upload run_dbxcarta.py` folds the `upload --all` step into submit (wheel still uploaded separately).
+- [x] Run `uv run dbxcarta submit run_dbxcarta.py` (correct invocation; `scripts/` prefix is added by the runner from `scripts_dir`). Required `upload --wheel` + `upload --all` first — see worklog note below. On `databricks-job-runner 0.4.6+`, `uv run dbxcarta submit --upload run_dbxcarta.py` folds the `upload --all` step into submit (wheel still uploaded separately).
 - [x] Inspect the run summary: status=success; `Table` failure rate=0.0% (13/13); per-label rate recorded in Delta; staging table has 13 rows; all 5 embedding properties present on all 13 Table nodes; Column nodes have 0 embeddings (flag off). Run summary Delta table evolved to 18 columns via `mergeSchema=true`.
 - [x] **Verify materialize-once empirically.** Staging table at `/Volumes/.../staging/table_nodes` has exactly 13 rows matching the 13 in-scope Table nodes. Serving endpoint invocation count before the run could not be read programmatically (UI-only metric); structural verification (staging row count = table count, 0 failures, single run) is consistent with one-call-per-row semantics. Endpoint UI check deferred to Stage 4 integration suite. See `worklog/stage3-first-green-run.md`.
 - [x] Run the same submit a second time and confirm counts are identical. Table count and embedding metrics identical (13 attempts, 13 successes, 0.0% rate). Column and Value counts differ slightly (93→100, 59→61) because the catalog gained new columns between the two runs — not a pipeline idempotency issue.
@@ -222,17 +222,40 @@ Rolled out one label at a time after the Table rollout is validated. The code in
 
 #### Checklist
 
-- [ ] Modify `build_column_nodes()` to retain `table_schema` and `table_name`; modify `build_schema_nodes()` to retain `catalog_name`. Both fields are dropped from the Neo4j write (they are not node properties).
-- [ ] Add `_COLUMN_EMBEDDING_TEXT_EXPR`, `_SCHEMA_EMBEDDING_TEXT_EXPR`, `_DATABASE_EMBEDDING_TEXT_EXPR`, `_VALUE_EMBEDDING_TEXT_EXPR` constants to `pipeline.py` (see decision #3).
-- [ ] Add embedding blocks for Column, Value, Schema, and Database in the transform section of `pipeline.py`, each guarded by its flag and following the Table pattern: `add_embedding_column` → `_stage_embedded_nodes` → `compute_failure_stats` → accumulate summary counts.
-- [ ] Drop `embedding_error` and context-only fields (`table_schema`, `table_name` for Column; `catalog_name` for Schema) before the respective Neo4j node writes.
-- [ ] Set `DBXCARTA_INCLUDE_EMBEDDINGS_COLUMNS=true` in `.env`; leave Values, Schemas, Databases off.
+- [x] Modify `build_column_nodes()` to retain `table_schema` and `table_name`; modify `build_schema_nodes()` to retain `catalog_name`. Both fields are dropped from the Neo4j write (they are not node properties).
+- [x] Add `_COLUMN_EMBEDDING_TEXT_EXPR`, `_SCHEMA_EMBEDDING_TEXT_EXPR`, `_DATABASE_EMBEDDING_TEXT_EXPR`, `_VALUE_EMBEDDING_TEXT_EXPR` constants to `pipeline.py` (see decision #3).
+- [x] Add embedding blocks for Column, Value, Schema, and Database in the transform section of `pipeline.py`, each guarded by its flag and following the Table pattern: `add_embedding_column` → `_stage_embedded_nodes` → `compute_failure_stats` → accumulate summary counts.
+- [x] Drop `embedding_error` and context-only fields (`table_schema`, `table_name` for Column; `catalog_name` for Schema) before the respective Neo4j node writes.
+- [x] Set `DBXCARTA_INCLUDE_EMBEDDINGS_COLUMNS=true` in `.env`; leave Values, Schemas, Databases off.
 - [ ] Re-run; verify Column nodes carry all five embedding properties, `embedding_text` is absent (hash-only), vector index `column_embedding` is ONLINE, failure rate ≤ threshold.
-- [ ] Extend `tests/embeddings/test_graph_integration.py` with Column assertions: all in-scope Column nodes carry the five embedding properties; `embedding_text` is absent; vector index `column_embedding` exists with correct config; similarity probe returns neighbors; non-Column labels still carry no embeddings (when their flags are off).
+- [x] Extend `tests/embeddings/test_graph_integration.py` with Column assertions: all in-scope Column nodes carry the five embedding properties; `embedding_text` is absent; vector index `column_embedding` exists with correct config; similarity probe returns neighbors; non-Column labels still carry no embeddings (when their flags are off).
 - [ ] Turn on `DBXCARTA_INCLUDE_EMBEDDINGS_VALUES=true`, re-run, extend integration tests for Value nodes. `Value` nodes are hash-only.
 - [ ] Turn on `DBXCARTA_INCLUDE_EMBEDDINGS_SCHEMAS=true` and `DBXCARTA_INCLUDE_EMBEDDINGS_DATABASES=true`, re-run, extend integration tests for Schema and Database nodes. Both are hash-only.
 
+### Stage 5A: Incremental label rollout and verification
+
+Executes the per-label run-and-verify loop that Stage 5 deferred. Each step follows the same pattern: flip one `.env` flag, submit, run the integration suite, extend the test file with assertions for the new label before marking the step done.
+
+#### Column (current .env state — Tables + Columns both true)
+
+- [x] Submit the pipeline: `uv run dbxcarta submit --upload run_dbxcarta.py` (re-run `uv run dbxcarta upload --wheel` first if `src/dbxcarta/` changed)
+- [x] Run `pytest tests/embeddings/ -v` and verify all Column assertions pass: Column nodes carry 4 embedding properties (`embedding_text` absent), `column_embedding` vector index is ONLINE, cosine probe returns neighbors, failure rate ≤ threshold, `test_embedding_properties_match_enabled_flags` confirms disabled labels carry no properties.
+
+#### Value
+
+- [x] Set `DBXCARTA_INCLUDE_EMBEDDINGS_VALUES=true` in `.env`; submit.
+- [x] Extend `tests/embeddings/test_graph_integration.py` with Value assertions: all in-scope Value nodes carry 4 embedding properties; `embedding_text` absent (hash-only); `value_embedding` vector index exists with correct config; cosine probe returns neighbors.
+- [x] Run `pytest tests/embeddings/ -v` and verify Value assertions pass.
+
+#### Schema and Database
+
+- [x] Set `DBXCARTA_INCLUDE_EMBEDDINGS_SCHEMAS=true` and `DBXCARTA_INCLUDE_EMBEDDINGS_DATABASES=true` in `.env`; submit.
+- [x] Extend `tests/embeddings/test_graph_integration.py` with Schema and Database assertions: all in-scope nodes carry 4 embedding properties; `embedding_text` absent; `schema_embedding` and `database_embedding` vector indexes exist with correct config; cosine probes return neighbors.
+- [x] Run `pytest tests/embeddings/ -v` and verify all assertions pass; `test_embedding_properties_match_enabled_flags` now checks all five labels positively.
+
 ### Stage 6: REFERENCES relationship (W8)
+
+**What this does:** Adds foreign-key edges to the graph. Right now the graph has Column nodes but no connections between columns in different tables that are linked by a foreign key. This stage reads Unity Catalog's `referential_constraints` and `key_column_usage` views, joins them to find which column references which, and writes a `(Column)-[:REFERENCES]->(Column)` relationship for each FK pair. The result is that you can traverse the graph to discover how tables are joined in practice — useful for impact analysis and lineage.
 
 (Was Stage 5 in v5.) `W8` is the v4 work-item label for the `(Column)-[:REFERENCES]->(Column)` write (read `R4` over `information_schema.referential_constraints` ⨝ `key_column_usage`). See `dbxcarta-v5-fk.md` for the implementation plan and `worklog/v5-fk-findings.md` for the FK-join investigation.
 
@@ -243,6 +266,8 @@ v6 ships with `REFERENCES` stubbed and `row_counts["fk_references"] = 0`.
 - [ ] Extend `tests/schema_graph/` to assert `REFERENCES` source and target columns exist and that coverage is recorded in the run summary.
 
 ### Stage 7: Operational hardening
+
+**What this does:** Makes the pipeline production-efficient across three dimensions. First, it adds an embedding ledger — a durable Delta table that records every vector already computed. On each run the pipeline checks the ledger before calling the serving endpoint; if the text hasn't changed and the model is the same, it reuses the stored vector instead of re-embedding. This avoids paying for and waiting on inference calls for nodes that haven't changed. Second, it adds incremental scope: instead of processing the entire catalog every run, the pipeline reads `last_altered` timestamps and skips tables that haven't changed since the last successful run. Third, it benchmarks throughput to find the actual bottleneck (endpoint or Neo4j writer) before loosening the conservative `coalesce(1)` parallelism setting.
 
 Optimizations deliberately deferred. (Was Stage 6 in v5.)
 

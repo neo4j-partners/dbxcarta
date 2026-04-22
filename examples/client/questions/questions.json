@@ -1,0 +1,122 @@
+[
+  {
+    "question_id": "q01",
+    "question": "How many accounts are there?",
+    "notes": "tier-1: single table count",
+    "reference_sql": "SELECT COUNT(*) AS account_count FROM `dbxcarta-catalog`.`dbxcarta-schema`.accounts"
+  },
+  {
+    "question_id": "q02",
+    "question": "What distinct account types exist?",
+    "notes": "tier-1: single table distinct",
+    "reference_sql": "SELECT DISTINCT account_type FROM `dbxcarta-catalog`.`dbxcarta-schema`.accounts ORDER BY account_type"
+  },
+  {
+    "question_id": "q03",
+    "question": "What regions do accounts come from?",
+    "notes": "tier-1: single table distinct",
+    "reference_sql": "SELECT DISTINCT region FROM `dbxcarta-catalog`.`dbxcarta-schema`.accounts ORDER BY region"
+  },
+  {
+    "question_id": "q04",
+    "question": "What merchant business categories are there?",
+    "notes": "tier-1: single table distinct",
+    "reference_sql": "SELECT DISTINCT category FROM `dbxcarta-catalog`.`dbxcarta-schema`.merchants ORDER BY category"
+  },
+  {
+    "question_id": "q05",
+    "question": "How many fraud ring communities are there?",
+    "notes": "tier-1: single table count",
+    "reference_sql": "SELECT COUNT(*) AS community_count FROM `dbxcarta-catalog`.`dbxcarta-schema`.gold_fraud_ring_communities"
+  },
+  {
+    "question_id": "q06",
+    "question": "List all high-risk merchants",
+    "notes": "tier-2: filter with literal string",
+    "reference_sql": "SELECT merchant_name, category, region FROM `dbxcarta-catalog`.`dbxcarta-schema`.merchants WHERE risk_tier = 'high' ORDER BY merchant_name"
+  },
+  {
+    "question_id": "q07",
+    "question": "How many checking accounts are there?",
+    "notes": "tier-2: filter with literal string",
+    "reference_sql": "SELECT COUNT(*) AS checking_count FROM `dbxcarta-catalog`.`dbxcarta-schema`.accounts WHERE account_type = 'checking'"
+  },
+  {
+    "question_id": "q08",
+    "question": "Which fraud ring communities are ring candidates?",
+    "notes": "tier-2: filter with boolean literal",
+    "reference_sql": "SELECT community_id, member_count, avg_risk_score FROM `dbxcarta-catalog`.`dbxcarta-schema`.gold_fraud_ring_communities WHERE is_ring_candidate = true ORDER BY avg_risk_score DESC"
+  },
+  {
+    "question_id": "q09",
+    "question": "How many accounts have a balance over 5000?",
+    "notes": "tier-2: numeric range filter",
+    "reference_sql": "SELECT COUNT(*) AS high_balance_count FROM `dbxcarta-catalog`.`dbxcarta-schema`.accounts WHERE balance > 5000"
+  },
+  {
+    "question_id": "q10",
+    "question": "How many transactions occurred between midnight and 5am?",
+    "notes": "tier-2: numeric range filter on txn_hour",
+    "reference_sql": "SELECT COUNT(*) AS overnight_count FROM `dbxcarta-catalog`.`dbxcarta-schema`.transactions WHERE txn_hour BETWEEN 0 AND 5"
+  },
+  {
+    "question_id": "q11",
+    "question": "What is the total transaction amount by merchant category?",
+    "notes": "tier-3: join transactions and merchants, aggregate",
+    "reference_sql": "SELECT m.category, SUM(t.amount) AS total_amount FROM `dbxcarta-catalog`.`dbxcarta-schema`.transactions t JOIN `dbxcarta-catalog`.`dbxcarta-schema`.merchants m ON t.merchant_id = m.merchant_id GROUP BY m.category ORDER BY total_amount DESC"
+  },
+  {
+    "question_id": "q12",
+    "question": "How many transactions has each account type made?",
+    "notes": "tier-3: join transactions and accounts, aggregate",
+    "reference_sql": "SELECT a.account_type, COUNT(t.txn_id) AS txn_count FROM `dbxcarta-catalog`.`dbxcarta-schema`.transactions t JOIN `dbxcarta-catalog`.`dbxcarta-schema`.accounts a ON t.account_id = a.account_id GROUP BY a.account_type ORDER BY txn_count DESC"
+  },
+  {
+    "question_id": "q13",
+    "question": "What is the average transaction amount at high-risk merchants?",
+    "notes": "tier-3: join with filter, aggregate",
+    "reference_sql": "SELECT AVG(t.amount) AS avg_amount FROM `dbxcarta-catalog`.`dbxcarta-schema`.transactions t JOIN `dbxcarta-catalog`.`dbxcarta-schema`.merchants m ON t.merchant_id = m.merchant_id WHERE m.risk_tier = 'high'"
+  },
+  {
+    "question_id": "q14",
+    "question": "What is the average balance of accounts confirmed as fraud ring members?",
+    "notes": "tier-3: join accounts and account_labels",
+    "reference_sql": "SELECT AVG(a.balance) AS avg_balance FROM `dbxcarta-catalog`.`dbxcarta-schema`.accounts a JOIN `dbxcarta-catalog`.`dbxcarta-schema`.account_labels l ON a.account_id = l.account_id WHERE l.is_fraud = true"
+  },
+  {
+    "question_id": "q15",
+    "question": "How many accounts labeled as fraud have a risk score above 1.0?",
+    "notes": "tier-3: three-way join with filter",
+    "reference_sql": "SELECT COUNT(*) AS high_risk_fraud_count FROM `dbxcarta-catalog`.`dbxcarta-schema`.gold_accounts g JOIN `dbxcarta-catalog`.`dbxcarta-schema`.account_labels l ON g.account_id = l.account_id WHERE l.is_fraud = true AND g.risk_score > 1.0"
+  },
+  {
+    "question_id": "q16",
+    "question": "Which accounts have sent transfers to more than 3 different destination accounts?",
+    "notes": "tier-4: account_links self-aggregation requiring FK knowledge",
+    "reference_sql": "SELECT src_account_id, COUNT(DISTINCT dst_account_id) AS unique_targets FROM `dbxcarta-catalog`.`dbxcarta-schema`.account_links GROUP BY src_account_id HAVING COUNT(DISTINCT dst_account_id) > 3 ORDER BY unique_targets DESC"
+  },
+  {
+    "question_id": "q17",
+    "question": "What is the total transfer amount sent out of savings accounts?",
+    "notes": "tier-4: account_links joined to accounts on src FK",
+    "reference_sql": "SELECT SUM(al.amount) AS total_out FROM `dbxcarta-catalog`.`dbxcarta-schema`.account_links al JOIN `dbxcarta-catalog`.`dbxcarta-schema`.accounts a ON al.src_account_id = a.account_id WHERE a.account_type = 'savings'"
+  },
+  {
+    "question_id": "q18",
+    "question": "Which merchants have processed transactions from accounts that are confirmed fraud ring members?",
+    "notes": "tier-4: three-way join across transactions, account_labels, merchants",
+    "reference_sql": "SELECT DISTINCT m.merchant_name, m.category FROM `dbxcarta-catalog`.`dbxcarta-schema`.transactions t JOIN `dbxcarta-catalog`.`dbxcarta-schema`.account_labels l ON t.account_id = l.account_id JOIN `dbxcarta-catalog`.`dbxcarta-schema`.merchants m ON t.merchant_id = m.merchant_id WHERE l.is_fraud = true ORDER BY m.merchant_name"
+  },
+  {
+    "question_id": "q19",
+    "question": "How many accounts made purchases at high-risk merchants and also sent at least one transfer?",
+    "notes": "tier-4: requires connecting transactions, merchants, and account_links",
+    "reference_sql": "SELECT COUNT(DISTINCT t.account_id) AS count FROM `dbxcarta-catalog`.`dbxcarta-schema`.transactions t JOIN `dbxcarta-catalog`.`dbxcarta-schema`.merchants m ON t.merchant_id = m.merchant_id WHERE m.risk_tier = 'high' AND t.account_id IN (SELECT DISTINCT src_account_id FROM `dbxcarta-catalog`.`dbxcarta-schema`.account_links)"
+  },
+  {
+    "question_id": "q20",
+    "question": "What is the average risk score of accounts in fraud ring communities with more than 100 members?",
+    "notes": "tier-4: join gold_accounts to gold_fraud_ring_communities on community_id",
+    "reference_sql": "SELECT AVG(g.risk_score) AS avg_risk FROM `dbxcarta-catalog`.`dbxcarta-schema`.gold_accounts g JOIN `dbxcarta-catalog`.`dbxcarta-schema`.gold_fraud_ring_communities c ON g.community_id = c.community_id WHERE c.member_count > 100"
+  }
+]
