@@ -58,13 +58,18 @@ Source: derived from Spark lazy-evaluation semantics and the driver memory const
 
 ## Neo4j Spark Connector
 
-### 1. Repartition to 1 before writing relationships
+### 1. `coalesce(1)` for relationships, `repartition(N, id)` for nodes
 
-Neo4j relationship writes lock both endpoint nodes. Writing relationships from multiple Spark partitions in parallel causes lock contention on shared endpoint nodes and can raise rejection errors. The connector's own documentation recommends a single partition for most writes.
+Neo4j write lock contention is the concern the connector docs warn about. Relationships lock both endpoint nodes, and any two Spark partitions writing relationships can contend on a shared endpoint node, so the connector's guidance to serialize writes applies straightforwardly. Nodes are different: uniqueness constraints lock per node id, so partitions that are disjoint on id cannot contend. `repartition(N, "id")` produces exactly that — hash-partitioning on a uniqueness-constrained property guarantees each node lands in a single partition, and parallel writes across partitions are safe by construction.
 
-**How we apply it:** every relationship DataFrame is `.coalesce(1)` before the Neo4j write. Node writes default to 1 as well for the first green run; a later phase may tune upward for labels whose identifiers are known to be disjoint across partitions.
+**How we apply it:**
 
-Source: [Neo4j Spark Connector — Parameter tuning, Write parallelism](https://neo4j.com/docs/spark/current/performance/tuning/#parallelism) (retrieved 2026-04-21).
+- **Relationship writes** — every relationship DataFrame is `.coalesce(1)` before the Neo4j write. No exceptions; relationships always lock two nodes.
+- **Node writes** — every node DataFrame is `.repartition(N, "id")` before the Neo4j write, where `N` comes from `DBXCARTA_NEO4J_NODE_PARTITIONS` (default `4`). This is a standing rule, not a benchmark-gated optimization; no measurement is required to prove it's safe because the partitioning guarantees disjoint lock keys.
+
+Tuning `N` is a throughput question, not a correctness question, and is handled in `worklog/benchmarking_plan.md`.
+
+Source: [Neo4j Spark Connector — Parameter tuning, Write parallelism](https://neo4j.com/docs/spark/current/performance/tuning/#parallelism) (retrieved 2026-04-22). The "Dataset partitioning" subsection on that page sanctions the exception directly: "if your data writes are partitioned ahead of time to avoid locks, you can generally do as many write threads to Neo4j as there are cores in the server. Suppose we want to write a long list of `:Person` nodes, and we know they are distinct by the person `id`. We might stream those into Neo4j in four different partitions, as there will not be any lock contention." Our default `N=4` matches the example.
 
 ### 2. Tune `batch.size` above the default
 
@@ -78,7 +83,7 @@ Source: [Neo4j Spark Connector — Tune the batch size](https://neo4j.com/docs/s
 
 On AuraDB and any causal cluster, only the leader accepts writes. Write throughput scales with the cores on the leader, not with the number of Spark executors. This bounds the point at which adding more Spark parallelism stops helping.
 
-**How we apply it:** the pipeline treats Spark-side parallelism as a second-order tuning knob, not a first-order solution. Stage 7 (endpoint throughput benchmark) measures the actual ceiling before any parallelism is added beyond `coalesce(1)`.
+**How we apply it:** the pipeline treats Spark-side parallelism as a second-order tuning knob, not a first-order solution. Node writes use a modest default (`DBXCARTA_NEO4J_NODE_PARTITIONS=4`, see §1); raising it against measured throughput is deferred to `worklog/benchmarking_plan.md`.
 
 Source: [Neo4j Spark Connector — Parameter tuning, Write parallelism](https://neo4j.com/docs/spark/current/performance/tuning/#parallelism) (retrieved 2026-04-21).
 
