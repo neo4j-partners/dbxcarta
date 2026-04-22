@@ -26,3 +26,8 @@ test = [
 [build-system]
 requires = ["uv_build>=0.9.3,<0.10.0"]
 build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+markers = [
+    "slow: tests that submit a Databricks job and wait for it to finish",
+]

@@ -14,33 +14,28 @@ The output graph follows a standard shape so it can be consumed by downstream ag
 
 Each node carries a stable dotted `id` such as `catalog.schema.table.column`, plus a `description` and, where applicable, an `embedding` vector for semantic similarity search.
 
-## Databrick Native Design Decisions
+## Design
 
-This project is designed to be run on Databricks and leverage the Databricks ecosystem. The core design choices:
+Everything runs inside Databricks — no external orchestrators, no local execution, no service accounts.
 
-1. **Run as Databricks Jobs**: each phase is a job entry point orchestrated and scheduled through the Databricks Jobs scheduler, not a local Python script. Runs are reproducible, logged, and observable in the workspace.
-2. **Use Spark for ETL**: extraction and transformation use PySpark DataFrames on Databricks compute rather than row-by-row Python, so the pipeline scales to large Unity Catalogs without a single-process bottleneck.
-3. **Use Databricks Model Serving endpoints**: embeddings are generated against Databricks-hosted foundation models served through Model Serving, keeping inference inside the workspace and governed by Unity Catalog permissions instead of calling an external embeddings API.
-4. **Leverage Databricks compute infrastructure**: job clusters or serverless compute, SQL warehouses for sample-value queries, Unity Catalog as the single metadata source, UC Volumes for run-summary artifacts, and a Delta run-summary table for history.
-5. **Use `databricks-job-runner` for job lifecycle**: project scripts, wheels, and jobs are uploaded, submitted, monitored, and cleaned up through the `databricks-job-runner` CLI rather than bespoke SDK code. It wraps the Databricks Python SDK into a reusable `Runner` that exposes `upload`, `submit`, `validate`, `logs`, and `clean` subcommands, plus Unity Catalog helpers for catalogs, schemas, and volumes. The project's `cli.py` simply configures a `Runner`, and `scripts/` contains a separate entry-point script for each phase (`run_dbxcarta_schema.py`, `run_dbxcarta_sample.py`, `run_dbxcarta_embeddings.py`).
+- **Jobs**: each phase runs as a Databricks Job, not a local script. Runs are reproducible, logged, and observable in the workspace.
+- **Spark**: extraction and transformation use PySpark DataFrames, so the pipeline scales to large catalogs without single-process bottlenecks.
+- **Model Serving**: embeddings are generated via Databricks-hosted foundation models, keeping inference inside the workspace and governed by Unity Catalog permissions.
+- **Neo4j Spark Connector**: bulk, partitioned writes from DataFrames — no per-row `MERGE` statements from the Python driver.
+- **Secrets**: Neo4j credentials live in a Databricks secret scope and are injected at job time, not read from a local file.
+- **Metadata source**: Unity Catalog `information_schema` only — no pluggable multi-source connector layer.
+- **Run observability**: every run emits a `RunSummary` to stdout, a timestamped JSON file in a UC Volume, and a row appended to a Delta table so history is queryable via SQL.
+- **`databricks-job-runner`**: CLI wrapper around the Databricks SDK that handles upload, submit, and cleanup. A single dispatcher script runs all phases; the active phase is controlled by `DBXCARTA_JOB=schema|sample|embeddings` in `.env`.
 
-Additional differences worth calling out:
+## Architecture
 
-- **Write path**: the Neo4j Spark Connector performs bulk, partitioned writes from DataFrames, rather than the neo4j Python driver issuing per-row `MERGE` statements.
-- **Secrets**: Neo4j credentials live in a Databricks secret scope and are read at job time via `dbutils.secrets`, not from a local `.env` file.
-- **Authentication**: Databricks-native using a workspace profile, OAuth, and `dbutils`, with no separate service-account or local gcloud setup.
-- **Metadata source**: directly targets `<catalog>.information_schema` plus UC system tables, rather than a pluggable multi-source connector layer.
-- **Run observability**: every run emits a typed `RunSummary` to stdout, a timestamped JSON file in a UC Volume, and an append to a Delta table so history is queryable via SQL.
+Spark jobs read from Unity Catalog `information_schema` and a SQL warehouse, then write to Neo4j through the Neo4j Spark Connector. Credentials come from a Databricks secret scope at job runtime; every run appends a summary to a UC Volume and a Delta table.
 
-## Proposed Architecture
+The pipeline has three phases:
 
-Extraction, transformation, and loading execute as Spark jobs on Databricks compute, reading from Unity Catalog `information_schema` and a SQL warehouse for sample values, and writing to Neo4j through the Neo4j Spark Connector. Credentials are resolved at job runtime from a Databricks secret scope (default `dbxcarta-neo4j`); run metadata is emitted to stdout, a UC Volume JSON file, and a Delta run-summary table.
-
-The pipeline is organized into three phases, each a separate submitted script:
-
-- **Phase 1, Schema Graph** (`run_dbxcarta_schema.py`): reads `schemata`, `tables`, and `columns` from `<catalog>.information_schema`, builds node and relationship DataFrames using a shared id contract in `dbxcarta.contract`, and writes `Database`, `Schema`, `Table`, `Column` nodes plus `HAS_SCHEMA`, `HAS_TABLE`, `HAS_COLUMN`, and `REFERENCES` foreign-key edges via the Neo4j Spark Connector.
-- **Phase 2, Sample Values** (`run_dbxcarta_sample.py`): samples distinct column values from a Databricks SQL warehouse and writes `Value` nodes and `HAS_VALUE` edges, giving the graph representative data for each column.
-- **Phase 3, Embeddings** (`run_dbxcarta_embeddings.py`): generates vector embeddings for node descriptions via Databricks Model Serving and writes them back onto the `embedding` property, enabling semantic similarity retrieval.
+- **Schema Graph** (`DBXCARTA_JOB=schema`): builds the structural graph — `Database`, `Schema`, `Table`, and `Column` nodes with `HAS_SCHEMA`, `HAS_TABLE`, `HAS_COLUMN`, and `REFERENCES` edges — from `information_schema`.
+- **Sample Values** (`DBXCARTA_JOB=sample`): adds `Value` nodes and `HAS_VALUE` edges by sampling distinct values from STRING and BOOLEAN columns. High-cardinality columns are skipped; threshold and sample limit are configurable.
+- **Embeddings** (`DBXCARTA_JOB=embeddings`): *not yet implemented* — will generate vector embeddings for node descriptions via Databricks Model Serving and write them back onto the `embedding` property.
 
 ```
 Unity Catalog ──► Spark Job ──► Transform ──► Neo4j Spark Connector ──► Neo4j Graph
@@ -53,71 +48,37 @@ Unity Catalog ──► Spark Job ──► Transform ──► Neo4j Spark Conn
 
 ## Quickstart
 
-### 1. Install
-
 ```bash
 uv sync
-```
+cp .env.sample .env          # fill in values
+./setup_secrets.sh --profile <your-profile>
 
-### 2. Configure
-
-Create `.env` in the repo root (not committed) with both the job-time settings and the Neo4j credentials:
-
-```
-DATABRICKS_PROFILE=azure-rk-knight
-DATABRICKS_SECRET_SCOPE=dbxcarta-neo4j
-DBXCARTA_CATALOG=<your_catalog>
-DBXCARTA_SCHEMAS=<optional,comma,separated>
-DBXCARTA_SUMMARY_VOLUME=/Volumes/<catalog>/<schema>/<volume>
-DBXCARTA_SUMMARY_TABLE=<catalog>.<schema>.dbxcarta_run_summary
-DATABRICKS_WAREHOUSE_ID=<warehouse_id>
-
-NEO4J_URI=neo4j+s://<host>:7687
-NEO4J_USERNAME=neo4j
-NEO4J_PASSWORD=<password>
-```
-
-Push the Neo4j credentials to the Databricks secret scope:
-
-```bash
-./setup_secrets.sh --profile azure-rk-knight
-```
-
-### 3. Upload and run the schema graph job
-
-Build and upload the `dbxcarta` wheel, upload the phase scripts, then submit:
-
-```bash
 uv run dbxcarta upload --wheel
 uv run dbxcarta upload --all
-uv run dbxcarta submit run_dbxcarta_schema.py
+uv run dbxcarta submit run_dbxcarta.py   # DBXCARTA_JOB=schema in .env
+
+uv run pytest tests/schema_graph
 ```
 
-- `upload --wheel` builds `dbxcarta` with `uv build` and uploads the wheel to the UC Volume. Because the scripts follow the `run_dbxcarta_*` naming convention, `submit` auto-attaches the latest uploaded wheel to the job so the cluster can `import dbxcarta`. Re-run `upload --wheel` whenever code under `src/dbxcarta/` changes.
-- `upload --all` copies every `*.py` in `scripts/` to the configured workspace directory. Re-run it whenever `scripts/` changes.
-- `submit` runs the last-uploaded script — it does not upload on its own.
-
-To run the other phases:
+To run Phase 2, set `DBXCARTA_JOB=sample` in `.env` and resubmit:
 
 ```bash
-uv run dbxcarta submit run_dbxcarta_sample.py
-uv run dbxcarta submit run_dbxcarta_embeddings.py
+uv run dbxcarta submit run_dbxcarta.py
+uv run pytest tests/sample_values
 ```
 
-Flags on `submit`:
-- `--no-wait` — return immediately with the run ID instead of blocking until completion
-- `--compute {cluster,serverless}` — override `DATABRICKS_COMPUTE_MODE` from `.env`
-
-Tail logs for a submitted run:
+Tail logs from any run:
 
 ```bash
 uv run dbxcarta logs <run_id>
 ```
 
-### 4. Verify
+## Upload and submit
 
-After a successful run, execute the pytest suite against the live Neo4j graph and the latest run-summary JSON:
+`upload --wheel` builds the `dbxcarta` package, bumps the patch version in `pyproject.toml`, and uploads the wheel to `DATABRICKS_VOLUME_PATH/wheels/`. `upload --all` copies every `*.py` in `scripts/` to `DATABRICKS_WORKSPACE_DIR/scripts/` in the workspace. Re-run `upload --wheel` when `src/dbxcarta/` changes; re-run `upload --all` when `scripts/` changes.
 
-```bash
-uv run pytest tests/schema_graph
-```
+`submit` does not upload — it runs whatever is already in the workspace. Because the script name starts with `run_dbxcarta`, the runner auto-attaches the latest uploaded wheel so the cluster can `import dbxcarta`. All non-Databricks variables from `.env` (including `DBXCARTA_JOB`) are forwarded to the job as arguments, so the dispatcher picks the right phase without any cluster-side config file.
+
+Flags on `submit`:
+- `--no-wait` — return immediately with the run ID instead of blocking until completion
+- `--compute {cluster,serverless}` — override `DATABRICKS_COMPUTE_MODE` for a single submission

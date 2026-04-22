@@ -30,7 +30,7 @@ def test_second_run_produces_same_counts(neo4j_driver: Driver) -> None:
         before = _counts(s)
 
     os.environ["DBXCARTA_JOB"] = "sample"
-    runner.submit("run_dbxcarta.py", project_dir=_PROJECT_DIR)
+    runner.submit("run_dbxcarta.py")
 
     with neo4j_driver.session() as s:
         after = _counts(s)

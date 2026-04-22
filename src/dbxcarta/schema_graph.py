@@ -287,6 +287,10 @@ def _bootstrap_constraints(config: Neo4jConfig) -> None:
                     if "ConstraintAlreadyExists" not in (exc.code or ""):
                         raise
                     logger.info("[dbxcarta] constraint for %s already satisfied by existing constraint, skipping", label)
+            session.run(
+                f"CREATE INDEX {LABEL_COLUMN.lower()}_data_type IF NOT EXISTS "
+                f"FOR (n:{LABEL_COLUMN}) ON (n.data_type)"
+            )
     logger.info("[dbxcarta] neo4j constraints bootstrapped")
 
 
