@@ -1,0 +1,64 @@
+"""Neo4j Spark Connector writer: node and relationship write helpers."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pyspark.sql import DataFrame
+
+_FORMAT = "org.neo4j.spark.DataSource"
+
+
+@dataclass(frozen=True)
+class Neo4jConfig:
+    uri: str
+    username: str
+    password: str
+
+    def _base_opts(self) -> dict[str, str]:
+        return {
+            "url": self.uri,
+            "authentication.type": "basic",
+            "authentication.basic.username": self.username,
+            "authentication.basic.password": self.password,
+        }
+
+
+def write_nodes(df: "DataFrame", config: Neo4jConfig, label: str) -> None:
+    """MERGE nodes on id, updating all other properties on match."""
+    (
+        df.write.format(_FORMAT)
+        .mode("Overwrite")
+        .options(**config._base_opts())
+        .option("labels", f":{label}")
+        .option("node.keys", "id")
+        .save()
+    )
+
+
+def write_relationship(
+    df: "DataFrame",
+    config: Neo4jConfig,
+    rel_type: str,
+    source_label: str,
+    target_label: str,
+    source_col: str = "source_id",
+    target_col: str = "target_id",
+) -> None:
+    """MERGE relationship between existing nodes matched by id."""
+    (
+        df.write.format(_FORMAT)
+        .mode("Overwrite")
+        .options(**config._base_opts())
+        .option("relationship", rel_type)
+        .option("relationship.save.strategy", "keys")
+        .option("relationship.source.labels", f":{source_label}")
+        .option("relationship.source.save.mode", "Match")
+        .option("relationship.source.node.keys", f"{source_col}:id")
+        .option("relationship.target.labels", f":{target_label}")
+        .option("relationship.target.save.mode", "Match")
+        .option("relationship.target.node.keys", f"{target_col}:id")
+        .save()
+    )

@@ -1,0 +1,28 @@
+[project]
+name = "dbxcarta"
+version = "0.2.0"
+description = "Unity Catalog to Neo4j ingestion pipeline via Databricks Spark jobs"
+authors = [
+    { name = "Ryan Knight"}
+]
+requires-python = ">=3.12"
+dependencies = [
+    "databricks-job-runner>=0.4.4",
+    "databricks-sdk>=0.40",
+    "neo4j>=5.0",
+    "pydantic>=2",
+    "pydantic-settings>=2",
+    "python-dotenv",
+]
+
+[project.scripts]
+dbxcarta = "dbxcarta.cli:runner.main"
+
+[project.optional-dependencies]
+test = [
+    "pytest",
+]
+
+[build-system]
+requires = ["uv_build>=0.9.3,<0.10.0"]
+build-backend = "uv_build"
