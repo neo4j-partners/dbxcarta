@@ -19,15 +19,23 @@ def test_sampled_column_ids_exist(neo4j_driver: Driver, run_summary: dict, ws: W
     catalog = run_summary["catalog"]
     warehouse_id = os.environ["DATABRICKS_WAREHOUSE_ID"]
 
+    schemas = run_summary.get("schemas") or []
+    schema_filter = (
+        f" AND table_schema IN ({', '.join(repr(s) for s in schemas)})"
+        if schemas else ""
+    )
     result = ws.statement_execution.execute_statement(
         warehouse_id=warehouse_id,
         statement=(
             f"SELECT table_catalog, table_schema, table_name, column_name"
-            f" FROM {catalog}.information_schema.columns"
+            f" FROM `{catalog}`.information_schema.columns"
+            f" WHERE table_schema != 'information_schema'{schema_filter}"
             f" LIMIT 500"
         ),
         wait_timeout="30s",
     )
+    if result.result is None:
+        pytest.skip(f"Warehouse did not return data (state={result.status})")
     rows = result.result.data_array or []
     sample = random.sample(rows, min(50, len(rows)))
 
@@ -55,11 +63,13 @@ def test_python_id_matches_spark_sql_id(run_summary: dict, ws: WorkspaceClient) 
         statement=(
             f"SELECT table_catalog, table_schema, table_name, column_name,"
             f" lower(translate(concat_ws('.', table_catalog, table_schema, table_name, column_name), ' -', '__')) AS sql_id"
-            f" FROM {catalog}.information_schema.columns"
+            f" FROM `{catalog}`.information_schema.columns"
             f" LIMIT 100"
         ),
         wait_timeout="30s",
     )
+    if result.result is None:
+        pytest.skip(f"Warehouse did not return data (state={result.status})")
     rows = result.result.data_array or []
 
     mismatches = []

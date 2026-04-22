@@ -44,15 +44,42 @@ See `dbxcarta-v6-plan.md` for the full staged implementation plan and `docs/best
 
 ## Quickstart
 
+One-time setup:
+
 ```bash
 uv sync
 cp .env.sample .env          # fill in values
 ./setup_secrets.sh --profile <your-profile>
+```
 
+First green run (Table embeddings only — see `dbxcarta-v6-plan.md` Stage 3):
+
+1. In `.env`, set `DBXCARTA_INCLUDE_EMBEDDINGS_TABLES=true` and leave all other `DBXCARTA_INCLUDE_EMBEDDINGS_*` flags off. Constrain `DBXCARTA_SCHEMAS` to a single small schema.
+2. Bump `DBXCARTA_EMBEDDING_FAILURE_THRESHOLD=0.10` for small-fixture runs so a single transient endpoint failure doesn't abort. Restore to `0.05` once the run is green.
+3. Wipe the target Neo4j instance (Aura console reset, or `MATCH (n) DETACH DELETE n`) so the bootstrap creates the vector index from scratch.
+4. Build and upload the wheel, then submit (the `--upload` flag uploads every `scripts/*.py` before the run):
+
+```bash
+uv run dbxcarta upload --wheel
+uv run dbxcarta submit --upload run_dbxcarta.py
+```
+
+Equivalent without `--upload` (useful when you know scripts haven't changed since the last upload):
+
+```bash
 uv run dbxcarta upload --wheel
 uv run dbxcarta upload --all
-uv run dbxcarta submit scripts/run_dbxcarta.py
+uv run dbxcarta submit run_dbxcarta.py
+```
 
+The `submit` argument is a script name relative to `scripts/` — do not include the `scripts/` prefix. `submit` does not rebuild the wheel; re-run `upload --wheel` when `src/dbxcarta/` changes. `--upload` covers scripts only; the wheel must be uploaded separately.
+
+5. Verify: `status=success`, per-label embedding failure rate `0.0%`, staging Delta table row count equals the in-scope node count, and all five embedding properties (`embedding`, `embedding_text`, `embedding_text_hash`, `embedding_model`, `embedded_at`) present on every in-scope `Table` node.
+6. Submit again and confirm counts are idempotent (MERGE semantics — no duplicate nodes).
+
+Verification suites:
+
+```bash
 uv run pytest tests/schema_graph
 uv run pytest tests/sample_values
 uv run pytest tests/embeddings
@@ -81,8 +108,9 @@ For the first green run, enable `DBXCARTA_INCLUDE_EMBEDDINGS_TABLES=true` only a
 
 `upload --wheel` builds the `dbxcarta` package, bumps the patch version in `pyproject.toml`, and uploads the wheel to `DATABRICKS_VOLUME_PATH/wheels/`. `upload --all` copies every `*.py` in `scripts/` to `DATABRICKS_WORKSPACE_DIR/scripts/` in the workspace. Re-run `upload --wheel` when `src/dbxcarta/` changes; re-run `upload --all` when `scripts/` changes.
 
-`submit` does not upload — it runs whatever is already in the workspace. Because the script name starts with `run_dbxcarta`, the runner auto-attaches the latest uploaded wheel so the cluster can `import dbxcarta`. All non-Databricks variables from `.env` are forwarded to the job as arguments.
+`submit` runs whatever is already in the workspace, with one shortcut: `submit --upload` (added in `databricks-job-runner 0.4.6`) uploads every `scripts/*.py` right before the run, so you can fold the script upload into the submit step. It does not cover the wheel — always re-run `upload --wheel` after editing `src/dbxcarta/`. The `script` positional is a name relative to `scripts/`; the runner prepends `scripts/` and resolves it against `DATABRICKS_WORKSPACE_DIR`. Because the script name starts with `run_dbxcarta`, the runner auto-attaches the latest uploaded wheel so the cluster can `import dbxcarta`. All non-Databricks variables from `.env` are forwarded to the job as arguments.
 
 Flags on `submit`:
+- `--upload` — upload every `scripts/*.py` before submitting (requires `databricks-job-runner >= 0.4.6`)
 - `--no-wait` — return immediately with the run ID instead of blocking until completion
 - `--compute {cluster,serverless}` — override `DATABRICKS_COMPUTE_MODE` for a single submission

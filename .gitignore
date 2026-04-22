@@ -48,6 +48,7 @@ dmypy.json
 # Environment Variables / Secrets
 # =============================================================================
 .env
+.env.enrichment
 .env.*
 !.env.sample
 !.env.example

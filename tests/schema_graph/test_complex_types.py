@@ -20,12 +20,14 @@ def _sample_column_by_type_prefix(ws: WorkspaceClient, catalog: str, warehouse_i
         warehouse_id=warehouse_id,
         statement=(
             f"SELECT table_catalog, table_schema, table_name, column_name, data_type"
-            f" FROM {catalog}.information_schema.columns"
+            f" FROM `{catalog}`.information_schema.columns"
             f" WHERE upper(data_type) LIKE '{prefix}%'"
             f" LIMIT 1"
         ),
         wait_timeout="30s",
     )
+    if result.result is None:
+        pytest.skip(f"Warehouse did not return data (state={result.status})")
     rows = result.result.data_array or []
     return rows[0] if rows else None
 

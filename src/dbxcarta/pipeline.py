@@ -51,6 +51,15 @@ _IDENTIFIER_RE = re.compile(r"^[a-zA-Z0-9_.`\-]+$")
 _TABLE_EMBEDDING_TEXT_EXPR = (
     "concat_ws(' | ', concat_ws('.', table_schema, name), nullif(trim(comment), ''))"
 )
+_COLUMN_EMBEDDING_TEXT_EXPR = (
+    "concat_ws(' | ', concat_ws('.', table_schema, table_name, name),"
+    " data_type, nullif(trim(comment), ''))"
+)
+_SCHEMA_EMBEDDING_TEXT_EXPR = (
+    "concat_ws(' | ', concat_ws('.', catalog_name, name), nullif(trim(comment), ''))"
+)
+_DATABASE_EMBEDDING_TEXT_EXPR = "name"
+_VALUE_EMBEDDING_TEXT_EXPR = "value"
 
 
 class Settings(BaseSettings):
@@ -281,27 +290,69 @@ def _run(spark, settings: Settings, schema_list: list[str], summary: RunSummary)
             attempts, successes, rate * 100,
         )
 
-    # Per-label check first so the error message names the specific label.
-    threshold = settings.dbxcarta_embedding_failure_threshold
-    for lbl, per_label_rate in summary.embedding_failure_rate_per_label.items():
-        if per_label_rate > threshold:
-            raise RuntimeError(
-                f"[dbxcarta] {lbl} embedding failure rate {per_label_rate:.2%} exceeds"
-                f" threshold {threshold:.2%}; aborting before Neo4j write"
-            )
+    if settings.dbxcarta_include_embeddings_columns:
+        enriched = emb.add_embedding_column(
+            column_node_df,
+            _COLUMN_EMBEDDING_TEXT_EXPR,
+            settings.dbxcarta_embedding_endpoint,
+            settings.dbxcarta_embedding_dimension,
+            label=LABEL_COLUMN,
+        )
+        column_node_df = _stage_embedded_nodes(enriched, staging_path, LABEL_COLUMN)
+        rate, attempts, successes = emb.compute_failure_stats(column_node_df)
+        summary.embedding_attempts[LABEL_COLUMN] = attempts
+        summary.embedding_successes[LABEL_COLUMN] = successes
+        summary.embedding_failure_rate_per_label[LABEL_COLUMN] = rate
+        total_emb_attempts += attempts
+        total_emb_successes += successes
+        logger.info(
+            "[dbxcarta] Column embeddings: attempts=%d successes=%d failure_rate=%.2f%%",
+            attempts, successes, rate * 100,
+        )
 
-    # Aggregate check catches the case where no single label trips but the
-    # combined rate does (e.g. 2% Table + 8% Column aggregates above threshold).
-    if total_emb_attempts > 0:
-        aggregate_rate = (total_emb_attempts - total_emb_successes) / total_emb_attempts
-        summary.embedding_failure_rate = aggregate_rate
-        if aggregate_rate > threshold:
-            raise RuntimeError(
-                f"[dbxcarta] Aggregate embedding failure rate {aggregate_rate:.2%} exceeds"
-                f" threshold {threshold:.2%}; aborting before Neo4j write"
-            )
+    if settings.dbxcarta_include_embeddings_schemas:
+        enriched = emb.add_embedding_column(
+            schema_node_df,
+            _SCHEMA_EMBEDDING_TEXT_EXPR,
+            settings.dbxcarta_embedding_endpoint,
+            settings.dbxcarta_embedding_dimension,
+            label=LABEL_SCHEMA,
+        )
+        schema_node_df = _stage_embedded_nodes(enriched, staging_path, LABEL_SCHEMA)
+        rate, attempts, successes = emb.compute_failure_stats(schema_node_df)
+        summary.embedding_attempts[LABEL_SCHEMA] = attempts
+        summary.embedding_successes[LABEL_SCHEMA] = successes
+        summary.embedding_failure_rate_per_label[LABEL_SCHEMA] = rate
+        total_emb_attempts += attempts
+        total_emb_successes += successes
+        logger.info(
+            "[dbxcarta] Schema embeddings: attempts=%d successes=%d failure_rate=%.2f%%",
+            attempts, successes, rate * 100,
+        )
+
+    if settings.dbxcarta_include_embeddings_databases:
+        enriched = emb.add_embedding_column(
+            database_df,
+            _DATABASE_EMBEDDING_TEXT_EXPR,
+            settings.dbxcarta_embedding_endpoint,
+            settings.dbxcarta_embedding_dimension,
+            label=LABEL_DATABASE,
+        )
+        database_df = _stage_embedded_nodes(enriched, staging_path, LABEL_DATABASE)
+        rate, attempts, successes = emb.compute_failure_stats(database_df)
+        summary.embedding_attempts[LABEL_DATABASE] = attempts
+        summary.embedding_successes[LABEL_DATABASE] = successes
+        summary.embedding_failure_rate_per_label[LABEL_DATABASE] = rate
+        total_emb_attempts += attempts
+        total_emb_successes += successes
+        logger.info(
+            "[dbxcarta] Database embeddings: attempts=%d successes=%d failure_rate=%.2f%%",
+            attempts, successes, rate * 100,
+        )
 
     # --- Transform: sample values ---
+    # Runs before the threshold check so Value embeddings can be included in the
+    # aggregate before any Neo4j write is attempted.
     sample_stats: sv.SampleStats | None = None
     value_node_df = None
     has_value_df = None
@@ -325,16 +376,63 @@ def _run(spark, settings: Settings, schema_list: list[str], summary: RunSummary)
             sample_stats.value_nodes,
         )
 
+    if settings.dbxcarta_include_embeddings_values and value_node_df is not None:
+        enriched = emb.add_embedding_column(
+            value_node_df,
+            _VALUE_EMBEDDING_TEXT_EXPR,
+            settings.dbxcarta_embedding_endpoint,
+            settings.dbxcarta_embedding_dimension,
+            label=LABEL_VALUE,
+        )
+        value_node_df = _stage_embedded_nodes(enriched, staging_path, LABEL_VALUE)
+        rate, attempts, successes = emb.compute_failure_stats(value_node_df)
+        summary.embedding_attempts[LABEL_VALUE] = attempts
+        summary.embedding_successes[LABEL_VALUE] = successes
+        summary.embedding_failure_rate_per_label[LABEL_VALUE] = rate
+        total_emb_attempts += attempts
+        total_emb_successes += successes
+        logger.info(
+            "[dbxcarta] Value embeddings: attempts=%d successes=%d failure_rate=%.2f%%",
+            attempts, successes, rate * 100,
+        )
+
+    # Per-label check first so the error message names the specific label.
+    threshold = settings.dbxcarta_embedding_failure_threshold
+    for lbl, per_label_rate in summary.embedding_failure_rate_per_label.items():
+        if per_label_rate > threshold:
+            raise RuntimeError(
+                f"[dbxcarta] {lbl} embedding failure rate {per_label_rate:.2%} exceeds"
+                f" threshold {threshold:.2%}; aborting before Neo4j write"
+            )
+
+    # Aggregate check catches the case where no single label trips but the
+    # combined rate does (e.g. 2% Table + 8% Column aggregates above threshold).
+    if total_emb_attempts > 0:
+        aggregate_rate = (total_emb_attempts - total_emb_successes) / total_emb_attempts
+        summary.embedding_failure_rate = aggregate_rate
+        if aggregate_rate > threshold:
+            raise RuntimeError(
+                f"[dbxcarta] Aggregate embedding failure rate {aggregate_rate:.2%} exceeds"
+                f" threshold {threshold:.2%}; aborting before Neo4j write"
+            )
+
     # --- Load: nodes ---
     logger.info("[dbxcarta] writing nodes: Database (1)")
-    write_nodes(database_df, neo4j, LABEL_DATABASE)
+    database_write_df = database_df
+    if "embedding_error" in database_write_df.columns:
+        database_write_df = database_write_df.drop("embedding_error")
+    write_nodes(database_write_df, neo4j, LABEL_DATABASE)
 
     # Stage 2: all writes land on Neo4j as a single partition. Relationship
     # writes lock both endpoint nodes, so parallel partitions cause lock
     # contention (best-practices Neo4j §1); node writes match for first green
     # run until throughput benchmarking in Stage 7.
     logger.info("[dbxcarta] writing nodes: Schema (%d)", summary.row_counts["schemas"])
-    write_nodes(schema_node_df.coalesce(1), neo4j, LABEL_SCHEMA)
+    schema_write_df = schema_node_df
+    for _c in ("catalog_name", "embedding_error"):
+        if _c in schema_write_df.columns:
+            schema_write_df = schema_write_df.drop(_c)
+    write_nodes(schema_write_df.coalesce(1), neo4j, LABEL_SCHEMA)
 
     logger.info("[dbxcarta] writing nodes: Table (%d)", summary.row_counts["tables"])
     table_write_df = table_node_df
@@ -343,13 +441,20 @@ def _run(spark, settings: Settings, schema_list: list[str], summary: RunSummary)
     write_nodes(table_write_df.coalesce(1), neo4j, LABEL_TABLE)
 
     logger.info("[dbxcarta] writing nodes: Column (%d)", summary.row_counts["columns"])
-    write_nodes(column_node_df.coalesce(1), neo4j, LABEL_COLUMN)
+    column_write_df = column_node_df
+    for _c in ("table_schema", "table_name", "embedding_error"):
+        if _c in column_write_df.columns:
+            column_write_df = column_write_df.drop(_c)
+    write_nodes(column_write_df.coalesce(1), neo4j, LABEL_COLUMN)
 
     if settings.dbxcarta_include_values and sample_stats is not None:
         _purge_stale_values(neo4j, sample_stats.candidate_col_ids)
         if sample_stats.value_nodes > 0:
             logger.info("[dbxcarta] writing nodes: Value (%d)", sample_stats.value_nodes)
-            write_nodes(value_node_df.coalesce(1), neo4j, LABEL_VALUE)
+            value_write_df = value_node_df
+            if "embedding_error" in value_write_df.columns:
+                value_write_df = value_write_df.drop("embedding_error")
+            write_nodes(value_write_df.coalesce(1), neo4j, LABEL_VALUE)
             logger.info("[dbxcarta] writing relationships: HAS_VALUE (%d)", sample_stats.has_value_edges)
             write_relationship(has_value_df.coalesce(1), neo4j, REL_HAS_VALUE, LABEL_COLUMN, LABEL_VALUE)
 

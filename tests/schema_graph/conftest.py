@@ -26,7 +26,7 @@ load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 @pytest.fixture(scope="session")
 def ws() -> WorkspaceClient:
-    return WorkspaceClient()
+    return WorkspaceClient(profile=os.environ.get("DATABRICKS_PROFILE"))
 
 
 @pytest.fixture(scope="session")
@@ -46,9 +46,9 @@ def run_summary(ws: WorkspaceClient) -> dict:
     """Load the most recent schema_graph run-summary JSON from the UC Volume."""
     volume_path = os.environ["DBXCARTA_SUMMARY_VOLUME"]
     entries = list(ws.files.list_directory_contents(directory_path=volume_path))
-    schema_files = [e for e in entries if e.name.startswith("schema_graph_") and e.name.endswith(".json")]
+    schema_files = [e for e in entries if e.name.startswith("dbxcarta_") and e.name.endswith(".json")]
     if not schema_files:
-        pytest.skip("No schema_graph run summary found — run the job first")
+        pytest.skip("No dbxcarta run summary found — run the job first")
     latest = max(schema_files, key=lambda e: e.name)
     content = ws.files.download(file_path=f"{volume_path}/{latest.name}").contents.read()
     return json.loads(content)

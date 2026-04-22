@@ -26,7 +26,7 @@ def build_schema_nodes(schemata_df: "DataFrame") -> "DataFrame":
         .withColumn("id", id_expr("catalog_name", "schema_name"))
         .withColumn("name", col("schema_name"))
         .withColumn("contract_version", lit(CONTRACT_VERSION))
-        .select("id", "name", "comment", "contract_version")
+        .select("id", "name", "catalog_name", "comment", "contract_version")
     )
 
 
@@ -55,7 +55,7 @@ def build_column_nodes(columns_df: "DataFrame") -> "DataFrame":
             when(col("is_nullable") == "YES", True).when(col("is_nullable") == "NO", False),
         )
         .withColumn("contract_version", lit(CONTRACT_VERSION))
-        .select("id", "name", "data_type", "is_nullable", "ordinal_position", "comment", "contract_version")
+        .select("id", "name", "table_schema", "table_name", "data_type", "is_nullable", "ordinal_position", "comment", "contract_version")
     )
 
 

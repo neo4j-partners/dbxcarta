@@ -167,6 +167,8 @@ Surfaced while tidying up after Stage 2; out of scope for Stage 2 itself but wor
 
 Validates the end-to-end pipeline with the smallest possible embedding scope turned on. (Was Stage 2 in v5.)
 
+Re-validated 2026-04-22 against `dbxcarta-catalog.dbxcarta-schema` after a Neo4j reset — see `worklog/stage3-first-green-run.md` for run IDs and metrics.
+
 **Pre-run checks completed 2026-04-21:**
 
 - Spike re-validation on `databricks-gte-large-en` — struct schema, 1024-dim, and `failOnError => false` behavior all match `bge-large-en`. See `worklog/spike-ai-query.md` header.
@@ -179,7 +181,7 @@ Validates the end-to-end pipeline with the smallest possible embedding scope tur
 - [x] Constrain the scope so only a handful of tables hit the serving endpoint. `DBXCARTA_SCHEMAS=graph-enriched-schema` — 13 tables, appropriate for Stage 3.
 - [X] Wipe the target Neo4j instance manually (Aura console reset, or `MATCH (n) DETACH DELETE n`) before the first green run. No automated reset path ships with v6.
 - [x] Bootstrap step creates the Neo4j vector index on `Table.embedding` with the dimension read from `DBXCARTA_EMBEDDING_DIMENSION` and cosine similarity. Index `table_embedding` confirmed ONLINE post-run.
-- [x] Run `dbxcarta submit run_dbxcarta.py` (correct invocation; `scripts/` prefix is added by the runner from `scripts_dir`). Required `upload --wheel` + `upload --all` first — see worklog note below.
+- [x] Run `dbxcarta submit run_dbxcarta.py` (correct invocation; `scripts/` prefix is added by the runner from `scripts_dir`). Required `upload --wheel` + `upload --all` first — see worklog note below. On `databricks-job-runner 0.4.6+`, `dbxcarta submit --upload run_dbxcarta.py` folds the `upload --all` step into submit (wheel still uploaded separately).
 - [x] Inspect the run summary: status=success; `Table` failure rate=0.0% (13/13); per-label rate recorded in Delta; staging table has 13 rows; all 5 embedding properties present on all 13 Table nodes; Column nodes have 0 embeddings (flag off). Run summary Delta table evolved to 18 columns via `mergeSchema=true`.
 - [x] **Verify materialize-once empirically.** Staging table at `/Volumes/.../staging/table_nodes` has exactly 13 rows matching the 13 in-scope Table nodes. Serving endpoint invocation count before the run could not be read programmatically (UI-only metric); structural verification (staging row count = table count, 0 failures, single run) is consistent with one-call-per-row semantics. Endpoint UI check deferred to Stage 4 integration suite. See `worklog/stage3-first-green-run.md`.
 - [x] Run the same submit a second time and confirm counts are identical. Table count and embedding metrics identical (13 attempts, 13 successes, 0.0% rate). Column and Value counts differ slightly (93→100, 59→61) because the catalog gained new columns between the two runs — not a pipeline idempotency issue.
@@ -195,11 +197,40 @@ Covers the three concerns of the v6 graph with separate pytest suites that all r
 
 ### Stage 5: Expand embedding coverage (later phases)
 
-Rolled out one label at a time after the Table rollout is validated. Each step is a configuration change plus a test-suite expansion, not a code change. (Was Stage 4 in v5.)
+Rolled out one label at a time after the Table rollout is validated. The code infrastructure for all four labels ships in one pass; subsequent steps are configuration flips + test runs. (Was Stage 4 in v5.)
 
-- [ ] Turn on `DBXCARTA_INCLUDE_EMBEDDINGS_COLUMNS=true`, add the `Column` vector index to the bootstrap, re-run, extend tests. `Column` nodes store `embedding_text_hash` but not the full `embedding_text`.
-- [ ] Turn on `DBXCARTA_INCLUDE_EMBEDDINGS_VALUES=true`, add the `Value` vector index, re-run, extend tests. `Value` nodes are hash-only.
-- [ ] Turn on `DBXCARTA_INCLUDE_EMBEDDINGS_SCHEMAS=true` and `DBXCARTA_INCLUDE_EMBEDDINGS_DATABASES=true`, add the corresponding vector indexes, re-run, extend tests. These are hash-only.
+#### Design decisions (resolved while writing Stage 5)
+
+1. **Code changes are needed.** `pipeline.py` only has an embedding block for `Table`; analogous blocks for Column, Value, Schema, and Database must be added. The generic infra (bootstrap indexes, `_stage_embedded_nodes`, `add_embedding_column`, threshold checks) already handles all labels — the gap is the per-label `if enabled:` blocks in the transform section.
+
+2. **Retain context fields in node builders for richer embedding text.** Since `embedding_text` is dropped after hashing for non-Table labels, there is zero storage cost to making it rich. Richer input improves the quality of similarity search on the stored vector.
+   - `build_column_nodes()` retains `table_schema` and `table_name` (same pattern as `build_table_nodes()` retaining `table_schema`); both are dropped from the Neo4j write since they are not node properties.
+   - `build_schema_nodes()` retains `catalog_name`; dropped from the Neo4j write.
+
+3. **Embedding text expressions by label:**
+
+   | Label | Expression | Storage |
+   |---|---|---|
+   | Column | `concat_ws(' \| ', concat_ws('.', table_schema, table_name, name), data_type, nullif(trim(comment), ''))` | hash-only |
+   | Schema | `concat_ws(' \| ', concat_ws('.', catalog_name, name), nullif(trim(comment), ''))` | hash-only |
+   | Database | `name` (catalog name; no comment exists) | hash-only |
+   | Value | `value` (the sampled string is the semantic content) | hash-only |
+
+4. **Threshold check positioning.** The per-label and aggregate threshold checks in `pipeline.py` sit immediately after the Table embedding block. Adding the four new blocks before them keeps the existing check position correct: all embedding blocks run, then the single shared threshold check fires.
+
+5. **`.env` flag state at end of Stage 5 code work.** All four label code paths are wired in one pass, but `.env` is left with only `DBXCARTA_INCLUDE_EMBEDDINGS_COLUMNS=true`. Values, Schemas, and Databases are enabled one step at a time after each re-run is verified.
+
+#### Checklist
+
+- [ ] Modify `build_column_nodes()` to retain `table_schema` and `table_name`; modify `build_schema_nodes()` to retain `catalog_name`. Both fields are dropped from the Neo4j write (they are not node properties).
+- [ ] Add `_COLUMN_EMBEDDING_TEXT_EXPR`, `_SCHEMA_EMBEDDING_TEXT_EXPR`, `_DATABASE_EMBEDDING_TEXT_EXPR`, `_VALUE_EMBEDDING_TEXT_EXPR` constants to `pipeline.py` (see decision #3).
+- [ ] Add embedding blocks for Column, Value, Schema, and Database in the transform section of `pipeline.py`, each guarded by its flag and following the Table pattern: `add_embedding_column` → `_stage_embedded_nodes` → `compute_failure_stats` → accumulate summary counts.
+- [ ] Drop `embedding_error` and context-only fields (`table_schema`, `table_name` for Column; `catalog_name` for Schema) before the respective Neo4j node writes.
+- [ ] Set `DBXCARTA_INCLUDE_EMBEDDINGS_COLUMNS=true` in `.env`; leave Values, Schemas, Databases off.
+- [ ] Re-run; verify Column nodes carry all five embedding properties, `embedding_text` is absent (hash-only), vector index `column_embedding` is ONLINE, failure rate ≤ threshold.
+- [ ] Extend `tests/embeddings/test_graph_integration.py` with Column assertions: all in-scope Column nodes carry the five embedding properties; `embedding_text` is absent; vector index `column_embedding` exists with correct config; similarity probe returns neighbors; non-Column labels still carry no embeddings (when their flags are off).
+- [ ] Turn on `DBXCARTA_INCLUDE_EMBEDDINGS_VALUES=true`, re-run, extend integration tests for Value nodes. `Value` nodes are hash-only.
+- [ ] Turn on `DBXCARTA_INCLUDE_EMBEDDINGS_SCHEMAS=true` and `DBXCARTA_INCLUDE_EMBEDDINGS_DATABASES=true`, re-run, extend integration tests for Schema and Database nodes. Both are hash-only.
 
 ### Stage 6: REFERENCES relationship (W8)
 
@@ -224,7 +255,7 @@ Optimizations deliberately deferred. (Was Stage 6 in v5.)
 - Re-embedding policy via Delta embedding ledger. v6 persists `embedding_text_hash` + `embedding_model` on each node so Stage 7 is additive.
 - Per-run scope narrowing via `last_altered`. v6 processes the full catalog every run.
 - `REFERENCES` relationship. v6 stubs it at zero coverage; Stage 6 resolves.
-- Full embedding coverage across all node labels. v6 enables `Table` only; remaining labels roll out one at a time.
+- Full embedding coverage across all node labels. v6 enables `Table` and `Column` initially; Value, Schema, and Database roll out one step at a time per Stage 5 checklist.
 - Endpoint throughput and Neo4j parallelism benchmarking. v6 defers all performance work past `coalesce(1)` + `batch.size=20000`.
 
 ## Out of scope

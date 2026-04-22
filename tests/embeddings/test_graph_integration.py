@@ -22,6 +22,11 @@ def _tables_enabled(run_summary: dict) -> bool:
     return bool(flags.get("Table"))
 
 
+def _columns_enabled(run_summary: dict) -> bool:
+    flags = run_summary.get("embedding_flags") or {}
+    return bool(flags.get("Column"))
+
+
 def test_table_nodes_carry_five_embedding_properties(neo4j_driver, run_summary) -> None:
     if not _tables_enabled(run_summary):
         pytest.skip("Table embeddings not enabled in the latest run")
@@ -86,7 +91,7 @@ def test_vector_index_exists_with_expected_config(neo4j_driver, run_summary) -> 
     assert "Table" in idx["labelsOrTypes"]
     assert "embedding" in idx["properties"]
     cfg = idx["options"]["indexConfig"]
-    assert cfg["vector.similarity_function"] == "cosine"
+    assert cfg["vector.similarity_function"].lower() == "cosine"
     assert cfg["vector.dimensions"] > 0
 
 
@@ -137,6 +142,75 @@ def test_staging_delta_populated_for_enabled_labels(run_summary) -> None:
         path = f"{staging_root}/{label.lower()}_nodes"
         assert os.path.isdir(path), f"Staging Delta missing for {label} at {path}"
         assert attempts.get(label, 0) > 0, f"No embedding attempts recorded for {label}"
+
+
+def test_column_nodes_carry_four_embedding_properties(neo4j_driver, run_summary) -> None:
+    if not _columns_enabled(run_summary):
+        pytest.skip("Column embeddings not enabled in the latest run")
+
+    with neo4j_driver.session() as session:
+        result = session.run(
+            "MATCH (n:Column) "
+            "RETURN count(n) AS total, "
+            "  count(n.embedding_text_hash) AS has_hash, "
+            "  count(n.embedding) AS has_embedding, "
+            "  count(n.embedding_model) AS has_model, "
+            "  count(n.embedded_at) AS has_ts, "
+            "  count(n.embedding_text) AS has_text"
+        ).single()
+    assert result["total"] > 0, "No Column nodes in graph"
+    assert result["has_hash"] == result["total"]
+    assert result["has_embedding"] == result["total"]
+    assert result["has_model"] == result["total"]
+    assert result["has_ts"] == result["total"]
+    assert result["has_text"] == 0, "Column nodes must not store embedding_text (hash-only)"
+
+
+def test_column_embedding_error_not_persisted(neo4j_driver, run_summary) -> None:
+    if not _columns_enabled(run_summary):
+        pytest.skip("Column embeddings not enabled in the latest run")
+
+    with neo4j_driver.session() as session:
+        count = session.run(
+            "MATCH (n:Column) WHERE n.embedding_error IS NOT NULL RETURN count(n) AS c"
+        ).single()["c"]
+    assert count == 0
+
+
+def test_column_vector_index_exists_with_expected_config(neo4j_driver, run_summary) -> None:
+    if not _columns_enabled(run_summary):
+        pytest.skip("Column embeddings not enabled in the latest run")
+
+    with neo4j_driver.session() as session:
+        rows = list(session.run(
+            "SHOW VECTOR INDEXES YIELD name, labelsOrTypes, properties, options "
+            "WHERE name = 'column_embedding'"
+        ))
+    assert rows, "Vector index 'column_embedding' not found"
+    idx = rows[0]
+    assert "Column" in idx["labelsOrTypes"]
+    assert "embedding" in idx["properties"]
+    cfg = idx["options"]["indexConfig"]
+    assert cfg["vector.similarity_function"].lower() == "cosine"
+    assert cfg["vector.dimensions"] > 0
+
+
+def test_column_cosine_probe_returns_neighbors(neo4j_driver, run_summary) -> None:
+    if not _columns_enabled(run_summary):
+        pytest.skip("Column embeddings not enabled in the latest run")
+
+    with neo4j_driver.session() as session:
+        probe = session.run(
+            "MATCH (n:Column) WHERE n.embedding IS NOT NULL "
+            "RETURN n.id AS id, n.embedding AS vec LIMIT 1"
+        ).single()
+        assert probe is not None, "No Column with an embedding"
+        neighbors = list(session.run(
+            "CALL db.index.vector.queryNodes('column_embedding', 5, $vec) "
+            "YIELD node, score RETURN node.id AS id, score",
+            vec=probe["vec"],
+        ))
+    assert neighbors, "Vector index returned no neighbors for a known-good vector"
 
 
 def test_non_table_labels_carry_no_embedding_properties(neo4j_driver, run_summary) -> None:
