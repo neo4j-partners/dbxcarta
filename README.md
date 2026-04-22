@@ -1,6 +1,8 @@
 # dbxcarta
 
-dbxcarta builds a metadata knowledge graph in Neo4j from Unity Catalog, designed as the semantic layer for **GraphRAG** workflows. Unity Catalog metadata — table names, column descriptions, comments, and sampled values — is the unstructured content: each piece is embedded with a Databricks foundation model and stored as a vector property on its graph node. A downstream client (a Text2SQL agent, an MCP tool, or a schema-aware RAG pipeline) embeds a user question, runs a similarity search against the graph to find the most relevant schema nodes, then follows graph relationships to pull surrounding context — columns, values, foreign-key references — all in a single retrieval step before the LLM call.
+*Inspired by [neocarta](https://github.com/neo4j-field/neocarta).*
+
+dbxcarta builds a metadata knowledge graph in Neo4j from Unity Catalog, designed as the semantic layer for **GraphRAG** workflows. Unity Catalog metadata, including table names, column descriptions, comments, and sampled values, is the unstructured content: each piece is embedded with a Databricks foundation model and stored as a vector property on its graph node. A downstream client, such as a Text2SQL agent, MCP tool, or schema-aware RAG pipeline, embeds a user question, runs a similarity search against the graph to find the most relevant schema nodes, then follows graph relationships to pull surrounding context: columns, values, and foreign-key references, all in a single retrieval step before the LLM call.
 
 The graph enforces a stable, typed schema so the retrieval result is always structured: nodes carry dotted IDs (`catalog.schema.table.column`), typed labels, and explicit relationships, so the client always knows what it got back.
 
@@ -18,7 +20,7 @@ Each node carries a stable dotted `id` such as `catalog.schema.table.column`, pl
 
 ## Architecture
 
-### Build time — pipeline writes the graph
+### Build time: pipeline writes the graph
 
 Unity Catalog metadata flows through a single Spark job that extracts, embeds, and loads every enabled node label into Neo4j. Embeddings are generated inside Spark via `ai_query` and materialized to a Delta staging table before the Neo4j write, so the embedding call happens exactly once per run.
 
@@ -35,9 +37,9 @@ Unity Catalog metadata flows through a single Spark job that extracts, embeds, a
 └────────────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Query time — client retrieves schema context
+### Query time: client retrieves schema context
 
-A client performs two steps: a vector similarity search to find the most relevant nodes, then a graph traversal to expand that seed set into a full schema subgraph. The combination delivers both semantic relevance and structural completeness — the LLM receives the right tables *and* their columns, values, and relationships.
+A client performs two steps: a vector similarity search to find the most relevant nodes, then a graph traversal to expand that seed set into a full schema subgraph. The combination delivers both semantic relevance and structural completeness: the LLM receives the right tables *and* their columns, values, and relationships.
 
 ```
 ┌──────────────────────────────────────────── QUERY TIME ────────────────────────────────────────────┐
@@ -84,7 +86,7 @@ cp .env.sample .env          # fill in values
 ./setup_secrets.sh --profile <your-profile>
 ```
 
-First green run (Table embeddings only — see `dbxcarta-v6-plan.md` Stage 3):
+First green run (Table embeddings only; see Stage 3 in `dbxcarta-v6-plan.md`):
 
 1. In `.env`, set `DBXCARTA_INCLUDE_EMBEDDINGS_TABLES=true` and leave all other `DBXCARTA_INCLUDE_EMBEDDINGS_*` flags off. Constrain `DBXCARTA_SCHEMAS` to a single small schema.
 2. Bump `DBXCARTA_EMBEDDING_FAILURE_THRESHOLD=0.10` for small-fixture runs so a single transient endpoint failure doesn't abort. Restore to `0.05` once the run is green.
@@ -107,7 +109,7 @@ uv run dbxcarta submit run_dbxcarta.py
 The `submit` argument is a script name relative to `scripts/` — do not include the `scripts/` prefix. `submit` does not rebuild the wheel; re-run `upload --wheel` when `src/dbxcarta/` changes. `--upload` covers scripts only; the wheel must be uploaded separately.
 
 5. Verify: `status=success`, per-label embedding failure rate `0.0%`, staging Delta table row count equals the in-scope node count, and all five embedding properties (`embedding`, `embedding_text`, `embedding_text_hash`, `embedding_model`, `embedded_at`) present on every in-scope `Table` node.
-6. Submit again and confirm counts are idempotent (MERGE semantics — no duplicate nodes).
+6. Submit again and confirm counts are idempotent. MERGE semantics guarantee no duplicate nodes.
 
 Verification suites:
 
