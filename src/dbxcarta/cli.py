@@ -9,6 +9,7 @@ runner = Runner(
     run_name_prefix="dbxcarta",
     wheel_package="dbxcarta",
     scripts_dir="scripts",
+    cli_command="uv run dbxcarta",
 )
 
 _CLIENT_SCRIPT = "run_dbxcarta_client.py"
