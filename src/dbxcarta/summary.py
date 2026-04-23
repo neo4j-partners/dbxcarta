@@ -1,23 +1,38 @@
-"""Run-summary emitter: stdout, JSON volume file, and Delta table."""
+"""Run-summary emitter: stdout, JSON volume file, and Delta table.
+
+The in-memory shape is nominal — `ExtractCounts`, `EmbeddingCounts`,
+`SampleValueCounts`, `InferenceCounters`, `SemanticInferenceCounters` — so
+that no pipeline site pokes stringly-typed keys into a dict-bag. The flat
+`row_counts: dict[str, int]` and `embedding_*: dict[str, int/float]` shape
+still appears on the wire (JSON + Delta), but only at the `to_dict()`
+serialization boundary. Delta DDL is unchanged; JSON contract is unchanged.
+"""
 
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
+from dbxcarta.contract import NodeLabel
 
 if TYPE_CHECKING:
     from pyspark.sql import SparkSession
+
+    from dbxcarta.fk_inference import InferenceCounters
+    from dbxcarta.fk_semantic import SemanticInferenceCounters
+    from dbxcarta.sample_values import SampleStats
 
 
 def _mkdirs(dirpath: Path) -> None:
     parts = dirpath.parts
     if len(parts) > 1 and parts[1] == "Volumes":
         # UC Volume FUSE mount: creating the volume root (/Volumes/cat/schema/vol)
-        # is handled by CREATE VOLUME in _preflight and returns errno 95 if attempted
-        # via os.mkdir.  Only create subdirectories beyond the volume root (depth > 5).
+        # is handled by CREATE VOLUME in preflight and returns errno 95 if
+        # attempted via os.mkdir. Only create subdirectories beyond the volume
+        # root (depth > 5).
         for depth in range(6, len(parts) + 1):
             Path(*parts[:depth]).mkdir(exist_ok=True)
     else:
@@ -25,7 +40,134 @@ def _mkdirs(dirpath: Path) -> None:
 
 
 @dataclass
+class ExtractCounts:
+    schemas: int = 0
+    tables: int = 0
+    columns: int = 0
+    fk_declared: int = 0
+    fk_resolved: int = 0
+    fk_skipped: int = 0
+    fk_references: int = 0
+
+    def as_row_counts(self) -> dict[str, int]:
+        return {
+            "schemas": self.schemas,
+            "tables": self.tables,
+            "columns": self.columns,
+            "fk_declared": self.fk_declared,
+            "fk_resolved": self.fk_resolved,
+            "fk_skipped": self.fk_skipped,
+            "fk_references": self.fk_references,
+        }
+
+
+@dataclass
+class SampleValueCounts:
+    """Mirrors sample_values.SampleStats but lives on RunSummary.
+
+    Captured from SampleStats via `from_sample_stats`; flat serialization to
+    `row_counts` happens in `as_row_counts`. Optional fields (percentiles)
+    are emitted only when non-None — matches the legacy pipeline behaviour
+    where the percentile keys were skipped if unset."""
+
+    candidate_columns: int = 0
+    sampled_columns: int = 0
+    skipped_columns: int = 0
+    skipped_schemas: int = 0
+    cardinality_failed_tables: int = 0
+    cardinality_wall_clock_ms: int = 0
+    sample_wall_clock_ms: int = 0
+    value_nodes: int = 0
+    has_value_edges: int = 0
+    cardinality_min: int | None = None
+    cardinality_p25: int | None = None
+    cardinality_p50: int | None = None
+    cardinality_p75: int | None = None
+    cardinality_p95: int | None = None
+    cardinality_max: int | None = None
+
+    @classmethod
+    def from_sample_stats(cls, stats: "SampleStats") -> "SampleValueCounts":
+        return cls(
+            candidate_columns=stats.candidate_columns,
+            sampled_columns=stats.sampled_columns,
+            skipped_columns=stats.skipped_columns,
+            skipped_schemas=stats.skipped_schemas,
+            cardinality_failed_tables=stats.cardinality_failed_tables,
+            cardinality_wall_clock_ms=stats.cardinality_wall_clock_ms,
+            sample_wall_clock_ms=stats.sample_wall_clock_ms,
+            value_nodes=stats.value_nodes,
+            has_value_edges=stats.has_value_edges,
+            cardinality_min=stats.cardinality_min,
+            cardinality_p25=stats.cardinality_p25,
+            cardinality_p50=stats.cardinality_p50,
+            cardinality_p75=stats.cardinality_p75,
+            cardinality_p95=stats.cardinality_p95,
+            cardinality_max=stats.cardinality_max,
+        )
+
+    def as_row_counts(self) -> dict[str, int]:
+        out: dict[str, int] = {
+            "candidate_columns": self.candidate_columns,
+            "sampled_columns": self.sampled_columns,
+            "skipped_columns": self.skipped_columns,
+            "skipped_schemas": self.skipped_schemas,
+            "cardinality_failed_tables": self.cardinality_failed_tables,
+            "cardinality_wall_clock_ms": self.cardinality_wall_clock_ms,
+            "sample_wall_clock_ms": self.sample_wall_clock_ms,
+            "value_nodes": self.value_nodes,
+            "has_value_edges": self.has_value_edges,
+        }
+        for name in ("cardinality_min", "cardinality_p25", "cardinality_p50",
+                     "cardinality_p75", "cardinality_p95", "cardinality_max"):
+            val = getattr(self, name)
+            if val is not None:
+                out[name] = val
+        return out
+
+
+@dataclass
+class EmbeddingCounts:
+    """Per-label embedding bookkeeping.
+
+    Keyed by `NodeLabel` enum in memory; serialization to the Delta/JSON
+    wire flattens to `dict[str, ...]` using `label.value` via `as_*_map`."""
+
+    model: str | None = None
+    failure_threshold: float | None = None
+    flags: dict[NodeLabel, bool] = field(default_factory=dict)
+    attempts: dict[NodeLabel, int] = field(default_factory=dict)
+    successes: dict[NodeLabel, int] = field(default_factory=dict)
+    failure_rate_per_label: dict[NodeLabel, float] = field(default_factory=dict)
+    ledger_hits: dict[NodeLabel, int] = field(default_factory=dict)
+    aggregate_failure_rate: float | None = None
+
+    def as_flags_map(self) -> dict[str, bool]:
+        return {k.value: v for k, v in self.flags.items()}
+
+    def as_attempts_map(self) -> dict[str, int]:
+        return {k.value: v for k, v in self.attempts.items()}
+
+    def as_successes_map(self) -> dict[str, int]:
+        return {k.value: v for k, v in self.successes.items()}
+
+    def as_failure_rate_map(self) -> dict[str, float]:
+        return {k.value: v for k, v in self.failure_rate_per_label.items()}
+
+    def as_ledger_hits_map(self) -> dict[str, int]:
+        return {k.value: v for k, v in self.ledger_hits.items()}
+
+
+@dataclass
 class RunSummary:
+    """Run-level aggregate.
+
+    In-memory: nominal sub-dataclasses for each counter group.
+    On the wire: flat `row_counts` dict + flat `embedding_*` maps. The
+    `to_dict` / `to_json_dict` methods are the sole place where enum keys
+    become strings and sub-dataclasses flatten into the legacy wire shape.
+    """
+
     run_id: str
     job_name: str
     contract_version: str
@@ -34,31 +176,62 @@ class RunSummary:
     started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     ended_at: datetime | None = None
     status: str = "running"
-    row_counts: dict[str, int] = field(default_factory=dict)
-    neo4j_counts: dict[str, int] = field(default_factory=dict)
     error: str | None = None
-    # Embedding fields — None/empty when no embedding flags are enabled.
-    embedding_model: str | None = None
-    embedding_flags: dict[str, bool] = field(default_factory=dict)
-    embedding_attempts: dict[str, int] = field(default_factory=dict)
-    embedding_successes: dict[str, int] = field(default_factory=dict)
-    embedding_failure_rate_per_label: dict[str, float] = field(default_factory=dict)
-    embedding_failure_rate: float | None = None
-    embedding_failure_threshold: float | None = None
-    embedding_ledger_hits: dict[str, int] = field(default_factory=dict)
+    extract: ExtractCounts = field(default_factory=ExtractCounts)
+    fk_metadata: "InferenceCounters | None" = None
+    fk_semantic: "SemanticInferenceCounters | None" = None
+    sample_values: SampleValueCounts | None = None
+    embeddings: EmbeddingCounts = field(default_factory=EmbeddingCounts)
+    neo4j_counts: dict[str, int] = field(default_factory=dict)
 
     def finish(self, *, status: str, error: str | None = None) -> None:
         self.status = status
         self.error = error
         self.ended_at = datetime.now(timezone.utc)
 
-    def to_dict(self) -> dict:
-        """Returns dict with datetime objects — suitable for Spark Row."""
-        return asdict(self)
+    def _build_row_counts(self) -> dict[str, int]:
+        """Flatten all nominal counter groups into the legacy `row_counts` shape."""
+        out: dict[str, int] = {}
+        out.update(self.extract.as_row_counts())
+        if self.fk_metadata is not None:
+            out.update(self.fk_metadata.as_summary_dict("fk_inferred_metadata"))
+        if self.fk_semantic is not None:
+            out.update(self.fk_semantic.as_summary_dict("fk_inferred_semantic"))
+        if self.sample_values is not None:
+            out.update(self.sample_values.as_row_counts())
+        return out
 
-    def to_json_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
+        """Returns dict with datetime objects — suitable for Spark Row.
+
+        Serialization shape is the legacy flat contract: `row_counts` is a
+        single dict[str, int], embedding fields are flat `dict[str, ...]`.
+        """
+        return {
+            "run_id": self.run_id,
+            "job_name": self.job_name,
+            "contract_version": self.contract_version,
+            "catalog": self.catalog,
+            "schemas": self.schemas,
+            "started_at": self.started_at,
+            "ended_at": self.ended_at,
+            "status": self.status,
+            "row_counts": self._build_row_counts(),
+            "neo4j_counts": dict(self.neo4j_counts),
+            "error": self.error,
+            "embedding_model": self.embeddings.model,
+            "embedding_flags": self.embeddings.as_flags_map(),
+            "embedding_attempts": self.embeddings.as_attempts_map(),
+            "embedding_successes": self.embeddings.as_successes_map(),
+            "embedding_failure_rate_per_label": self.embeddings.as_failure_rate_map(),
+            "embedding_failure_rate": self.embeddings.aggregate_failure_rate,
+            "embedding_failure_threshold": self.embeddings.failure_threshold,
+            "embedding_ledger_hits": self.embeddings.as_ledger_hits_map(),
+        }
+
+    def to_json_dict(self) -> dict[str, Any]:
         """Returns dict with ISO string timestamps — suitable for JSON serialization."""
-        d = asdict(self)
+        d = self.to_dict()
         d["started_at"] = self.started_at.isoformat()
         d["ended_at"] = self.ended_at.isoformat() if self.ended_at else None
         return d
@@ -68,7 +241,7 @@ class RunSummary:
             f"[dbxcarta] run_id={self.run_id} job={self.job_name} "
             f"status={self.status} catalog={self.catalog}"
         )
-        for stage, count in self.row_counts.items():
+        for stage, count in self._build_row_counts().items():
             print(f"  {stage}: {count}")
         for label, count in self.neo4j_counts.items():
             print(f"  neo4j/{label}: {count}")

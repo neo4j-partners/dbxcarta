@@ -1,35 +1,55 @@
-"""Graph contract: labels, relationship types, and identifier generation.
+"""Graph contract: node/relationship/edge-source enums and identifier generation.
 
 All identifier production goes through generate_id or generate_value_id.
-No call site builds an ID inline.
+No call site builds an ID inline. All label and relationship references
+go through NodeLabel / RelType / EdgeSource enums — no magic strings.
 """
 
+from __future__ import annotations
+
 import hashlib
+from enum import StrEnum
 
 CONTRACT_VERSION = "1.0"
 
-# Node labels
-LABEL_DATABASE = "Database"
-LABEL_SCHEMA = "Schema"
-LABEL_TABLE = "Table"
-LABEL_COLUMN = "Column"
-LABEL_VALUE = "Value"
 
-# Relationship types
-REL_HAS_SCHEMA = "HAS_SCHEMA"
-REL_HAS_TABLE = "HAS_TABLE"
-REL_HAS_COLUMN = "HAS_COLUMN"
-REL_HAS_VALUE = "HAS_VALUE"
-REL_REFERENCES = "REFERENCES"
+class NodeLabel(StrEnum):
+    """Neo4j node labels. `.value` yields the literal label string used in
+    Cypher (e.g., 'Column'); StrEnum members are str subclasses so they
+    interpolate cleanly into f-strings."""
+
+    DATABASE = "Database"
+    SCHEMA = "Schema"
+    TABLE = "Table"
+    COLUMN = "Column"
+    VALUE = "Value"
+
+
+class RelType(StrEnum):
+    """Neo4j relationship types."""
+
+    HAS_SCHEMA = "HAS_SCHEMA"
+    HAS_TABLE = "HAS_TABLE"
+    HAS_COLUMN = "HAS_COLUMN"
+    HAS_VALUE = "HAS_VALUE"
+    REFERENCES = "REFERENCES"
+
+
+class EdgeSource(StrEnum):
+    """Provenance tag on REFERENCES edges. DECLARED is the Unity Catalog
+    declared-FK source; INFERRED_METADATA is Phase 3 name/PK inference;
+    SEMANTIC is Phase 4 embedding cosine. Phases 5/6 extend this enum."""
+
+    DECLARED = "declared"
+    INFERRED_METADATA = "inferred_metadata"
+    SEMANTIC = "semantic"
+
 
 # REFERENCES edge properties (additive in contract v1.0). All three are
 # nullable. Legacy edges written before Phase 2 have none of these set;
 # readers treat absence as (1.0, "declared", null) via COALESCE in Cypher.
 # See worklog/fk-gap-v3-build.md Phase 2.
-REL_PROP_CONFIDENCE = "confidence"
-REL_PROP_SOURCE = "source"
-REL_PROP_CRITERIA = "criteria"
-REFERENCES_PROPERTIES = (REL_PROP_CONFIDENCE, REL_PROP_SOURCE, REL_PROP_CRITERIA)
+REFERENCES_PROPERTIES: tuple[str, ...] = ("confidence", "source", "criteria")
 
 # Characters translated in normalization: space→_, hyphen→_
 # These constants are shared with the Spark SQL expression to prevent drift.
@@ -53,11 +73,7 @@ def generate_value_id(column_id: str, value: object) -> str:
 
 
 def id_expr(*column_names: str):
-    """Return a PySpark Column expression equivalent to generate_id().
-
-    Uses lower(translate(concat_ws('.', ...), ' -', '__')) so the Spark
-    computation is byte-identical to the Python function above.
-    """
+    """Return a PySpark Column expression equivalent to generate_id()."""
     from pyspark.sql import functions as F
 
     parts = [F.col(c) for c in column_names]
@@ -65,12 +81,7 @@ def id_expr(*column_names: str):
 
 
 def value_id_expr():
-    """Return a PySpark Column expression equivalent to generate_value_id().
-
-    Computes concat(col_id, ".", md5(val)) where col_id and val are column
-    names in the calling DataFrame. Byte-identical to generate_value_id() for
-    UTF-8 string values (Spark md5() returns lowercase hex, as does hashlib).
-    """
+    """Return a PySpark Column expression equivalent to generate_value_id()."""
     from pyspark.sql import functions as F
 
     return F.concat(F.col("col_id"), F.lit("."), F.md5(F.col("val")))
