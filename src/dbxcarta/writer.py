@@ -48,9 +48,17 @@ def write_relationship(
     target_label: str,
     source_col: str = "source_id",
     target_col: str = "target_id",
+    properties: tuple[str, ...] = (),
 ) -> None:
-    """MERGE relationship between existing nodes matched by id."""
-    (
+    """MERGE relationship between existing nodes matched by id.
+
+    When `properties` is non-empty, those DataFrame columns are written as
+    relationship properties. The Neo4j Spark Connector's `keys` strategy
+    requires an explicit `relationship.properties` option — extra columns
+    on the DataFrame are otherwise ignored. See worklog/fk-gap-v3-build.md
+    Phase 2.
+    """
+    writer = (
         df.write.format(_FORMAT)
         .mode("Overwrite")
         .options(**config._base_opts())
@@ -62,5 +70,7 @@ def write_relationship(
         .option("relationship.target.labels", f":{target_label}")
         .option("relationship.target.save.mode", "Match")
         .option("relationship.target.node.keys", f"{target_col}:id")
-        .save()
     )
+    if properties:
+        writer = writer.option("relationship.properties", ",".join(properties))
+    writer.save()

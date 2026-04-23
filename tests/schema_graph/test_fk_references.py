@@ -5,21 +5,31 @@ Three concerns, distinguished because they apply in different scopes:
 1. Edge-count invariant (universal): Neo4j's REFERENCES count matches
    run summary's fk_references.
 2. Accounting invariant (universal): fk_skipped == fk_declared - fk_resolved.
-3. Fixture-exact assertion (only when the seeded W8 fixtures are in scope):
-   3 declared FKs resolve to 3 with 4 column-pair edges. This deliberately
-   does NOT apply to arbitrary production catalogs, because the Stage 4 policy
-   is log-and-skip on unresolvable FKs — partial coverage must not fail the
-   test suite when the fixture schemas aren't the scope under test.
+3. Fixture-exact assertion (only when the seeded test schemas are in scope):
+   16 declared FKs resolve to 16 with 17 column-pair edges (the composite PK
+   on product_suppliers produces 2 column-pair rows for 1 FK constraint).
+   This deliberately does NOT apply to arbitrary production catalogs, because
+   the Stage 4 policy is log-and-skip on unresolvable FKs — partial coverage
+   must not fail the test suite when the fixture schemas are not the scope.
+
+   Fixture schemas are created by tests/fixtures/setup_test_catalog.sql.
+   Cross-schema FK edges (sales->hr, sales->inventory) only appear when all
+   four fixture schemas are included in DBXCARTA_SCHEMAS.
 """
 
 from neo4j import Driver
 
 from dbxcarta.contract import REL_REFERENCES
 
-_FIXTURE_SCHEMAS = {"dbxcarta_fk_test", "dbxcarta_fk_test_b"}
-_FIXTURE_EXPECTED_DECLARED = 3
-_FIXTURE_EXPECTED_RESOLVED = 3
-_FIXTURE_EXPECTED_EDGES = 4
+_FIXTURE_SCHEMAS = {
+    "dbxcarta_test_sales",
+    "dbxcarta_test_inventory",
+    "dbxcarta_test_hr",
+    "dbxcarta_test_events",
+}
+_FIXTURE_EXPECTED_DECLARED = 16
+_FIXTURE_EXPECTED_RESOLVED = 16
+_FIXTURE_EXPECTED_EDGES = 17
 
 
 def test_references_edge_count_matches(neo4j_driver: Driver, run_summary: dict) -> None:

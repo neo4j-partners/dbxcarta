@@ -39,9 +39,12 @@ from dbxcarta.contract import (
     REL_HAS_TABLE,
     REL_HAS_VALUE,
     REL_REFERENCES,
+    REFERENCES_PROPERTIES,
+    generate_id,
 )
 from dbxcarta.summary import RunSummary
 from dbxcarta.writer import Neo4jConfig, write_nodes, write_relationship
+from dbxcarta.fk_inference import infer_fk_pairs
 import dbxcarta.embeddings as emb
 import dbxcarta.sample_values as sv
 import dbxcarta.schema_graph as sg
@@ -101,6 +104,8 @@ class Settings(BaseSettings):
     # DBXCARTA_LEDGER_PATH defaults to <DBXCARTA_SUMMARY_VOLUME's parent>/ledger when unset.
     dbxcarta_ledger_enabled: bool = False
     dbxcarta_ledger_path: str = ""
+    # Phase 3 metadata FK inference toggle; default on per worklog ablation matrix.
+    dbxcarta_infer_metadata: bool = True
 
     @field_validator("dbxcarta_catalog", "dbxcarta_summary_table")
     @classmethod
@@ -124,12 +129,14 @@ class _ExtractResult:
     has_table_df: DataFrame
     has_column_df: DataFrame
     references_df: DataFrame
+    inferred_references_df: "DataFrame | None"
     schemata_df: DataFrame
     tables_df: DataFrame
     columns_df: DataFrame
     fk_pairs_df: DataFrame
     declared_df: DataFrame
     fk_references: int
+    fk_inferred_metadata_references: int
 
 
 @dataclass
@@ -324,6 +331,10 @@ def _extract(
     has_column_df = sg.build_has_column_rel(columns_df)
     references_df = sg.build_references_rel(fk_pairs_df)
 
+    inferred_references_df, fk_inferred = _infer_metadata_references(
+        spark, settings, schema_list, columns_df, fk_pairs_df, summary,
+    )
+
     return _ExtractResult(
         database_df=database_df,
         schema_node_df=schema_node_df,
@@ -333,13 +344,125 @@ def _extract(
         has_table_df=has_table_df,
         has_column_df=has_column_df,
         references_df=references_df,
+        inferred_references_df=inferred_references_df,
         schemata_df=schemata_df,
         tables_df=tables_df,
         columns_df=columns_df,
         fk_pairs_df=fk_pairs_df,
         declared_df=declared_df,
         fk_references=fk_references,
+        fk_inferred_metadata_references=fk_inferred,
     )
+
+
+def _infer_metadata_references(
+    spark, settings: Settings, schema_list: list[str],
+    columns_df, fk_pairs_df, summary: RunSummary,
+) -> "tuple[DataFrame | None, int]":
+    """Phase 3: run metadata FK inference and package as a REFERENCES DataFrame.
+
+    Returns (None, 0) when DBXCARTA_INFER_METADATA is off so _load can skip
+    the write cleanly. Counters land in summary.row_counts under the
+    fk_inferred_metadata_* prefix; matches existing fk_* accounting style.
+    """
+    if not settings.dbxcarta_infer_metadata:
+        return None, 0
+
+    from pyspark.sql.functions import col
+
+    catalog = settings.dbxcarta_catalog
+
+    pk_rows_df = spark.sql(
+        f"SELECT kcu.table_catalog, kcu.table_schema, kcu.table_name,"
+        f"       kcu.column_name, tc.constraint_type, kcu.ordinal_position,"
+        f"       kcu.constraint_name"
+        f" FROM `{catalog}`.information_schema.table_constraints tc"
+        f" JOIN `{catalog}`.information_schema.key_column_usage kcu"
+        f"   ON tc.constraint_catalog = kcu.constraint_catalog"
+        f"  AND tc.constraint_schema  = kcu.constraint_schema"
+        f"  AND tc.constraint_name    = kcu.constraint_name"
+        f" WHERE tc.constraint_type IN ('PRIMARY KEY', 'UNIQUE')"
+    )
+    if schema_list:
+        pk_rows_df = pk_rows_df.filter(col("table_schema").isin(schema_list))
+
+    columns = [
+        {
+            "catalog": r["table_catalog"],
+            "schema": r["table_schema"],
+            "table": r["table_name"],
+            "column": r["column_name"],
+            "data_type": r["data_type"],
+            "comment": r["comment"],
+        }
+        for r in columns_df.collect()
+    ]
+
+    pk_cols, unique_leftmost, composite_pk_count = _partition_pk_constraints(
+        pk_rows_df.collect(),
+    )
+
+    declared_pairs = {
+        (
+            generate_id(r["src_catalog"], r["src_schema"], r["src_table"], r["src_column"]),
+            generate_id(r["tgt_catalog"], r["tgt_schema"], r["tgt_table"], r["tgt_column"]),
+        )
+        for r in fk_pairs_df.collect()
+    }
+
+    rows, counters = infer_fk_pairs(
+        columns, pk_cols, unique_leftmost, declared_pairs,
+    )
+
+    for name, val in counters.items():
+        summary.row_counts[f"fk_inferred_metadata_{name}"] = val
+    summary.row_counts["fk_inferred_metadata_composite_pk_skipped"] = composite_pk_count
+
+    logger.info(
+        "[dbxcarta] metadata inference: candidates=%d accepted=%d"
+        " composite_pks_skipped=%d",
+        counters["candidates"], counters["accepted"], composite_pk_count,
+    )
+
+    if not rows:
+        return None, 0
+
+    inferred_df = sg.build_inferred_metadata_references_rel(spark, rows)
+    return inferred_df, len(rows)
+
+
+def _partition_pk_constraints(
+    rows,
+) -> tuple[dict[str, set[str]], dict[str, set[str]], int]:
+    """Group raw constraint rows into (pk_cols_single, unique_leftmost, composite_count).
+
+    Composite PKs (multi-column) are dropped from pk_cols_single — a single
+    column that is only unique in combination with others is not FK-target
+    material. Their count feeds the run summary so the evaluator can judge
+    coverage loss (worklog: composite-key non-goal).
+    """
+    pk_by_constraint: dict[tuple, list[str]] = {}
+    pk_table_by_constraint: dict[tuple, str] = {}
+    unique_leftmost: dict[str, set[str]] = {}
+
+    for r in rows:
+        table_key = generate_id(r["table_catalog"], r["table_schema"], r["table_name"])
+        constraint_key = (r["table_catalog"], r["table_schema"], r["constraint_name"])
+        if r["constraint_type"] == "PRIMARY KEY":
+            pk_by_constraint.setdefault(constraint_key, []).append(r["column_name"])
+            pk_table_by_constraint[constraint_key] = table_key
+        elif r["constraint_type"] == "UNIQUE" and r["ordinal_position"] == 1:
+            unique_leftmost.setdefault(table_key, set()).add(r["column_name"])
+
+    pk_cols: dict[str, set[str]] = {}
+    composite_count = 0
+    for ckey, cols in pk_by_constraint.items():
+        table_key = pk_table_by_constraint[ckey]
+        if len(cols) == 1:
+            pk_cols.setdefault(table_key, set()).add(cols[0])
+        else:
+            composite_count += 1
+    return pk_cols, unique_leftmost, composite_count
 
 
 def _transform_embeddings(
@@ -505,6 +628,18 @@ def _load(
     if extract.fk_references > 0:
         write_relationship(
             extract.references_df.coalesce(1), neo4j, REL_REFERENCES, LABEL_COLUMN, LABEL_COLUMN,
+            properties=REFERENCES_PROPERTIES,
+        )
+
+    if extract.fk_inferred_metadata_references > 0 and extract.inferred_references_df is not None:
+        logger.info(
+            "[dbxcarta] writing relationships: REFERENCES inferred_metadata (%d)",
+            extract.fk_inferred_metadata_references,
+        )
+        write_relationship(
+            extract.inferred_references_df.coalesce(1), neo4j,
+            REL_REFERENCES, LABEL_COLUMN, LABEL_COLUMN,
+            properties=REFERENCES_PROPERTIES,
         )
 
 

@@ -89,9 +89,44 @@ def build_has_column_rel(columns_df: "DataFrame") -> "DataFrame":
 
 
 def build_references_rel(fk_pairs_df: "DataFrame") -> "DataFrame":
+    """Declared-FK edges carry provenance (1.0, "declared", null).
+
+    Inferred-source phases (metadata / semantic / query-log) write their own
+    DataFrames with the same three columns and different values.
+    """
+    from pyspark.sql.functions import lit
+    from pyspark.sql.types import StringType
+
     return (
         fk_pairs_df
         .withColumn("source_id", id_expr("src_catalog", "src_schema", "src_table", "src_column"))
         .withColumn("target_id", id_expr("tgt_catalog", "tgt_schema", "tgt_table", "tgt_column"))
-        .select("source_id", "target_id")
+        .withColumn("confidence", lit(1.0))
+        .withColumn("source", lit("declared"))
+        .withColumn("criteria", lit(None).cast(StringType()))
+        .select("source_id", "target_id", "confidence", "source", "criteria")
     )
+
+
+def build_inferred_metadata_references_rel(
+    spark: "SparkSession", rows: list[dict],
+) -> "DataFrame":
+    """Wrap pure-Python inferred rows in the canonical REFERENCES 5-col schema.
+
+    Separate write from build_references_rel so declared-duplicate suppression
+    stays in the inference layer; this module only owns DataFrame shape.
+    """
+    from pyspark.sql.types import DoubleType, StringType, StructField, StructType
+
+    schema = StructType([
+        StructField("source_id", StringType(), False),
+        StructField("target_id", StringType(), False),
+        StructField("confidence", DoubleType(), False),
+        StructField("source", StringType(), False),
+        StructField("criteria", StringType(), True),
+    ])
+    tuples = [
+        (r["source_id"], r["target_id"], r["confidence"], r["source"], r["criteria"])
+        for r in rows
+    ]
+    return spark.createDataFrame(tuples, schema=schema)

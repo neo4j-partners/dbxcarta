@@ -12,6 +12,33 @@ _COL_INDEX = "column_embedding"
 _TABLE_INDEX = "table_embedding"
 _MAX_VALUES = 30
 
+# OPTIONAL MATCH so deployments with no REFERENCES edges don't trigger
+# Neo4j's 01N51 UnknownRelationshipTypeWarning. See worklog/fk-gap-v3-build.md
+# Phase 1. Exported as a constant so the regression guard can import it.
+#
+# Phase 2: bind the rel as `r` so we can filter on confidence. Legacy edges
+# written before Phase 2 have no confidence property; COALESCE(..., 1.0)
+# treats them as declared-strength so they are never silently dropped.
+_REFERENCES_TABLE_IDS_CYPHER = (
+    "UNWIND $col_ids AS cid "
+    "OPTIONAL MATCH (c:Column {id: cid})-[r:REFERENCES]-(other:Column)"
+    "<-[:HAS_COLUMN]-(t:Table) "
+    "WITH t, r WHERE t IS NOT NULL AND COALESCE(r.confidence, 1.0) >= $threshold "
+    "RETURN DISTINCT t.id AS tid"
+)
+
+# Phase 2: fetch literal join predicates for retrieved neighbour tables so
+# they can be injected into the SQL-generation prompt. Gated by
+# DBXCARTA_INJECT_CRITERIA.
+_REFERENCES_CRITERIA_CYPHER = (
+    "UNWIND $col_ids AS cid "
+    "OPTIONAL MATCH (c:Column {id: cid})-[r:REFERENCES]-(:Column) "
+    "WITH r WHERE r IS NOT NULL "
+    "  AND COALESCE(r.confidence, 1.0) >= $threshold "
+    "  AND r.criteria IS NOT NULL "
+    "RETURN DISTINCT r.criteria AS crit"
+)
+
 
 class GraphRetriever(Retriever):
     def __init__(self, settings: ClientSettings) -> None:
@@ -26,21 +53,29 @@ class GraphRetriever(Retriever):
         top_k = self._settings.dbxcarta_client_top_k
         catalog = self._settings.dbxcarta_catalog
         schemas = self._settings.schemas_list
+        threshold = self._settings.dbxcarta_confidence_threshold
+        inject_criteria = self._settings.dbxcarta_inject_criteria
 
         with self._driver.session() as session:
             col_seeds = _query_vector_seeds(session, _COL_INDEX, embedding, top_k)
             tbl_seeds = _query_vector_seeds(session, _TABLE_INDEX, embedding, top_k)
             parent_tbl_ids = _parent_table_ids(session, col_seeds)
-            ref_tbl_ids = _references_table_ids(session, col_seeds)
+            ref_tbl_ids = _references_table_ids(session, col_seeds, threshold)
 
             all_tbl_ids = list(dict.fromkeys(tbl_seeds + parent_tbl_ids + ref_tbl_ids))
             columns = _fetch_columns(session, all_tbl_ids, catalog, schemas)
             values = _fetch_values(session, col_seeds)
+            criteria = (
+                _references_criteria(session, col_seeds, threshold)
+                if inject_criteria
+                else []
+            )
 
         return ContextBundle(
             columns=columns,
             values=values,
             seed_ids=col_seeds + tbl_seeds,
+            criteria=criteria,
         )
 
 
@@ -67,18 +102,24 @@ def _parent_table_ids(session, col_ids: list[str]) -> list[str]:
     return [row["tid"] for row in result]
 
 
-def _references_table_ids(session, col_ids: list[str]) -> list[str]:
+def _references_table_ids(session, col_ids: list[str], threshold: float) -> list[str]:
     """Follow REFERENCES edges in both directions to find joinable tables."""
     if not col_ids:
         return []
     result = session.run(
-        "UNWIND $col_ids AS cid "
-        "MATCH (c:Column {id: cid})-[:REFERENCES]-(other:Column) "
-        "MATCH (other)<-[:HAS_COLUMN]-(t:Table) "
-        "RETURN DISTINCT t.id AS tid",
-        col_ids=col_ids,
+        _REFERENCES_TABLE_IDS_CYPHER, col_ids=col_ids, threshold=threshold,
     )
     return [row["tid"] for row in result]
+
+
+def _references_criteria(session, col_ids: list[str], threshold: float) -> list[str]:
+    """Pull literal join predicates off REFERENCES edges above the threshold."""
+    if not col_ids:
+        return []
+    result = session.run(
+        _REFERENCES_CRITERIA_CYPHER, col_ids=col_ids, threshold=threshold,
+    )
+    return [row["crit"] for row in result if row["crit"] is not None]
 
 
 def _fetch_columns(

@@ -25,6 +25,12 @@ class ClientSettings(BaseSettings):
     dbxcarta_client_top_k: int = 5
     dbxcarta_client_timeout_sec: int = 30
 
+    # Phase 2: REFERENCES-edge provenance. See worklog/fk-gap-v3-build.md.
+    # Inclusive `>=` comparison; legacy edges with no confidence set are
+    # treated as 1.0 via COALESCE in Cypher so they are never silently dropped.
+    dbxcarta_confidence_threshold: float = 0.8
+    dbxcarta_inject_criteria: bool = True
+
     @model_validator(mode="after")
     def _resolve_defaults(self) -> ClientSettings:
         if not self.dbxcarta_embed_endpoint:

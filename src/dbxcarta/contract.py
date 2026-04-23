@@ -22,6 +22,15 @@ REL_HAS_COLUMN = "HAS_COLUMN"
 REL_HAS_VALUE = "HAS_VALUE"
 REL_REFERENCES = "REFERENCES"
 
+# REFERENCES edge properties (additive in contract v1.0). All three are
+# nullable. Legacy edges written before Phase 2 have none of these set;
+# readers treat absence as (1.0, "declared", null) via COALESCE in Cypher.
+# See worklog/fk-gap-v3-build.md Phase 2.
+REL_PROP_CONFIDENCE = "confidence"
+REL_PROP_SOURCE = "source"
+REL_PROP_CRITERIA = "criteria"
+REFERENCES_PROPERTIES = (REL_PROP_CONFIDENCE, REL_PROP_SOURCE, REL_PROP_CRITERIA)
+
 # Characters translated in normalization: space→_, hyphen→_
 # These constants are shared with the Spark SQL expression to prevent drift.
 _TRANSLATE_FROM = " -"

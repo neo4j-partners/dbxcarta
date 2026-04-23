@@ -19,6 +19,7 @@ class ContextBundle:
     columns: list[ColumnEntry] = field(default_factory=list)
     values: list[str] = field(default_factory=list)
     seed_ids: list[str] = field(default_factory=list)
+    criteria: list[str] = field(default_factory=list)
 
     def to_text(self) -> str:
         if not self.columns:
@@ -36,6 +37,11 @@ class ContextBundle:
         if self.values:
             lines.append("")
             lines.append("Sample values: " + ", ".join(self.values[:20]))
+        if self.criteria:
+            lines.append("")
+            lines.append("Join predicates:")
+            for predicate in self.criteria:
+                lines.append(f"  {predicate}")
         return "\n".join(lines)
 
 
