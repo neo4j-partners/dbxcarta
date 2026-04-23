@@ -1,4 +1,4 @@
-"""Warehouse SQL executor: run a statement and report whether it returned rows."""
+"""Warehouse SQL executor: run statements and report results or success."""
 
 from __future__ import annotations
 
@@ -87,6 +87,58 @@ def fetch_rows(
         return None, None, msg
 
     return None, None, f"statement did not complete within {timeout_sec}s (state={state})"
+
+
+def execute_ddl(
+    ws: WorkspaceClient,
+    warehouse_id: str,
+    sql: str,
+    timeout_sec: int = 60,
+) -> tuple[bool, str | None]:
+    """Execute a DDL statement (CREATE, ALTER, DROP, USE) and return success.
+
+    Returns (succeeded, error_message). DDL produces no result set so
+    Disposition and Format are omitted.
+    """
+    response = ws.statement_execution.execute_statement(
+        statement=sql,
+        warehouse_id=warehouse_id,
+        wait_timeout=f"{timeout_sec}s",
+    )
+    state = response.status.state
+    if state == StatementState.SUCCEEDED:
+        return True, None
+    if state in (StatementState.FAILED, StatementState.CANCELED):
+        msg = (
+            response.status.error.message
+            if response.status and response.status.error
+            else str(state)
+        )
+        return False, msg
+    return False, f"statement did not complete within {timeout_sec}s (state={state})"
+
+
+def split_sql_statements(sql: str) -> list[str]:
+    """Split a SQL script on semicolons, discarding comment-only and empty segments.
+
+    Inline SQL comments within statements are preserved — they are valid SQL
+    that the warehouse engine handles correctly. Only segments whose entire
+    content is comments or whitespace are discarded.
+
+    Note: splits on literal semicolons only. Does not handle semicolons inside
+    string literals or block comments. This is sufficient for DDL scripts where
+    those constructs do not appear.
+    """
+    result = []
+    for segment in sql.split(";"):
+        stripped = segment.strip()
+        has_sql = any(
+            line and not line.startswith("--")
+            for line in (l.strip() for l in stripped.splitlines())
+        )
+        if has_sql:
+            result.append(stripped)
+    return result
 
 
 def preflight_warehouse(ws: WorkspaceClient, warehouse_id: str) -> None:

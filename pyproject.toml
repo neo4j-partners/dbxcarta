@@ -32,3 +32,19 @@ build-backend = "uv_build"
 markers = [
     "slow: tests that submit a Databricks job and wait for it to finish",
 ]
+
+# Phase 3.5 (worklog/fk-gap-v3-build.md): mypy config declares the FK-inference
+# surface as the first strictly-typed module in the package. Not executed here
+# (this workstream ships no code execution); the evaluate workstream runs mypy.
+[tool.mypy]
+python_version = "3.12"
+
+[[tool.mypy.overrides]]
+module = ["dbxcarta.fk_inference"]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+warn_return_any = true
+no_implicit_optional = true
+check_untyped_defs = true
+warn_unused_ignores = true
+strict_equality = true

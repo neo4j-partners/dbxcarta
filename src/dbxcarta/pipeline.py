@@ -44,14 +44,26 @@ from dbxcarta.contract import (
 )
 from dbxcarta.summary import RunSummary
 from dbxcarta.writer import Neo4jConfig, write_nodes, write_relationship
-from dbxcarta.fk_inference import infer_fk_pairs
+from dbxcarta.fk_inference import (
+    ColumnMeta,
+    ConstraintRow,
+    DeclaredPair,
+    PKIndex,
+    infer_fk_pairs,
+)
 import dbxcarta.embeddings as emb
 import dbxcarta.sample_values as sv
 import dbxcarta.schema_graph as sg
 
 logger = logging.getLogger(__name__)
 
-_IDENTIFIER_RE = re.compile(r"^[a-zA-Z0-9_.`\-]+$")
+# Strict Databricks identifier: alphabetic/underscore start, then alphanumerics/
+# underscores. Deliberately excludes backticks, dots, hyphens, and spaces.
+# Dotted names (`schema.table`, `cat.schema.table`) are split on `.` by their
+# field validator and validated per part. The old permissive regex allowed
+# backticks inside identifier segments, which combined with f"`{catalog}`"
+# SQL interpolation could escape the intended quoting (Phase 3.5 hardening).
+_IDENTIFIER_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
 _TABLE_EMBEDDING_TEXT_EXPR = (
     "concat_ws(' | ', concat_ws('.', table_schema, name), nullif(trim(comment), ''))"
@@ -107,11 +119,24 @@ class Settings(BaseSettings):
     # Phase 3 metadata FK inference toggle; default on per worklog ablation matrix.
     dbxcarta_infer_metadata: bool = True
 
-    @field_validator("dbxcarta_catalog", "dbxcarta_summary_table")
+    @field_validator("dbxcarta_catalog")
     @classmethod
-    def _validate_identifier(cls, v: str) -> str:
+    def _validate_catalog(cls, v: str) -> str:
         if not _IDENTIFIER_RE.match(v):
             raise ValueError(f"Invalid Databricks identifier: {v!r}")
+        return v
+
+    @field_validator("dbxcarta_summary_table")
+    @classmethod
+    def _validate_summary_table(cls, v: str) -> str:
+        # Accepts `table`, `schema.table`, or `catalog.schema.table`. Each dot-
+        # separated part must be a strict Databricks identifier; this is the
+        # only place where a dotted value is accepted.
+        for part in v.split("."):
+            if not _IDENTIFIER_RE.match(part):
+                raise ValueError(
+                    f"Invalid identifier part {part!r} in table {v!r}"
+                )
         return v
 
 
@@ -386,83 +411,39 @@ def _infer_metadata_references(
     if schema_list:
         pk_rows_df = pk_rows_df.filter(col("table_schema").isin(schema_list))
 
-    columns = [
-        {
-            "catalog": r["table_catalog"],
-            "schema": r["table_schema"],
-            "table": r["table_name"],
-            "column": r["column_name"],
-            "data_type": r["data_type"],
-            "comment": r["comment"],
-        }
-        for r in columns_df.collect()
-    ]
-
-    pk_cols, unique_leftmost, composite_pk_count = _partition_pk_constraints(
-        pk_rows_df.collect(),
-    )
-
-    declared_pairs = {
-        (
-            generate_id(r["src_catalog"], r["src_schema"], r["src_table"], r["src_column"]),
-            generate_id(r["tgt_catalog"], r["tgt_schema"], r["tgt_table"], r["tgt_column"]),
+    column_metas = [ColumnMeta.from_row(r) for r in columns_df.collect()]
+    constraint_rows = [ConstraintRow.from_row(r) for r in pk_rows_df.collect()]
+    pk_index = PKIndex.from_constraints(constraint_rows)
+    declared_pairs = frozenset(
+        DeclaredPair(
+            source_id=generate_id(
+                r["src_catalog"], r["src_schema"], r["src_table"], r["src_column"],
+            ),
+            target_id=generate_id(
+                r["tgt_catalog"], r["tgt_schema"], r["tgt_table"], r["tgt_column"],
+            ),
         )
         for r in fk_pairs_df.collect()
-    }
-
-    rows, counters = infer_fk_pairs(
-        columns, pk_cols, unique_leftmost, declared_pairs,
     )
 
-    for name, val in counters.items():
-        summary.row_counts[f"fk_inferred_metadata_{name}"] = val
-    summary.row_counts["fk_inferred_metadata_composite_pk_skipped"] = composite_pk_count
+    refs, counters = infer_fk_pairs(column_metas, pk_index, declared_pairs)
+
+    summary.row_counts.update(counters.as_summary_dict("fk_inferred_metadata"))
+    summary.row_counts["fk_inferred_metadata_composite_pk_skipped"] = (
+        pk_index.composite_pk_count
+    )
 
     logger.info(
         "[dbxcarta] metadata inference: candidates=%d accepted=%d"
         " composite_pks_skipped=%d",
-        counters["candidates"], counters["accepted"], composite_pk_count,
+        counters.candidates, counters.accepted, pk_index.composite_pk_count,
     )
 
-    if not rows:
+    if not refs:
         return None, 0
 
-    inferred_df = sg.build_inferred_metadata_references_rel(spark, rows)
-    return inferred_df, len(rows)
-
-
-def _partition_pk_constraints(
-    rows,
-) -> tuple[dict[str, set[str]], dict[str, set[str]], int]:
-    """Group raw constraint rows into (pk_cols_single, unique_leftmost, composite_count).
-
-    Composite PKs (multi-column) are dropped from pk_cols_single — a single
-    column that is only unique in combination with others is not FK-target
-    material. Their count feeds the run summary so the evaluator can judge
-    coverage loss (worklog: composite-key non-goal).
-    """
-    pk_by_constraint: dict[tuple, list[str]] = {}
-    pk_table_by_constraint: dict[tuple, str] = {}
-    unique_leftmost: dict[str, set[str]] = {}
-
-    for r in rows:
-        table_key = generate_id(r["table_catalog"], r["table_schema"], r["table_name"])
-        constraint_key = (r["table_catalog"], r["table_schema"], r["constraint_name"])
-        if r["constraint_type"] == "PRIMARY KEY":
-            pk_by_constraint.setdefault(constraint_key, []).append(r["column_name"])
-            pk_table_by_constraint[constraint_key] = table_key
-        elif r["constraint_type"] == "UNIQUE" and r["ordinal_position"] == 1:
-            unique_leftmost.setdefault(table_key, set()).add(r["column_name"])
-
-    pk_cols: dict[str, set[str]] = {}
-    composite_count = 0
-    for ckey, cols in pk_by_constraint.items():
-        table_key = pk_table_by_constraint[ckey]
-        if len(cols) == 1:
-            pk_cols.setdefault(table_key, set()).add(cols[0])
-        else:
-            composite_count += 1
-    return pk_cols, unique_leftmost, composite_count
+    inferred_df = sg.build_inferred_metadata_references_rel(spark, refs)
+    return inferred_df, len(refs)
 
 
 def _transform_embeddings(
@@ -791,11 +772,18 @@ def _resolve_ledger_path(settings: Settings) -> str:
 
 
 def _read_ledger(spark, ledger_root: str, label: str) -> "DataFrame | None":
-    """Return the ledger DataFrame for label, or None if it doesn't exist yet."""
+    """Return the ledger DataFrame for label, or None if it doesn't exist yet.
+
+    Catches only AnalysisException, which is what Spark raises when the Delta
+    path doesn't exist. Other failures (permission denied, corrupt metadata)
+    propagate as signal per Phase 3.5 exception-narrowing rules.
+    """
+    from pyspark.errors import AnalysisException
+
     ledger_path = f"{ledger_root.rstrip('/')}/{label.lower()}"
     try:
         return spark.read.format("delta").load(ledger_path)
-    except Exception:  # noqa: BLE001 — missing table is expected on first run
+    except AnalysisException:
         return None
 
 
@@ -842,6 +830,7 @@ def _upsert_ledger(staged_df, ledger_root: str, label: str) -> None:
     embedding_model STRING, embedded_at TIMESTAMP.
     """
     from delta.tables import DeltaTable
+    from pyspark.errors import AnalysisException
     from pyspark.sql.functions import col
 
     ledger_path = f"{ledger_root.rstrip('/')}/{label.lower()}"
@@ -856,12 +845,12 @@ def _upsert_ledger(staged_df, ledger_root: str, label: str) -> None:
         .dropDuplicates(["id", "embedding_model"])
     )
 
-    # Use forPath in a try/except rather than isDeltaTable to avoid AnalysisException
-    # edge cases observed with isDeltaTable on /Volumes paths (Delta docs community reports).
-    # Only the forPath call is wrapped — a merge failure propagates as-is.
+    # forPath raises AnalysisException when the Delta path doesn't exist yet.
+    # Narrow the catch to that type only — other failures (permission, corrupt
+    # metadata) propagate as signal per Phase 3.5 exception-narrowing rules.
     try:
         existing = DeltaTable.forPath(spark, ledger_path)
-    except Exception:  # noqa: BLE001 — path doesn't exist on first run
+    except AnalysisException:
         (
             rows_to_upsert.write
             .format("delta")
@@ -890,14 +879,28 @@ def _truncate_staging_root(staging_root: str) -> None:
     Overwrite-per-label would leave orphan subdirs when a label's embedding
     flag flips off between runs; truncating the whole root once per run keeps
     the staging volume faithful to the current config.
+
+    Probe-first design: check existence via `dbutils.fs.ls` and narrow-catch
+    only on the probe. Any failure from the destructive `rm` call propagates
+    as signal per Phase 3.5 exception-narrowing rules (previously a bare
+    `except Exception` swallowed permission errors as "not present"). The
+    probe catch is scoped to `Py4JJavaError`, the only exception type the
+    dbutils.fs bridge raises when a path is missing.
     """
     from databricks.sdk.runtime import dbutils
+    from py4j.protocol import Py4JJavaError
 
     try:
+        dbutils.fs.ls(staging_root)
+        exists = True
+    except Py4JJavaError:
+        exists = False
+
+    if exists:
         dbutils.fs.rm(staging_root, recurse=True)
         logger.info("[dbxcarta] truncated staging root %s", staging_root)
-    except Exception as exc:  # noqa: BLE001 — missing path is not fatal
-        logger.info("[dbxcarta] staging root %s not present (%s)", staging_root, exc)
+    else:
+        logger.info("[dbxcarta] staging root %s not present", staging_root)
 
 
 def _stage_embedded_nodes(df, staging_root: str, label: str):

@@ -65,7 +65,7 @@ DATABRICKS_WAREHOUSE_ID=<id> python scripts/run_demo.py \
   --volume-path /Volumes/my_catalog/default/dbxcarta
 ```
 
-The `--volume-path` argument is only required for `dbxcarta_test_external`.
+The `--volume-path` argument (or `DATABRICKS_VOLUME_PATH` env var) is only required for `dbxcarta_test_external`.
 Omit it to skip external tables (the script will fail only on those three
 `CREATE TABLE ... LOCATION` statements).
 
@@ -105,9 +105,8 @@ sed -e 's/${catalog}/my_catalog/g' \
 ## Teardown
 
 ```bash
-DATABRICKS_WAREHOUSE_ID=<id> python scripts/run_demo.py \
-  --catalog my_catalog \
-  --teardown
+DATABRICKS_WAREHOUSE_ID=<id> DBXCARTA_CATALOG=my_catalog \
+  python scripts/run_demo.py --teardown
 ```
 
 Or uncomment and run the `TEARDOWN` block at the bottom of `setup_test_catalog.sql`.

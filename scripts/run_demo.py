@@ -7,17 +7,14 @@ full graph_rag demo using the pre-seeded question set.
 Usage:
     python scripts/run_demo.py [--catalog CATALOG] [--volume-path VOL_PATH] [--teardown]
 
-The script reads credentials from the environment or a .env file (same as the
-pipeline scripts). At minimum, DATABRICKS_WAREHOUSE_ID must be set.
-
 Required env vars:
-    DATABRICKS_WAREHOUSE_ID   SQL warehouse to execute DDL against
+    DATABRICKS_WAREHOUSE_ID    SQL warehouse to execute DDL against
 
-Optional env vars:
-    DBXCARTA_DEMO_CATALOG     Catalog to set up schemas in (default: main)
-    DBXCARTA_DEMO_VOLUME      UC Volume base path for external tables
-                              (e.g. /Volumes/main/default/dbxcarta)
-                              Required only for dbxcarta_test_external schema.
+Optional env vars (overridden by the corresponding CLI flags):
+    DBXCARTA_CATALOG           Catalog to set up schemas in (default: main)
+    DATABRICKS_VOLUME_PATH     UC Volume base path for external tables
+                               (e.g. /Volumes/main/default/dbxcarta)
+                               Required only for dbxcarta_test_external schema.
 
 After setup, run the full demo via run_dbxcarta_client.py with:
     DBXCARTA_CATALOG=<catalog>
@@ -44,7 +41,7 @@ _DEMO_SCHEMAS = [
     "dbxcarta_test_hr",
     "dbxcarta_test_events",
 ]
-# Includes external schema and legacy backward-compat schemas for full cleanup.
+# Teardown includes external schema and legacy backward-compat schemas for full cleanup.
 _TEARDOWN_SCHEMAS = _DEMO_SCHEMAS + [
     "dbxcarta_test_external",
     "dbxcarta_fk_test",
@@ -53,58 +50,69 @@ _TEARDOWN_SCHEMAS = _DEMO_SCHEMAS + [
 _DEMO_QUESTIONS_REL = "tests/fixtures/demo_questions.json"
 
 
-def _has_sql(stmt: str) -> bool:
-    return any(
-        s and not s.startswith("--")
-        for s in (l.strip() for l in stmt.splitlines())
-    )
-
-
-def _execute_sql_file(
+def _setup(
+    ws: "WorkspaceClient",
     warehouse_id: str,
     catalog: str,
     volume_path: str,
-    teardown: bool,
 ) -> None:
-    from databricks.sdk import WorkspaceClient
+    from dbxcarta.client.executor import execute_ddl, split_sql_statements
 
-    ws = WorkspaceClient()
+    raw = _SETUP_SQL.read_text()
+    sql = raw.replace("${catalog}", catalog).replace("${volume_path}", volume_path)
+    statements = split_sql_statements(sql)
+    total = len(statements)
 
-    if teardown:
-        statements = [
-            f"DROP SCHEMA IF EXISTS {catalog}.{schema} CASCADE"
-            for schema in _TEARDOWN_SCHEMAS
-        ]
-        action = "Tearing down"
-    else:
-        raw = _SETUP_SQL.read_text()
-        sql = raw.replace("${catalog}", catalog).replace("${volume_path}", volume_path)
-        statements = [s.strip() for s in sql.split(";") if _has_sql(s)]
-        action = "Setting up"
+    print(f"Setting up demo schemas in catalog '{catalog}' ({total} statements)...")
 
-    print(f"{action} demo schemas in catalog '{catalog}'...")
-
-    errors = []
     for i, stmt in enumerate(statements, 1):
-        preview = stmt[:60].replace("\n", " ")
-        try:
-            ws.statement_execution.execute_statement(
-                warehouse_id=warehouse_id,
-                statement=stmt,
-                wait_timeout="60s",
+        preview = stmt[:70].replace("\n", " ")
+        succeeded, error = execute_ddl(ws, warehouse_id, stmt, timeout_sec=60)
+        if succeeded:
+            print(f"  [{i}/{total}] OK  {preview}")
+        else:
+            print(f"  [{i}/{total}] ERR {preview}")
+            print(f"  Error: {error}")
+            print(
+                f"\nSetup failed at statement {i}/{total}. "
+                f"Subsequent FK constraints will cascade from this failure.\n"
+                f"Fix the error and re-run, or tear down first for a clean start:\n"
+                f"  python scripts/run_demo.py --catalog {catalog} --teardown"
             )
-            print(f"  [{i}/{len(statements)}] OK  {preview}...")
-        except Exception as exc:
-            msg = str(exc)
-            print(f"  [{i}/{len(statements)}] ERR {preview}...")
-            print(f"           {msg}")
-            errors.append((stmt, msg))
+            sys.exit(1)
 
-    if errors:
-        print(f"\n{len(errors)} statement(s) failed. See errors above.")
-        sys.exit(1)
+    print(f"\nDone. {total} statement(s) executed successfully.")
 
-    print(f"\nDone. {len(statements)} statement(s) executed successfully.")
+
+def _teardown(
+    ws: "WorkspaceClient",
+    warehouse_id: str,
+    catalog: str,
+) -> None:
+    from dbxcarta.client.executor import execute_ddl
+
+    statements = [
+        f"DROP SCHEMA IF EXISTS {catalog}.{schema} CASCADE"
+        for schema in _TEARDOWN_SCHEMAS
+    ]
+    total = len(statements)
+
+    print(f"Tearing down demo schemas in catalog '{catalog}'...")
+
+    warnings = []
+    for i, stmt in enumerate(statements, 1):
+        succeeded, error = execute_ddl(ws, warehouse_id, stmt, timeout_sec=60)
+        if succeeded:
+            print(f"  [{i}/{total}] OK  {stmt}")
+        else:
+            print(f"  [{i}/{total}] WARN {stmt}")
+            print(f"         {error}")
+            warnings.append(error)
+
+    if warnings:
+        print(f"\n{len(warnings)} drop(s) reported warnings (schemas may not have existed).")
+    else:
+        print(f"\nDone. {total} schema(s) removed.")
 
 
 def _print_next_steps(catalog: str) -> None:
@@ -134,14 +142,22 @@ Next steps
 
 3. To tear down the schemas after the demo:
 
-   python scripts/run_demo.py --teardown
+   python scripts/run_demo.py --catalog {catalog} --teardown
 """.format(catalog=catalog, schemas=schemas, questions=_DEMO_QUESTIONS_REL))
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="DBxCarta demo schema setup")
-    parser.add_argument("--catalog", default=os.getenv("DBXCARTA_DEMO_CATALOG", "main"))
-    parser.add_argument("--volume-path", default=os.getenv("DBXCARTA_DEMO_VOLUME", ""))
+    parser.add_argument(
+        "--catalog",
+        default=os.getenv("DBXCARTA_CATALOG", "main"),
+        help="Target UC catalog (default: DBXCARTA_CATALOG env var, else 'main')",
+    )
+    parser.add_argument(
+        "--volume-path",
+        default=os.getenv("DATABRICKS_VOLUME_PATH", ""),
+        help="UC Volume base path for external tables (e.g. /Volumes/cat/schema/vol)",
+    )
     parser.add_argument(
         "--teardown",
         action="store_true",
@@ -154,14 +170,16 @@ def main() -> None:
         print("ERROR: DATABRICKS_WAREHOUSE_ID is not set.", file=sys.stderr)
         sys.exit(1)
 
-    _execute_sql_file(
-        warehouse_id=warehouse_id,
-        catalog=args.catalog,
-        volume_path=args.volume_path,
-        teardown=args.teardown,
-    )
+    from databricks.sdk import WorkspaceClient
+    from dbxcarta.client.executor import preflight_warehouse
 
-    if not args.teardown:
+    ws = WorkspaceClient()
+    preflight_warehouse(ws, warehouse_id)
+
+    if args.teardown:
+        _teardown(ws, warehouse_id, args.catalog)
+    else:
+        _setup(ws, warehouse_id, args.catalog, args.volume_path)
         _print_next_steps(args.catalog)
 
 

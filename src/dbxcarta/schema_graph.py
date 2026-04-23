@@ -9,6 +9,8 @@ from dbxcarta.contract import CONTRACT_VERSION, generate_id, id_expr
 if TYPE_CHECKING:
     from pyspark.sql import DataFrame, SparkSession
 
+    from dbxcarta.fk_inference import InferredRef
+
 
 def build_database_node(spark: "SparkSession", catalog: str) -> "DataFrame":
     from pyspark.sql import Row
@@ -109,12 +111,15 @@ def build_references_rel(fk_pairs_df: "DataFrame") -> "DataFrame":
 
 
 def build_inferred_metadata_references_rel(
-    spark: "SparkSession", rows: list[dict],
+    spark: "SparkSession", refs: "list[InferredRef]",
 ) -> "DataFrame":
-    """Wrap pure-Python inferred rows in the canonical REFERENCES 5-col schema.
+    """Wrap inferred-reference dataclasses in the canonical REFERENCES 5-col schema.
 
     Separate write from build_references_rel so declared-duplicate suppression
     stays in the inference layer; this module only owns DataFrame shape.
+
+    This is the single InferredRef → Spark-tuple conversion point (Phase 3.5
+    boundary rule: one conversion per Spark edge).
     """
     from pyspark.sql.types import DoubleType, StringType, StructField, StructType
 
@@ -126,7 +131,7 @@ def build_inferred_metadata_references_rel(
         StructField("criteria", StringType(), True),
     ])
     tuples = [
-        (r["source_id"], r["target_id"], r["confidence"], r["source"], r["criteria"])
-        for r in rows
+        (r.source_id, r.target_id, r.confidence, r.source, r.criteria)
+        for r in refs
     ]
     return spark.createDataFrame(tuples, schema=schema)
