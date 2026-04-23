@@ -42,23 +42,6 @@ def neo4j_driver(ws: WorkspaceClient) -> Iterator[Driver]:
 
 
 @pytest.fixture(scope="session")
-def local_spark() -> Iterator:
-    """Local-mode SparkSession for unit tests of pure DataFrame builders."""
-    from pyspark.sql import SparkSession
-
-    spark = (
-        SparkSession.builder
-        .master("local[1]")
-        .appName("dbxcarta-schema-graph-tests")
-        .config("spark.ui.enabled", "false")
-        .config("spark.sql.shuffle.partitions", "1")
-        .getOrCreate()
-    )
-    yield spark
-    spark.stop()
-
-
-@pytest.fixture(scope="session")
 def run_summary(ws: WorkspaceClient) -> dict:
     """Load the most recent schema_graph run-summary JSON from the UC Volume."""
     volume_path = os.environ["DBXCARTA_SUMMARY_VOLUME"]

@@ -2,13 +2,13 @@
 
 from neo4j import Driver
 
-from dbxcarta.contract import LABEL_VALUE
+from dbxcarta.contract import NodeLabel
 
 
 def test_value_count_matches_summary(neo4j_driver: Driver, run_summary: dict) -> None:
     expected = run_summary["row_counts"]["value_nodes"]
     with neo4j_driver.session() as s:
-        actual = s.run(f"MATCH (n:{LABEL_VALUE}) RETURN count(n) AS cnt").single()["cnt"]
+        actual = s.run(f"MATCH (n:{NodeLabel.VALUE}) RETURN count(n) AS cnt").single()["cnt"]
     assert actual == expected
 
 

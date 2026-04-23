@@ -53,8 +53,13 @@ class Settings(BaseSettings):
     dbxcarta_ledger_path: str = ""
     # Phase 3: metadata FK inference
     dbxcarta_infer_metadata: bool = True
-    # Phase 4: semantic FK inference
-    dbxcarta_infer_semantic: bool = True
+    # Phase 4: semantic FK inference.
+    # Default False because column embeddings also default off, and semantic
+    # inference requires them — the cross-field validator below rejects the
+    # incoherent combination. Deployments that want Phase 4 set both
+    # DBXCARTA_INFER_SEMANTIC=true and DBXCARTA_INCLUDE_EMBEDDINGS_COLUMNS=true.
+    # (The worklog ablation matrix's `true` default assumed embeddings on.)
+    dbxcarta_infer_semantic: bool = False
     dbxcarta_semantic_min_tables: int = 10
     dbxcarta_semantic_threshold: float = 0.85
 

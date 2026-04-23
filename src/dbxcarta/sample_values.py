@@ -12,6 +12,9 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from py4j.protocol import Py4JJavaError
+from pyspark.errors import AnalysisException
+
 from dbxcarta.contract import CONTRACT_VERSION, generate_id, value_id_expr
 
 if TYPE_CHECKING:
@@ -268,7 +271,7 @@ def _cardinality_filter(
                     if card < threshold:
                         kept_names.append(name)
                         kept_ids.append(id_by_name[name])
-            except Exception as exc:
+            except (AnalysisException, Py4JJavaError) as exc:
                 table_failed = True
                 logger.warning(
                     "[dbxcarta] cardinality probe failed for %s chunk=%d cols=%s: %s",
@@ -315,7 +318,7 @@ def _sample_values(
                     concat(lit(col_id_prefix), lower(translate(col("col_name"), " -", "__"))),
                 )
                 dfs.append(chunk_df)
-            except Exception as exc:
+            except (AnalysisException, Py4JJavaError) as exc:
                 logger.warning(
                     "[dbxcarta] sampling failed for %s chunk=%d cols=%s: %s",
                     cand.fq(), chunk_index, chunk_cols, exc,
@@ -350,14 +353,14 @@ def _filter_readable_schemas(
     skipped = 0
     for (cat, sch), cands in by_schema.items():
         probes = cands[:_SCHEMA_PROBE_LIMIT]
-        last_exc: Exception | None = None
+        last_exc: AnalysisException | Py4JJavaError | None = None
         readable_schema = False
         for probe in probes:
             try:
                 spark.sql(f"SELECT 1 FROM {probe.fq()} LIMIT 1").collect()
                 readable_schema = True
                 break
-            except Exception as exc:
+            except (AnalysisException, Py4JJavaError) as exc:
                 last_exc = exc
                 continue
         if not readable_schema:

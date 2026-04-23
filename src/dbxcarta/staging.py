@@ -1,0 +1,117 @@
+"""UC Volume path resolution and Delta staging-root lifecycle.
+
+Everything in this module is pure path arithmetic or Delta/dbutils I/O —
+no Neo4j, no UC query. Extracted from pipeline.py (Phase 3.6 foundation
+rewrite) so pipeline.py is the orchestrator, not the junk drawer.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import TYPE_CHECKING
+
+from dbxcarta.contract import NodeLabel
+
+if TYPE_CHECKING:
+    from pyspark.sql import DataFrame
+
+    from dbxcarta.settings import Settings
+
+logger = logging.getLogger(__name__)
+
+
+def parse_volume_path(path: str) -> list[str]:
+    """Validate a /Volumes path and return its parts (after lstrip).
+
+    Requires at least /Volumes/<cat>/<schema>/<vol>/<subdir> (5 segments).
+    Raises RuntimeError for bare volume roots so neither preflight nor
+    resolve_staging_path silently accepts a path that will fail at runtime.
+    """
+    parts = path.lstrip("/").split("/")
+    if len(parts) < 5 or parts[0] != "Volumes":
+        raise RuntimeError(
+            f"[dbxcarta] volume path must be at least"
+            f" /Volumes/<cat>/<schema>/<vol>/<subdir>, got {path!r}."
+            f" Set DBXCARTA_SUMMARY_VOLUME to a path with a subdirectory"
+            f" under the volume root (e.g. /Volumes/cat/schema/vol/dbxcarta)."
+        )
+    return parts
+
+
+def resolve_staging_path(settings: "Settings") -> str:
+    """Return the Delta staging root.
+
+    If DBXCARTA_STAGING_PATH is set, use it verbatim. Otherwise derive a sibling
+    "staging" directory under the same UC volume as DBXCARTA_SUMMARY_VOLUME by
+    stripping the summary subdir.
+    """
+    configured = settings.dbxcarta_staging_path.strip()
+    if configured:
+        return configured.rstrip("/")
+    summary_root = settings.dbxcarta_summary_volume.rstrip("/")
+    parts = parse_volume_path(summary_root)
+    parent = "/" + "/".join(parts[:-1])
+    return f"{parent}/staging"
+
+
+def resolve_ledger_path(settings: "Settings") -> str:
+    """Return the Delta ledger root.
+
+    Sibling "ledger" directory under the same UC volume as the summary volume
+    when unset. The ledger is never truncated between runs — it persists as a
+    durable cache.
+    """
+    configured = settings.dbxcarta_ledger_path.strip()
+    if configured:
+        return configured.rstrip("/")
+    summary_root = settings.dbxcarta_summary_volume.rstrip("/")
+    parts = parse_volume_path(summary_root)
+    parent = "/" + "/".join(parts[:-1])
+    return f"{parent}/ledger"
+
+
+def truncate_staging_root(staging_root: str) -> None:
+    """Remove the staging root so each run starts clean.
+
+    Overwrite-per-label would leave orphan subdirs when a label's embedding
+    flag flips off between runs; truncating the whole root once per run keeps
+    the staging volume faithful to the current config.
+
+    Probe-first design: check existence via `dbutils.fs.ls` and narrow-catch
+    only on the probe. Any failure from the destructive `rm` call propagates
+    as signal. The probe catch is scoped to `Py4JJavaError`, the only
+    exception type the dbutils.fs bridge raises when a path is missing.
+    """
+    from databricks.sdk.runtime import dbutils
+    from py4j.protocol import Py4JJavaError
+
+    try:
+        dbutils.fs.ls(staging_root)
+        exists = True
+    except Py4JJavaError:
+        exists = False
+
+    if exists:
+        dbutils.fs.rm(staging_root, recurse=True)
+        logger.info("[dbxcarta] truncated staging root %s", staging_root)
+    else:
+        logger.info("[dbxcarta] staging root %s not present", staging_root)
+
+
+def stage_embedded_nodes(df: "DataFrame", staging_root: str, label: NodeLabel) -> "DataFrame":
+    """Write df to <staging_root>/<label>_nodes as Delta and read back.
+
+    overwriteSchema is enabled so future column additions don't require a
+    manual drop of the staging table. The returned DataFrame is a fresh read
+    off the staging table, so the failure-rate aggregation and the Neo4j write
+    do not re-invoke ai_query.
+    """
+    out = f"{staging_root.rstrip('/')}/{label.value.lower()}_nodes"
+    (
+        df.write.format("delta")
+        .mode("overwrite")
+        .option("overwriteSchema", "true")
+        .save(out)
+    )
+    logger.info("[dbxcarta] staged %s nodes at %s", label.value, out)
+    return df.sparkSession.read.format("delta").load(out)

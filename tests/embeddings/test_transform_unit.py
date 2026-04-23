@@ -11,7 +11,6 @@ import hashlib
 
 import pytest
 
-from dbxcarta.contract import LABEL_COLUMN, LABEL_TABLE
 from dbxcarta.embeddings import _validate_embedding, add_embedding_column
 
 
@@ -79,17 +78,15 @@ def test_validate_embedding_endpoint_error_wins(local_spark) -> None:
     assert row["err"] == "endpoint timeout"
 
 
-def test_label_driven_embedding_text_drop_source_inspection() -> None:
+def test_embedding_text_drop_source_inspection() -> None:
     """add_embedding_column cannot be called end-to-end in local Spark because
-    `ai_query` is a Databricks-only SQL function. Instead, assert the
-    invariant from the source: for `label != LABEL_TABLE` the function
-    drops `embedding_text`; the hash is always retained. Covered at runtime
-    by the integration suite once Stage 5 enables a non-Table label.
+    `ai_query` is a Databricks-only SQL function. Instead, assert the invariant
+    from the source: `embedding_text` is always dropped, the hash is always
+    retained. Covered at runtime by the integration suite.
     """
     import inspect
 
     source = inspect.getsource(add_embedding_column)
-    assert 'if label != LABEL_TABLE' in source
     assert '.drop("embedding_text")' in source
     assert 'embedding_text_hash' in source
 
@@ -149,7 +146,7 @@ def test_ledger_all_rows_hit_misses_empty(local_spark) -> None:
     from pyspark.sql.functions import sha2, expr
     from pyspark.sql.types import ArrayType, DoubleType, StringType, StructField, StructType, TimestampType
 
-    from dbxcarta.pipeline import _split_by_ledger
+    from dbxcarta.ledger import split_by_ledger
 
     endpoint = "test-model"
     stored_vec = [0.5] * 4
@@ -179,7 +176,7 @@ def test_ledger_all_rows_hit_misses_empty(local_spark) -> None:
         schema=ledger_schema,
     )
 
-    hits_df, misses_df = _split_by_ledger(df_hashed, ledger_df, endpoint)
+    hits_df, misses_df = split_by_ledger(df_hashed, ledger_df, endpoint)
 
     assert misses_df.count() == 0
     assert hits_df.count() == 2
@@ -194,7 +191,7 @@ def test_ledger_hash_mismatch_is_miss(local_spark) -> None:
     from pyspark.sql.functions import sha2, expr
     from pyspark.sql.types import ArrayType, DoubleType, StringType, StructField, StructType, TimestampType
 
-    from dbxcarta.pipeline import _split_by_ledger
+    from dbxcarta.ledger import split_by_ledger
 
     endpoint = "test-model"
     stored_vec = [0.5] * 4
@@ -215,7 +212,7 @@ def test_ledger_hash_mismatch_is_miss(local_spark) -> None:
         schema=ledger_schema,
     )
 
-    hits_df, misses_df = _split_by_ledger(df_hashed, ledger_df, endpoint)
+    hits_df, misses_df = split_by_ledger(df_hashed, ledger_df, endpoint)
 
     assert hits_df.count() == 0
     assert misses_df.count() == 1
@@ -228,7 +225,7 @@ def test_ledger_model_mismatch_is_miss(local_spark) -> None:
     from pyspark.sql.functions import sha2, expr
     from pyspark.sql.types import ArrayType, DoubleType, StringType, StructField, StructType, TimestampType
 
-    from dbxcarta.pipeline import _split_by_ledger
+    from dbxcarta.ledger import split_by_ledger
 
     current_endpoint = "new-model"
     stored_vec = [0.5] * 4
@@ -250,7 +247,7 @@ def test_ledger_model_mismatch_is_miss(local_spark) -> None:
         schema=ledger_schema,
     )
 
-    hits_df, misses_df = _split_by_ledger(df_hashed, ledger_df, current_endpoint)
+    hits_df, misses_df = split_by_ledger(df_hashed, ledger_df, current_endpoint)
 
     assert hits_df.count() == 0
     assert misses_df.count() == 1

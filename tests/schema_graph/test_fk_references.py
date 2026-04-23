@@ -19,7 +19,7 @@ Three concerns, distinguished because they apply in different scopes:
 
 from neo4j import Driver
 
-from dbxcarta.contract import REL_REFERENCES
+from dbxcarta.contract import RelType
 
 _FIXTURE_SCHEMAS = {
     "dbxcarta_test_sales",
@@ -36,7 +36,7 @@ def test_references_edge_count_matches(neo4j_driver: Driver, run_summary: dict) 
     fk_references = run_summary["row_counts"].get("fk_references", 0)
     with neo4j_driver.session() as s:
         edges = s.run(
-            f"MATCH ()-[r:{REL_REFERENCES}]->() RETURN count(r) AS cnt"
+            f"MATCH ()-[r:{RelType.REFERENCES}]->() RETURN count(r) AS cnt"
         ).single()["cnt"]
     assert edges == fk_references, (
         f"Neo4j has {edges} REFERENCES edges; run summary reported {fk_references}."

@@ -1,8 +1,8 @@
 # FK-inference internal types
 
-Deliverable from worklog/fk-gap-v3-build.md Phase 3.5. Documents the nominal
-dataclass layout introduced by the foundation rewrite, and pinpoints the one
-place each boundary conversion happens.
+Deliverable from `worklog/fk-gap-v3-build.md` Phases 3.5 and 3.6. Documents
+the nominal dataclass layout introduced by the foundation rewrite, and
+pinpoints the one place each boundary conversion happens.
 
 ## Layer map
 
@@ -11,97 +11,172 @@ Spark DataFrames (information_schema.*)
         │
         │ .collect() → Row[dict-like]
         ▼
-┌───────────────────────────────────────────────────────┐
-│ pipeline._infer_metadata_references (the edge)         │
-│                                                       │
-│   columns_df       → [ColumnMeta.from_row(r), ...]    │
-│   pk_rows_df       → [ConstraintRow.from_row(r), ...] │
-│   fk_pairs_df      → frozenset[DeclaredPair]          │
-│                                                       │
-│ No dict-key access past this point.                   │
-└───────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────┐
+│ extract.extract (pure UC pull)                             │
+│ inference.run_inferences (pipeline edge, both FK phases)   │
+│                                                            │
+│   columns_df      → [ColumnMeta.from_row(r), ...]          │
+│   pk_rows_df      → [ConstraintRow.from_row(r), ...]       │
+│   fk_pairs_df     → frozenset[DeclaredPair]                │
+│   column_node_df  → dict[col_id, ColumnEmbedding]          │
+│   value_node_df⋈has_value_df → ValueIndex                  │
+│                                                            │
+│ No dict-key access past this point.                        │
+└────────────────────────────────────────────────────────────┘
         │
         ▼
-┌───────────────────────────────────────────────────────┐
-│ fk_inference.infer_fk_pairs (pure Python)             │
-│                                                       │
-│   list[ColumnMeta] × PKIndex × frozenset[DeclaredPair]│
-│     → (list[InferredRef], InferenceCounters)          │
-│                                                       │
-│ Attribute access only. Enums for name-match and PK-   │
-│ evidence kinds; RejectionReason / ScoreBucket keys    │
-│ into the counters maps.                               │
-└───────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────┐
+│ fk_inference.infer_fk_pairs     (Phase 3, pure Python)     │
+│ fk_semantic.infer_semantic_pairs (Phase 4, pure Python)    │
+│                                                            │
+│   Attribute access only. Enums for name-match, PK-         │
+│   evidence, rejection-reason, score bucket, edge source.   │
+│   Pure-Python cosine in fk_semantic (no numpy dep).        │
+└────────────────────────────────────────────────────────────┘
         │
         ▼
-┌───────────────────────────────────────────────────────┐
-│ schema_graph.build_inferred_metadata_references_rel    │
-│                                                       │
-│   list[InferredRef] → Spark DataFrame (5-col schema)  │
-│                                                       │
-│ Single InferredRef → tuple conversion point.          │
-└───────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────┐
+│ schema_graph.build_inferred_references_rel                 │
+│                                                            │
+│   list[InferredRef] → Spark DataFrame (5-col schema)       │
+│                                                            │
+│ Single InferredRef → tuple conversion. EdgeSource.value    │
+│ serialization is here — no magic strings downstream.       │
+└────────────────────────────────────────────────────────────┘
         │
         ▼
 Spark DataFrame → Neo4j Spark Connector
 ```
 
-Counters flatten to `RunSummary.row_counts` via
-`InferenceCounters.as_summary_dict("fk_inferred_metadata")`. This is the
-single place where enum keys become prefixed string keys; the Delta-table
-column `row_counts MAP<STRING, BIGINT>` forces the string shape and is a
-non-goal to change (see Phase 3.5 Non-goals).
+Run-summary counters flatten to `RunSummary.row_counts` (on the wire) via
+each counter class's `as_summary_dict(prefix)`. The flattening happens
+inside `RunSummary.to_dict()` — **the sole point** where nominal enum
+keys become prefixed string keys. Delta table column
+`row_counts MAP<STRING, BIGINT>` forces the string shape on storage, but
+nothing upstream of the write boundary touches a stringly-typed counter.
+
+## File layout (post-Phase-3.6)
+
+```
+src/dbxcarta/
+  contract.py      NodeLabel, RelType, EdgeSource (StrEnum); generate_id
+  fk_common.py     ColumnMeta, ConstraintRow, DeclaredPair, InferredRef,
+                   PKIndex, PKEvidence, pk_kind, types_compatible,
+                   canonicalize, build_id_cols_index, _TYPE_EQUIV
+  fk_inference.py  Phase 3 metadata: NameMatchKind, RejectionReason,
+                   ScoreBucket, _SCORE_TABLE, InferenceCounters,
+                   infer_fk_pairs
+  fk_semantic.py   Phase 4 semantic: ColumnEmbedding, ValueIndex,
+                   SemanticRejectionReason, SemanticInferenceCounters,
+                   infer_semantic_pairs
+  extract.py       ExtractResult + extract() — pure UC pull
+  inference.py     InferenceResult + run_inferences() — Phase 3 + Phase 4
+  settings.py      Settings (pydantic) + cross-field validators
+  staging.py       Path resolution + Delta staging lifecycle
+  ledger.py        Re-embedding ledger I/O
+  neo4j_io.py      bootstrap/purge/query/load wrappers typed with enums
+  preflight.py     Pre-run checks (catalog, volume, endpoint)
+  pipeline.py      run_dbxcarta + _run orchestrator (thin)
+  embeddings.py    ai_query transform
+  sample_values.py Distinct-value sampling
+  summary.py       RunSummary + nominal sub-counter dataclasses
+  schema_graph.py  DataFrame builders (nodes, rels, inferred refs)
+  writer.py        Neo4j Spark Connector wrappers
+  contract.py      Identifier generation + enums
+```
 
 ## Types
 
 | Type | Frozen | Owner module | Purpose |
 |---|---|---|---|
-| `ColumnMeta` | yes | `fk_inference` | Driver-side column metadata row |
-| `ConstraintRow` | yes | `fk_inference` | `information_schema.key_column_usage` + `table_constraints` row |
-| `DeclaredPair` | yes | `fk_inference` | (source_id, target_id) declared-FK suppression set member |
-| `InferredRef` | yes | `fk_inference` | Emitted REFERENCES edge, 5-tuple shape |
-| `PKIndex` | yes | `fk_inference` | Declared PK/UNIQUE index, composite count |
-| `InferenceCounters` | no | `fk_inference` | Mutable aggregate: candidates/accepted/rejections/buckets |
+| `NodeLabel` | StrEnum | `contract` | Neo4j node labels |
+| `RelType` | StrEnum | `contract` | Neo4j relationship types |
+| `EdgeSource` | StrEnum | `contract` | `REFERENCES.source` provenance tag |
+| `ColumnMeta` | yes | `fk_common` | Driver-side column metadata row |
+| `ConstraintRow` | yes | `fk_common` | `information_schema.key_column_usage` row |
+| `DeclaredPair` | yes | `fk_common` | (source_id, target_id) suppression-set member |
+| `InferredRef` | yes | `fk_common` | Emitted REFERENCES edge (source: EdgeSource) |
+| `PKIndex` | yes | `fk_common` | Declared PK/UNIQUE index + composite-count |
+| `PKEvidence` | enum | `fk_common` | DECLARED_PK / UNIQUE_OR_HEUR |
 | `NameMatchKind` | enum | `fk_inference` | EXACT / SUFFIX |
-| `PKEvidence` | enum | `fk_inference` | DECLARED_PK / UNIQUE_OR_HEUR |
-| `RejectionReason` | enum | `fk_inference` | NAME, TYPE, PK, SUB_THRESHOLD, TIE_BREAK, DUPLICATE_DECLARED |
-| `ScoreBucket` | enum | `fk_inference` | 0.95 / 0.90 / 0.88 / 0.83 / 0.82 / 0.78 buckets |
+| `RejectionReason` | enum | `fk_inference` | Phase 3 rejection tags |
+| `ScoreBucket` | enum | `fk_inference` | Phase 3 score buckets |
+| `InferenceCounters` | no | `fk_inference` | Phase 3 mutable counter aggregate |
+| `ColumnEmbedding` | yes | `fk_semantic` | col_id + vector + cached norm |
+| `ValueIndex` | yes | `fk_semantic` | col_id → frozenset[sampled value-text] |
+| `SemanticRejectionReason` | enum | `fk_semantic` | Phase 4 rejection tags |
+| `SemanticInferenceCounters` | no | `fk_semantic` | Phase 4 mutable counter aggregate |
+| `ExtractResult` | no | `extract` | Raw UC DataFrames post-pull |
+| `InferenceResult` | no | `inference` | Phase 3 + Phase 4 DataFrames + counts |
+| `ExtractCounts` | no | `summary` | Per-catalog row counts |
+| `SampleValueCounts` | no | `summary` | Sample-values stats, flattens to row_counts |
+| `EmbeddingCounts` | no | `summary` | Per-NodeLabel embedding bookkeeping |
+| `RunSummary` | no | `summary` | Top-level aggregate; `to_dict` flattens to wire shape |
 
 ## Invariants
 
-- **Counter invariant.** After `infer_fk_pairs` returns,
-  `counters.candidates == counters.accepted + sum(counters.rejections.values())`.
-  Enforced by `test_counter_invariant_on_v5fk` and
-  `test_counter_invariant_on_sub_threshold_fixture`. The previous silent
-  `continue` for sub-threshold scores is now accounted for via
-  `RejectionReason.SUB_THRESHOLD`.
+- **Counter invariants.** After Phase 3,
+  `fk_metadata.candidates == fk_metadata.accepted + Σ rejections`.
+  After Phase 4,
+  `fk_semantic.considered == fk_semantic.accepted + Σ rejections`
+  (and `fk_semantic.value_corroborated` is an independent overlay,
+  not a rejection). Enforced by counter-invariant tests in both test
+  suites.
 
 - **Immutability.** `ColumnMeta`, `ConstraintRow`, `DeclaredPair`,
-  `InferredRef`, `PKIndex` are all `frozen=True, slots=True`. Enforced by
-  `test_*_is_frozen` cases. Immutability is load-bearing for
-  `frozenset[DeclaredPair]` hashing.
+  `InferredRef`, `PKIndex`, `ColumnEmbedding`, `ValueIndex` are all
+  `frozen=True, slots=True`. Enforced by `test_*_is_frozen` cases.
+  Immutability is load-bearing for `frozenset[DeclaredPair]` hashing.
 
-- **PK-evidence purity.** `PKIndex` holds only what the DBA declared (PRIMARY
-  KEY + leftmost UNIQUE). Name-based fallback (`id`, `{table}_id`) lives in
-  the free function `_build_id_cols_index` consumed by `_pk_kind`. Intent: do
-  not entangle declared evidence with inferred-from-column-names evidence
-  inside a single type.
+- **PK-evidence purity.** `PKIndex` holds only what the DBA declared
+  (PRIMARY KEY + leftmost UNIQUE). Name-based fallback (`id`,
+  `{table}_id`) lives in the free function `build_id_cols_index`
+  consumed by `pk_kind`. Intent: do not entangle declared evidence with
+  inferred-from-column-names evidence inside a single type.
 
-- **Boundary conversion is single-source.** `ColumnMeta.from_row` /
-  `ConstraintRow.from_row` are the only places that rename Spark-Row keys
-  (`table_catalog` → `catalog`, `column_name` → `column`). Grep for those
-  classmethods before adding any other conversion point.
+- **Boundary conversions are single-source.** Spark Row → dataclass
+  happens once per type at `*.from_row` classmethods called exclusively
+  from `extract.py` / `inference.py`. Dataclass → Spark tuple happens
+  once in `schema_graph.build_inferred_references_rel`. Enum → string
+  (for both Cypher interpolation and DataFrame literals) goes through
+  `.value` at the single serialization site.
+
+- **Magic strings are eliminated in the FK surface.** Labels, rel types,
+  edge sources, and embedding-text label keys are all `StrEnum` members;
+  never module-level string constants. Grep `LABEL_|REL_HAS|REL_REFERENCES`
+  in `src/dbxcarta/` should return zero hits.
+
+## Settings cross-field validation
+
+`Settings.model_validator(mode="after")` rejects two known-incoherent
+configurations at construction (not halfway through a run):
+
+- `DBXCARTA_INFER_SEMANTIC=true` with
+  `DBXCARTA_INCLUDE_EMBEDDINGS_COLUMNS=false` — Phase 4 needs column
+  embeddings. Default: both flags `false`; enable together to use
+  Phase 4.
+- `DBXCARTA_INCLUDE_EMBEDDINGS_VALUES=true` with
+  `DBXCARTA_INCLUDE_VALUES=false` — Value embeddings need Value nodes
+  to embed. Previously a runtime warning; Phase 3.6 moves it to the
+  boundary.
 
 ## PEP-8 / python-focus compliance
 
-Per `docs/PYTHON-FOCUS-SKILL.md`:
-
-- Pydantic is used at env-var boundary (`Settings`) only. Internal DTOs are
-  `@dataclass`, per the skill's decision table.
+- Pydantic is used at the env-var boundary (`Settings`) only. Internal
+  DTOs are `@dataclass`, per the skill's decision table.
 - `_IDENTIFIER_RE` is strict (`^[a-zA-Z_][a-zA-Z0-9_]*$`); dotted
-  `dbxcarta_summary_table` is split on `.` and validated per part.
-- Exception catches narrowed: `AnalysisException` for Delta-missing-path,
-  `Py4JJavaError` scoped to the `dbutils.fs.ls` probe in
-  `_truncate_staging_root`. No `# noqa: BLE001` remains.
-- Type hints on every public signature in `fk_inference.py`; strict mypy
-  config lives under `[[tool.mypy.overrides]]` for the module.
+  `dbxcarta_summary_table` splits on `.` and validates per part.
+- Exception catches narrowed across the FK-touching surface:
+  - `AnalysisException` for Delta missing-path (`ledger.read_ledger`).
+  - `AnalysisException` for Delta merge-target missing (`ledger.upsert_ledger`).
+  - `Py4JJavaError` scoped to the `dbutils.fs.ls` probe in
+    `staging.truncate_staging_root`.
+  - `(AnalysisException, Py4JJavaError)` in `sample_values`'s three
+    per-table/per-chunk resilience sites and in `preflight`'s ai_query
+    probe.
+  - One deliberate `except Exception` remains in `pipeline.run_dbxcarta`
+    — the top-level catch-all whose job is to record any failure into
+    `RunSummary.error` before re-raising. Narrowing it would silently
+    lose novel failure modes. Documented in code.
+- mypy-strict config covers the entire domain layer via
+  `[[tool.mypy.overrides]]` in `pyproject.toml`.

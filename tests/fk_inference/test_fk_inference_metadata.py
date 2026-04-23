@@ -28,21 +28,23 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
-from dbxcarta.contract import REFERENCES_PROPERTIES
-from dbxcarta.fk_inference import (
-    _SCORE_TABLE,
+from dbxcarta.contract import EdgeSource, REFERENCES_PROPERTIES
+from dbxcarta.fk_common import (
     ColumnMeta,
     ConstraintRow,
     DeclaredPair,
     InferredRef,
-    NameMatchKind,
     PKEvidence,
     PKIndex,
+)
+from dbxcarta.fk_inference import (
+    _SCORE_TABLE,
+    NameMatchKind,
     RejectionReason,
     ScoreBucket,
     infer_fk_pairs,
 )
-from dbxcarta.schema_graph import build_inferred_metadata_references_rel
+from dbxcarta.schema_graph import build_inferred_references_rel
 
 
 _CAT = "main"
@@ -115,7 +117,7 @@ def test_v5fk_rediscovers_three_declared_fks_at_0_83() -> None:
     assert expected.issubset(edges), f"missing: {expected - edges}"
     for r in refs:
         assert r.confidence >= _S_SUFFIX_DPK_NO_COMMENT
-        assert r.source == "inferred_metadata"
+        assert r.source is EdgeSource.INFERRED_METADATA
         assert r.criteria is None
     assert counters.accepted == len(refs)
 
@@ -293,9 +295,9 @@ def test_build_inferred_dataframe_columns_match_references_properties(
     refs = [InferredRef(
         source_id="cat.s.t.a", target_id="cat.s.t.b",
         confidence=_S_SUFFIX_DPK_NO_COMMENT,
-        source="inferred_metadata", criteria=None,
+        source=EdgeSource.INFERRED_METADATA, criteria=None,
     )]
-    df = build_inferred_metadata_references_rel(local_spark, refs)
+    df = build_inferred_references_rel(local_spark, refs)
     assert tuple(df.columns) == _EXPECTED_COLUMNS
     assert set(REFERENCES_PROPERTIES).issubset(set(df.columns))
 
@@ -304,7 +306,7 @@ def test_build_inferred_dataframe_empty_rows(local_spark) -> None:
     """Empty input still produces a schema-shaped DataFrame; _load guards on
     the emit count so this path is never written to Neo4j, but the builder
     must not crash on the edge case."""
-    df = build_inferred_metadata_references_rel(local_spark, [])
+    df = build_inferred_references_rel(local_spark, [])
     assert tuple(df.columns) == _EXPECTED_COLUMNS
     assert df.count() == 0
 
@@ -392,6 +394,9 @@ def test_counters_flatten_to_summary_dict() -> None:
     flat = counters.as_summary_dict("fk_inferred_metadata")
     assert "fk_inferred_metadata_candidates" in flat
     assert "fk_inferred_metadata_accepted" in flat
+    # composite_pk_skipped was a sidebar write in Phase 3; folded into
+    # InferenceCounters in Phase 3.6 — assert it's emitted by as_summary_dict.
+    assert "fk_inferred_metadata_composite_pk_skipped" in flat
     for reason in RejectionReason:
         assert f"fk_inferred_metadata_{reason.value}" in flat
     for bucket in ScoreBucket:
@@ -407,7 +412,7 @@ def test_declared_pair_is_frozen() -> None:
 def test_inferred_ref_is_frozen() -> None:
     r = InferredRef(
         source_id="a", target_id="b", confidence=0.9,
-        source="inferred_metadata", criteria=None,
+        source=EdgeSource.INFERRED_METADATA, criteria=None,
     )
     with pytest.raises(FrozenInstanceError):
         r.confidence = 0.5  # type: ignore[misc]
@@ -454,15 +459,15 @@ def test_declared_pair_equality_and_hash() -> None:
 def test_inferred_ref_equality_and_hash() -> None:
     r1 = InferredRef(
         source_id="s", target_id="t", confidence=0.83,
-        source="inferred_metadata", criteria=None,
+        source=EdgeSource.INFERRED_METADATA, criteria=None,
     )
     r2 = InferredRef(
         source_id="s", target_id="t", confidence=0.83,
-        source="inferred_metadata", criteria=None,
+        source=EdgeSource.INFERRED_METADATA, criteria=None,
     )
     r3 = InferredRef(
         source_id="s", target_id="t", confidence=0.90,
-        source="inferred_metadata", criteria=None,
+        source=EdgeSource.INFERRED_METADATA, criteria=None,
     )
     assert r1 == r2
     assert hash(r1) == hash(r2)
