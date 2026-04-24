@@ -1,61 +1,48 @@
-"""Phase 2 deliverable: build_references_rel sets provenance on declared edges.
+"""build_references_rel sets provenance from each FKEdge.source tag.
 
-Every row out of build_references_rel must carry the three new properties
-(confidence=1.0, source="declared", criteria=null). When Phases 3/4/6 add
-inferred edges, they write their own DataFrames with the same schema and
-different values, so this test stays the source of truth for declared
-provenance.
-
-Uses three representative FK pairs from the test fixture schemas created by
-tests/fixtures/setup_test_catalog.sql, including the cross-schema pair
-(sales.order_items.product_id -> inventory.products.id).
-
-See worklog/fk-gap-v3-build.md Phase 2.
+Source-agnostic builder: declared (1.0, "declared", null), metadata
+(score, "inferred_metadata", null), semantic (score, "semantic", null)
+all flow through the same 5-column schema via the FKEdge dataclass.
 """
 
 from __future__ import annotations
 
-from dbxcarta.contract import REFERENCES_PROPERTIES
+from dbxcarta.contract import EdgeSource, REFERENCES_PROPERTIES
+from dbxcarta.fk_common import FKEdge
 from dbxcarta.schema_graph import build_references_rel
 
 
 _EXPECTED_COLUMNS = ("source_id", "target_id", "confidence", "source", "criteria")
 
 
-def _fk_pairs_rows(local_spark):
-    """Three declared FK pairs from the test fixture schemas.
-
-    Covers intra-schema (orders->customers, order_items->orders) and
-    cross-schema (order_items.product_id -> inventory.products.id) cases.
-    """
-    rows = [
-        (
-            "main", "dbxcarta_test_sales", "orders", "customer_id",
-            "main", "dbxcarta_test_sales", "customers", "id",
+def _declared_edges() -> list[FKEdge]:
+    """Three declared FK edges: intra-schema + cross-schema."""
+    return [
+        FKEdge(
+            source_id="main.dbxcarta_test_sales.orders.customer_id",
+            target_id="main.dbxcarta_test_sales.customers.id",
+            confidence=1.0, source=EdgeSource.DECLARED, criteria=None,
         ),
-        (
-            "main", "dbxcarta_test_sales", "order_items", "order_id",
-            "main", "dbxcarta_test_sales", "orders", "id",
+        FKEdge(
+            source_id="main.dbxcarta_test_sales.order_items.order_id",
+            target_id="main.dbxcarta_test_sales.orders.id",
+            confidence=1.0, source=EdgeSource.DECLARED, criteria=None,
         ),
-        (
-            "main", "dbxcarta_test_sales", "order_items", "product_id",
-            "main", "dbxcarta_test_inventory", "products", "id",
+        FKEdge(
+            source_id="main.dbxcarta_test_sales.order_items.product_id",
+            target_id="main.dbxcarta_test_inventory.products.id",
+            confidence=1.0, source=EdgeSource.DECLARED, criteria=None,
         ),
     ]
-    schema = (
-        "src_catalog STRING, src_schema STRING, src_table STRING, src_column STRING, "
-        "tgt_catalog STRING, tgt_schema STRING, tgt_table STRING, tgt_column STRING"
-    )
-    return local_spark.createDataFrame(rows, schema=schema)
 
 
 def test_build_references_emits_provenance_columns(local_spark) -> None:
-    df = build_references_rel(_fk_pairs_rows(local_spark))
+    df = build_references_rel(local_spark, _declared_edges())
     assert tuple(df.columns) == _EXPECTED_COLUMNS
 
 
 def test_build_references_declared_values(local_spark) -> None:
-    rows = build_references_rel(_fk_pairs_rows(local_spark)).collect()
+    rows = build_references_rel(local_spark, _declared_edges()).collect()
     assert len(rows) == 3
     for row in rows:
         assert row["confidence"] == 1.0
@@ -63,24 +50,36 @@ def test_build_references_declared_values(local_spark) -> None:
         assert row["criteria"] is None
 
 
-def test_build_references_ids_are_normalized(local_spark) -> None:
-    """Sanity that the id_expr wiring survived the provenance additions."""
-    rows = sorted(
-        build_references_rel(_fk_pairs_rows(local_spark)).collect(),
-        key=lambda r: (r["source_id"], r["target_id"]),
-    )
+def test_build_references_preserves_ids(local_spark) -> None:
+    rows = build_references_rel(local_spark, _declared_edges()).collect()
     source_ids = {r["source_id"] for r in rows}
     target_ids = {r["target_id"] for r in rows}
     assert "main.dbxcarta_test_sales.orders.customer_id" in source_ids
     assert "main.dbxcarta_test_sales.customers.id" in target_ids
 
 
+def test_build_references_source_tag_is_serialized_from_enum(local_spark) -> None:
+    """Non-declared EdgeSource values round-trip as their string .value."""
+    edges = [
+        FKEdge(
+            source_id="cat.s.t.a", target_id="cat.s.t.b",
+            confidence=0.85, source=EdgeSource.INFERRED_METADATA, criteria=None,
+        ),
+        FKEdge(
+            source_id="cat.s.t.c", target_id="cat.s.t.d",
+            confidence=0.87, source=EdgeSource.SEMANTIC, criteria=None,
+        ),
+    ]
+    rows = {r["source"] for r in build_references_rel(local_spark, edges).collect()}
+    assert rows == {"inferred_metadata", "semantic"}
+
+
 def test_references_properties_tuple_matches_dataframe(local_spark) -> None:
-    """Contract's REFERENCES_PROPERTIES must be the DataFrame prop columns.
+    """Contract's REFERENCES_PROPERTIES must be a subset of the DataFrame columns.
 
     The writer passes REFERENCES_PROPERTIES to the Neo4j Spark Connector's
     `relationship.properties` option. If the DataFrame columns drift from
     that tuple, property writes silently stop.
     """
-    df_columns = set(build_references_rel(_fk_pairs_rows(local_spark)).columns)
+    df_columns = set(build_references_rel(local_spark, _declared_edges()).columns)
     assert set(REFERENCES_PROPERTIES).issubset(df_columns)

@@ -21,7 +21,7 @@ import dbxcarta.embeddings as emb
 import dbxcarta.sample_values as sv
 from dbxcarta.contract import CONTRACT_VERSION, NodeLabel, REFERENCES_PROPERTIES, RelType
 from dbxcarta.extract import ExtractResult, extract
-from dbxcarta.inference import InferenceResult, run_inferences
+from dbxcarta.fk_discovery import FKDiscoveryResult, run_fk_discovery
 from dbxcarta.ledger import read_ledger, split_by_ledger, upsert_ledger
 from dbxcarta.neo4j_io import (
     bootstrap_constraints,
@@ -159,7 +159,7 @@ def _run(
         )
         _check_thresholds(settings, summary)
 
-        inference_result = run_inferences(
+        fk_result = run_fk_discovery(
             spark, settings, schema_list, extract_result,
             values.sample_stats if values else None,
             values.value_node_df if values else None,
@@ -167,7 +167,7 @@ def _run(
             summary,
         )
 
-        _load(neo4j, driver, extract_result, inference_result, values, summary)
+        _load(neo4j, driver, extract_result, fk_result, values, summary)
         summary.neo4j_counts = query_counts(driver)
 
     extract_result.unpersist_cached()
@@ -279,7 +279,7 @@ def _load(
     neo4j: Neo4jConfig,
     driver: "Driver",
     extract_result: ExtractResult,
-    inference_result: InferenceResult,
+    fk_result: FKDiscoveryResult,
     values: ValueResult | None,
     summary: RunSummary,
 ) -> None:
@@ -333,32 +333,35 @@ def _load(
         RelType.HAS_COLUMN, NodeLabel.TABLE, NodeLabel.COLUMN,
     )
 
-    logger.info("[dbxcarta] writing relationships: REFERENCES (%d)", summary.extract.fk_references)
-    if summary.extract.fk_references > 0:
+    if fk_result.declared_edge_count > 0 and fk_result.declared_edges_df is not None:
+        logger.info(
+            "[dbxcarta] writing relationships: REFERENCES declared (%d)",
+            fk_result.declared_edge_count,
+        )
         write_rel(
-            extract_result.references_df.coalesce(1), neo4j,
+            fk_result.declared_edges_df.coalesce(1), neo4j,
             RelType.REFERENCES, NodeLabel.COLUMN, NodeLabel.COLUMN,
             properties=REFERENCES_PROPERTIES,
         )
 
-    if inference_result.metadata_edge_count > 0 and inference_result.metadata_inferred_df is not None:
+    if fk_result.metadata_edge_count > 0 and fk_result.metadata_edges_df is not None:
         logger.info(
             "[dbxcarta] writing relationships: REFERENCES inferred_metadata (%d)",
-            inference_result.metadata_edge_count,
+            fk_result.metadata_edge_count,
         )
         write_rel(
-            inference_result.metadata_inferred_df.coalesce(1), neo4j,
+            fk_result.metadata_edges_df.coalesce(1), neo4j,
             RelType.REFERENCES, NodeLabel.COLUMN, NodeLabel.COLUMN,
             properties=REFERENCES_PROPERTIES,
         )
 
-    if inference_result.semantic_edge_count > 0 and inference_result.semantic_inferred_df is not None:
+    if fk_result.semantic_edge_count > 0 and fk_result.semantic_edges_df is not None:
         logger.info(
             "[dbxcarta] writing relationships: REFERENCES semantic (%d)",
-            inference_result.semantic_edge_count,
+            fk_result.semantic_edge_count,
         )
         write_rel(
-            inference_result.semantic_inferred_df.coalesce(1), neo4j,
+            fk_result.semantic_edges_df.coalesce(1), neo4j,
             RelType.REFERENCES, NodeLabel.COLUMN, NodeLabel.COLUMN,
             properties=REFERENCES_PROPERTIES,
         )

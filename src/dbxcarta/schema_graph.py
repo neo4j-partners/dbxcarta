@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from dbxcarta.contract import CONTRACT_VERSION, EdgeSource, generate_id, id_expr
+from dbxcarta.contract import CONTRACT_VERSION, generate_id, id_expr
 
 if TYPE_CHECKING:
     from pyspark.sql import DataFrame, SparkSession
 
-    from dbxcarta.fk_common import InferredRef
+    from dbxcarta.fk_common import FKEdge
 
 
 def build_database_node(spark: "SparkSession", catalog: str) -> "DataFrame":
@@ -90,39 +90,14 @@ def build_has_column_rel(columns_df: "DataFrame") -> "DataFrame":
     )
 
 
-def build_references_rel(fk_pairs_df: "DataFrame") -> "DataFrame":
-    """Declared-FK edges carry provenance (1.0, EdgeSource.DECLARED.value, null).
-
-    Inferred-source phases (metadata / semantic) build DataFrames via
-    build_inferred_references_rel from InferredRef dataclasses whose `source`
-    field is an EdgeSource enum.
-    """
-    from pyspark.sql.functions import lit
-    from pyspark.sql.types import StringType
-
-    return (
-        fk_pairs_df
-        .withColumn("source_id", id_expr("src_catalog", "src_schema", "src_table", "src_column"))
-        .withColumn("target_id", id_expr("tgt_catalog", "tgt_schema", "tgt_table", "tgt_column"))
-        .withColumn("confidence", lit(1.0))
-        .withColumn("source", lit(EdgeSource.DECLARED.value))
-        .withColumn("criteria", lit(None).cast(StringType()))
-        .select("source_id", "target_id", "confidence", "source", "criteria")
-    )
-
-
-def build_inferred_references_rel(
-    spark: "SparkSession", refs: "list[InferredRef]",
+def build_references_rel(
+    spark: "SparkSession", edges: "list[FKEdge]",
 ) -> "DataFrame":
-    """Wrap inferred-reference dataclasses in the canonical REFERENCES 5-col schema.
+    """Wrap FKEdge dataclasses in the canonical REFERENCES 5-col schema.
 
-    Source-agnostic: accepts refs with any EdgeSource tag (INFERRED_METADATA,
-    SEMANTIC, …). The enum `.value` is serialized at this tuple boundary —
-    no magic strings downstream.
-
-    Separate from build_references_rel because declared-duplicate suppression
-    and provenance tagging happen in the inference layer; this module only
-    owns DataFrame shape.
+    Source-agnostic: accepts edges with any EdgeSource tag (DECLARED,
+    INFERRED_METADATA, SEMANTIC). The enum `.value` is serialized at this
+    tuple boundary — no magic strings downstream.
     """
     from pyspark.sql.types import DoubleType, StringType, StructField, StructType
 
@@ -134,7 +109,7 @@ def build_inferred_references_rel(
         StructField("criteria", StringType(), True),
     ])
     tuples = [
-        (r.source_id, r.target_id, r.confidence, r.source.value, r.criteria)
-        for r in refs
+        (e.source_id, e.target_id, e.confidence, e.source.value, e.criteria)
+        for e in edges
     ]
     return spark.createDataFrame(tuples, schema=schema)

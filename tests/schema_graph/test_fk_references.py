@@ -3,7 +3,7 @@
 Three concerns, distinguished because they apply in different scopes:
 
 1. Edge-count invariant (universal): Neo4j's REFERENCES count matches
-   run summary's fk_references.
+   run summary's fk_edges.
 2. Accounting invariant (universal): fk_skipped == fk_declared - fk_resolved.
 3. Fixture-exact assertion (only when the seeded test schemas are in scope):
    16 declared FKs resolve to 16 with 17 column-pair edges (the composite PK
@@ -33,13 +33,13 @@ _FIXTURE_EXPECTED_EDGES = 17
 
 
 def test_references_edge_count_matches(neo4j_driver: Driver, run_summary: dict) -> None:
-    fk_references = run_summary["row_counts"].get("fk_references", 0)
+    fk_edges = run_summary["row_counts"].get("fk_edges", 0)
     with neo4j_driver.session() as s:
         edges = s.run(
             f"MATCH ()-[r:{RelType.REFERENCES}]->() RETURN count(r) AS cnt"
         ).single()["cnt"]
-    assert edges == fk_references, (
-        f"Neo4j has {edges} REFERENCES edges; run summary reported {fk_references}."
+    assert edges == fk_edges, (
+        f"Neo4j has {edges} REFERENCES edges; run summary reported {fk_edges}."
         " A mismatch implies the Spark Connector dropped rows where an endpoint"
         " Column node did not exist."
     )
@@ -68,7 +68,7 @@ def test_fixture_coverage_exact(run_summary: dict) -> None:
     counts = run_summary["row_counts"]
     declared = counts.get("fk_declared", 0)
     resolved = counts.get("fk_resolved", 0)
-    fk_references = counts.get("fk_references", 0)
+    fk_edges = counts.get("fk_edges", 0)
 
     assert declared >= _FIXTURE_EXPECTED_DECLARED, (
         f"Fixture schemas in scope but fk_declared={declared} < {_FIXTURE_EXPECTED_DECLARED}."
@@ -77,4 +77,4 @@ def test_fixture_coverage_exact(run_summary: dict) -> None:
     # The fixtures must all resolve. If a production schema also in scope
     # contributes unresolvable FKs, the assertion relaxes to >=.
     assert resolved >= _FIXTURE_EXPECTED_RESOLVED
-    assert fk_references >= _FIXTURE_EXPECTED_EDGES
+    assert fk_edges >= _FIXTURE_EXPECTED_EDGES

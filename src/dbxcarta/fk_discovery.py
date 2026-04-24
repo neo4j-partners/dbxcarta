@@ -1,9 +1,14 @@
-"""Inference orchestration: Phase 3 (metadata) + Phase 4 (semantic).
+"""FK discovery orchestrator: runs declared → metadata → semantic.
 
-Pipeline boundary for all FK-inference work. Owns the Spark Row → dataclass
-conversions for columns, constraints, declared FK pairs, embeddings, and
-sampled values. Produces `InferenceResult` — ready-to-write REFERENCES
-DataFrames tagged with `EdgeSource.INFERRED_METADATA` / `EdgeSource.SEMANTIC`.
+Pipeline boundary for all FK-discovery work. Owns the Spark Row → dataclass
+conversions for columns, constraints, embeddings, and sampled values.
+Produces `FKDiscoveryResult` — ready-to-write REFERENCES DataFrames tagged
+with `EdgeSource.{DECLARED, INFERRED_METADATA, SEMANTIC}`.
+
+Each strategy receives `prior_pairs: frozenset[DeclaredPair]` accumulated
+from earlier strategies and skips pairs already covered. Declared receives
+an empty set; metadata receives declared's pairs; semantic receives
+declared + metadata.
 """
 
 from __future__ import annotations
@@ -13,14 +18,15 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import dbxcarta.schema_graph as sg
-from dbxcarta.contract import generate_id
 from dbxcarta.fk_common import (
     ColumnMeta,
     ConstraintRow,
     DeclaredPair,
+    FKEdge,
     PKIndex,
 )
-from dbxcarta.fk_inference import infer_fk_pairs
+from dbxcarta.fk_declared import discover_declared
+from dbxcarta.fk_metadata import infer_fk_pairs
 from dbxcarta.fk_semantic import (
     ColumnEmbedding,
     ValueIndex,
@@ -39,19 +45,21 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class InferenceResult:
-    """Post-inference DataFrames ready for the Neo4j REFERENCES write.
+class FKDiscoveryResult:
+    """Post-discovery DataFrames ready for the Neo4j REFERENCES write.
 
-    None when the corresponding phase produced zero rows (or was gated off).
-    The pipeline's load step skips writes whose DataFrame is None."""
+    None when the corresponding strategy produced zero edges (or was gated
+    off). The pipeline's load step skips writes whose DataFrame is None."""
 
-    metadata_inferred_df: "DataFrame | None"
+    declared_edges_df: "DataFrame | None"
+    declared_edge_count: int
+    metadata_edges_df: "DataFrame | None"
     metadata_edge_count: int
-    semantic_inferred_df: "DataFrame | None"
+    semantic_edges_df: "DataFrame | None"
     semantic_edge_count: int
 
 
-def run_inferences(
+def run_fk_discovery(
     spark: "SparkSession",
     settings: "Settings",
     schema_list: list[str],
@@ -60,84 +68,90 @@ def run_inferences(
     value_node_df: "DataFrame | None",
     has_value_df: "DataFrame | None",
     summary: RunSummary,
-) -> InferenceResult:
-    """Run Phase 3 and Phase 4 against the extracted material.
+) -> FKDiscoveryResult:
+    """Run declared → metadata → semantic, threading prior_pairs uniformly.
 
-    Phase 3 is gated on DBXCARTA_INFER_METADATA. When off, Phase 4 still
-    sees an empty metadata_inferred_pairs set; this is correct — Phase 4
-    just has more candidates to consider.
-
-    Phase 4 is gated on DBXCARTA_INFER_SEMANTIC and on a catalog-size floor
+    Semantic is gated on DBXCARTA_INFER_SEMANTIC and on a catalog-size floor
     (DBXCARTA_SEMANTIC_MIN_TABLES). Column embeddings are required and
     already validated present by Settings' cross-field validator.
     """
     column_metas = [ColumnMeta.from_row(r) for r in extract.columns_df.collect()]
-    declared_pairs = _build_declared_pairs(extract.fk_pairs_df)
     pk_index = _build_pk_index(spark, settings, schema_list)
 
-    # --- Phase 3 ------------------------------------------------------------
-    metadata_inferred_df: "DataFrame | None" = None
-    metadata_edge_count = 0
-    metadata_pairs: frozenset[DeclaredPair] = frozenset()
+    prior_pairs: frozenset[DeclaredPair] = frozenset()
 
-    if settings.dbxcarta_infer_metadata:
-        refs, counters = infer_fk_pairs(column_metas, pk_index, declared_pairs)
-        summary.fk_metadata = counters
-        logger.info(
-            "[dbxcarta] metadata inference: candidates=%d accepted=%d"
-            " composite_pks_skipped=%d",
-            counters.candidates, counters.accepted, counters.composite_pk_skipped,
-        )
-        if refs:
-            metadata_inferred_df = sg.build_inferred_references_rel(spark, refs)
-            metadata_edge_count = len(refs)
-            metadata_pairs = frozenset(
-                DeclaredPair(source_id=r.source_id, target_id=r.target_id)
-                for r in refs
-            )
+    declared_edges, declared_counters = discover_declared(
+        spark, settings, schema_list, prior_pairs=prior_pairs,
+    )
+    summary.fk_declared = declared_counters
+    declared_edges_df = (
+        sg.build_references_rel(spark, declared_edges) if declared_edges else None
+    )
+    prior_pairs = prior_pairs | _edges_as_pairs(declared_edges)
 
-    # --- Phase 4 ------------------------------------------------------------
-    semantic_inferred_df: "DataFrame | None" = None
+    metadata_edges, metadata_counters = infer_fk_pairs(
+        column_metas, pk_index, prior_pairs,
+    )
+    summary.fk_metadata = metadata_counters
+    logger.info(
+        "[dbxcarta] metadata inference: candidates=%d accepted=%d"
+        " composite_pks_skipped=%d",
+        metadata_counters.candidates, metadata_counters.accepted,
+        metadata_counters.composite_pk_skipped,
+    )
+    metadata_edges_df = (
+        sg.build_references_rel(spark, metadata_edges) if metadata_edges else None
+    )
+    prior_pairs = prior_pairs | _edges_as_pairs(metadata_edges)
+
+    semantic_edges_df: "DataFrame | None" = None
     semantic_edge_count = 0
 
     if _should_run_semantic(settings, summary.extract.tables):
         embeddings = _collect_column_embeddings(extract.column_node_df)
         value_index = _build_value_index(value_node_df, has_value_df, sample_stats)
 
-        refs, counters = infer_semantic_pairs(
+        semantic_edges, semantic_counters = infer_semantic_pairs(
             columns=column_metas,
             embeddings=embeddings,
             pk_index=pk_index,
-            declared_pairs=declared_pairs,
-            metadata_inferred_pairs=metadata_pairs,
+            prior_pairs=prior_pairs,
             value_index=value_index,
             threshold=settings.dbxcarta_semantic_threshold,
         )
-        summary.fk_semantic = counters
+        summary.fk_semantic = semantic_counters
         logger.info(
             "[dbxcarta] semantic inference: considered=%d accepted=%d"
             " value_corroborated=%d",
-            counters.considered, counters.accepted, counters.value_corroborated,
+            semantic_counters.considered, semantic_counters.accepted,
+            semantic_counters.value_corroborated,
         )
-        if refs:
-            semantic_inferred_df = sg.build_inferred_references_rel(spark, refs)
-            semantic_edge_count = len(refs)
+        if semantic_edges:
+            semantic_edges_df = sg.build_references_rel(spark, semantic_edges)
+            semantic_edge_count = len(semantic_edges)
 
-    return InferenceResult(
-        metadata_inferred_df=metadata_inferred_df,
-        metadata_edge_count=metadata_edge_count,
-        semantic_inferred_df=semantic_inferred_df,
+    return FKDiscoveryResult(
+        declared_edges_df=declared_edges_df,
+        declared_edge_count=len(declared_edges),
+        metadata_edges_df=metadata_edges_df,
+        metadata_edge_count=len(metadata_edges),
+        semantic_edges_df=semantic_edges_df,
         semantic_edge_count=semantic_edge_count,
     )
 
 
+def _edges_as_pairs(edges: list[FKEdge]) -> frozenset[DeclaredPair]:
+    return frozenset(
+        DeclaredPair(source_id=e.source_id, target_id=e.target_id) for e in edges
+    )
+
+
 def _should_run_semantic(settings: "Settings", n_tables: int) -> bool:
-    """Phase 4 runs iff enabled and the catalog exceeds the min-tables floor.
+    """Semantic runs iff enabled and the catalog exceeds the min-tables floor.
 
     On tiny catalogs, embedding similarity fires on unrelated pairs more often
     than it helps; the gate blocks that while letting small fixtures exercise
     the code path via a per-test override of DBXCARTA_SEMANTIC_MIN_TABLES.
-    Logging the skip is a side effect of the runner, not this predicate.
     """
     if not settings.dbxcarta_infer_semantic:
         return False
@@ -148,21 +162,6 @@ def _should_run_semantic(settings: "Settings", n_tables: int) -> bool:
         )
         return False
     return True
-
-
-def _build_declared_pairs(fk_pairs_df: "DataFrame") -> frozenset[DeclaredPair]:
-    """Pipeline-edge conversion: Spark Row → frozenset[DeclaredPair]."""
-    return frozenset(
-        DeclaredPair(
-            source_id=generate_id(
-                r["src_catalog"], r["src_schema"], r["src_table"], r["src_column"],
-            ),
-            target_id=generate_id(
-                r["tgt_catalog"], r["tgt_schema"], r["tgt_table"], r["tgt_column"],
-            ),
-        )
-        for r in fk_pairs_df.collect()
-    )
 
 
 def _build_pk_index(
@@ -195,7 +194,7 @@ def _collect_column_embeddings(column_node_df: "DataFrame") -> dict[str, ColumnE
     dict[col_id → ColumnEmbedding].
 
     Rows with null embedding (ai_query failures, dimension mismatches) are
-    skipped — Phase 4 never considers them as candidates."""
+    skipped — semantic discovery never considers them as candidates."""
     from pyspark.sql.functions import col
 
     rows = (
@@ -218,13 +217,9 @@ def _build_value_index(
     """Pipeline-edge conversion: Value node + HAS_VALUE edges → ValueIndex.
 
     Returns None when values weren't sampled (DBXCARTA_INCLUDE_VALUES off,
-    or zero value_nodes). Phase 4 interprets None as "no corroboration
+    or zero value_nodes). Semantic interprets None as "no corroboration
     signal available" and the value-bonus simply doesn't apply.
-
-    Joins the Value nodes (`id`, `value`) against HAS_VALUE edges
-    (`source_id` = col_id, `target_id` = value id) so the returned index is
-    col_id → frozenset[value-text]. Single driver-side collect; acceptable
-    at the Value-node cap set by DBXCARTA_SAMPLE_LIMIT."""
+    """
     from pyspark.sql.functions import col
 
     if (

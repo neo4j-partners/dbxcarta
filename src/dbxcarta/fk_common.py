@@ -1,12 +1,9 @@
-"""Shared FK-inference primitives.
+"""Shared FK-discovery primitives.
 
-Nominal types and helpers used by both Phase 3 (metadata, `fk_inference.py`)
-and Phase 4 (semantic, `fk_semantic.py`). Living in `fk_common.py` because
-they have two callers — Phase 3 was not their owner, only the first.
-
-Boundary rule (Phase 3.5 / Phase 3.6): Spark Row → dataclass conversion
-happens exactly once at the pipeline edge via the *.from_row classmethods.
-Dataclass → Spark tuple happens exactly once in schema_graph.
+Nominal types and helpers used by all three strategies (declared, metadata,
+semantic). Spark Row → dataclass conversion happens exactly once at the
+pipeline edge via the *.from_row classmethods. Dataclass → Spark tuple
+happens exactly once in schema_graph.
 """
 
 from __future__ import annotations
@@ -104,9 +101,9 @@ class DeclaredPair:
 
 
 @dataclass(frozen=True, slots=True)
-class InferredRef:
-    """Emitted inferred REFERENCES edge. Built in the inference layer, tuple-
-    converted once in schema_graph.build_inferred_references_rel.
+class FKEdge:
+    """Emitted REFERENCES edge. Built in any of the three discovery
+    strategies, tuple-converted once in schema_graph.build_references_rel.
 
     `source` is an EdgeSource enum (not a magic string); the DataFrame builder
     serializes `.value` at the tuple boundary."""
@@ -161,7 +158,7 @@ class PKIndex:
         )
 
 
-# --- Shared primitives (previously underscore-private in fk_inference) ------
+# --- Shared primitives ------------------------------------------------------
 
 def canonicalize(data_type: str) -> tuple[str, str | None]:
     """Reduce a declared type to (family, detail) for equality comparison.

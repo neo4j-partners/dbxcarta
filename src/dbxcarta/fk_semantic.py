@@ -1,7 +1,7 @@
-"""Phase 4: semantic (embedding-based) FK inference.
+"""Semantic (embedding-based) FK discovery.
 
-Runs after Phase 3. Considers only column pairs not already covered by
-declared FKs or Phase-3 metadata-inferred edges. Candidate gate reuses
+Runs after metadata. Considers only column pairs not already covered by
+earlier strategies (declared + metadata). Candidate gate reuses
 `pk_kind` and `types_compatible` from `fk_common`.
 
 Confidence model:
@@ -29,7 +29,7 @@ from dbxcarta.contract import EdgeSource
 from dbxcarta.fk_common import (
     ColumnMeta,
     DeclaredPair,
-    InferredRef,
+    FKEdge,
     PKIndex,
     build_id_cols_index,
     pk_kind,
@@ -143,8 +143,7 @@ def infer_semantic_pairs(
     columns: list[ColumnMeta],
     embeddings: dict[str, ColumnEmbedding],
     pk_index: PKIndex,
-    declared_pairs: frozenset[DeclaredPair],
-    metadata_inferred_pairs: frozenset[DeclaredPair],
+    prior_pairs: frozenset[DeclaredPair],
     value_index: ValueIndex | None = None,
     *,
     threshold: float = 0.85,
@@ -152,25 +151,23 @@ def infer_semantic_pairs(
     cap: float = 0.90,
     value_bonus: float = 0.05,
     overlap_threshold: float = 0.5,
-) -> tuple[list[InferredRef], SemanticInferenceCounters]:
-    """Emit semantic-inferred REFERENCES refs tagged with EdgeSource.SEMANTIC.
+) -> tuple[list[FKEdge], SemanticInferenceCounters]:
+    """Emit semantic-inferred REFERENCES edges tagged with EdgeSource.SEMANTIC.
 
     columns: ColumnMeta for every column in the catalog-under-inference.
     embeddings: col_id → ColumnEmbedding. Columns without an embedding (e.g.,
       ai_query errors) are silently skipped from the candidate pool — no
       counter increment because they never entered the "considered" set.
-    pk_index: same PKIndex Phase 3 built; reused here for the target gate.
-    declared_pairs: declared FKs (already covered).
-    metadata_inferred_pairs: Phase 3 output (already covered).
+    pk_index: shared PKIndex; reused here for the target gate.
+    prior_pairs: pairs already covered by declared + metadata strategies.
     value_index: optional; when present, values-overlap corroboration applies.
 
-    Returns (refs, counters). refs carry `source=EdgeSource.SEMANTIC`.
+    Returns (edges, counters). edges carry `source=EdgeSource.SEMANTIC`.
     """
     counters = SemanticInferenceCounters()
     id_cols_by_table = build_id_cols_index(columns)
-    covered = declared_pairs | metadata_inferred_pairs
 
-    refs: list[InferredRef] = []
+    edges: list[FKEdge] = []
     for src in columns:
         src_emb = embeddings.get(src.col_id)
         if src_emb is None:
@@ -184,7 +181,7 @@ def infer_semantic_pairs(
 
             counters.record_considered()
 
-            if DeclaredPair(source_id=src.col_id, target_id=tgt.col_id) in covered:
+            if DeclaredPair(source_id=src.col_id, target_id=tgt.col_id) in prior_pairs:
                 counters.record_rejected(SemanticRejectionReason.ALREADY_COVERED)
                 continue
             if not types_compatible(src.data_type, tgt.data_type):
@@ -207,7 +204,7 @@ def infer_semantic_pairs(
                     confidence = _clamp(confidence + value_bonus, floor, cap)
                     corroborated = True
 
-            refs.append(InferredRef(
+            edges.append(FKEdge(
                 source_id=src.col_id,
                 target_id=tgt.col_id,
                 confidence=round(confidence, 4),
@@ -216,4 +213,4 @@ def infer_semantic_pairs(
             ))
             counters.record_accepted(value_corroborated=corroborated)
 
-    return refs, counters
+    return edges, counters

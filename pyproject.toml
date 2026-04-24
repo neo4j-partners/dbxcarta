@@ -44,10 +44,11 @@ python_version = "3.12"
 module = [
     "dbxcarta.contract",
     "dbxcarta.fk_common",
-    "dbxcarta.fk_inference",
+    "dbxcarta.fk_declared",
+    "dbxcarta.fk_metadata",
     "dbxcarta.fk_semantic",
     "dbxcarta.extract",
-    "dbxcarta.inference",
+    "dbxcarta.fk_discovery",
     "dbxcarta.settings",
     "dbxcarta.summary",
     "dbxcarta.staging",

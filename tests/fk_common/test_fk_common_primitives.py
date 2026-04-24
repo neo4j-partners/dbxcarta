@@ -1,9 +1,8 @@
 """Direct tests for the shared FK primitives in `fk_common`.
 
-These helpers are called by both Phase 3 (`fk_inference`) and Phase 4
-(`fk_semantic`). They were tested only indirectly via those higher-level
-suites before Phase 3.6; this file closes the loop so future refactors
-have a direct safety net.
+These helpers are called by all three discovery strategies (`fk_declared`,
+`fk_metadata`, `fk_semantic`). Direct coverage so future refactors have a
+safety net.
 """
 
 from __future__ import annotations

@@ -1,12 +1,13 @@
-"""Phase 4 min-catalog-size gate (worklog deliverable).
+"""Semantic min-catalog-size gate.
 
-Exercises `_should_run_semantic` independently of the heavy `run_inferences`
-path, so the boundary decision is testable without standing up Spark.
+Exercises `_should_run_semantic` independently of the heavy
+`run_fk_discovery` path, so the boundary decision is testable without
+standing up Spark.
 """
 
 from __future__ import annotations
 
-from dbxcarta.inference import _should_run_semantic
+from dbxcarta.fk_discovery import _should_run_semantic
 from dbxcarta.settings import Settings
 
 

@@ -21,7 +21,8 @@ from dbxcarta.contract import NodeLabel
 if TYPE_CHECKING:
     from pyspark.sql import SparkSession
 
-    from dbxcarta.fk_inference import InferenceCounters
+    from dbxcarta.fk_declared import DeclaredCounters
+    from dbxcarta.fk_metadata import InferenceCounters
     from dbxcarta.fk_semantic import SemanticInferenceCounters
     from dbxcarta.sample_values import SampleStats
 
@@ -44,20 +45,12 @@ class ExtractCounts:
     schemas: int = 0
     tables: int = 0
     columns: int = 0
-    fk_declared: int = 0
-    fk_resolved: int = 0
-    fk_skipped: int = 0
-    fk_references: int = 0
 
     def as_row_counts(self) -> dict[str, int]:
         return {
             "schemas": self.schemas,
             "tables": self.tables,
             "columns": self.columns,
-            "fk_declared": self.fk_declared,
-            "fk_resolved": self.fk_resolved,
-            "fk_skipped": self.fk_skipped,
-            "fk_references": self.fk_references,
         }
 
 
@@ -178,6 +171,7 @@ class RunSummary:
     status: str = "running"
     error: str | None = None
     extract: ExtractCounts = field(default_factory=ExtractCounts)
+    fk_declared: "DeclaredCounters | None" = None
     fk_metadata: "InferenceCounters | None" = None
     fk_semantic: "SemanticInferenceCounters | None" = None
     sample_values: SampleValueCounts | None = None
@@ -193,6 +187,8 @@ class RunSummary:
         """Flatten all nominal counter groups into the legacy `row_counts` shape."""
         out: dict[str, int] = {}
         out.update(self.extract.as_row_counts())
+        if self.fk_declared is not None:
+            out.update(self.fk_declared.as_row_counts())
         if self.fk_metadata is not None:
             out.update(self.fk_metadata.as_summary_dict("fk_inferred_metadata"))
         if self.fk_semantic is not None:

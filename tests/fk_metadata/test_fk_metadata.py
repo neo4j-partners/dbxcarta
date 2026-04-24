@@ -33,18 +33,18 @@ from dbxcarta.fk_common import (
     ColumnMeta,
     ConstraintRow,
     DeclaredPair,
-    InferredRef,
+    FKEdge,
     PKEvidence,
     PKIndex,
 )
-from dbxcarta.fk_inference import (
+from dbxcarta.fk_metadata import (
     _SCORE_TABLE,
     NameMatchKind,
     RejectionReason,
     ScoreBucket,
     infer_fk_pairs,
 )
-from dbxcarta.schema_graph import build_inferred_references_rel
+from dbxcarta.schema_graph import build_references_rel
 
 
 _CAT = "main"
@@ -106,7 +106,7 @@ def _v5fk_pk_index() -> PKIndex:
 
 def test_v5fk_rediscovers_three_declared_fks_at_0_83() -> None:
     refs, counters = infer_fk_pairs(
-        _v5fk_columns(), _v5fk_pk_index(), declared_pairs=frozenset(),
+        _v5fk_columns(), _v5fk_pk_index(), prior_pairs=frozenset(),
     )
     edges = {(r.source_id, r.target_id) for r in refs}
     expected = {
@@ -123,7 +123,7 @@ def test_v5fk_rediscovers_three_declared_fks_at_0_83() -> None:
 
 
 def test_v5fk_declared_duplicate_suppression() -> None:
-    """When declared_pairs is populated, inference skips those exact edges."""
+    """When prior_pairs is populated, inference skips those exact edges."""
     declared = frozenset({
         DeclaredPair(
             source_id=f"{_CAT}.{_SA}.orders.customer_id",
@@ -131,7 +131,7 @@ def test_v5fk_declared_duplicate_suppression() -> None:
         ),
     })
     refs, counters = infer_fk_pairs(
-        _v5fk_columns(), _v5fk_pk_index(), declared_pairs=declared,
+        _v5fk_columns(), _v5fk_pk_index(), prior_pairs=declared,
     )
     emitted_pairs = {
         DeclaredPair(source_id=r.source_id, target_id=r.target_id) for r in refs
@@ -152,7 +152,7 @@ def test_no_fk_synthetic_recovers_via_name_heuristic() -> None:
     """
     empty_index = PKIndex.from_constraints([])
     refs, counters = infer_fk_pairs(
-        _v5fk_columns(), empty_index, declared_pairs=frozenset(),
+        _v5fk_columns(), empty_index, prior_pairs=frozenset(),
     )
     assert refs == []
     assert counters.accepted == 0
@@ -186,7 +186,7 @@ def test_no_fk_synthetic_with_comment_overlap_clears_threshold() -> None:
         ),
     ]
     empty_index = PKIndex.from_constraints([])
-    refs, _ = infer_fk_pairs(columns, empty_index, declared_pairs=frozenset())
+    refs, _ = infer_fk_pairs(columns, empty_index, prior_pairs=frozenset())
     edges_and_conf = {(r.source_id, r.target_id): r.confidence for r in refs}
     suffix_edge = (
         f"{_CAT}.{_SA}.orders.customer_id",
@@ -228,7 +228,7 @@ def test_tie_break_drops_nine_way_user_id_fanout() -> None:
     pk_index = PKIndex.from_constraints(constraint_rows)
 
     refs, counters = infer_fk_pairs(
-        columns, pk_index, declared_pairs=frozenset(),
+        columns, pk_index, prior_pairs=frozenset(),
     )
     assert refs == []
     assert counters.rejections[RejectionReason.TIE_BREAK] >= 9
@@ -271,7 +271,7 @@ def test_tie_break_preserves_two_way_polymorphic_pair() -> None:
     ]
     pk_index = PKIndex.from_constraints(constraint_rows)
     refs, counters = infer_fk_pairs(
-        columns, pk_index, declared_pairs=frozenset(),
+        columns, pk_index, prior_pairs=frozenset(),
     )
     suffix_targets = {
         (f"{_CAT}.primary.accounts.user_id", f"{_CAT}.primary.user.id"),
@@ -292,12 +292,12 @@ _EXPECTED_COLUMNS = ("source_id", "target_id", "confidence", "source", "criteria
 def test_build_inferred_dataframe_columns_match_references_properties(
     local_spark,
 ) -> None:
-    refs = [InferredRef(
+    refs = [FKEdge(
         source_id="cat.s.t.a", target_id="cat.s.t.b",
         confidence=_S_SUFFIX_DPK_NO_COMMENT,
         source=EdgeSource.INFERRED_METADATA, criteria=None,
     )]
-    df = build_inferred_references_rel(local_spark, refs)
+    df = build_references_rel(local_spark, refs)
     assert tuple(df.columns) == _EXPECTED_COLUMNS
     assert set(REFERENCES_PROPERTIES).issubset(set(df.columns))
 
@@ -306,7 +306,7 @@ def test_build_inferred_dataframe_empty_rows(local_spark) -> None:
     """Empty input still produces a schema-shaped DataFrame; _load guards on
     the emit count so this path is never written to Neo4j, but the builder
     must not crash on the edge case."""
-    df = build_inferred_references_rel(local_spark, [])
+    df = build_references_rel(local_spark, [])
     assert tuple(df.columns) == _EXPECTED_COLUMNS
     assert df.count() == 0
 
@@ -330,7 +330,7 @@ def test_type_equiv_accepts_int_and_bigint() -> None:
         column_name="id", constraint_type="PRIMARY KEY",
         ordinal_position=1, constraint_name="s_customer_pk",
     )])
-    refs, _ = infer_fk_pairs(columns, pk_index, declared_pairs=frozenset())
+    refs, _ = infer_fk_pairs(columns, pk_index, prior_pairs=frozenset())
     assert len(refs) == 1
 
 
@@ -351,7 +351,7 @@ def test_type_mismatch_blocks_match() -> None:
         ordinal_position=1, constraint_name="s_customer_pk",
     )])
     refs, counters = infer_fk_pairs(
-        columns, pk_index, declared_pairs=frozenset(),
+        columns, pk_index, prior_pairs=frozenset(),
     )
     assert refs == []
     assert counters.rejections[RejectionReason.TYPE] == 1
@@ -362,7 +362,7 @@ def test_type_mismatch_blocks_match() -> None:
 def test_counter_invariant_on_v5fk() -> None:
     """candidates == accepted + Σ rejections. No silent drops."""
     _, counters = infer_fk_pairs(
-        _v5fk_columns(), _v5fk_pk_index(), declared_pairs=frozenset(),
+        _v5fk_columns(), _v5fk_pk_index(), prior_pairs=frozenset(),
     )
     rejected_total = sum(counters.rejections.values())
     assert counters.candidates == counters.accepted + rejected_total
@@ -378,7 +378,7 @@ def test_counter_invariant_on_sub_threshold_fixture() -> None:
     """
     empty_index = PKIndex.from_constraints([])
     _, counters = infer_fk_pairs(
-        _v5fk_columns(), empty_index, declared_pairs=frozenset(),
+        _v5fk_columns(), empty_index, prior_pairs=frozenset(),
     )
     rejected_total = sum(counters.rejections.values())
     assert counters.candidates == counters.accepted + rejected_total
@@ -389,7 +389,7 @@ def test_counters_flatten_to_summary_dict() -> None:
     """as_summary_dict produces the flat prefix_{field} mapping expected by
     RunSummary.row_counts, with no missing enum members."""
     _, counters = infer_fk_pairs(
-        _v5fk_columns(), _v5fk_pk_index(), declared_pairs=frozenset(),
+        _v5fk_columns(), _v5fk_pk_index(), prior_pairs=frozenset(),
     )
     flat = counters.as_summary_dict("fk_inferred_metadata")
     assert "fk_inferred_metadata_candidates" in flat
@@ -410,7 +410,7 @@ def test_declared_pair_is_frozen() -> None:
 
 
 def test_inferred_ref_is_frozen() -> None:
-    r = InferredRef(
+    r = FKEdge(
         source_id="a", target_id="b", confidence=0.9,
         source=EdgeSource.INFERRED_METADATA, criteria=None,
     )
@@ -457,15 +457,15 @@ def test_declared_pair_equality_and_hash() -> None:
 
 
 def test_inferred_ref_equality_and_hash() -> None:
-    r1 = InferredRef(
+    r1 = FKEdge(
         source_id="s", target_id="t", confidence=0.83,
         source=EdgeSource.INFERRED_METADATA, criteria=None,
     )
-    r2 = InferredRef(
+    r2 = FKEdge(
         source_id="s", target_id="t", confidence=0.83,
         source=EdgeSource.INFERRED_METADATA, criteria=None,
     )
-    r3 = InferredRef(
+    r3 = FKEdge(
         source_id="s", target_id="t", confidence=0.90,
         source=EdgeSource.INFERRED_METADATA, criteria=None,
     )

@@ -6,7 +6,7 @@ Deliverables per worklog/fk-gap-v3-build.md Phase 4:
    rename fixture plus hand-crafted vectors satisfying exact cosine
    constraints, `infer_semantic_pairs` recovers both edges at confidence ≥ 0.80.
 2. Min-catalog-size gate is exercised at the pipeline boundary; here we
-   exercise the pure function semantics (gate lives in `inference.py`).
+   exercise the pure function semantics (gate lives in `fk_discovery.py`).
 
 Plus Phase 3.6 discipline:
 - Frozen-dataclass immutability on ColumnEmbedding and ValueIndex.
@@ -86,8 +86,7 @@ def test_recovers_renamed_edges_above_threshold(phase4_embeddings_pkl: Path) -> 
         columns=_fixture_columns(),
         embeddings=embeddings,
         pk_index=_fixture_pk_index(),
-        declared_pairs=frozenset(),
-        metadata_inferred_pairs=frozenset(),
+        prior_pairs=frozenset(),
     )
 
     by_pair = {(r.source_id, r.target_id): r for r in refs}
@@ -114,8 +113,7 @@ def test_unrelated_pair_rejected_sub_threshold(phase4_embeddings_pkl: Path) -> N
         columns=_fixture_columns(),
         embeddings=embeddings,
         pk_index=_fixture_pk_index(),
-        declared_pairs=frozenset(),
-        metadata_inferred_pairs=frozenset(),
+        prior_pairs=frozenset(),
     )
     emitted_pairs = {(r.source_id, r.target_id) for r in refs}
     unrelated_edge = (
@@ -146,8 +144,7 @@ def test_suppresses_edges_already_covered_by_declared(
         columns=_fixture_columns(),
         embeddings=embeddings,
         pk_index=_fixture_pk_index(),
-        declared_pairs=declared,
-        metadata_inferred_pairs=frozenset(),
+        prior_pairs=declared,
     )
     emitted = {DeclaredPair(source_id=r.source_id, target_id=r.target_id) for r in refs}
     assert declared.isdisjoint(emitted)
@@ -169,8 +166,7 @@ def test_suppresses_edges_already_covered_by_metadata(
         columns=_fixture_columns(),
         embeddings=embeddings,
         pk_index=_fixture_pk_index(),
-        declared_pairs=frozenset(),
-        metadata_inferred_pairs=metadata_pairs,
+        prior_pairs=metadata_pairs,
     )
     emitted = {DeclaredPair(source_id=r.source_id, target_id=r.target_id) for r in refs}
     assert metadata_pairs.isdisjoint(emitted)
@@ -192,8 +188,7 @@ def test_value_overlap_adds_bonus_up_to_cap(phase4_embeddings_pkl: Path) -> None
         columns=_fixture_columns(),
         embeddings=embeddings,
         pk_index=_fixture_pk_index(),
-        declared_pairs=frozenset(),
-        metadata_inferred_pairs=frozenset(),
+        prior_pairs=frozenset(),
         value_index=value_index,
     )
     buyer_edge = (
@@ -218,8 +213,7 @@ def test_value_overlap_below_threshold_no_bonus(phase4_embeddings_pkl: Path) -> 
         columns=_fixture_columns(),
         embeddings=embeddings,
         pk_index=_fixture_pk_index(),
-        declared_pairs=frozenset(),
-        metadata_inferred_pairs=frozenset(),
+        prior_pairs=frozenset(),
         value_index=value_index,
     )
     buyer_edge = (
@@ -246,8 +240,7 @@ def test_columns_without_embeddings_are_silently_skipped(
         columns=cols,
         embeddings=embeddings,
         pk_index=_fixture_pk_index(),
-        declared_pairs=frozenset(),
-        metadata_inferred_pairs=frozenset(),
+        prior_pairs=frozenset(),
     )
     for r in refs:
         assert "ghost" not in r.source_id
@@ -266,8 +259,7 @@ def test_counter_invariant(phase4_embeddings_pkl: Path) -> None:
         columns=_fixture_columns(),
         embeddings=embeddings,
         pk_index=_fixture_pk_index(),
-        declared_pairs=frozenset(),
-        metadata_inferred_pairs=frozenset(),
+        prior_pairs=frozenset(),
     )
     total_rejections = sum(counters.rejections.values())
     assert counters.considered == counters.accepted + total_rejections
@@ -282,8 +274,7 @@ def test_counters_flatten_to_summary_dict(phase4_embeddings_pkl: Path) -> None:
         columns=_fixture_columns(),
         embeddings=embeddings,
         pk_index=_fixture_pk_index(),
-        declared_pairs=frozenset(),
-        metadata_inferred_pairs=frozenset(),
+        prior_pairs=frozenset(),
     )
     flat = counters.as_summary_dict("fk_inferred_semantic")
     assert "fk_inferred_semantic_considered" in flat

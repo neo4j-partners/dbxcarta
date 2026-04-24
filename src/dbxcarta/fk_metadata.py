@@ -1,23 +1,13 @@
-"""Phase 3: metadata-based FK inference.
+"""Metadata-based FK discovery.
 
 Pure Python — no Spark on the hot path. Driver-side iteration over column
-metadata already collected during ingest. Scale target: ~10³ tables, tractable
-on a single executor per worklog/fk-gap-v3-build.md scale notes.
+metadata already collected during ingest. Scale target: ~10³ tables.
 
-Entry point: infer_fk_pairs(columns, pk_index, declared_pairs).
+Entry point: infer_fk_pairs(columns, pk_index, prior_pairs).
 
-Returns (refs, counters) where refs are InferredRef dataclasses tagged with
+Returns (edges, counters) where edges are FKEdge dataclasses tagged with
 EdgeSource.INFERRED_METADATA and counters is an InferenceCounters aggregate
 feeding the run summary.
-
-Shared primitives (`ColumnMeta`, `ConstraintRow`, `DeclaredPair`,
-`InferredRef`, `PKIndex`, `PKEvidence`, `types_compatible`, `pk_kind`,
-`build_id_cols_index`) live in `fk_common.py` — both Phase 3 and Phase 4
-consume them. Phase 3-specific things (`_SCORE_TABLE`, `NameMatchKind`,
-`RejectionReason`, `ScoreBucket`, `InferenceCounters`, `_comment_tokens`,
-`_name_match`) stay here.
-
-See worklog/fk-gap-v3-build.md Phases 3, 3.5, 3.6.
 """
 
 from __future__ import annotations
@@ -31,7 +21,7 @@ from dbxcarta.contract import EdgeSource
 from dbxcarta.fk_common import (
     ColumnMeta,
     DeclaredPair,
-    InferredRef,
+    FKEdge,
     PKEvidence,
     PKIndex,
     build_id_cols_index,
@@ -176,15 +166,15 @@ def _comment_tokens(comment: str | None) -> set[str]:
 def infer_fk_pairs(
     columns: list[ColumnMeta],
     pk_index: PKIndex,
-    declared_pairs: frozenset[DeclaredPair],
+    prior_pairs: frozenset[DeclaredPair],
     threshold: float = 0.8,
-) -> tuple[list[InferredRef], InferenceCounters]:
-    """Emit metadata-inferred REFERENCES refs tagged with EdgeSource.INFERRED_METADATA.
+) -> tuple[list[FKEdge], InferenceCounters]:
+    """Emit metadata-inferred REFERENCES edges tagged with EdgeSource.INFERRED_METADATA.
 
     columns: driver-side materialised list of ColumnMeta.
     pk_index: declared single-column PKs and UNIQUE-leftmost columns.
-    declared_pairs: frozenset of DeclaredPair already covered by declared
-      FKs; suppressed from output to avoid duplicate edges.
+    prior_pairs: frozenset of DeclaredPair already covered by earlier
+      strategies (declared); suppressed from output to avoid duplicate edges.
     threshold: minimum attenuated score to emit. Default 0.8 matches retriever.
     """
     counters = InferenceCounters(composite_pk_skipped=pk_index.composite_pk_count)
@@ -224,7 +214,7 @@ def infer_fk_pairs(
 
             per_source.setdefault(src.col_id, []).append((score, tgt.col_id, nm, pk))
 
-    refs: list[InferredRef] = []
+    edges: list[FKEdge] = []
     for src_id, candidates in per_source.items():
         n = len(candidates)
         denom = max(1.0, math.sqrt(max(0, n - 1)))
@@ -233,10 +223,10 @@ def infer_fk_pairs(
             if attenuated < threshold:
                 counters.record_rejected(RejectionReason.TIE_BREAK)
                 continue
-            if DeclaredPair(source_id=src_id, target_id=tgt_id) in declared_pairs:
+            if DeclaredPair(source_id=src_id, target_id=tgt_id) in prior_pairs:
                 counters.record_rejected(RejectionReason.DUPLICATE_DECLARED)
                 continue
-            refs.append(InferredRef(
+            edges.append(FKEdge(
                 source_id=src_id,
                 target_id=tgt_id,
                 confidence=round(attenuated, 4),
@@ -245,4 +235,4 @@ def infer_fk_pairs(
             ))
             counters.record_accepted(score)
 
-    return refs, counters
+    return edges, counters

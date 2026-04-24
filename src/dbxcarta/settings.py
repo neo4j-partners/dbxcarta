@@ -51,14 +51,11 @@ class Settings(BaseSettings):
     # Re-embedding ledger: skip ai_query for unchanged nodes.
     dbxcarta_ledger_enabled: bool = False
     dbxcarta_ledger_path: str = ""
-    # Phase 3: metadata FK inference
-    dbxcarta_infer_metadata: bool = True
-    # Phase 4: semantic FK inference.
+    # Semantic FK discovery.
     # Default False because column embeddings also default off, and semantic
-    # inference requires them — the cross-field validator below rejects the
-    # incoherent combination. Deployments that want Phase 4 set both
+    # discovery requires them — the cross-field validator below rejects the
+    # incoherent combination. Deployments that want semantic set both
     # DBXCARTA_INFER_SEMANTIC=true and DBXCARTA_INCLUDE_EMBEDDINGS_COLUMNS=true.
-    # (The worklog ablation matrix's `true` default assumed embeddings on.)
     dbxcarta_infer_semantic: bool = False
     dbxcarta_semantic_min_tables: int = 10
     dbxcarta_semantic_threshold: float = 0.85
