@@ -471,6 +471,7 @@ class TestInjectableCosineFn:
         return columns, embeddings, pk_index
 
     def test_default_cosine_fn_works(self) -> None:
+        """Default cosine fn is invoked and emits refs when similarity is 1.0."""
         columns, embeddings, pk_index = self._simple_fixture()
         refs, _ = infer_semantic_pairs(
             columns=columns,
@@ -479,8 +480,9 @@ class TestInjectableCosineFn:
             declared_pairs=frozenset(),
             metadata_inferred_pairs=frozenset(),
         )
-        # With cosine=1.0 between all pairs, some refs should emit
-        assert len(refs) >= 0  # basic sanity
+        # Both column vectors are identical (cosine=1.0 > threshold=0.85).
+        # cust_ref → customers.id should emit since customers.id is a declared PK.
+        assert len(refs) >= 1
 
     def test_custom_cosine_fn_always_zero_emits_nothing(self) -> None:
         """Injecting a zero-cosine function blocks all pairs at threshold."""
