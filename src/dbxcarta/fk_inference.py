@@ -11,38 +11,49 @@ EdgeSource.INFERRED_METADATA and counters is an InferenceCounters aggregate
 feeding the run summary.
 
 Shared primitives (`ColumnMeta`, `ConstraintRow`, `DeclaredPair`,
-`InferredRef`, `PKIndex`, `PKEvidence`, `types_compatible`, `pk_kind`,
-`build_id_cols_index`) live in `fk_common.py` — both Phase 3 and Phase 4
-consume them. Phase 3-specific things (`_SCORE_TABLE`, `NameMatchKind`,
-`RejectionReason`, `ScoreBucket`, `InferenceCounters`, `_comment_tokens`,
-`_name_match`) stay here.
+`InferredRef`, `PKIndex`, `PKEvidence`, `NameMatchKind`, `types_compatible`,
+`pk_kind`, `build_id_cols_index`) live in `fk_common.py` — both Phase 3 and
+Phase 4 consume them. `NameMatchKind` is re-exported here for backward
+compatibility with callers that import it from this module.
+
+Phase 3-specific things (`_SCORE_TABLE`, `RejectionReason`, `ScoreBucket`,
+`InferenceCounters`, `_comment_tokens`, `_name_match`) stay here.
 
 See worklog/fk-gap-v3-build.md Phases 3, 3.5, 3.6.
 """
 
 from __future__ import annotations
 
-import math
 import re
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import TYPE_CHECKING
 
 from dbxcarta.contract import EdgeSource
 from dbxcarta.fk_common import (
     ColumnMeta,
     DeclaredPair,
     InferredRef,
+    NameMatchKind,  # defined in fk_common; re-exported here for compat
     PKEvidence,
     PKIndex,
     build_id_cols_index,
+    is_pair_covered,
     pk_kind,
     types_compatible,
 )
 
+if TYPE_CHECKING:
+    from dbxcarta.fk_config import FKInferenceConfig
 
-class NameMatchKind(Enum):
-    EXACT = "exact"
-    SUFFIX = "suffix"
+# Re-export so existing callers do: from dbxcarta.fk_inference import NameMatchKind
+__all__ = [
+    "NameMatchKind",
+    "RejectionReason",
+    "ScoreBucket",
+    "InferenceCounters",
+    "infer_fk_pairs",
+]
 
 
 class RejectionReason(Enum):
@@ -145,18 +156,26 @@ def _stem_matches_table(stem: str, table: str) -> bool:
     return t == s or t == f"{s}s" or t == f"{s}es"
 
 
-def _name_match(src_col: str, tgt_col: str, tgt_table: str) -> NameMatchKind | None:
+def _name_match(
+    src_col: str,
+    tgt_col: str,
+    tgt_table: str,
+    stem_suffixes: tuple[str, ...] = _STEM_SUFFIXES,
+) -> NameMatchKind | None:
     """Return EXACT, SUFFIX, or None per Phase 3 name rules.
 
     Suffix branch requires the source's stem to match the target table (singular
     or +s/+es plural). Without this guard, a column like `order_id` fans out to
     every `id` column in the catalog and tie-break drops legitimate matches.
+
+    stem_suffixes: configurable suffix list from FKInferenceConfig (defaults to
+    the module-level _STEM_SUFFIXES tuple so existing call sites are unchanged).
     """
     src_l = src_col.lower()
     tgt_l = tgt_col.lower()
     if src_l == tgt_l:
         return NameMatchKind.EXACT
-    for suf in _STEM_SUFFIXES:
+    for suf in stem_suffixes:
         if src_l.endswith(suf) and len(src_l) > len(suf):
             stem = src_l[:-len(suf)]
             if tgt_l == "id" and _stem_matches_table(stem, tgt_table):
@@ -177,7 +196,9 @@ def infer_fk_pairs(
     columns: list[ColumnMeta],
     pk_index: PKIndex,
     declared_pairs: frozenset[DeclaredPair],
-    threshold: float = 0.8,
+    threshold: float | None = None,
+    *,
+    config: "FKInferenceConfig | None" = None,
 ) -> tuple[list[InferredRef], InferenceCounters]:
     """Emit metadata-inferred REFERENCES refs tagged with EdgeSource.INFERRED_METADATA.
 
@@ -185,12 +206,30 @@ def infer_fk_pairs(
     pk_index: declared single-column PKs and UNIQUE-leftmost columns.
     declared_pairs: frozenset of DeclaredPair already covered by declared
       FKs; suppressed from output to avoid duplicate edges.
-    threshold: minimum attenuated score to emit. Default 0.8 matches retriever.
+    threshold: minimum attenuated score to emit. When None (default),
+      config.metadata_threshold is used. An explicit float overrides config.
+    config: optional FKInferenceConfig providing pluggable strategies and
+      tuning parameters. When None, all defaults reproduce current behavior.
     """
+    from dbxcarta.fk_config import FKInferenceConfig as _FKInferenceConfig
+
+    cfg = config if config is not None else _FKInferenceConfig()
+
+    _threshold = threshold if threshold is not None else cfg.metadata_threshold
+
+    score_table = cfg.score_table
+    stem_suffixes = cfg.stem_suffixes
+    name_match_fn = cfg.name_match_strategy or (
+        lambda sc, tc, tt: _name_match(sc, tc, tt, stem_suffixes)
+    )
+    type_equiv = cfg.effective_type_equiv()
+    pk_patterns = cfg.compiled_pk_patterns()
+
     counters = InferenceCounters(composite_pk_skipped=pk_index.composite_pk_count)
     id_cols_by_table = build_id_cols_index(columns)
 
-    # per_source[src_id] = [(score, target_id, name_kind, pk_evidence), ...]
+    # --- Pass 1: score every (src, tgt) pair that clears name / type / PK gates.
+    # per_source[src_id] = [(score, tgt_id, name_kind, pk_evidence), ...]
     per_source: dict[str, list[tuple[float, str, NameMatchKind, PKEvidence]]] = {}
 
     for src in columns:
@@ -199,17 +238,17 @@ def infer_fk_pairs(
                 continue
             counters.record_candidate()
 
-            nm = _name_match(src.column, tgt.column, tgt.table)
+            nm = name_match_fn(src.column, tgt.column, tgt.table)
             if nm is None:
                 counters.record_rejected(RejectionReason.NAME)
                 continue
             if src.table_key == tgt.table_key and src.column.lower() == tgt.column.lower():
                 counters.record_rejected(RejectionReason.NAME)
                 continue
-            if not types_compatible(src.data_type, tgt.data_type):
+            if not types_compatible(src.data_type, tgt.data_type, type_equiv):
                 counters.record_rejected(RejectionReason.TYPE)
                 continue
-            pk = pk_kind(tgt, pk_index, id_cols_by_table)
+            pk = pk_kind(tgt, pk_index, id_cols_by_table, pk_patterns or None)
             if pk is None:
                 counters.record_rejected(RejectionReason.PK)
                 continue
@@ -217,23 +256,38 @@ def infer_fk_pairs(
             comment_present = bool(
                 _comment_tokens(src.comment) & _comment_tokens(tgt.comment)
             )
-            score = _SCORE_TABLE[(nm, pk, comment_present)]
-            if score < threshold:
+            score = score_table[(nm, pk, comment_present)]
+            if score < _threshold:
                 counters.record_rejected(RejectionReason.SUB_THRESHOLD)
                 continue
 
             per_source.setdefault(src.col_id, []).append((score, tgt.col_id, nm, pk))
 
+    # --- Pass 2: apply tie-break attenuation then emit surviving pairs.
+    # Separating the two passes makes each step independently readable and
+    # testable: Pass 1 is pure scoring; Pass 2 is pure attenuation + emit.
     refs: list[InferredRef] = []
+    exp = cfg.attenuation_exponent
+    top_n = cfg.attenuation_top_n
+
     for src_id, candidates in per_source.items():
         n = len(candidates)
-        denom = max(1.0, math.sqrt(max(0, n - 1)))
-        for score, tgt_id, _nm, _pk in candidates:
+        # Generalization of the original sqrt(max(0, n-1)) formula:
+        # denom = max(1.0, (n-1)^exp). At exp=0.5 (default) this is exactly
+        # sqrt(n-1) — the same formula as before the refactoring. For n≤1
+        # denom is always 1.0 (no attenuation). The exponent knob lets
+        # operators tune aggressiveness without changing the anchor point.
+        denom = max(1.0, (n - 1) ** exp) if n > 1 else 1.0
+
+        # Apply optional hard top-N cap before attenuation (highest scores first).
+        working = sorted(candidates, key=lambda x: x[0], reverse=True)[:top_n] if top_n is not None else candidates
+
+        for score, tgt_id, _nm, _pk in working:
             attenuated = score / denom if denom > 1 else score
-            if attenuated < threshold:
+            if attenuated < _threshold:
                 counters.record_rejected(RejectionReason.TIE_BREAK)
                 continue
-            if DeclaredPair(source_id=src_id, target_id=tgt_id) in declared_pairs:
+            if is_pair_covered(src_id, tgt_id, declared_pairs):
                 counters.record_rejected(RejectionReason.DUPLICATE_DECLARED)
                 continue
             refs.append(InferredRef(
@@ -244,5 +298,10 @@ def infer_fk_pairs(
                 criteria=None,
             ))
             counters.record_accepted(score)
+
+        # Count candidates beyond the top-N cap as tie-break rejections.
+        if top_n is not None and n > top_n:
+            for _ in range(n - top_n):
+                counters.record_rejected(RejectionReason.TIE_BREAK)
 
     return refs, counters

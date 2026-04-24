@@ -4,6 +4,10 @@ Pipeline boundary for all FK-inference work. Owns the Spark Row → dataclass
 conversions for columns, constraints, declared FK pairs, embeddings, and
 sampled values. Produces `InferenceResult` — ready-to-write REFERENCES
 DataFrames tagged with `EdgeSource.INFERRED_METADATA` / `EdgeSource.SEMANTIC`.
+
+`run_inferences` is the external API. `_run_phase_pipeline` executes the
+phases in order; each phase receives the accumulated covered-pairs set from
+all prior phases so later phases never duplicate earlier work.
 """
 
 from __future__ import annotations
@@ -20,6 +24,7 @@ from dbxcarta.fk_common import (
     DeclaredPair,
     PKIndex,
 )
+from dbxcarta.fk_config import FKInferenceConfig
 from dbxcarta.fk_inference import infer_fk_pairs
 from dbxcarta.fk_semantic import (
     ColumnEmbedding,
@@ -70,18 +75,69 @@ def run_inferences(
     Phase 4 is gated on DBXCARTA_INFER_SEMANTIC and on a catalog-size floor
     (DBXCARTA_SEMANTIC_MIN_TABLES). Column embeddings are required and
     already validated present by Settings' cross-field validator.
+
+    Delegates to _run_phase_pipeline which iterates over the ordered list of
+    enabled phases, threading the accumulated covered-pairs set between them.
     """
     column_metas = [ColumnMeta.from_row(r) for r in extract.columns_df.collect()]
     declared_pairs = _build_declared_pairs(extract.fk_pairs_df)
     pk_index = _build_pk_index(spark, settings, schema_list)
+    fk_config = settings.fk_config
 
-    # --- Phase 3 ------------------------------------------------------------
+    return _run_phase_pipeline(
+        spark=spark,
+        settings=settings,
+        column_metas=column_metas,
+        pk_index=pk_index,
+        declared_pairs=declared_pairs,
+        fk_config=fk_config,
+        extract=extract,
+        sample_stats=sample_stats,
+        value_node_df=value_node_df,
+        has_value_df=has_value_df,
+        summary=summary,
+    )
+
+
+def _run_phase_pipeline(
+    *,
+    spark: "SparkSession",
+    settings: "Settings",
+    column_metas: list[ColumnMeta],
+    pk_index: PKIndex,
+    declared_pairs: frozenset[DeclaredPair],
+    fk_config: FKInferenceConfig,
+    extract: "ExtractResult",
+    sample_stats: "SampleStats | None",
+    value_node_df: "DataFrame | None",
+    has_value_df: "DataFrame | None",
+    summary: RunSummary,
+) -> InferenceResult:
+    """Execute Phase 3 then Phase 4, threading the covered-pairs set between them.
+
+    Each phase receives the accumulated covered-pairs set (declared FKs plus
+    all pairs emitted by preceding phases) so later phases never emit duplicates.
+    Builds and returns the combined InferenceResult.
+
+    Adding a new phase: implement the phase function, add its gate condition
+    here, run it against the current covered set, and register its counter
+    on summary.
+    """
+    # Accumulated covered set grows as each phase emits new pairs.
+    covered: frozenset[DeclaredPair] = declared_pairs
+
+    # --- Phase 3: metadata inference ----------------------------------------
     metadata_inferred_df: "DataFrame | None" = None
     metadata_edge_count = 0
     metadata_pairs: frozenset[DeclaredPair] = frozenset()
 
     if settings.dbxcarta_infer_metadata:
-        refs, counters = infer_fk_pairs(column_metas, pk_index, declared_pairs)
+        refs, counters = infer_fk_pairs(
+            column_metas,
+            pk_index,
+            covered,
+            config=fk_config,
+        )
         summary.fk_metadata = counters
         logger.info(
             "[dbxcarta] metadata inference: candidates=%d accepted=%d"
@@ -95,8 +151,9 @@ def run_inferences(
                 DeclaredPair(source_id=r.source_id, target_id=r.target_id)
                 for r in refs
             )
+            covered = covered | metadata_pairs
 
-    # --- Phase 4 ------------------------------------------------------------
+    # --- Phase 4: semantic inference ----------------------------------------
     semantic_inferred_df: "DataFrame | None" = None
     semantic_edge_count = 0
 
@@ -111,7 +168,7 @@ def run_inferences(
             declared_pairs=declared_pairs,
             metadata_inferred_pairs=metadata_pairs,
             value_index=value_index,
-            threshold=settings.dbxcarta_semantic_threshold,
+            config=fk_config,
         )
         summary.fk_semantic = counters
         logger.info(
@@ -244,3 +301,4 @@ def _build_value_index(
     for r in joined.collect():
         by_col.setdefault(r["col_id"], set()).add(str(r["val"]))
     return ValueIndex(values_by_col_id={k: frozenset(v) for k, v in by_col.items()})
+

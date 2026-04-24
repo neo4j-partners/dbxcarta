@@ -32,6 +32,18 @@ _DECIMAL_RE = re.compile(r"^(?:DECIMAL|NUMERIC)\((\d+)(?:,(\d+))?\)$")
 _STRING_PARAM_RE = re.compile(r"^(?:STRING|VARCHAR|CHAR)(?:\(\d+\))?$")
 
 
+class NameMatchKind(Enum):
+    """Phase 3 column name-match classification.
+
+    Moved here from fk_inference so fk_config can reference it without
+    creating a circular import (fk_config ← fk_common only).
+    fk_inference re-exports this for backward compatibility.
+    """
+
+    EXACT = "exact"
+    SUFFIX = "suffix"
+
+
 @dataclass(frozen=True, slots=True)
 class ColumnMeta:
     """Driver-side column metadata. Built once at the Spark boundary."""
@@ -163,11 +175,18 @@ class PKIndex:
 
 # --- Shared primitives (previously underscore-private in fk_inference) ------
 
-def canonicalize(data_type: str) -> tuple[str, str | None]:
+def canonicalize(
+    data_type: str,
+    type_equiv: dict[str, str] | None = None,
+) -> tuple[str, str | None]:
     """Reduce a declared type to (family, detail) for equality comparison.
 
     detail holds scale for DECIMAL; None otherwise. Precision is discarded so
     DECIMAL(10,2) ↔ DECIMAL(18,2).
+
+    type_equiv: optional merged type equivalence map (base _TYPE_EQUIV
+    entries are always present; extras extend it). Callers pass the
+    merged map from FKInferenceConfig so build-once is cheap.
     """
     t = data_type.strip().upper()
     if _STRING_PARAM_RE.match(t):
@@ -176,11 +195,25 @@ def canonicalize(data_type: str) -> tuple[str, str | None]:
     if m:
         scale = m.group(2) if m.group(2) is not None else "0"
         return ("DECIMAL", scale)
-    return (_TYPE_EQUIV.get(t, t), None)
+    equiv = type_equiv if type_equiv is not None else _TYPE_EQUIV
+    return (equiv.get(t, t), None)
 
 
-def types_compatible(a: str, b: str) -> bool:
-    return canonicalize(a) == canonicalize(b)
+def types_compatible(
+    a: str,
+    b: str,
+    type_equiv: dict[str, str] | None = None,
+) -> bool:
+    return canonicalize(a, type_equiv) == canonicalize(b, type_equiv)
+
+
+def default_type_equiv() -> dict[str, str]:
+    """Return a copy of the built-in type-equivalence map.
+
+    Public accessor for _TYPE_EQUIV so callers outside this module can build
+    merged maps without importing a private symbol.
+    """
+    return dict(_TYPE_EQUIV)
 
 
 def build_id_cols_index(columns: list[ColumnMeta]) -> dict[str, list[str]]:
@@ -191,6 +224,19 @@ def build_id_cols_index(columns: list[ColumnMeta]) -> dict[str, list[str]]:
         if c.column.lower().endswith("_id"):
             index.setdefault(c.table_key, []).append(c.column)
     return index
+
+
+def is_pair_covered(
+    source_id: str,
+    target_id: str,
+    covered: frozenset[DeclaredPair],
+) -> bool:
+    """Return True when (source_id, target_id) is already in covered.
+
+    Shared suppression check used by both Phase 3 and Phase 4 so the
+    membership test is never reimplemented per phase.
+    """
+    return DeclaredPair(source_id=source_id, target_id=target_id) in covered
 
 
 # PKEvidence lives here because pk_kind returns it and both Phase 3 and
@@ -204,6 +250,7 @@ def pk_kind(
     tgt: ColumnMeta,
     pk_index: PKIndex,
     id_cols_by_table: dict[str, list[str]],
+    extra_pk_patterns: list[re.Pattern[str]] | None = None,
 ) -> PKEvidence | None:
     """Classify target's PK-likeness.
 
@@ -212,6 +259,10 @@ def pk_kind(
     PKs. The fallback collapses into UNIQUE_OR_HEUR rather than a third
     bucket — Phase 3's score table has two PK columns, and Phase 4's floor/
     cap is continuous so the kind only matters as a gate.
+
+    extra_pk_patterns: optional compiled regex patterns (from
+    FKInferenceConfig.pk_extra_patterns) that extend the built-in heuristic.
+    A column name matching any pattern is classified as UNIQUE_OR_HEUR.
     """
     if tgt.column in pk_index.pk_cols.get(tgt.table_key, frozenset()):
         return PKEvidence.DECLARED_PK
@@ -224,4 +275,8 @@ def pk_kind(
         id_cols = id_cols_by_table.get(tgt.table_key, [])
         if len(id_cols) == 1 and id_cols[0].lower() == col_lower:
             return PKEvidence.UNIQUE_OR_HEUR
+    if extra_pk_patterns:
+        for pat in extra_pk_patterns:
+            if pat.search(col_lower):
+                return PKEvidence.UNIQUE_OR_HEUR
     return None
