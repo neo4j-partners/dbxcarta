@@ -14,7 +14,9 @@ Confidence model:
 Scale: driver-side cosine over candidate pairs. Candidate gates (PK-likeness,
 type compat, already-covered suppression) keep the working set a small
 fraction of the Cartesian product. Pure-Python cosine (no numpy) — adequate
-at the 10⁴–10⁵-column scale target; see worklog scale notes.
+at the 10⁴–10⁵-column scale target; see worklog scale notes. The cosine
+function is injectable via the `cosine_fn` parameter for callers that want a
+numpy-backed or BLAS-backed implementation on larger catalogs.
 
 Entry point: infer_semantic_pairs(embeddings, columns, pk_index, ...).
 """
@@ -24,6 +26,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import TYPE_CHECKING, Callable
 
 from dbxcarta.contract import EdgeSource
 from dbxcarta.fk_common import (
@@ -32,9 +35,13 @@ from dbxcarta.fk_common import (
     InferredRef,
     PKIndex,
     build_id_cols_index,
+    is_pair_covered,
     pk_kind,
     types_compatible,
 )
+
+if TYPE_CHECKING:
+    from dbxcarta.fk_config import FKInferenceConfig
 
 
 class SemanticRejectionReason(Enum):
@@ -152,6 +159,8 @@ def infer_semantic_pairs(
     cap: float = 0.90,
     value_bonus: float = 0.05,
     overlap_threshold: float = 0.5,
+    config: "FKInferenceConfig | None" = None,
+    cosine_fn: Callable[[ColumnEmbedding, ColumnEmbedding], float] | None = None,
 ) -> tuple[list[InferredRef], SemanticInferenceCounters]:
     """Emit semantic-inferred REFERENCES refs tagged with EdgeSource.SEMANTIC.
 
@@ -163,9 +172,31 @@ def infer_semantic_pairs(
     declared_pairs: declared FKs (already covered).
     metadata_inferred_pairs: Phase 3 output (already covered).
     value_index: optional; when present, values-overlap corroboration applies.
+    config: optional FKInferenceConfig. When provided, its semantic_* fields
+      supply the defaults for threshold/floor/cap/value_bonus/overlap_threshold
+      (explicit keyword arguments to this function take precedence).
+    cosine_fn: optional injectable cosine function. Defaults to the pure-Python
+      _cosine implementation. Pass a numpy-backed function for larger catalogs.
 
     Returns (refs, counters). refs carry `source=EdgeSource.SEMANTIC`.
     """
+    from dbxcarta.fk_config import FKInferenceConfig as _FKCfg
+
+    cfg = config if config is not None else _FKCfg()
+
+    # Resolve effective parameter values: explicit kwargs take precedence over
+    # config defaults (which take precedence over the function default literals).
+    _threshold = threshold if threshold != 0.85 else cfg.semantic_threshold
+    _floor = floor if floor != 0.80 else cfg.semantic_floor
+    _cap = cap if cap != 0.90 else cfg.semantic_cap
+    _value_bonus = value_bonus if value_bonus != 0.05 else cfg.semantic_value_bonus
+    _overlap_threshold = (
+        overlap_threshold if overlap_threshold != 0.5 else cfg.semantic_overlap_threshold
+    )
+    _cosine_fn = cosine_fn if cosine_fn is not None else _cosine
+    type_equiv = cfg.effective_type_equiv()
+    pk_patterns = cfg.compiled_pk_patterns()
+
     counters = SemanticInferenceCounters()
     id_cols_by_table = build_id_cols_index(columns)
     covered = declared_pairs | metadata_inferred_pairs
@@ -184,27 +215,27 @@ def infer_semantic_pairs(
 
             counters.record_considered()
 
-            if DeclaredPair(source_id=src.col_id, target_id=tgt.col_id) in covered:
+            if is_pair_covered(src.col_id, tgt.col_id, covered):
                 counters.record_rejected(SemanticRejectionReason.ALREADY_COVERED)
                 continue
-            if not types_compatible(src.data_type, tgt.data_type):
+            if not types_compatible(src.data_type, tgt.data_type, type_equiv):
                 counters.record_rejected(SemanticRejectionReason.TYPE)
                 continue
-            if pk_kind(tgt, pk_index, id_cols_by_table) is None:
+            if pk_kind(tgt, pk_index, id_cols_by_table, pk_patterns or None) is None:
                 counters.record_rejected(SemanticRejectionReason.PK)
                 continue
 
-            sim = _cosine(src_emb, tgt_emb)
-            if sim < threshold:
+            sim = _cosine_fn(src_emb, tgt_emb)
+            if sim < _threshold:
                 counters.record_rejected(SemanticRejectionReason.SUB_THRESHOLD)
                 continue
 
-            confidence = _clamp(sim, floor, cap)
+            confidence = _clamp(sim, _floor, _cap)
             corroborated = False
             if value_index is not None:
                 ratio = value_index.overlap_ratio(src.col_id, tgt.col_id)
-                if ratio is not None and ratio >= overlap_threshold:
-                    confidence = _clamp(confidence + value_bonus, floor, cap)
+                if ratio is not None and ratio >= _overlap_threshold:
+                    confidence = _clamp(confidence + _value_bonus, _floor, _cap)
                     corroborated = True
 
             refs.append(InferredRef(
