@@ -1,8 +1,8 @@
 # FK-inference internal types
 
-Deliverable from `worklog/fk-gap-v3-build.md` Phases 3.5 and 3.6. Documents
-the nominal dataclass layout introduced by the foundation rewrite, and
-pinpoints the one place each boundary conversion happens.
+Documents the typed dataclass layer that sits between Spark DataFrames and the
+FK inference pipeline, and identifies the single boundary-conversion point for
+each type transition.
 
 ## Layer map
 
@@ -55,7 +55,7 @@ keys become prefixed string keys. Delta table column
 `row_counts MAP<STRING, BIGINT>` forces the string shape on storage, but
 nothing upstream of the write boundary touches a stringly-typed counter.
 
-## File layout (post-Phase-3.6)
+## File layout
 
 ```
 src/dbxcarta/

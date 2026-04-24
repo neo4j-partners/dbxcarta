@@ -20,7 +20,7 @@ With `failOnError => false`, a per-row failure returns a struct with `result = N
 
 **How we apply it:** the transform projects `.result` as `embedding` and counts nulls against a configurable per-label and aggregate failure threshold. A returned vector whose length mismatches `DBXCARTA_EMBEDDING_DIMENSION` is normalized to null and counted as a row-level failure (no separate abort path).
 
-Source: [Use `ai_query` — Best practices](https://docs.databricks.com/aws/en/large-language-models/ai-query#best-practices); `ai_query` spike note at `worklog/spike-ai-query.md`.
+Source: [Use `ai_query` — Best practices](https://docs.databricks.com/aws/en/large-language-models/ai-query#best-practices).
 
 ### 3. Prefer batch-optimized Databricks-hosted embedding models
 
@@ -67,7 +67,7 @@ Neo4j write lock contention is the concern the connector docs warn about. Relati
 - **Relationship writes** — every relationship DataFrame is `.coalesce(1)` before the Neo4j write. No exceptions; relationships always lock two nodes.
 - **Node writes** — every node DataFrame is `.repartition(N, "id")` before the Neo4j write, where `N` comes from `DBXCARTA_NEO4J_NODE_PARTITIONS` (default `4`). This is a standing rule, not a benchmark-gated optimization; no measurement is required to prove it's safe because the partitioning guarantees disjoint lock keys.
 
-Tuning `N` is a throughput question, not a correctness question, and is handled in `worklog/benchmarking_plan.md`.
+Tuning `N` is a throughput question, not a correctness question.
 
 Source: [Neo4j Spark Connector — Parameter tuning, Write parallelism](https://neo4j.com/docs/spark/current/performance/tuning/#parallelism) (retrieved 2026-04-22). The "Dataset partitioning" subsection on that page sanctions the exception directly: "if your data writes are partitioned ahead of time to avoid locks, you can generally do as many write threads to Neo4j as there are cores in the server. Suppose we want to write a long list of `:Person` nodes, and we know they are distinct by the person `id`. We might stream those into Neo4j in four different partitions, as there will not be any lock contention." Our default `N=4` matches the example.
 
@@ -83,7 +83,7 @@ Source: [Neo4j Spark Connector — Tune the batch size](https://neo4j.com/docs/s
 
 On AuraDB and any causal cluster, only the leader accepts writes. Write throughput scales with the cores on the leader, not with the number of Spark executors. This bounds the point at which adding more Spark parallelism stops helping.
 
-**How we apply it:** the pipeline treats Spark-side parallelism as a second-order tuning knob, not a first-order solution. Node writes use a modest default (`DBXCARTA_NEO4J_NODE_PARTITIONS=4`, see §1); raising it against measured throughput is deferred to `worklog/benchmarking_plan.md`.
+**How we apply it:** the pipeline treats Spark-side parallelism as a second-order tuning knob, not a first-order solution. Node writes use a modest default (`DBXCARTA_NEO4J_NODE_PARTITIONS=4`, see §1); raise it incrementally against measured throughput once write volume justifies it.
 
 Source: [Neo4j Spark Connector — Parameter tuning, Write parallelism](https://neo4j.com/docs/spark/current/performance/tuning/#parallelism) (retrieved 2026-04-21).
 
@@ -119,4 +119,4 @@ The preflight enumerates every grant and endpoint permission the enabled flags r
 
 `submit` is a reference operation, not a build operation. The runner attaches the wheel last uploaded to the UC Volume and executes the script last uploaded to the Databricks workspace; it does not rebuild or re-upload either on `submit`. Running stale code against real infrastructure produces misleading signal — apparent failures may be old bugs already fixed, apparent successes may hide regressions in new code, and the run summary reflects whatever the cluster actually ran, not what the local source says.
 
-Any time source files change, run `dbxcarta upload --wheel && dbxcarta upload --all` before `dbxcarta submit`. Treat `job_name` and `contract_version` in the JSON run summary as a quick sanity check that the expected code ran; a wrong prefix (e.g. `schema_graph_*` instead of `dbxcarta_*`) means the workspace script is stale. See `worklog/stage3-first-green-run.md` for a concrete example where a pre-v6 wheel and workspace script ran silently against a v6 environment.
+Any time source files change, run `dbxcarta upload --wheel && dbxcarta upload --all` before `dbxcarta submit`. Treat `job_name` and `contract_version` in the JSON run summary as a quick sanity check that the expected code ran; a wrong prefix (e.g. `schema_graph_*` instead of `dbxcarta_*`) means the workspace script is stale and a re-upload is required before interpreting any results.
