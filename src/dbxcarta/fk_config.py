@@ -8,7 +8,6 @@ Protocols defined here:
   - CounterProtocol  — shared interface for all inference phase counters
   - NameMatchStrategy — pluggable column name-match callable (Phase 3)
   - CosineFn         — injectable cosine similarity callable (Phase 4)
-  - InferencePhase   — structural type for a runnable inference phase
 
 FKInferenceConfig bundles all FK tuning knobs in one dataclass. The existing
 Settings fields for FK inference delegate to a config object produced by
@@ -20,12 +19,10 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 from dbxcarta.fk_common import NameMatchKind, PKEvidence
 
-if TYPE_CHECKING:
-    from dbxcarta.fk_common import ColumnMeta, DeclaredPair, InferredRef, PKIndex
 
 # Type alias: the score table maps (NameMatchKind, PKEvidence, comment_present)
 # triples to float confidence scores.
@@ -81,29 +78,11 @@ class CosineFn(Protocol):
         ...
 
 
-@runtime_checkable
-class InferencePhase(Protocol):
-    """Structural type for a runnable inference phase.
-
-    Each phase receives the accumulated covered-pairs set (declared FKs plus
-    all pairs emitted by earlier phases) and returns a list of InferredRef
-    plus a counter object satisfying CounterProtocol. The pipeline runner
-    in inference.py iterates over enabled phases in order, threading the
-    accumulated covered set between them.
-    """
-
-    def __call__(
-        self,
-        covered: frozenset[DeclaredPair],
-    ) -> tuple[list[InferredRef], CounterProtocol]:
-        ...
-
-
 # ---------------------------------------------------------------------------
 # FKInferenceConfig
 # ---------------------------------------------------------------------------
 
-@dataclass
+@dataclass(frozen=True)
 class FKInferenceConfig:
     """All FK inference tuning parameters in one place.
 
@@ -209,8 +188,8 @@ class FKInferenceConfig:
         """
         if not self.extra_type_equiv:
             return None
-        from dbxcarta.fk_common import _TYPE_EQUIV
-        merged = dict(_TYPE_EQUIV)
+        from dbxcarta.fk_common import default_type_equiv
+        merged = default_type_equiv()
         merged.update(self.extra_type_equiv)
         return merged
 

@@ -154,11 +154,11 @@ def infer_semantic_pairs(
     metadata_inferred_pairs: frozenset[DeclaredPair],
     value_index: ValueIndex | None = None,
     *,
-    threshold: float = 0.85,
-    floor: float = 0.80,
-    cap: float = 0.90,
-    value_bonus: float = 0.05,
-    overlap_threshold: float = 0.5,
+    threshold: float | None = None,
+    floor: float | None = None,
+    cap: float | None = None,
+    value_bonus: float | None = None,
+    overlap_threshold: float | None = None,
     config: "FKInferenceConfig | None" = None,
     cosine_fn: Callable[[ColumnEmbedding, ColumnEmbedding], float] | None = None,
 ) -> tuple[list[InferredRef], SemanticInferenceCounters]:
@@ -173,8 +173,8 @@ def infer_semantic_pairs(
     metadata_inferred_pairs: Phase 3 output (already covered).
     value_index: optional; when present, values-overlap corroboration applies.
     config: optional FKInferenceConfig. When provided, its semantic_* fields
-      supply the defaults for threshold/floor/cap/value_bonus/overlap_threshold
-      (explicit keyword arguments to this function take precedence).
+      supply the defaults for threshold/floor/cap/value_bonus/overlap_threshold.
+      An explicit non-None keyword argument takes precedence over config.
     cosine_fn: optional injectable cosine function. Defaults to the pure-Python
       _cosine implementation. Pass a numpy-backed function for larger catalogs.
 
@@ -184,14 +184,12 @@ def infer_semantic_pairs(
 
     cfg = config if config is not None else _FKCfg()
 
-    # Resolve effective parameter values: explicit kwargs take precedence over
-    # config defaults (which take precedence over the function default literals).
-    _threshold = threshold if threshold != 0.85 else cfg.semantic_threshold
-    _floor = floor if floor != 0.80 else cfg.semantic_floor
-    _cap = cap if cap != 0.90 else cfg.semantic_cap
-    _value_bonus = value_bonus if value_bonus != 0.05 else cfg.semantic_value_bonus
+    _threshold = threshold if threshold is not None else cfg.semantic_threshold
+    _floor = floor if floor is not None else cfg.semantic_floor
+    _cap = cap if cap is not None else cfg.semantic_cap
+    _value_bonus = value_bonus if value_bonus is not None else cfg.semantic_value_bonus
     _overlap_threshold = (
-        overlap_threshold if overlap_threshold != 0.5 else cfg.semantic_overlap_threshold
+        overlap_threshold if overlap_threshold is not None else cfg.semantic_overlap_threshold
     )
     _cosine_fn = cosine_fn if cosine_fn is not None else _cosine
     type_equiv = cfg.effective_type_equiv()

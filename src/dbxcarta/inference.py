@@ -5,11 +5,9 @@ conversions for columns, constraints, declared FK pairs, embeddings, and
 sampled values. Produces `InferenceResult` — ready-to-write REFERENCES
 DataFrames tagged with `EdgeSource.INFERRED_METADATA` / `EdgeSource.SEMANTIC`.
 
-The internal `_run_phase_pipeline` function replaces the old procedural
-sequence with a runner that iterates over an ordered list of enabled phases.
-Each phase receives the accumulated covered-pairs set from all prior phases.
-`run_inferences` is kept as the external API; it builds the phase list and
-delegates to the runner.
+`run_inferences` is the external API. `_run_phase_pipeline` executes the
+phases in order; each phase receives the accumulated covered-pairs set from
+all prior phases so later phases never duplicate earlier work.
 """
 
 from __future__ import annotations
@@ -115,15 +113,15 @@ def _run_phase_pipeline(
     has_value_df: "DataFrame | None",
     summary: RunSummary,
 ) -> InferenceResult:
-    """Pipeline runner: iterate over enabled phases in order.
+    """Execute Phase 3 then Phase 4, threading the covered-pairs set between them.
 
     Each phase receives the accumulated covered-pairs set (declared FKs plus
-    all pairs emitted by preceding phases). The runner collects InferredRef
-    lists and counter objects, then builds the combined InferenceResult.
+    all pairs emitted by preceding phases) so later phases never emit duplicates.
+    Builds and returns the combined InferenceResult.
 
-    Adding a new phase means: implement the phase function, add its gate
-    condition here, bind it into the phase list, and register its counter
-    on summary. No changes to run_inferences or the orchestration contract.
+    Adding a new phase: implement the phase function, add its gate condition
+    here, run it against the current covered set, and register its counter
+    on summary.
     """
     # Accumulated covered set grows as each phase emits new pairs.
     covered: frozenset[DeclaredPair] = declared_pairs

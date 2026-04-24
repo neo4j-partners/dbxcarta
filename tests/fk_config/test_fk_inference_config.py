@@ -31,7 +31,6 @@ from dbxcarta.fk_common import (
 from dbxcarta.fk_config import (
     CounterProtocol,
     FKInferenceConfig,
-    InferencePhase,
     NameMatchStrategy,
 )
 from dbxcarta.fk_inference import (
@@ -124,6 +123,11 @@ class TestFKInferenceConfigDefaults:
     def test_default_no_name_match_strategy(self) -> None:
         cfg = FKInferenceConfig()
         assert cfg.name_match_strategy is None
+
+    def test_config_is_frozen(self) -> None:
+        cfg = FKInferenceConfig()
+        with pytest.raises(FrozenInstanceError):
+            cfg.metadata_threshold = 0.99  # type: ignore[misc]
 
 
 # ---------------------------------------------------------------------------
@@ -399,31 +403,46 @@ class TestPKExtraPatterns:
         assert cfg.compiled_pk_patterns() == []
 
     def test_extra_pattern_classifies_pk_prefix_column(self) -> None:
-        """Catalog uses pk_{col} convention; patterns make it PK-like."""
+        """Catalog uses a _key suffix convention; extra pattern makes it PK-like.
+
+        product_key is an EXACT name match across tables but not covered by any
+        built-in PK heuristic (not "id", not "{table}_id", no declared PK).
+        Without the pattern, no ref fires. With r"_key$", product_key is
+        classified as UNIQUE_OR_HEUR and the ref is emitted.
+        """
         columns = [
             ColumnMeta(
-                catalog=_CAT, schema=_SA, table="users", column="pk_users",
+                catalog=_CAT, schema=_SA, table="products", column="product_key",
                 data_type="BIGINT", comment=None,
             ),
             ColumnMeta(
-                catalog=_CAT, schema=_SA, table="orders", column="user_ref",
+                catalog=_CAT, schema=_SA, table="orders", column="product_key",
                 data_type="BIGINT", comment=None,
             ),
         ]
         # Empty pk_index — no declared PKs
         pk_index = PKIndex.from_constraints([])
 
-        # Without extra pattern: pk_users is not recognized as PK-like
+        ref_pair = (
+            f"{_CAT}.{_SA}.orders.product_key",
+            f"{_CAT}.{_SA}.products.product_key",
+        )
+
+        # Without extra pattern: product_key is not PK-like → no ref
         refs_no_pattern, _ = infer_fk_pairs(
             columns, pk_index, declared_pairs=frozenset(),
         )
-        # user_ref → pk_users won't fire (pk_users isn't PK-like)
         emitted_no = {(r.source_id, r.target_id) for r in refs_no_pattern}
-        ref_pk = (
-            f"{_CAT}.{_SA}.orders.user_ref",
-            f"{_CAT}.{_SA}.users.pk_users",
+        assert ref_pair not in emitted_no
+
+        # With extra pattern: product_key matches r"_key$" → classified as
+        # UNIQUE_OR_HEUR → ref fires
+        cfg = FKInferenceConfig(pk_extra_patterns=[r"_key$"])
+        refs_with_pattern, _ = infer_fk_pairs(
+            columns, pk_index, declared_pairs=frozenset(), config=cfg,
         )
-        assert ref_pk not in emitted_no
+        emitted_with = {(r.source_id, r.target_id) for r in refs_with_pattern}
+        assert ref_pair in emitted_with
 
     def test_extra_patterns_compiled_correctly(self) -> None:
         cfg = FKInferenceConfig(pk_extra_patterns=[r"^pk_", r"^key_"])

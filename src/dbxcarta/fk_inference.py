@@ -53,8 +53,6 @@ __all__ = [
     "ScoreBucket",
     "InferenceCounters",
     "infer_fk_pairs",
-    "_SCORE_TABLE",
-    "_STEM_SUFFIXES",
 ]
 
 
@@ -198,7 +196,7 @@ def infer_fk_pairs(
     columns: list[ColumnMeta],
     pk_index: PKIndex,
     declared_pairs: frozenset[DeclaredPair],
-    threshold: float = 0.8,
+    threshold: float | None = None,
     *,
     config: "FKInferenceConfig | None" = None,
 ) -> tuple[list[InferredRef], InferenceCounters]:
@@ -208,10 +206,8 @@ def infer_fk_pairs(
     pk_index: declared single-column PKs and UNIQUE-leftmost columns.
     declared_pairs: frozenset of DeclaredPair already covered by declared
       FKs; suppressed from output to avoid duplicate edges.
-    threshold: minimum attenuated score to emit. Default 0.8 matches retriever.
-      When config is provided, config.metadata_threshold is used as the
-      default; the explicit threshold parameter takes precedence only when
-      it differs from the default (0.8).
+    threshold: minimum attenuated score to emit. When None (default),
+      config.metadata_threshold is used. An explicit float overrides config.
     config: optional FKInferenceConfig providing pluggable strategies and
       tuning parameters. When None, all defaults reproduce current behavior.
     """
@@ -219,9 +215,7 @@ def infer_fk_pairs(
 
     cfg = config if config is not None else _FKInferenceConfig()
 
-    # When caller passes the default threshold (0.8) and config overrides it,
-    # prefer config. Explicit non-default threshold values take precedence.
-    _threshold = cfg.metadata_threshold if threshold == 0.8 else threshold
+    _threshold = threshold if threshold is not None else cfg.metadata_threshold
 
     score_table = cfg.score_table
     stem_suffixes = cfg.stem_suffixes
@@ -285,8 +279,8 @@ def infer_fk_pairs(
         # operators tune aggressiveness without changing the anchor point.
         denom = max(1.0, (n - 1) ** exp) if n > 1 else 1.0
 
-        # Apply optional hard top-N cap before attenuation.
-        working = candidates[:top_n] if top_n is not None else candidates
+        # Apply optional hard top-N cap before attenuation (highest scores first).
+        working = sorted(candidates, key=lambda x: x[0], reverse=True)[:top_n] if top_n is not None else candidates
 
         for score, tgt_id, _nm, _pk in working:
             attenuated = score / denom if denom > 1 else score

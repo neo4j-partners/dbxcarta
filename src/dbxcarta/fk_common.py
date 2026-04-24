@@ -207,6 +207,15 @@ def types_compatible(
     return canonicalize(a, type_equiv) == canonicalize(b, type_equiv)
 
 
+def default_type_equiv() -> dict[str, str]:
+    """Return a copy of the built-in type-equivalence map.
+
+    Public accessor for _TYPE_EQUIV so callers outside this module can build
+    merged maps without importing a private symbol.
+    """
+    return dict(_TYPE_EQUIV)
+
+
 def build_id_cols_index(columns: list[ColumnMeta]) -> dict[str, list[str]]:
     """Inferred from the column list, not from declared constraint metadata.
     Used by pk_kind's name-heuristic fallback branch."""
