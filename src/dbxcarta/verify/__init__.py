@@ -51,6 +51,7 @@ def verify_run(
     ws: "WorkspaceClient",
     warehouse_id: str,
     catalog: str,
+    sample_limit: int,
 ) -> Report:
     """Run every verify check against the given run summary; return one Report."""
     from dbxcarta.verify import catalog as catalog_mod
@@ -64,7 +65,7 @@ def verify_run(
     violations.extend(_check_summary_shape(summary))
     violations.extend(graph_mod.check(neo4j_driver, summary))
     violations.extend(references_mod.check(neo4j_driver, summary))
-    violations.extend(values_mod.check(neo4j_driver, summary))
+    violations.extend(values_mod.check(neo4j_driver, summary, sample_limit=sample_limit))
     violations.extend(catalog_mod.check(neo4j_driver, summary, ws=ws, warehouse_id=warehouse_id, catalog=catalog))
 
     return Report(run_id=run_id, violations=violations)

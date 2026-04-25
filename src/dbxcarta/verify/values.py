@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 _HEX32 = re.compile(r"^[0-9a-f]{32}$")
 
 
-def check(driver: "Driver", summary: dict[str, Any]) -> list[Violation]:
+def check(driver: "Driver", summary: dict[str, Any], *, sample_limit: int) -> list[Violation]:
     counts = summary.get("row_counts") or {}
     if counts.get("value_nodes", 0) == 0:
         return []
@@ -27,7 +27,7 @@ def check(driver: "Driver", summary: dict[str, Any]) -> list[Violation]:
     out.extend(_check_value_count(driver, summary))
     out.extend(_check_sampling_accounting(summary))
     out.extend(_check_parent_column_type(driver))
-    out.extend(_check_relationship_integrity(driver, summary))
+    out.extend(_check_relationship_integrity(driver, sample_limit=sample_limit))
     out.extend(_check_value_id_shape(driver))
     return out
 
@@ -85,10 +85,9 @@ def _check_parent_column_type(driver: "Driver") -> list[Violation]:
     return []
 
 
-def _check_relationship_integrity(driver: "Driver", summary: dict[str, Any]) -> list[Violation]:
+def _check_relationship_integrity(driver: "Driver", *, sample_limit: int) -> list[Violation]:
     """No orphan Value nodes; each Value has exactly one incoming HAS_VALUE;
-    Column out-degree is bounded by sample limit (best-effort: read from summary
-    if present, fall back to skipping that bound)."""
+    Column out-degree is bounded by `sample_limit` (the configured per-column cap)."""
     out: list[Violation] = []
     with driver.session() as s:
         orphans = s.run(
@@ -111,23 +110,17 @@ def _check_relationship_integrity(driver: "Driver", summary: dict[str, Any]) -> 
                 message=f"{bad_in} Value node(s) have incoming HAS_VALUE count != 1.",
                 details={"count": bad_in},
             ))
-        # The sample limit is a Settings field, not stored on the run summary,
-        # but the test used DBXCARTA_SAMPLE_LIMIT from env. Read os.environ
-        # only — the pipeline knows its own limit and can be wired via Phase 3
-        # if we want to skip the env read entirely. Default 10 matches Settings.
-        import os
-        limit = int(os.environ.get("DBXCARTA_SAMPLE_LIMIT", "10"))
         over = s.run(
             "MATCH (c:Column)-[r:HAS_VALUE]->() "
             "WITH c, count(r) AS d WHERE d > $limit "
             "RETURN count(c) AS cnt",
-            limit=limit,
+            limit=sample_limit,
         ).single()["cnt"]
         if over:
             out.append(Violation(
                 code="values.column_outdegree_exceeds_limit",
-                message=f"{over} Column node(s) exceed {limit} HAS_VALUE edges.",
-                details={"count": over, "limit": limit},
+                message=f"{over} Column node(s) exceed {sample_limit} HAS_VALUE edges.",
+                details={"count": over, "limit": sample_limit},
             ))
     return out
 
