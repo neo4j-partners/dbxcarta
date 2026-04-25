@@ -17,6 +17,8 @@ from __future__ import annotations
 import requests
 import pytest
 
+pytestmark = pytest.mark.live
+
 _TOP_K = 10
 _SAMPLE = 5
 _MIN_SELF_SIMILARITY = 0.99

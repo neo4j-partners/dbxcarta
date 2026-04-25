@@ -10,6 +10,12 @@ runner = Runner(
     wheel_package="dbxcarta",
     scripts_dir="scripts",
     cli_command="uv run dbxcarta",
+    # Excluded from cleartext env-param forwarding to job parameters. The
+    # runner instead emits DATABRICKS_SECRET_KEYS=NEO4J_URI,... and
+    # inject_params() pulls these from databricks_secret_scope on the
+    # cluster. Required to keep credentials out of the job-run record
+    # (visible via `databricks jobs get-run <id>`).
+    secret_keys=["NEO4J_URI", "NEO4J_USERNAME", "NEO4J_PASSWORD"],
 )
 
 _CLIENT_SCRIPT = "run_dbxcarta_client.py"
@@ -124,8 +130,8 @@ def _build_neo4j_driver(ws, settings):
         return base64.b64decode(ws.secrets.get_secret(scope=scope, key=key).value).decode()
 
     return GraphDatabase.driver(
-        _secret("uri"),
-        auth=(_secret("username"), _secret("password")),
+        _secret("NEO4J_URI"),
+        auth=(_secret("NEO4J_USERNAME"), _secret("NEO4J_PASSWORD")),
     )
 
 

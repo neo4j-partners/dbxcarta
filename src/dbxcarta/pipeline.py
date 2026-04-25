@@ -137,9 +137,9 @@ def _run(
 
     scope = settings.databricks_secret_scope
     neo4j = Neo4jConfig(
-        uri=dbutils.secrets.get(scope=scope, key="uri"),
-        username=dbutils.secrets.get(scope=scope, key="username"),
-        password=dbutils.secrets.get(scope=scope, key="password"),
+        uri=dbutils.secrets.get(scope=scope, key="NEO4J_URI"),
+        username=dbutils.secrets.get(scope=scope, key="NEO4J_USERNAME"),
+        password=dbutils.secrets.get(scope=scope, key="NEO4J_PASSWORD"),
         batch_size=settings.dbxcarta_neo4j_batch_size,
     )
 
@@ -169,9 +169,54 @@ def _run(
 
         _load(neo4j, driver, extract_result, fk_result, values, summary)
         summary.neo4j_counts = query_counts(driver)
+        _verify(driver, settings, summary)
 
     extract_result.unpersist_cached()
     logger.info("[dbxcarta] neo4j counts: %s", summary.neo4j_counts)
+
+
+def _verify(driver: "Driver", settings: Settings, summary: RunSummary) -> None:
+    """Final pipeline step: re-run dbxcarta.verify against the run summary just
+    built. Records the outcome on summary.verify (durable in JSON + Delta).
+    Warn-only by default; raises when settings.dbxcarta_verify_gate is True.
+
+    The summary dict is materialised here with status forced to 'success' — the
+    enclosing run_dbxcarta() has not yet called summary.finish(), but verify's
+    summary-shape check expects a successful run. If we raise, the outer
+    catch-all in run_dbxcarta() records the failure via summary.finish(failure).
+    """
+    from databricks.sdk import WorkspaceClient
+    from dbxcarta.summary import VerifyResult
+    from dbxcarta.verify import verify_run
+
+    summary_dict = summary.to_dict()
+    summary_dict["status"] = "success"
+    ws = WorkspaceClient()
+    report = verify_run(
+        summary=summary_dict,
+        neo4j_driver=driver,
+        ws=ws,
+        warehouse_id=settings.databricks_warehouse_id,
+        catalog=settings.dbxcarta_catalog,
+        sample_limit=settings.dbxcarta_sample_limit,
+    )
+    summary.verify = VerifyResult(
+        ok=report.ok,
+        violations=[{"code": v.code, "message": v.message} for v in report.violations],
+    )
+    if report.ok:
+        logger.info("[dbxcarta] verify: OK (0 violations)")
+        return
+    if settings.dbxcarta_verify_gate:
+        raise RuntimeError(
+            f"[dbxcarta] verify gate failed: {len(report.violations)} violation(s)\n"
+            + report.format()
+        )
+    logger.warning(
+        "[dbxcarta] verify reported %d violation(s) (warn-only; set"
+        " DBXCARTA_VERIFY_GATE=true to gate):\n%s",
+        len(report.violations), report.format(),
+    )
 
 
 def _transform_embeddings(

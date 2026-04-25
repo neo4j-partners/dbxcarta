@@ -241,7 +241,7 @@ wheels = [
 
 [[package]]
 name = "dbxcarta"
-version = "0.2.23"
+version = "0.2.29"
 source = { editable = "." }
 dependencies = [
     { name = "databricks-job-runner" },

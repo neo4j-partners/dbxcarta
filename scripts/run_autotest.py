@@ -331,8 +331,8 @@ def _neo4j_references_by_source(ws) -> dict[str, set[tuple[str, str]]]:
         return base64.b64decode(ws.secrets.get_secret(scope=scope, key=key).value).decode()
 
     driver = GraphDatabase.driver(
-        _secret("uri"),
-        auth=(_secret("username"), _secret("password")),
+        _secret("NEO4J_URI"),
+        auth=(_secret("NEO4J_USERNAME"), _secret("NEO4J_PASSWORD")),
     )
     try:
         with driver.session() as s:

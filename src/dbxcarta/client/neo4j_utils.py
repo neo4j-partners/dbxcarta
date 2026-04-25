@@ -14,9 +14,9 @@ def neo4j_credentials(settings: ClientSettings) -> tuple[str, str, str]:
 
         scope = settings.databricks_secret_scope
         return (
-            dbutils.secrets.get(scope=scope, key="uri"),
-            dbutils.secrets.get(scope=scope, key="username"),
-            dbutils.secrets.get(scope=scope, key="password"),
+            dbutils.secrets.get(scope=scope, key="NEO4J_URI"),
+            dbutils.secrets.get(scope=scope, key="NEO4J_USERNAME"),
+            dbutils.secrets.get(scope=scope, key="NEO4J_PASSWORD"),
         )
     except Exception:
         return (

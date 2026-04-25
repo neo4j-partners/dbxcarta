@@ -161,18 +161,26 @@ python scripts/run_dbxcarta_client.py
 
 ---
 
-## Running Tests
+## Verifying a Run
 
-The test suite uses `_FIXTURE_SCHEMAS` in `test_build_references_rel.py` to gate
-strict FK count assertions. With all four fixture schemas in scope:
-
-- `_FIXTURE_EXPECTED_DECLARED = 16` (all 16 FK constraints)
-- `_FIXTURE_EXPECTED_RESOLVED = 16` (all resolve — no dangling references)
-- `_FIXTURE_EXPECTED_EDGES = 17` (16 single-column FKs + 1 extra for composite)
+Pipeline self-verification lives in `dbxcarta.verify` and is exposed as a CLI.
+After a successful run, point at the run summary in your UC Volume to
+re-run every structural invariant (node counts, FK accounting, HAS_VALUE
+shape, value-id format, run-summary parity):
 
 ```bash
-pytest tests/schema_graph/ --slow
+uv run dbxcarta verify                    # most recent status='success' summary
+uv run dbxcarta verify --run-id <run_id>  # a specific run
 ```
+
+Expected counts on the four-schema fixture (`dbxcarta_test_sales`,
+`dbxcarta_test_inventory`, `dbxcarta_test_hr`, `dbxcarta_test_events`):
+
+- 16 declared FKs / 16 resolved / 17 column-pair REFERENCES edges
+  (1 composite contributes 2 column-pair rows)
+
+The `scripts/run_autotest.py` harness runs this end-to-end (DDL + INSERT +
+ingest + verify diff) against a live workspace.
 
 ---
 

@@ -205,6 +205,20 @@ class EmbeddingCounts:
 
 
 @dataclass
+class VerifyResult:
+    """Phase 3 verify outcome captured into the RunSummary.
+
+    `ok=False` means at least one violation. `violations` is the full list
+    surfaced through the JSON output for auditability without driver logs.
+    Delta only retains the flat `verify_ok`/`verify_violation_count` summary
+    columns to keep the table schema simple.
+    """
+
+    ok: bool
+    violations: list[dict[str, str]]  # [{"code": str, "message": str}, ...]
+
+
+@dataclass
 class RunSummary:
     """Run-level aggregate.
 
@@ -230,6 +244,7 @@ class RunSummary:
     sample_values: SampleValueCounts | None = None
     embeddings: EmbeddingCounts = field(default_factory=EmbeddingCounts)
     neo4j_counts: dict[str, int] = field(default_factory=dict)
+    verify: VerifyResult | None = None
 
     def finish(self, *, status: str, error: str | None = None) -> None:
         self.status = status
@@ -276,6 +291,13 @@ class RunSummary:
             "embedding_failure_rate": self.embeddings.aggregate_failure_rate,
             "embedding_failure_threshold": self.embeddings.failure_threshold,
             "embedding_ledger_hits": self.embeddings.as_ledger_hits_map(),
+            # Flat verify summary — kept flat so the Delta schema doesn't need
+            # a nested struct. The JSON output replaces these with a richer
+            # nested `verify` object that includes the violation list.
+            "verify_ok": None if self.verify is None else self.verify.ok,
+            "verify_violation_count": (
+                0 if self.verify is None else len(self.verify.violations)
+            ),
         }
 
     def to_json_dict(self) -> dict[str, Any]:
@@ -283,6 +305,14 @@ class RunSummary:
         d = self.to_dict()
         d["started_at"] = self.started_at.isoformat()
         d["ended_at"] = self.ended_at.isoformat() if self.ended_at else None
+        if self.verify is not None:
+            d.pop("verify_ok", None)
+            d.pop("verify_violation_count", None)
+            d["verify"] = {
+                "ok": self.verify.ok,
+                "violation_count": len(self.verify.violations),
+                "violations": self.verify.violations,
+            }
         return d
 
     def emit_stdout(self) -> None:
@@ -294,6 +324,11 @@ class RunSummary:
             print(f"  {stage}: {count}")
         for label, count in self.neo4j_counts.items():
             print(f"  neo4j/{label}: {count}")
+        if self.verify is not None:
+            n = len(self.verify.violations)
+            print(f"  verify: ok={self.verify.ok} violations={n}")
+            for v in self.verify.violations:
+                print(f"    [{v['code']}] {v['message']}")
         if self.error:
             print(f"  error: {self.error}")
 
@@ -337,6 +372,8 @@ class RunSummary:
             StructField("embedding_failure_rate", DoubleType()),
             StructField("embedding_failure_threshold", DoubleType()),
             StructField("embedding_ledger_hits", MapType(StringType(), LongType())),
+            StructField("verify_ok", BooleanType()),
+            StructField("verify_violation_count", LongType()),
         ])
 
         quoted_table = ".".join(f"`{p}`" for p in table_name.split("."))
