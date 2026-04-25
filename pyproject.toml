@@ -1,13 +1,13 @@
 [project]
 name = "dbxcarta"
-version = "0.2.16"
+version = "0.2.17"
 description = "Unity Catalog to Neo4j ingestion pipeline via Databricks Spark jobs"
 authors = [
     { name = "Ryan Knight"}
 ]
 requires-python = ">=3.12"
 dependencies = [
-    "databricks-job-runner>=0.4.7",
+    "databricks-job-runner>=0.4.8",
     "databricks-sdk>=0.40",
     "neo4j>=5.0",
     "pydantic>=2",
@@ -29,8 +29,9 @@ requires = ["uv_build>=0.9.3,<0.10.0"]
 build-backend = "uv_build"
 
 [tool.pytest.ini_options]
+addopts = "-m 'not live'"
 markers = [
-    "slow: tests that submit a Databricks job and wait for it to finish",
+    "live: tests that require a live Databricks profile, Neo4j, and a previously-loaded catalog (default pytest skips these)",
 ]
 
 # Phase 3.5 / 3.6: mypy-strict covers the entire domain layer (FK types,

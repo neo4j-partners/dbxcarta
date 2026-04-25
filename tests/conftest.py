@@ -1,4 +1,10 @@
-"""Root conftest: --slow opt-in flag, plus shared local_spark fixture."""
+"""Root conftest: live-marker injection for non-unit dirs, plus shared local_spark fixture.
+
+Phase 1 (worklog/cleanup.md): tests under `schema_graph/`, `sample_values/`, and
+`integration/` require live Databricks + Neo4j infra. They are auto-marked `live`
+here so they are skipped by default (see `pyproject.toml:addopts`). Phase 2 deletes
+those directories entirely; this hook goes with them.
+"""
 
 from __future__ import annotations
 
@@ -6,18 +12,15 @@ from typing import Iterator
 
 import pytest
 
-
-def pytest_addoption(parser: pytest.Parser) -> None:
-    parser.addoption("--slow", action="store_true", default=False, help="run slow tests (submit Databricks jobs)")
+_LIVE_DIRS = ("schema_graph", "sample_values", "integration")
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
-    if config.getoption("--slow"):
-        return
-    skip = pytest.mark.skip(reason="pass --slow to run job-submission tests")
+    live = pytest.mark.live
     for item in items:
-        if "slow" in item.keywords:
-            item.add_marker(skip)
+        path = str(item.path)
+        if any(f"/tests/{d}/" in path for d in _LIVE_DIRS):
+            item.add_marker(live)
 
 
 @pytest.fixture(scope="session")
