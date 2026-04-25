@@ -59,7 +59,10 @@ def _setup(
     from dbxcarta.client.executor import execute_ddl, split_sql_statements
 
     raw = _SETUP_SQL.read_text()
-    sql = raw.replace("${catalog}", f"`{catalog}`")
+    # Backtick-quote the catalog in USE CATALOG (hyphen requires quoting in SQL).
+    # All other ${catalog} occurrences in the fixture are in comments.
+    # Catalog context for all other statements is set via the execute_statement API parameter.
+    sql = raw.replace("USE CATALOG ${catalog}", f"USE CATALOG `{catalog}`").replace("${catalog}", catalog)
     if volume_path:
         sql = sql.replace("${volume_path}", volume_path)
     statements = split_sql_statements(sql)
@@ -74,7 +77,7 @@ def _setup(
             skipped += 1
             continue
         preview = stmt[:70].replace("\n", " ")
-        succeeded, error = execute_ddl(ws, warehouse_id, stmt, timeout_sec=50)
+        succeeded, error = execute_ddl(ws, warehouse_id, stmt, timeout_sec=50, catalog=catalog)
         if succeeded:
             print(f"  [{i}/{total}] OK  {preview}")
         else:
@@ -101,7 +104,7 @@ def _teardown(
     from dbxcarta.client.executor import execute_ddl
 
     statements = [
-        f"DROP SCHEMA IF EXISTS `{catalog}`.{schema} CASCADE"
+        f"DROP SCHEMA IF EXISTS {schema} CASCADE"
         for schema in _TEARDOWN_SCHEMAS
     ]
     total = len(statements)
@@ -110,7 +113,7 @@ def _teardown(
 
     warnings = []
     for i, stmt in enumerate(statements, 1):
-        succeeded, error = execute_ddl(ws, warehouse_id, stmt, timeout_sec=50)
+        succeeded, error = execute_ddl(ws, warehouse_id, stmt, timeout_sec=50, catalog=catalog)
         if succeeded:
             print(f"  [{i}/{total}] OK  {stmt}")
         else:

@@ -136,17 +136,18 @@ def phase2_schema_setup() -> dict:
 
     # Teardown — best-effort (ignore returncode)
     print("  Teardown...")
-    _run([
-        "uv", "run", "python", "scripts/run_demo.py",
-        "--catalog", catalog, "--teardown",
-    ])
+    _run(
+        ["uv", "run", "python", "scripts/run_demo.py", "--catalog", catalog, "--teardown"],
+        env_overrides={"DATABRICKS_VOLUME_PATH": ""},
+    )
 
-    # Setup — fail-fast
+    # Setup — external schema is out of scope for the autotest (no FKs, requires
+    # cloud storage path). Clear DATABRICKS_VOLUME_PATH so run_demo.py skips it.
     print("  Setup...")
-    setup_cmd = ["uv", "run", "python", "scripts/run_demo.py", "--catalog", catalog]
-    if volume_path:
-        setup_cmd += ["--volume-path", volume_path]
-    result = _run(setup_cmd)
+    result = _run(
+        ["uv", "run", "python", "scripts/run_demo.py", "--catalog", catalog],
+        env_overrides={"DATABRICKS_VOLUME_PATH": ""},
+    )
 
     if result.returncode != 0:
         return {"status": "fail", "error": "Schema setup failed"}

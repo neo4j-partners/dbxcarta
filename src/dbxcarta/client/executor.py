@@ -94,6 +94,7 @@ def execute_ddl(
     warehouse_id: str,
     sql: str,
     timeout_sec: int = 50,
+    catalog: str | None = None,
 ) -> tuple[bool, str | None]:
     """Execute a DDL statement (CREATE, ALTER, DROP, USE) and return success.
 
@@ -104,6 +105,7 @@ def execute_ddl(
         statement=sql,
         warehouse_id=warehouse_id,
         wait_timeout=f"{timeout_sec}s",
+        catalog=catalog,
     )
     state = response.status.state
     if state == StatementState.SUCCEEDED:
