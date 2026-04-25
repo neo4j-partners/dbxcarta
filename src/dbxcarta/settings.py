@@ -26,6 +26,9 @@ _IDENTIFIER_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_-]*$")
 
 class Settings(BaseSettings):
     databricks_secret_scope: str = "dbxcarta-neo4j"
+    # Required only by the verify CLI (loads the run summary from the Delta
+    # summary table via SQL Statement Execution). Pipeline runs never read it.
+    databricks_warehouse_id: str = ""
     dbxcarta_catalog: str
     dbxcarta_schemas: str = ""
     dbxcarta_summary_volume: str

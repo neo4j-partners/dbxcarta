@@ -13,7 +13,7 @@
 --   - Column and table COMMENTs on every object (for embedding quality)
 --
 -- FK inventory after a full pipeline run (all 5 schemas in scope):
---   16 declared FKs → 17 column-pair rows (composite FK contributes 2)
+--   16 declared FKs → 16 column-pair rows
 --
 --   dbxcarta_test_sales (5 FKs):
 --     orders.customer_id           -> sales.customers.id

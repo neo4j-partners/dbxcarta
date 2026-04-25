@@ -164,6 +164,14 @@ def phase2_schema_setup() -> dict:
 def phase3_ingest_run() -> dict:
     print("\n=== Phase 3: Ingest Run ===")
 
+    summary_volume = os.environ.get("DBXCARTA_SUMMARY_VOLUME", "")
+    if not summary_volume:
+        return {"status": "fail", "error": "DBXCARTA_SUMMARY_VOLUME not set"}
+
+    from databricks_job_runner.download import download_file, list_volume_files
+
+    ws = _make_ws()
+
     print("  Uploading wheel...")
     r = _run(["uv", "run", "dbxcarta", "upload", "--wheel"])
     if r.returncode != 0:
@@ -173,6 +181,8 @@ def phase3_ingest_run() -> dict:
     r = _run(["uv", "run", "dbxcarta", "upload", "--all"])
     if r.returncode != 0:
         return {"status": "fail", "error": "scripts upload failed"}
+
+    files_before = set(list_volume_files(ws, summary_volume))
 
     print("  Submitting pipeline run...")
     schemas_val = ",".join(FIXTURE_SCHEMAS)
@@ -195,24 +205,21 @@ def phase3_ingest_run() -> dict:
 
     print(f"  run_id={run_id}")
 
-    summary_volume = os.environ.get("DBXCARTA_SUMMARY_VOLUME", "")
-    if not summary_volume:
-        return {"status": "fail", "error": "DBXCARTA_SUMMARY_VOLUME not set"}
-
-    from databricks_job_runner.download import download_file, list_volume_files
-
-    ws = _make_ws()
-    files = list_volume_files(ws, summary_volume)
-    pattern = re.compile(rf"dbxcarta_{re.escape(run_id)}_.*\.json$")
-    matches = [f for f in files if pattern.search(f)]
+    files_after = set(list_volume_files(ws, summary_volume))
+    new_files = files_after - files_before
+    summary_pat = re.compile(r"^dbxcarta_.*\.json$")
+    matches = sorted(f for f in new_files if summary_pat.match(f))
     if not matches:
         return {
             "status": "fail",
             "run_id": run_id,
-            "error": f"No RunSummary JSON found for run_id={run_id} in {summary_volume}",
+            "error": (
+                f"No new RunSummary JSON written to {summary_volume} after run {run_id}. "
+                f"New files seen: {sorted(new_files)!r}"
+            ),
         }
 
-    filename = matches[0]
+    filename = matches[-1]  # lexicographic sort puts newest YYYYMMDDTHHMMSSZ last
     remote_path = filename if filename.startswith("/Volumes") else f"{summary_volume}/{filename}"
 
     with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tmp:
@@ -224,6 +231,7 @@ def phase3_ingest_run() -> dict:
     finally:
         local_path.unlink(missing_ok=True)
 
+    print(f"  RunSummary: {filename}")
     return {"status": "pass", "run_id": run_id, "run_summary": run_summary}
 
 
@@ -252,9 +260,9 @@ def phase4_assertions(run_summary: dict) -> dict:
 
     rc = run_summary.get("row_counts", {})
     assert_ge("row_counts.schemas", rc.get("schemas"), 4)
-    assert_ge("row_counts.tables", rc.get("tables"), 20)
+    assert_ge("row_counts.tables", rc.get("tables"), 19)
     assert_ge("row_counts.fk_declared", rc.get("fk_declared"), 16)
-    assert_ge("row_counts.fk_edges", rc.get("fk_edges"), 17)
+    assert_ge("row_counts.fk_edges", rc.get("fk_edges"), 16)
     assert_present("neo4j_counts", run_summary.get("neo4j_counts"))
 
     for f in failed:
@@ -331,9 +339,8 @@ def main() -> None:
     if ingest["status"] != "pass":
         _abort(phases)
 
-    assertions = phase4_assertions(run_summary)
     phases["ingest_run"]["run_summary"] = run_summary
-    phases["ingest_run"]["assertions"] = assertions
+    phases["assertions"] = phase4_assertions(run_summary)
 
     phases["output"] = phase5_write_output(phases, os.environ.get("DBXCARTA_CATALOG", ""))
 

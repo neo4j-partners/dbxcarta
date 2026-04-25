@@ -179,6 +179,44 @@ uv run pytest tests/client
 DBXCARTA_CLIENT_ARMS=graph_rag uv run dbxcarta submit --upload run_dbxcarta_client.py
 ```
 
+## Automated end-to-end test
+
+`scripts/run_autotest.py` is a self-contained harness that provisions a known fixture schema in Unity Catalog, runs the full pipeline against it, and asserts the resulting `RunSummary` JSON meets expected thresholds. It produces a dated JSON result file in the configured volume and exits non-zero on any failure.
+
+**Prerequisites** — the following must be set in `.env` (or the environment):
+
+| Variable | Purpose |
+|----------|---------|
+| `DATABRICKS_PROFILE` | Databricks CLI profile for auth |
+| `DATABRICKS_CLUSTER_ID` or `DATABRICKS_COMPUTE_MODE=serverless` | Compute for the pipeline job |
+| `DATABRICKS_WAREHOUSE_ID` | SQL warehouse used for schema setup |
+| `DBXCARTA_CATALOG` | Must be `dbxcarta-catalog` |
+| `DBXCARTA_SUMMARY_VOLUME` | UC Volume path where `RunSummary` JSON and autotest results are written |
+
+**Run:**
+
+```bash
+uv run python scripts/run_autotest.py
+```
+
+**Phases:**
+
+| Phase | What it does |
+|-------|-------------|
+| 0 — Preflight | Verifies workspace connectivity and that the SQL warehouse is reachable |
+| 1 — Unit test gate | Runs the fast offline pytest suite; aborts if any test fails |
+| 2 — Schema setup | Tears down and recreates the fixture schemas (`dbxcarta_test_{sales,inventory,hr,events}`) in `dbxcarta-catalog` using `tests/fixtures/setup_test_catalog.sql` |
+| 3 — Ingest run | Builds and uploads the wheel, uploads scripts, submits `run_dbxcarta.py`, waits for `SUCCESS`, and downloads the `RunSummary` JSON |
+| 4 — Assertions | Validates the `RunSummary`: `status=success`, `error=null`, `schemas >= 4`, `tables >= 19`, `fk_declared >= 16`, `fk_edges >= 16`, `neo4j_counts` non-empty |
+| 5 — Output JSON | Writes a dated `autotest_results_<ts>.json` to `DBXCARTA_SUMMARY_VOLUME/autotest/` |
+
+The fixture covers all the structural edge cases: cross-schema FKs (sales → hr, sales → inventory), a self-referential FK (`employees.manager_id`), a composite PK/associative table (`product_suppliers`), and complex column types (`STRUCT`, `ARRAY`, `MAP`, `VARIANT`, `BINARY`). The external schema (`dbxcarta_test_external`) requires a UC Volume path and is excluded from the ingest run but included in teardown.
+
+**Notes:**
+- The harness locates the `RunSummary` via a before/after volume diff rather than matching the Databricks submit run ID — `DATABRICKS_JOB_RUN_ID` is not set for one-time `runs.submit()` jobs, so the file is always written as `dbxcarta_local_<ts>.json`.
+- Schema setup and teardown are idempotent — re-running the harness always starts from a clean state.
+- Unit tests run with `--ignore=tests/schema_graph --ignore=tests/sample_values --ignore=tests/integration` to exclude slow live-catalog suites.
+
 ## Upload and submit
 
 `upload --wheel` builds the `dbxcarta` package, bumps the patch version in `pyproject.toml`, and uploads the wheel to `DATABRICKS_VOLUME_PATH/wheels/`. `upload --all` copies every `*.py` in `scripts/` to `DATABRICKS_WORKSPACE_DIR/scripts/` in the workspace. Re-run `upload --wheel` when `src/dbxcarta/` changes; re-run `upload --all` when `scripts/` changes.
