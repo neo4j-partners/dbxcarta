@@ -1,6 +1,6 @@
 [project]
 name = "dbxcarta"
-version = "0.2.22"
+version = "0.2.23"
 description = "Unity Catalog to Neo4j ingestion pipeline via Databricks Spark jobs"
 authors = [
     { name = "Ryan Knight"}
