@@ -16,12 +16,12 @@ from pydantic_settings import BaseSettings
 
 
 # Strict Databricks identifier: alphabetic/underscore start, then alphanumerics/
-# underscores. Deliberately excludes backticks, dots, hyphens, and spaces.
+# underscores/hyphens. Excludes backticks, dots, and spaces. Hyphens are valid
+# in catalog and schema names but require backtick-quoting in SQL. Backticks
+# are the actual injection vector and remain excluded.
 # Dotted names (`schema.table`, `cat.schema.table`) are split on `.` by their
-# field validator and validated per part. The old permissive regex allowed
-# backticks inside identifier segments, which combined with f"`{catalog}`"
-# SQL interpolation could escape the intended quoting.
-_IDENTIFIER_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+# field validator and validated per part.
+_IDENTIFIER_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_-]*$")
 
 
 class Settings(BaseSettings):

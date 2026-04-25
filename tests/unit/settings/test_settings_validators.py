@@ -26,10 +26,9 @@ _BASE_SETTINGS = {
 # --- _IDENTIFIER_RE tightening (Phase 3.5) ----------------------------------
 
 @pytest.mark.parametrize("bad_catalog", [
-    "evil`catalog",     # backtick
+    "evil`catalog",     # backtick — injection vector
     "cat.subcat",       # dot (catalog must be single identifier)
     "cat name",         # space
-    "cat-name",         # hyphen
     "1cat",             # leading digit
     "",                 # empty
 ])
@@ -42,6 +41,7 @@ def test_settings_rejects_non_strict_catalog(bad_catalog: str) -> None:
     "main",
     "my_catalog",
     "_internal",
+    "dbxcarta-catalog",   # hyphens are valid; require backtick-quoting in SQL
 ])
 def test_settings_accepts_strict_catalog(good_catalog: str) -> None:
     s = Settings(dbxcarta_catalog=good_catalog, **_BASE_SETTINGS)
@@ -63,9 +63,8 @@ def test_settings_accepts_dotted_summary_table(good_table: str) -> None:
 
 
 @pytest.mark.parametrize("bad_table", [
-    "schema.`table`",       # backtick in a part
+    "schema.`table`",       # backtick in a part — injection vector
     "schema..table",        # empty middle part
-    "schema.my-table",      # hyphen in a part
     "schema.1table",        # leading digit in a part
 ])
 def test_settings_rejects_malformed_summary_table(bad_table: str) -> None:
