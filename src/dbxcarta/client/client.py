@@ -430,7 +430,8 @@ def run_client() -> None:
 
     spark = SparkSession.builder.getOrCreate()
     run_id = os.environ.get("DATABRICKS_JOB_RUN_ID", "local")
-    ws = WorkspaceClient()
+    profile = os.environ.get("DATABRICKS_PROFILE")
+    ws = WorkspaceClient(profile=profile) if profile else WorkspaceClient()
 
     _preflight(ws, settings)
 

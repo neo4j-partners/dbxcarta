@@ -108,6 +108,7 @@ def phase1_unit_tests() -> dict:
         "uv", "run", "pytest", "tests/", "-x", "-q",
         "--ignore=tests/schema_graph",
         "--ignore=tests/sample_values",
+        "--ignore=tests/integration",
     ])
 
     passed = 0

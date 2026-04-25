@@ -8,10 +8,13 @@ other failures are expected to propagate as signal.
 
 from __future__ import annotations
 
+import pytest
+
 from dbxcarta.contract import NodeLabel
 from dbxcarta.ledger import read_ledger
 
 
+@pytest.mark.skip(reason="requires Delta JAR on local Spark classpath — see worklog/fixspark.md")
 def test_read_ledger_returns_none_on_missing_path(local_spark, tmp_path) -> None:
     """A path that doesn't exist returns None. If any exception other than the
     narrowed AnalysisException fires, it propagates — test would fail loudly."""

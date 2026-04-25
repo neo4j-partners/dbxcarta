@@ -1,9 +1,7 @@
 """Fixtures for tests/embeddings/.
 
-Unit tests use a local-mode SparkSession to exercise the transform without
-invoking ai_query. Integration tests reuse neo4j_driver / run_summary from
-the schema_graph sibling conftest via direct import. The local_spark
-fixture lives in the root tests/conftest.py.
+Unit tests use a local-mode SparkSession (local_spark from the root conftest)
+to exercise the transform without invoking ai_query.
 """
 
 from __future__ import annotations

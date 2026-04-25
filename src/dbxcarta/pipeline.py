@@ -3,10 +3,10 @@
 Thin coordinator after the Phase 3.6 foundation split. Its job is limited to:
   1. Construct Settings (fails loudly at boundary via cross-field validators).
   2. Run preflight (fails before any destructive action).
-  3. Call extract → transform (embed, sample) → infer → load.
+  3. Call extract → transform (embed, sample) → fk_discovery → load.
   4. Emit the RunSummary.
 
-Everything substantive lives in its own module — extract, inference,
+Everything substantive lives in its own module — extract, fk_discovery,
 staging, ledger, neo4j_io, preflight, embeddings, sample_values.
 """
 

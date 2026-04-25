@@ -59,15 +59,22 @@ def _setup(
     from dbxcarta.client.executor import execute_ddl, split_sql_statements
 
     raw = _SETUP_SQL.read_text()
-    sql = raw.replace("${catalog}", catalog).replace("${volume_path}", volume_path)
+    sql = raw.replace("${catalog}", f"`{catalog}`")
+    if volume_path:
+        sql = sql.replace("${volume_path}", volume_path)
     statements = split_sql_statements(sql)
     total = len(statements)
 
     print(f"Setting up demo schemas in catalog '{catalog}' ({total} statements)...")
 
+    skipped = 0
     for i, stmt in enumerate(statements, 1):
+        if "${volume_path}" in stmt:
+            print(f"  [{i}/{total}] SKIP (no volume path — external table skipped)")
+            skipped += 1
+            continue
         preview = stmt[:70].replace("\n", " ")
-        succeeded, error = execute_ddl(ws, warehouse_id, stmt, timeout_sec=60)
+        succeeded, error = execute_ddl(ws, warehouse_id, stmt, timeout_sec=50)
         if succeeded:
             print(f"  [{i}/{total}] OK  {preview}")
         else:
@@ -81,7 +88,9 @@ def _setup(
             )
             sys.exit(1)
 
-    print(f"\nDone. {total} statement(s) executed successfully.")
+    done = total - skipped
+    suffix = f" ({skipped} skipped — no volume path)" if skipped else ""
+    print(f"\nDone. {done} statement(s) executed successfully{suffix}.")
 
 
 def _teardown(
@@ -92,7 +101,7 @@ def _teardown(
     from dbxcarta.client.executor import execute_ddl
 
     statements = [
-        f"DROP SCHEMA IF EXISTS {catalog}.{schema} CASCADE"
+        f"DROP SCHEMA IF EXISTS `{catalog}`.{schema} CASCADE"
         for schema in _TEARDOWN_SCHEMAS
     ]
     total = len(statements)
@@ -101,7 +110,7 @@ def _teardown(
 
     warnings = []
     for i, stmt in enumerate(statements, 1):
-        succeeded, error = execute_ddl(ws, warehouse_id, stmt, timeout_sec=60)
+        succeeded, error = execute_ddl(ws, warehouse_id, stmt, timeout_sec=50)
         if succeeded:
             print(f"  [{i}/{total}] OK  {stmt}")
         else:
@@ -173,7 +182,8 @@ def main() -> None:
     from databricks.sdk import WorkspaceClient
     from dbxcarta.client.executor import preflight_warehouse
 
-    ws = WorkspaceClient()
+    profile = os.environ.get("DATABRICKS_PROFILE")
+    ws = WorkspaceClient(profile=profile) if profile else WorkspaceClient()
     preflight_warehouse(ws, warehouse_id)
 
     if args.teardown:

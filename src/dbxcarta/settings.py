@@ -89,8 +89,8 @@ class Settings(BaseSettings):
 
         1. Value embeddings require sample-values to be enabled — there are
            no Value nodes to embed otherwise.
-        2. Phase 4 (semantic FK inference) requires column embeddings to be
-           enabled — cosine similarity needs vectors.
+        2. Semantic FK discovery requires column embeddings to be enabled —
+           cosine similarity needs vectors.
         """
         if (
             self.dbxcarta_include_embeddings_values

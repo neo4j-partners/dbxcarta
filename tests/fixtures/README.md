@@ -157,7 +157,7 @@ python scripts/run_dbxcarta_client.py
 
 ## Running Tests
 
-The test suite uses `_FIXTURE_SCHEMAS` in `test_fk_references.py` to gate
+The test suite uses `_FIXTURE_SCHEMAS` in `test_build_references_rel.py` to gate
 strict FK count assertions. With all four fixture schemas in scope:
 
 - `_FIXTURE_EXPECTED_DECLARED = 16` (all 16 FK constraints)

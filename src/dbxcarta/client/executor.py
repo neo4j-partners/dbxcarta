@@ -93,7 +93,7 @@ def execute_ddl(
     ws: WorkspaceClient,
     warehouse_id: str,
     sql: str,
-    timeout_sec: int = 60,
+    timeout_sec: int = 50,
 ) -> tuple[bool, str | None]:
     """Execute a DDL statement (CREATE, ALTER, DROP, USE) and return success.
 
@@ -121,23 +121,60 @@ def execute_ddl(
 def split_sql_statements(sql: str) -> list[str]:
     """Split a SQL script on semicolons, discarding comment-only and empty segments.
 
-    Inline SQL comments within statements are preserved — they are valid SQL
-    that the warehouse engine handles correctly. Only segments whose entire
-    content is comments or whitespace are discarded.
-
-    Note: splits on literal semicolons only. Does not handle semicolons inside
-    string literals or block comments. This is sufficient for DDL scripts where
-    those constructs do not appear.
+    Tracks -- line-comment state and single-quoted string literals so semicolons
+    inside comments or strings are not treated as statement boundaries. Does not
+    handle block comments (/* */); this is sufficient for DDL scripts.
     """
     result = []
-    for segment in sql.split(";"):
-        stripped = segment.strip()
-        has_sql = any(
-            line and not line.startswith("--")
-            for line in (l.strip() for l in stripped.splitlines())
-        )
-        if has_sql:
-            result.append(stripped)
+    current: list[str] = []
+    in_line_comment = False
+    in_string = False
+
+    i = 0
+    n = len(sql)
+    while i < n:
+        ch = sql[i]
+        if in_string:
+            current.append(ch)
+            if ch == "'":
+                if i + 1 < n and sql[i + 1] == "'":
+                    # SQL escaped quote: '' — consume both chars
+                    i += 1
+                    current.append(sql[i])
+                else:
+                    in_string = False
+        elif in_line_comment:
+            current.append(ch)
+            if ch == "\n":
+                in_line_comment = False
+        elif ch == "'":
+            in_string = True
+            current.append(ch)
+        elif ch == "-" and i + 1 < n and sql[i + 1] == "-":
+            in_line_comment = True
+            current.append(ch)
+        elif ch == ";":
+            segment = "".join(current).strip()
+            has_sql = any(
+                line and not line.startswith("--")
+                for line in (l.strip() for l in segment.splitlines())
+            )
+            if has_sql:
+                result.append(segment)
+            current = []
+        else:
+            current.append(ch)
+        i += 1
+
+    # trailing segment with no final semicolon
+    segment = "".join(current).strip()
+    has_sql = any(
+        line and not line.startswith("--")
+        for line in (l.strip() for l in segment.splitlines())
+    )
+    if has_sql:
+        result.append(segment)
+
     return result
 
 

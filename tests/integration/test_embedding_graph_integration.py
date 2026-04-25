@@ -9,11 +9,6 @@ from __future__ import annotations
 
 import pytest
 
-# Reuse integration fixtures from the schema_graph sibling conftest.
-# pytest collects sibling conftests automatically only for nested directories;
-# for sibling dirs we re-export explicitly.
-from tests.schema_graph.conftest import neo4j_driver, run_summary, ws  # noqa: F401
-
 
 def _tables_enabled(run_summary: dict) -> bool:
     flags = run_summary.get("embedding_flags") or {}

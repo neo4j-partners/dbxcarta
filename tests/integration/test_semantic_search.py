@@ -17,8 +17,6 @@ from __future__ import annotations
 import requests
 import pytest
 
-from tests.schema_graph.conftest import neo4j_driver, run_summary, ws  # noqa: F401
-
 _TOP_K = 10
 _SAMPLE = 5
 _MIN_SELF_SIMILARITY = 0.99
