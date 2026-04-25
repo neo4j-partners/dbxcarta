@@ -1,13 +1,13 @@
 """Automated end-to-end integration test harness for DBxCarta.
 
-Phases:
-  0   Preflight        — workspace + warehouse connectivity
-  1   Unit tests       — fast pytest suite
-  2   Schema setup     — teardown + fixture DDL
-  3   Ingest run       — upload, submit, download RunSummary
-  4   Assertions       — validate RunSummary contents
-  4b  References diff  — fixture FK declarations vs Neo4j REFERENCES set
-  5   Output JSON      — write results to volume
+Steps:
+  preflight        — workspace + warehouse connectivity
+  unit_tests       — fast pytest suite
+  schema_setup     — teardown + fixture DDL
+  ingest_run       — upload, submit, download RunSummary
+  assertions       — validate RunSummary contents
+  references_diff  — fixture FK declarations vs Neo4j REFERENCES set
+  write_output     — write results to volume
 
 Usage:
     uv run python scripts/run_autotest.py
@@ -59,11 +59,11 @@ def _run(cmd: list[str], *, env_overrides: dict[str, str] | None = None) -> subp
 
 
 # ---------------------------------------------------------------------------
-# Phase 0 — Preflight
+# Preflight
 # ---------------------------------------------------------------------------
 
-def phase0_preflight() -> dict:
-    print("\n=== Phase 0: Preflight ===")
+def run_preflight() -> dict:
+    print("\n=== Preflight ===")
     errors: list[str] = []
 
     warehouse_id = os.environ.get("DATABRICKS_WAREHOUSE_ID", "")
@@ -100,11 +100,11 @@ def phase0_preflight() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Phase 1 — Unit Test Gate
+# Unit Test Gate
 # ---------------------------------------------------------------------------
 
-def phase1_unit_tests() -> dict:
-    print("\n=== Phase 1: Unit Test Gate ===")
+def run_unit_tests() -> dict:
+    print("\n=== Unit Test Gate ===")
     result = _run([
         "uv", "run", "pytest", "tests/", "-x", "-q",
         "--ignore=tests/schema_graph",
@@ -127,11 +127,11 @@ def phase1_unit_tests() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Phase 2 — Schema Teardown and Setup
+# Schema Teardown and Setup
 # ---------------------------------------------------------------------------
 
-def phase2_schema_setup() -> dict:
-    print("\n=== Phase 2: Schema Teardown and Setup ===")
+def run_schema_setup() -> dict:
+    print("\n=== Schema Teardown and Setup ===")
     catalog = os.environ["DBXCARTA_CATALOG"]
     volume_path = os.environ.get("DATABRICKS_VOLUME_PATH", "")
 
@@ -159,11 +159,11 @@ def phase2_schema_setup() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Phase 3 — Ingest Run
+# Ingest Run
 # ---------------------------------------------------------------------------
 
-def phase3_ingest_run() -> dict:
-    print("\n=== Phase 3: Ingest Run ===")
+def run_ingest() -> dict:
+    print("\n=== Ingest Run ===")
 
     summary_volume = os.environ.get("DBXCARTA_SUMMARY_VOLUME", "")
     if not summary_volume:
@@ -237,11 +237,11 @@ def phase3_ingest_run() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Phase 4 — Assertions
+# Assertions
 # ---------------------------------------------------------------------------
 
-def phase4_assertions(run_summary: dict) -> dict:
-    print("\n=== Phase 4: Assertions ===")
+def run_assertions(run_summary: dict) -> dict:
+    print("\n=== Assertions ===")
     failed: list[str] = []
 
     def assert_eq(key: str, actual, expected) -> None:
@@ -275,7 +275,7 @@ def phase4_assertions(run_summary: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Phase 4b — Fixture-FK ↔ Neo4j REFERENCES diff
+# Fixture-FK ↔ Neo4j REFERENCES diff
 # ---------------------------------------------------------------------------
 #
 # This step exists because the run summary's `fk_*` counters and Neo4j's
@@ -285,7 +285,7 @@ def phase4_assertions(run_summary: dict) -> dict:
 # source for *declared* FKs. The pipeline also produces *inferred* FK edges
 # via `dbxcarta.fk_metadata` (column-comment hints) and optionally
 # `dbxcarta.fk_semantic`; replicating that logic here would just duplicate
-# the pipeline. So this phase asserts only what the fixture pins down (the
+# the pipeline. So this step asserts only what the fixture pins down (the
 # declared bucket) and reports the inferred bucket informationally so a
 # regression in inference is visible without being asserted against a
 # hand-curated list. Bucketing keys off the `r.source` property each
@@ -348,8 +348,8 @@ def _neo4j_references_by_source(ws) -> dict[str, set[tuple[str, str]]]:
     return buckets
 
 
-def phase4b_references_diff() -> dict:
-    print("\n=== Phase 4b: Fixture FK ↔ Neo4j REFERENCES diff ===")
+def run_references_diff() -> dict:
+    print("\n=== Fixture FK ↔ Neo4j REFERENCES diff ===")
     catalog = os.environ.get("DBXCARTA_CATALOG", "")
     if not catalog:
         return {"status": "fail", "error": "DBXCARTA_CATALOG not set"}
@@ -401,11 +401,11 @@ def phase4b_references_diff() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Phase 5 — Output JSON
+# Output JSON
 # ---------------------------------------------------------------------------
 
-def phase5_write_output(phases: dict, catalog: str) -> dict:
-    print("\n=== Phase 5: Write Output JSON ===")
+def run_write_output(phases: dict, catalog: str) -> dict:
+    print("\n=== Write Output JSON ===")
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
     overall_phases = {k: v for k, v in phases.items() if k != "output"}
@@ -447,36 +447,36 @@ def phase5_write_output(phases: dict, catalog: str) -> dict:
 
 def _abort(phases: dict) -> None:
     failed = [k for k, v in phases.items() if v["status"] != "pass"]
-    print(f"\nAborted — failed phases: {failed}")
+    print(f"\nAborted — failed steps: {failed}")
     sys.exit(1)
 
 
 def main() -> None:
     phases: dict[str, dict] = {}
 
-    phases["preflight"] = phase0_preflight()
+    phases["preflight"] = run_preflight()
     if phases["preflight"]["status"] != "pass":
         _abort(phases)
 
-    phases["unit_tests"] = phase1_unit_tests()
+    phases["unit_tests"] = run_unit_tests()
     if phases["unit_tests"]["status"] != "pass":
         _abort(phases)
 
-    phases["schema_setup"] = phase2_schema_setup()
+    phases["schema_setup"] = run_schema_setup()
     if phases["schema_setup"]["status"] != "pass":
         _abort(phases)
 
-    ingest = phase3_ingest_run()
+    ingest = run_ingest()
     run_summary = ingest.pop("run_summary", {})
     phases["ingest_run"] = ingest
     if ingest["status"] != "pass":
         _abort(phases)
 
     phases["ingest_run"]["run_summary"] = run_summary
-    phases["assertions"] = phase4_assertions(run_summary)
-    phases["references_diff"] = phase4b_references_diff()
+    phases["assertions"] = run_assertions(run_summary)
+    phases["references_diff"] = run_references_diff()
 
-    phases["output"] = phase5_write_output(phases, os.environ.get("DBXCARTA_CATALOG", ""))
+    phases["output"] = run_write_output(phases, os.environ.get("DBXCARTA_CATALOG", ""))
 
     overall = "pass" if all(p["status"] == "pass" for p in phases.values()) else "fail"
     print(f"\n{'=' * 50}")
