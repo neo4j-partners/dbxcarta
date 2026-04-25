@@ -26,7 +26,27 @@ _FIXTURE_SCHEMAS = frozenset({
 })
 _FIXTURE_EXPECTED_DECLARED = 16
 _FIXTURE_EXPECTED_RESOLVED = 16
+# 16 declared FKs + 1 metadata-inferred (employees.job_title_id -> job_titles.id,
+# detected from the column's "FK to job_titles" comment hint).
 _FIXTURE_EXPECTED_EDGES = 17
+
+
+def _expected_edge_total(summary: dict[str, Any]) -> int:
+    """Total REFERENCES edges the writer is expected to have produced.
+
+    The summary's `fk_edges` counter only counts *declared* FKs from the
+    catalog; metadata- and semantic-inferred FKs are tracked under separate
+    `fk_inferred_*_accepted` counters but are written to Neo4j as REFERENCES
+    edges alongside the declared ones. Comparing `fk_edges` to Neo4j's
+    REFERENCES count without summing the inferred totals will always look
+    high by `accepted` whenever inference is on (its default for metadata).
+    """
+    counts = summary.get("row_counts") or {}
+    return (
+        counts.get("fk_edges", 0)
+        + counts.get("fk_inferred_metadata_accepted", 0)
+        + counts.get("fk_inferred_semantic_accepted", 0)
+    )
 
 
 def check(driver: "Driver", summary: dict[str, Any]) -> list[Violation]:
@@ -38,19 +58,19 @@ def check(driver: "Driver", summary: dict[str, Any]) -> list[Violation]:
 
 
 def _check_edge_count(driver: "Driver", summary: dict[str, Any]) -> list[Violation]:
-    """Neo4j's REFERENCES edge count must match the summary's fk_edges count.
-    A mismatch implies the Spark Connector dropped rows where an endpoint
-    Column node did not exist."""
-    fk_edges = (summary.get("row_counts") or {}).get("fk_edges", 0)
+    """Neo4j's REFERENCES edge count must match declared + inferred FKs from
+    the summary. A mismatch implies the Spark Connector dropped rows where an
+    endpoint Column node did not exist."""
+    expected = _expected_edge_total(summary)
     with driver.session() as s:
         edges = s.run(
             f"MATCH ()-[r:{RelType.REFERENCES}]->() RETURN count(r) AS cnt"
         ).single()["cnt"]
-    if edges != fk_edges:
+    if edges != expected:
         return [Violation(
             code="references.edge_count_mismatch",
-            message=f"Neo4j has {edges} REFERENCES edges; run summary reported {fk_edges}.",
-            details={"neo4j": edges, "summary": fk_edges},
+            message=f"Neo4j has {edges} REFERENCES edges; run summary reported {expected} (declared + inferred).",
+            details={"neo4j": edges, "summary_total": expected},
         )]
     return []
 
@@ -93,7 +113,7 @@ def _check_fixture_coverage(summary: dict[str, Any]) -> list[Violation]:
     counts = summary.get("row_counts") or {}
     declared = counts.get("fk_declared", 0)
     resolved = counts.get("fk_resolved", 0)
-    fk_edges = counts.get("fk_edges", 0)
+    total_edges = _expected_edge_total(summary)
 
     out: list[Violation] = []
     if declared < _FIXTURE_EXPECTED_DECLARED:
@@ -108,10 +128,10 @@ def _check_fixture_coverage(summary: dict[str, Any]) -> list[Violation]:
             message=f"Fixture schemas in scope but fk_resolved={resolved} < {_FIXTURE_EXPECTED_RESOLVED}.",
             details={"resolved": resolved, "expected_min": _FIXTURE_EXPECTED_RESOLVED},
         ))
-    if fk_edges < _FIXTURE_EXPECTED_EDGES:
+    if total_edges < _FIXTURE_EXPECTED_EDGES:
         out.append(Violation(
             code="references.fixture_edges_below_expected",
-            message=f"Fixture schemas in scope but fk_edges={fk_edges} < {_FIXTURE_EXPECTED_EDGES}.",
-            details={"fk_edges": fk_edges, "expected_min": _FIXTURE_EXPECTED_EDGES},
+            message=f"Fixture schemas in scope but declared+inferred edges={total_edges} < {_FIXTURE_EXPECTED_EDGES}.",
+            details={"total_edges": total_edges, "expected_min": _FIXTURE_EXPECTED_EDGES},
         ))
     return out

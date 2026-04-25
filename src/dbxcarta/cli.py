@@ -72,14 +72,15 @@ def _handle_verify(argv: list[str]) -> int:
     args = parser.parse_args(argv)
 
     from dbxcarta.settings import Settings
+    from dbxcarta.summary import LoadSummaryError, load_summary_from_volume
     from dbxcarta.verify import verify_run
 
     settings = Settings()  # type: ignore[call-arg]
 
     ws = _build_workspace_client()
     try:
-        summary = _load_run_summary(ws, settings, args.run_id)
-    except _LoadSummaryError as e:
+        summary = load_summary_from_volume(ws, settings.dbxcarta_summary_volume, run_id=args.run_id)
+    except LoadSummaryError as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
     if summary is None:
@@ -128,46 +129,3 @@ def _build_neo4j_driver(ws, settings):
     )
 
 
-class _LoadSummaryError(Exception):
-    """Raised on ambiguous --run-id matches or other unrecoverable load errors."""
-
-
-def _load_run_summary(ws, settings, run_id: str | None) -> dict | None:
-    """Load a run summary from the UC Volume JSON files; return its dict, or None.
-
-    `summary.py:emit_json` writes `{job_name}_{run_id}_{ts}.json` files. With
-    `--run-id` set, we filter for that token; otherwise we scan newest-first
-    and return the first summary with status='success'.
-    """
-    import json
-
-    volume_path = settings.dbxcarta_summary_volume
-    entries = list(ws.files.list_directory_contents(directory_path=volume_path))
-    candidates = [
-        e for e in entries
-        if e.name.startswith("dbxcarta_") and e.name.endswith(".json")
-    ]
-    if not candidates:
-        return None
-
-    if run_id:
-        matched = [e for e in candidates if e.name.startswith(f"dbxcarta_{run_id}_")]
-        if not matched:
-            return None
-        if len(matched) > 1:
-            names = sorted(e.name for e in matched)
-            raise _LoadSummaryError(
-                f"--run-id={run_id!r} matched {len(matched)} files in {volume_path}: "
-                f"{names}. Disambiguate by removing duplicates or pass a more specific value."
-            )
-        target = matched[0]
-        content = ws.files.download(file_path=f"{volume_path}/{target.name}").contents.read()
-        return json.loads(content)
-
-    # No run_id: scan newest-first, return the first success.
-    for entry in sorted(candidates, key=lambda e: e.name, reverse=True):
-        content = ws.files.download(file_path=f"{volume_path}/{entry.name}").contents.read()
-        loaded = json.loads(content)
-        if loaded.get("status") == "success":
-            return loaded
-    return None

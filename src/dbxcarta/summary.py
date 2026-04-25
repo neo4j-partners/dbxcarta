@@ -19,12 +19,65 @@ from typing import TYPE_CHECKING, Any
 from dbxcarta.contract import NodeLabel
 
 if TYPE_CHECKING:
+    from databricks.sdk import WorkspaceClient
     from pyspark.sql import SparkSession
 
     from dbxcarta.fk_declared import DeclaredCounters
     from dbxcarta.fk_metadata import InferenceCounters
     from dbxcarta.fk_semantic import SemanticInferenceCounters
     from dbxcarta.sample_values import SampleStats
+
+
+class LoadSummaryError(Exception):
+    """Raised when a `--run-id` selector matches multiple summary files in the
+    volume. Caller is expected to disambiguate (typically by deleting duplicates
+    or passing a more specific id).
+    """
+
+
+def load_summary_from_volume(
+    ws: "WorkspaceClient",
+    volume_path: str,
+    *,
+    run_id: str | None = None,
+) -> dict | None:
+    """Load a run summary JSON from a UC Volume (the file emitted by `emit_json`).
+
+    `emit_json` writes `{job_name}_{run_id}_{ts}.json` files. With `run_id`
+    set, filter for that token; otherwise scan newest-first by filename and
+    return the first summary with `status == 'success'`.
+
+    Returns the parsed dict, or `None` if no matching file exists. Raises
+    `LoadSummaryError` if `run_id` matches multiple files (ambiguity).
+    """
+    entries = list(ws.files.list_directory_contents(directory_path=volume_path))
+    candidates = [
+        e for e in entries
+        if e.name.startswith("dbxcarta_") and e.name.endswith(".json")
+    ]
+    if not candidates:
+        return None
+
+    if run_id:
+        matched = [e for e in candidates if e.name.startswith(f"dbxcarta_{run_id}_")]
+        if not matched:
+            return None
+        if len(matched) > 1:
+            names = sorted(e.name for e in matched)
+            raise LoadSummaryError(
+                f"--run-id={run_id!r} matched {len(matched)} files in {volume_path}: "
+                f"{names}. Disambiguate by removing duplicates or pass a more specific value."
+            )
+        target = matched[0]
+        content = ws.files.download(file_path=f"{volume_path}/{target.name}").contents.read()
+        return json.loads(content)
+
+    for entry in sorted(candidates, key=lambda e: e.name, reverse=True):
+        content = ws.files.download(file_path=f"{volume_path}/{entry.name}").contents.read()
+        loaded = json.loads(content)
+        if loaded.get("status") == "success":
+            return loaded
+    return None
 
 
 def _mkdirs(dirpath: Path) -> None:

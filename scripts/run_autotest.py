@@ -1,12 +1,13 @@
 """Automated end-to-end integration test harness for DBxCarta.
 
 Phases:
-  0  Preflight      — workspace + warehouse connectivity
-  1  Unit tests     — fast pytest suite
-  2  Schema setup   — teardown + fixture DDL
-  3  Ingest run     — upload, submit, download RunSummary
-  4  Assertions     — validate RunSummary contents
-  5  Output JSON    — write results to volume
+  0   Preflight        — workspace + warehouse connectivity
+  1   Unit tests       — fast pytest suite
+  2   Schema setup     — teardown + fixture DDL
+  3   Ingest run       — upload, submit, download RunSummary
+  4   Assertions       — validate RunSummary contents
+  4b  References diff  — fixture FK declarations vs Neo4j REFERENCES set
+  5   Output JSON      — write results to volume
 
 Usage:
     uv run python scripts/run_autotest.py
@@ -274,6 +275,133 @@ def phase4_assertions(run_summary: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Phase 4b — Fixture-FK ↔ Neo4j REFERENCES diff
+# ---------------------------------------------------------------------------
+#
+# This phase exists because the run summary's `fk_*` counters and Neo4j's
+# REFERENCES edge count can drift apart silently — a real instance of which
+# is documented in worklog/cleanup-v2.md (Phase 2.6, Finding 1).
+#
+# The fixture (tests/fixtures/setup_test_catalog.sql) is the authoritative
+# source for *declared* FKs. The pipeline also produces *inferred* FK edges
+# via `dbxcarta.fk_metadata` (column-comment hints) and optionally
+# `dbxcarta.fk_semantic`; replicating that logic here would just duplicate
+# the pipeline. So this phase asserts only what the fixture pins down (the
+# declared bucket) and reports the inferred bucket informationally so a
+# regression in inference is visible without being asserted against a
+# hand-curated list. Bucketing keys off the `r.source` property each
+# REFERENCES edge carries (`'declared'` / `'inferred_metadata'` / etc.).
+
+
+_FK_RE = re.compile(
+    r"ALTER\s+TABLE\s+(?P<src_schema>\w+)\.(?P<src_table>\w+)\s+"
+    r"ADD\s+CONSTRAINT\s+\w+\s+"
+    r"FOREIGN\s+KEY\s*\(\s*(?P<src_col>\w+)\s*\)\s+"
+    r"REFERENCES\s+(?P<dst_schema>\w+)\.(?P<dst_table>\w+)\s*\(\s*(?P<dst_col>\w+)\s*\)",
+    re.IGNORECASE,
+)
+
+
+def _parse_fixture_fks(catalog: str) -> set[tuple[str, str]]:
+    """Parse `tests/fixtures/setup_test_catalog.sql` and return the canonical
+    set of *declared* `(src_id, dst_id)` REFERENCES edges, normalized via
+    `generate_id`."""
+    from dbxcarta.contract import generate_id
+
+    fixture_sql = (PROJECT_ROOT / "tests" / "fixtures" / "setup_test_catalog.sql").read_text()
+    out: set[tuple[str, str]] = set()
+    for m in _FK_RE.finditer(fixture_sql):
+        src_id = generate_id(catalog, m["src_schema"], m["src_table"], m["src_col"])
+        dst_id = generate_id(catalog, m["dst_schema"], m["dst_table"], m["dst_col"])
+        out.add((src_id, dst_id))
+    return out
+
+
+def _neo4j_references_by_source(ws) -> dict[str, set[tuple[str, str]]]:
+    """Open a Neo4j session via Databricks Secrets; return REFERENCES edges
+    bucketed by their `source` property (`'declared'`, `'inferred_metadata'`,
+    `'inferred_semantic'`, ...)."""
+    import base64
+
+    from neo4j import GraphDatabase
+
+    scope = os.environ.get("DATABRICKS_SECRET_SCOPE", "dbxcarta-neo4j")
+
+    def _secret(key: str) -> str:
+        return base64.b64decode(ws.secrets.get_secret(scope=scope, key=key).value).decode()
+
+    driver = GraphDatabase.driver(
+        _secret("uri"),
+        auth=(_secret("username"), _secret("password")),
+    )
+    try:
+        with driver.session() as s:
+            rows = s.run(
+                "MATCH (a:Column)-[r:REFERENCES]->(b:Column) "
+                "RETURN a.id AS src, b.id AS dst, r.source AS source"
+            ).data()
+    finally:
+        driver.close()
+
+    buckets: dict[str, set[tuple[str, str]]] = {}
+    for r in rows:
+        buckets.setdefault(r["source"] or "unknown", set()).add((r["src"], r["dst"]))
+    return buckets
+
+
+def phase4b_references_diff() -> dict:
+    print("\n=== Phase 4b: Fixture FK ↔ Neo4j REFERENCES diff ===")
+    catalog = os.environ.get("DBXCARTA_CATALOG", "")
+    if not catalog:
+        return {"status": "fail", "error": "DBXCARTA_CATALOG not set"}
+
+    expected_declared = _parse_fixture_fks(catalog)
+    print(f"  Fixture-declared FKs: {len(expected_declared)}")
+
+    try:
+        buckets = _neo4j_references_by_source(_make_ws())
+    except Exception as exc:
+        return {"status": "fail", "error": f"Neo4j query failed: {exc}"}
+
+    actual_declared = buckets.get("declared", set())
+    inferred = {k: v for k, v in buckets.items() if k != "declared"}
+    inferred_total = sum(len(v) for v in inferred.values())
+
+    print(f"  Neo4j REFERENCES (declared): {len(actual_declared)}")
+    for source, edges in sorted(inferred.items()):
+        print(f"  Neo4j REFERENCES ({source}, informational): {len(edges)}")
+        for src, dst in sorted(edges):
+            print(f"    {src} -> {dst}")
+
+    extra = sorted(actual_declared - expected_declared)
+    missing = sorted(expected_declared - actual_declared)
+    if extra:
+        print(f"  EXTRA in Neo4j declared bucket ({len(extra)}):")
+        for src, dst in extra:
+            print(f"    {src} -> {dst}")
+    if missing:
+        print(f"  MISSING in Neo4j declared bucket ({len(missing)}):")
+        for src, dst in missing:
+            print(f"    {src} -> {dst}")
+
+    result = {
+        "expected_declared_count": len(expected_declared),
+        "actual_declared_count": len(actual_declared),
+        "inferred_count": inferred_total,
+        "inferred_by_source": {k: len(v) for k, v in inferred.items()},
+    }
+    if extra or missing:
+        return {
+            **result,
+            "status": "fail",
+            "extra_declared": [list(e) for e in extra],
+            "missing_declared": [list(m) for m in missing],
+        }
+    print("  Declared-bucket match: OK.")
+    return {**result, "status": "pass"}
+
+
+# ---------------------------------------------------------------------------
 # Phase 5 — Output JSON
 # ---------------------------------------------------------------------------
 
@@ -347,6 +475,7 @@ def main() -> None:
 
     phases["ingest_run"]["run_summary"] = run_summary
     phases["assertions"] = phase4_assertions(run_summary)
+    phases["references_diff"] = phase4b_references_diff()
 
     phases["output"] = phase5_write_output(phases, os.environ.get("DBXCARTA_CATALOG", ""))
 

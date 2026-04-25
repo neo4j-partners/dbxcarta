@@ -7,6 +7,7 @@ This directory contains the canonical test and demo schema for dbxcarta.
 | File | Purpose |
 |---|---|
 | `setup_test_catalog.sql` | SQL DDL — creates all schemas, tables, PKs, FKs |
+| `insert_test_data.sql` | DML — inserts 15–25 FK-respecting rows per table |
 | `demo_questions.json` | Six sample questions for the graph_rag demo |
 
 ---
@@ -68,6 +69,11 @@ DATABRICKS_WAREHOUSE_ID=<id> python scripts/run_demo.py \
 The `--volume-path` argument (or `DATABRICKS_VOLUME_PATH` env var) is only required for `dbxcarta_test_external`.
 Omit it to skip external tables (the script will fail only on those three
 `CREATE TABLE ... LOCATION` statements).
+
+To load test data after setup, execute `insert_test_data.sql` using the same
+pattern (substituting `${catalog}` with your catalog name).  The three external
+table INSERT statements at the bottom of that file require the Volume path to be
+writable; skip them if no Volume is available.
 
 ### Option 2 — Databricks SDK (Python)
 

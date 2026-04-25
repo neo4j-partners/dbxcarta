@@ -35,6 +35,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 _SETUP_SQL = Path(__file__).parent.parent / "tests" / "fixtures" / "setup_test_catalog.sql"
+_INSERT_SQL = Path(__file__).parent.parent / "tests" / "fixtures" / "insert_test_data.sql"
 _DEMO_SCHEMAS = [
     "dbxcarta_test_sales",
     "dbxcarta_test_inventory",
@@ -87,6 +88,46 @@ def _setup(
                 f"\nSetup failed at statement {i}/{total}. "
                 f"Subsequent FK constraints will cascade from this failure.\n"
                 f"Fix the error and re-run, or tear down first for a clean start:\n"
+                f"  python scripts/run_demo.py --catalog {catalog} --teardown"
+            )
+            sys.exit(1)
+
+    done = total - skipped
+    suffix = f" ({skipped} skipped — no volume path)" if skipped else ""
+    print(f"\nDone. {done} statement(s) executed successfully{suffix}.")
+
+
+def _insert_data(
+    ws: "WorkspaceClient",
+    warehouse_id: str,
+    catalog: str,
+    volume_path: str,
+) -> None:
+    from dbxcarta.client.executor import execute_ddl, split_sql_statements
+
+    raw = _INSERT_SQL.read_text()
+    sql = raw.replace("USE CATALOG ${catalog}", f"USE CATALOG `{catalog}`").replace("${catalog}", catalog)
+    statements = split_sql_statements(sql)
+    total = len(statements)
+
+    print(f"Inserting test data into catalog '{catalog}' ({total} statements)...")
+
+    skipped = 0
+    for i, stmt in enumerate(statements, 1):
+        if not volume_path and "dbxcarta_test_external" in stmt:
+            print(f"  [{i}/{total}] SKIP (no volume path — external table insert skipped)")
+            skipped += 1
+            continue
+        preview = stmt[:70].replace("\n", " ")
+        succeeded, error = execute_ddl(ws, warehouse_id, stmt, timeout_sec=50, catalog=catalog)
+        if succeeded:
+            print(f"  [{i}/{total}] OK  {preview}")
+        else:
+            print(f"  [{i}/{total}] ERR {preview}")
+            print(f"  Error: {error}")
+            print(
+                f"\nData insert failed at statement {i}/{total}.\n"
+                f"Fix the error and re-run, or tear down and start fresh:\n"
                 f"  python scripts/run_demo.py --catalog {catalog} --teardown"
             )
             sys.exit(1)
@@ -193,6 +234,7 @@ def main() -> None:
         _teardown(ws, warehouse_id, args.catalog)
     else:
         _setup(ws, warehouse_id, args.catalog, args.volume_path)
+        _insert_data(ws, warehouse_id, args.catalog, args.volume_path)
         _print_next_steps(args.catalog)
 
 
