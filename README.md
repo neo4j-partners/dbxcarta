@@ -208,22 +208,32 @@ uv run python scripts/run_autotest.py
 | 2 — Schema setup | Tears down and recreates the fixture schemas (`dbxcarta_test_{sales,inventory,hr,events}`) in `dbxcarta-catalog` using `tests/fixtures/setup_test_catalog.sql` |
 | 3 — Ingest run | Builds and uploads the wheel, uploads scripts, submits `run_dbxcarta.py`, waits for `SUCCESS`, and downloads the `RunSummary` JSON |
 | 4 — Assertions | Validates the `RunSummary`: `status=success`, `error=null`, `schemas >= 4`, `tables >= 19`, `fk_declared >= 16`, `fk_edges >= 16`, `neo4j_counts` non-empty |
-| 5 — Output JSON | Writes a dated `autotest_results_<ts>.json` to `DBXCARTA_SUMMARY_VOLUME/autotest/` |
+| 5 — Output JSON | Writes `autotest_results_<ts>.json` to `DBXCARTA_SUMMARY_VOLUME/autotest/` and locally to `outputs/` (git-ignored) |
 
-The fixture covers all the structural edge cases: cross-schema FKs (sales → hr, sales → inventory), a self-referential FK (`employees.manager_id`), a composite PK/associative table (`product_suppliers`), and complex column types (`STRUCT`, `ARRAY`, `MAP`, `VARIANT`, `BINARY`). The external schema (`dbxcarta_test_external`) requires a UC Volume path and is excluded from the ingest run but included in teardown.
+The fixture covers all the structural edge cases:
+
+- **Cross-schema FKs**: sales → hr, sales → inventory
+- **Self-referential FK**: `employees.manager_id`
+- **Composite PK / associative table**: `product_suppliers`
+- **Complex column types**: `STRUCT`, `ARRAY`, `MAP`, `VARIANT`, `BINARY`
+- **External schema** (`dbxcarta_test_external`): requires a UC Volume path; excluded from ingest but included in teardown
 
 **Notes:**
-- The harness locates the `RunSummary` via a before/after volume diff rather than matching the Databricks submit run ID — `DATABRICKS_JOB_RUN_ID` is not set for one-time `runs.submit()` jobs, so the file is always written as `dbxcarta_local_<ts>.json`.
-- Schema setup and teardown are idempotent — re-running the harness always starts from a clean state.
+- The harness locates the `RunSummary` via a before/after volume diff — `DATABRICKS_JOB_RUN_ID` is not set for one-time `runs.submit()` jobs, so the file is always written as `dbxcarta_local_<ts>.json`.
+- Schema setup and teardown are idempotent — re-running always starts from a clean state.
 - Unit tests run with `--ignore=tests/schema_graph --ignore=tests/sample_values --ignore=tests/integration` to exclude slow live-catalog suites.
+- Results are also written locally to `outputs/autotest_results_<ts>.json` (git-ignored) for quick inspection without going back to the volume.
 
 ## Upload and submit
 
-`upload --wheel` builds the `dbxcarta` package, bumps the patch version in `pyproject.toml`, and uploads the wheel to `DATABRICKS_VOLUME_PATH/wheels/`. `upload --all` copies every `*.py` in `scripts/` to `DATABRICKS_WORKSPACE_DIR/scripts/` in the workspace. Re-run `upload --wheel` when `src/dbxcarta/` changes; re-run `upload --all` when `scripts/` changes.
+**`upload`**
+- `--wheel` — builds the package, bumps the patch version, and uploads the wheel to `DATABRICKS_VOLUME_PATH/wheels/`. Re-run whenever `src/dbxcarta/` changes.
+- `--all` — copies every `scripts/*.py` to the workspace. Re-run whenever `scripts/` changes.
 
-`submit` runs whatever is already in the workspace, with one shortcut: `submit --upload` (added in `databricks-job-runner 0.4.6`) uploads every `scripts/*.py` right before the run, so you can fold the script upload into the submit step. It does not cover the wheel — always re-run `upload --wheel` after editing `src/dbxcarta/`. The `script` positional is a name relative to `scripts/`; the runner prepends `scripts/` and resolves it against `DATABRICKS_WORKSPACE_DIR`. Because the script name starts with `run_dbxcarta`, the runner auto-attaches the latest uploaded wheel so the cluster can `import dbxcarta`. All non-Databricks variables from `.env` are forwarded to the job as arguments.
+**`submit <script>`**
 
-Flags on `submit`:
-- `--upload` — upload every `scripts/*.py` before submitting (requires `databricks-job-runner >= 0.4.6`)
-- `--no-wait` — return immediately with the run ID instead of blocking until completion
-- `--compute {cluster,serverless}` — override `DATABRICKS_COMPUTE_MODE` for a single submission
+The script name is relative to `scripts/`. Scripts named `run_dbxcarta*` auto-attach the latest uploaded wheel. All non-Databricks `.env` variables are forwarded to the job.
+
+- `--upload` — uploads `scripts/*.py` before submitting, replacing a separate `upload --all` step.
+- `--no-wait` — returns immediately with the run ID.
+- `--compute {cluster,serverless}` — overrides `DATABRICKS_COMPUTE_MODE` for this run.

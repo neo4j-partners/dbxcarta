@@ -74,6 +74,7 @@ bundle.lock
 
 # Job run artifacts
 run_output/
+output/
 *.dbx
 
 # =============================================================================
@@ -133,3 +134,4 @@ fabric.properties
 
 worklog/
 .mcp.json
+outputs/

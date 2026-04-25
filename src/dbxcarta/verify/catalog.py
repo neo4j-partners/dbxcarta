@@ -36,7 +36,7 @@ def check(
         )]
     out: list[Violation] = []
     out.extend(_check_id_normalization(driver, summary, ws=ws, warehouse_id=warehouse_id, catalog=catalog))
-    out.extend(_check_complex_type_round_trip(driver, ws=ws, warehouse_id=warehouse_id, catalog=catalog))
+    out.extend(_check_complex_type_round_trip(driver, summary, ws=ws, warehouse_id=warehouse_id, catalog=catalog))
     return out
 
 
@@ -112,20 +112,30 @@ def _check_id_normalization(
 
 def _check_complex_type_round_trip(
     driver: "Driver",
+    summary: dict[str, Any],
     *,
     ws: "WorkspaceClient",
     warehouse_id: str,
     catalog: str,
 ) -> list[Violation]:
-    """For each complex data_type family present, the corresponding Column node
-    in Neo4j must store data_type verbatim. Families absent from the catalog skip."""
+    """For each complex data_type family present in the run's scope, the
+    corresponding Column node in Neo4j must store data_type verbatim. Families
+    absent from the in-scope schemas skip. Sampling is constrained to
+    `summary["schemas"]` so columns belonging to objects the run did not load
+    (e.g. the run-summary Delta table itself, which lives outside the test
+    fixture schemas) cannot surface as false-positive "missing node" violations.
+    """
     out: list[Violation] = []
+    schemas = summary.get("schemas") or []
+    schema_filter = (
+        f" AND table_schema IN ({', '.join(repr(s) for s in schemas)})" if schemas else ""
+    )
     with driver.session() as s:
         for prefix in _COMPLEX_TYPE_FAMILIES:
             rows = _exec(ws, warehouse_id, (
                 f"SELECT table_catalog, table_schema, table_name, column_name, data_type"
                 f" FROM `{catalog}`.information_schema.columns"
-                f" WHERE upper(data_type) LIKE '{prefix}%'"
+                f" WHERE upper(data_type) LIKE '{prefix}%'{schema_filter}"
                 f" LIMIT 1"
             ))
             if not rows:

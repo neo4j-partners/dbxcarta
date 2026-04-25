@@ -305,7 +305,13 @@ def phase5_write_output(phases: dict, catalog: str) -> dict:
 
     ws.files.upload(remote_path, io.BytesIO(content), overwrite=True)
     print(f"  Written: {remote_path}")
-    return {"status": "pass", "path": remote_path}
+
+    local_dir = Path(__file__).parent.parent / "outputs"
+    local_dir.mkdir(exist_ok=True)
+    local_file = local_dir / f"autotest_results_{ts}.json"
+    local_file.write_bytes(content)
+    print(f"  Local:   {local_file}")
+    return {"status": "pass", "path": remote_path, "local_path": str(local_file)}
 
 
 # ---------------------------------------------------------------------------
