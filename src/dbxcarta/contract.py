@@ -37,8 +37,8 @@ class RelType(StrEnum):
 
 class EdgeSource(StrEnum):
     """Provenance tag on REFERENCES edges. DECLARED is the Unity Catalog
-    declared-FK source; INFERRED_METADATA is Phase 3 name/PK inference;
-    SEMANTIC is Phase 4 embedding cosine. Phases 5/6 extend this enum."""
+    declared-FK source; INFERRED_METADATA is name/PK heuristic inference;
+    SEMANTIC is embedding cosine similarity."""
 
     DECLARED = "declared"
     INFERRED_METADATA = "inferred_metadata"
@@ -46,9 +46,7 @@ class EdgeSource(StrEnum):
 
 
 # REFERENCES edge properties (additive in contract v1.0). All three are
-# nullable. Legacy edges written before Phase 2 have none of these set;
-# readers treat absence as (1.0, "declared", null) via COALESCE in Cypher.
-# See worklog/fk-gap-v3-build.md Phase 2.
+# nullable; readers treat absence as (1.0, "declared", null) via COALESCE.
 REFERENCES_PROPERTIES: tuple[str, ...] = ("confidence", "source", "criteria")
 
 # Characters translated in normalization: space→_, hyphen→_

@@ -89,7 +89,7 @@ class ValueIndex:
 
 @dataclass
 class SemanticInferenceCounters:
-    """Mutable aggregate of Phase 4 bookkeeping.
+    """Mutable aggregate of semantic-inference bookkeeping.
 
     Invariant (enforced by test_semantic_counter_invariant):
       considered == accepted + sum(rejections.values())

@@ -62,8 +62,7 @@ class Settings(BaseSettings):
     dbxcarta_infer_semantic: bool = False
     dbxcarta_semantic_min_tables: int = 10
     dbxcarta_semantic_threshold: float = 0.85
-    # Phase 3 (worklog/cleanup-v3.md): final verify step inside run_dbxcarta.
-    # When False (default), violations are logged as warnings and the run
+    # When False (default), verify violations are logged as warnings and the run
     # completes with status='success'. When True, any violation raises and the
     # task fails. Flip after two consecutive zero-violation warn-only runs.
     dbxcarta_verify_gate: bool = False

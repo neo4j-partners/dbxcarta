@@ -1,4 +1,4 @@
-"""Fixture factory for Phase 4 semantic FK inference tests.
+"""Fixture factory for semantic FK inference tests.
 
 Produces hand-crafted 1024-dim vectors with exact cosine similarities via
 axis-aligned orthogonal basis construction: for target cosine `c`, the

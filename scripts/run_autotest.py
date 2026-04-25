@@ -278,9 +278,8 @@ def phase4_assertions(run_summary: dict) -> dict:
 # Phase 4b — Fixture-FK ↔ Neo4j REFERENCES diff
 # ---------------------------------------------------------------------------
 #
-# This phase exists because the run summary's `fk_*` counters and Neo4j's
-# REFERENCES edge count can drift apart silently — a real instance of which
-# is documented in worklog/cleanup-v2.md (Phase 2.6, Finding 1).
+# This step exists because the run summary's `fk_*` counters and Neo4j's
+# REFERENCES edge count can drift apart silently without a direct comparison.
 #
 # The fixture (tests/fixtures/setup_test_catalog.sql) is the authoritative
 # source for *declared* FKs. The pipeline also produces *inferred* FK edges

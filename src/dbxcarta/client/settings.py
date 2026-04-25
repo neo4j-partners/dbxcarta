@@ -25,9 +25,9 @@ class ClientSettings(BaseSettings):
     dbxcarta_client_top_k: int = 5
     dbxcarta_client_timeout_sec: int = 30
 
-    # Phase 2: REFERENCES-edge provenance. See worklog/fk-gap-v3-build.md.
-    # Inclusive `>=` comparison; legacy edges with no confidence set are
-    # treated as 1.0 via COALESCE in Cypher so they are never silently dropped.
+    # REFERENCES-edge confidence filter. Inclusive `>=` comparison; edges with
+    # no confidence property are treated as 1.0 via COALESCE so they are never
+    # silently dropped.
     dbxcarta_confidence_threshold: float = 0.8
     dbxcarta_inject_criteria: bool = True
 

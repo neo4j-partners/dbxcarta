@@ -1,25 +1,24 @@
-"""Phase 3 + 3.5 deliverables: metadata-based FK inference with nominal types.
+"""Metadata-based FK inference with nominal types.
 
-Three deliverables from worklog/fk-gap-v3-build.md Phase 3:
+Coverage:
 
 1. On the v5-fk fixture, infer_fk_pairs rediscovers the 3 declared FKs at
-   confidence ≥ 0.83. (Worklog originally read ≥ 0.90; relaxed after sign-off
-   because all three v5-fk FKs are suffix matches, capped at 0.83 w/o comments
-   per the approved scoring table.)
+   confidence ≥ 0.83. (Threshold originally read ≥ 0.90; relaxed because all
+   three v5-fk FKs are suffix matches, capped at 0.83 w/o comments per the
+   approved scoring table.)
 2. On a synthetic no-FK fixture (same tables, constraints stripped), the
    name-based PK-likeness fallback recovers equivalent edges.
 3. Tie-break attenuation drops a 9-way fan-out and preserves a 2-way
    polymorphic pair.
 
-Plus column-parity guard: the inferred DataFrame's columns match
+Column-parity guard: the inferred DataFrame's columns match
 REFERENCES_PROPERTIES, so the Neo4j Spark Connector doesn't silently drop
 property writes.
 
-Phase 3.5 additions:
-- All fixture construction uses ColumnMeta / PKIndex / DeclaredPair (no dicts).
-- Score assertions pull from _SCORE_TABLE, not magic-number literals.
-- New invariant test: candidates == accepted + sum(rejections).
-- New immutability test: frozen dataclasses refuse mutation.
+Fixture construction uses ColumnMeta / PKIndex / DeclaredPair (no dicts).
+Score assertions pull from _SCORE_TABLE, not magic-number literals.
+Invariant: candidates == accepted + sum(rejections).
+Frozen dataclasses refuse mutation.
 """
 
 from __future__ import annotations
@@ -357,7 +356,7 @@ def test_type_mismatch_blocks_match() -> None:
     assert counters.rejections[RejectionReason.TYPE] == 1
 
 
-# --- Phase 3.5: counter invariant and immutability --------------------------
+# --- InferenceCounters invariant and immutability ----------------------------
 
 def test_counter_invariant_on_v5fk() -> None:
     """candidates == accepted + Σ rejections. No silent drops."""
@@ -394,8 +393,8 @@ def test_counters_flatten_to_summary_dict() -> None:
     flat = counters.as_summary_dict("fk_inferred_metadata")
     assert "fk_inferred_metadata_candidates" in flat
     assert "fk_inferred_metadata_accepted" in flat
-    # composite_pk_skipped was a sidebar write in Phase 3; folded into
-    # InferenceCounters in Phase 3.6 — assert it's emitted by as_summary_dict.
+    # composite_pk_skipped is tracked in InferenceCounters — assert it's emitted
+    # by as_summary_dict.
     assert "fk_inferred_metadata_composite_pk_skipped" in flat
     for reason in RejectionReason:
         assert f"fk_inferred_metadata_{reason.value}" in flat
@@ -474,7 +473,7 @@ def test_inferred_ref_equality_and_hash() -> None:
     assert r1 != r3
 
 
-# --- Phase 3.5: PKIndex behaviour -------------------------------------------
+# --- PKIndex behaviour -------------------------------------------------------
 
 def test_pk_index_excludes_composite_keys_and_counts_them() -> None:
     """A two-column declared PK does not populate pk_cols but is counted."""

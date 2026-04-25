@@ -190,8 +190,6 @@ def build_id_cols_index(columns: list[ColumnMeta]) -> dict[str, list[str]]:
     return index
 
 
-# PKEvidence lives here because pk_kind returns it and both Phase 3 and
-# Phase 4 consume it.
 class PKEvidence(Enum):
     DECLARED_PK = "declared_pk"
     UNIQUE_OR_HEUR = "unique_or_heur"

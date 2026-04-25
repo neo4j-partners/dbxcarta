@@ -13,12 +13,11 @@ _TABLE_INDEX = "table_embedding"
 _MAX_VALUES = 30
 
 # OPTIONAL MATCH so deployments with no REFERENCES edges don't trigger
-# Neo4j's 01N51 UnknownRelationshipTypeWarning. See worklog/fk-gap-v3-build.md
-# Phase 1. Exported as a constant so the regression guard can import it.
+# Neo4j's 01N51 UnknownRelationshipTypeWarning. Exported as a constant so
+# the regression guard can import it.
 #
-# Phase 2: bind the rel as `r` so we can filter on confidence. Legacy edges
-# written before Phase 2 have no confidence property; COALESCE(..., 1.0)
-# treats them as declared-strength so they are never silently dropped.
+# `r` is bound so we can filter on confidence. Edges with no confidence
+# property are treated as 1.0 via COALESCE so they are never silently dropped.
 _REFERENCES_TABLE_IDS_CYPHER = (
     "UNWIND $col_ids AS cid "
     "OPTIONAL MATCH (c:Column {id: cid})-[r:REFERENCES]-(other:Column)"
@@ -27,9 +26,8 @@ _REFERENCES_TABLE_IDS_CYPHER = (
     "RETURN DISTINCT t.id AS tid"
 )
 
-# Phase 2: fetch literal join predicates for retrieved neighbour tables so
-# they can be injected into the SQL-generation prompt. Gated by
-# DBXCARTA_INJECT_CRITERIA.
+# Fetch literal join predicates for retrieved neighbour tables so they can
+# be injected into the SQL-generation prompt. Gated by DBXCARTA_INJECT_CRITERIA.
 _REFERENCES_CRITERIA_CYPHER = (
     "UNWIND $col_ids AS cid "
     "OPTIONAL MATCH (c:Column {id: cid})-[r:REFERENCES]-(:Column) "

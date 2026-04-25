@@ -1,6 +1,6 @@
-"""Phase 4 deliverables: semantic FK inference over hand-crafted 1024-dim vectors.
+"""Semantic FK inference over hand-crafted 1024-dim vectors.
 
-Deliverables per worklog/fk-gap-v3-build.md Phase 4:
+Coverage:
 
 1. On a synthetic `buyer_ref → customers.id` / `purchase_ref → orders.id`
    rename fixture plus hand-crafted vectors satisfying exact cosine
@@ -8,12 +8,12 @@ Deliverables per worklog/fk-gap-v3-build.md Phase 4:
 2. Min-catalog-size gate is exercised at the pipeline boundary; here we
    exercise the pure function semantics (gate lives in `fk_discovery.py`).
 
-Plus Phase 3.6 discipline:
+Additional invariants:
 - Frozen-dataclass immutability on ColumnEmbedding and ValueIndex.
 - Counter invariant: considered == accepted + Σ rejections.
 - EdgeSource.SEMANTIC tagging.
 - Value-overlap corroboration bumps confidence but never exceeds cap.
-- Already-covered suppression against Phase-3 inferred pairs.
+- Already-covered suppression against metadata-inferred pairs.
 """
 
 from __future__ import annotations
@@ -154,7 +154,7 @@ def test_suppresses_edges_already_covered_by_declared(
 def test_suppresses_edges_already_covered_by_metadata(
     phase4_embeddings_pkl: Path,
 ) -> None:
-    """Same rule for Phase-3 inferred pairs: semantic doesn't re-emit them."""
+    """Same rule for metadata-inferred pairs: semantic doesn't re-emit them."""
     embeddings = _embeddings_from_pkl(phase4_embeddings_pkl)
     metadata_pairs = frozenset({
         DeclaredPair(

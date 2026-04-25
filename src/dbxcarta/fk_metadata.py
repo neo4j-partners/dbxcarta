@@ -83,7 +83,7 @@ _TOKEN_SPLIT_RE = re.compile(r"[^a-zA-Z0-9]+")
 
 @dataclass
 class InferenceCounters:
-    """Mutable aggregate of Phase 3 inference bookkeeping.
+    """Mutable aggregate of metadata-inference bookkeeping.
 
     Invariant: after inference finishes,
       candidates == accepted + sum(rejections.values())
@@ -136,7 +136,7 @@ def _stem_matches_table(stem: str, table: str) -> bool:
 
 
 def _name_match(src_col: str, tgt_col: str, tgt_table: str) -> NameMatchKind | None:
-    """Return EXACT, SUFFIX, or None per Phase 3 name rules.
+    """Return EXACT, SUFFIX, or None per column-name matching rules.
 
     Suffix branch requires the source's stem to match the target table (singular
     or +s/+es plural). Without this guard, a column like `order_id` fans out to

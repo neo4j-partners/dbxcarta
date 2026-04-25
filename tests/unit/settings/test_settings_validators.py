@@ -1,9 +1,9 @@
-"""Settings boundary validation (Phase 3.5 field-level + Phase 3.6 cross-field).
+"""Settings boundary validation: field-level identifier constraints and cross-field coherence.
 
-Phase 3.5 tightened `_IDENTIFIER_RE` to strict Databricks identifier shape.
-Phase 3.6 added `model_validator(mode="after")` for cross-field coherence
-(semantic inference requires column embeddings; value embeddings require
-sample values).
+`_IDENTIFIER_RE` enforces strict Databricks identifier shape.
+`model_validator(mode="after")` enforces cross-field coherence:
+semantic inference requires column embeddings; value embeddings require
+sample values.
 
 All tests construct Settings with explicit kwargs — no cloud infra, no
 Spark. Validates the boundary itself, not downstream behaviour.
@@ -23,7 +23,7 @@ _BASE_SETTINGS = {
 }
 
 
-# --- _IDENTIFIER_RE tightening (Phase 3.5) ----------------------------------
+# --- _IDENTIFIER_RE validation -----------------------------------------------
 
 @pytest.mark.parametrize("bad_catalog", [
     "evil`catalog",     # backtick — injection vector
@@ -76,14 +76,14 @@ def test_settings_rejects_malformed_summary_table(bad_table: str) -> None:
         )
 
 
-# --- Phase 3.6 cross-field validation ---------------------------------------
+# --- Cross-field validation --------------------------------------------------
 
 def test_settings_rejects_semantic_without_column_embeddings() -> None:
     """DBXCARTA_INFER_SEMANTIC=true requires DBXCARTA_INCLUDE_EMBEDDINGS_COLUMNS=true.
 
-    Phase 4 needs column embeddings to compute cosine similarity; without them
-    the phase has nothing to consume. The model_validator raises at Settings
-    construction rather than letting the incoherence surface mid-run.
+    Semantic inference needs column embeddings to compute cosine similarity;
+    without them there is nothing to consume. The model_validator raises at
+    Settings construction rather than letting the incoherence surface mid-run.
     """
     with pytest.raises(ValidationError, match="DBXCARTA_INFER_SEMANTIC"):
         Settings(

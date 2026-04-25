@@ -1,12 +1,12 @@
-"""Regression guard for Phase 1 of worklog/fk-gap-v3-build.md.
+"""Regression guard for OPTIONAL MATCH on REFERENCES in GraphRetriever.
 
-The REFERENCES lookup in GraphRetriever must use OPTIONAL MATCH so that
-deployments with no REFERENCES edges in the graph do not trigger Neo4j's
-01N51 UnknownRelationshipTypeWarning.
+The REFERENCES lookup must use OPTIONAL MATCH so that deployments with no
+REFERENCES edges in the graph do not trigger Neo4j's 01N51
+UnknownRelationshipTypeWarning.
 
-Phase 2 rebound the relationship as `[r:REFERENCES]` to filter on
-r.confidence; the regex tolerates an optional binding identifier so this
-guard continues to protect the OPTIONAL-MATCH invariant.
+The relationship is bound as `[r:REFERENCES]` to filter on r.confidence;
+the regex tolerates an optional binding identifier so this guard continues
+to protect the OPTIONAL-MATCH invariant.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ _WARNING_PATTERN = re.compile(
     r"(?<!OPTIONAL )\bMATCH\b[^\n]*\[\w*:REFERENCES\]"
 )
 
-# The Cypher as it was written before Phase 1. Embedded here so that if the
+# The non-OPTIONAL form of the REFERENCES query. Embedded here so that if the
 # implementation ever regresses to this shape, the regex test catches it.
 _PRE_CHANGE_CYPHER = (
     "UNWIND $col_ids AS cid "
@@ -48,10 +48,9 @@ def test_post_change_cypher_uses_optional_match_on_references() -> None:
 
 
 def test_criteria_cypher_does_not_trigger_warning_pattern() -> None:
-    """Phase 2 added a second Cypher on REFERENCES for join-predicate fetch.
+    """The criteria Cypher also queries REFERENCES for join-predicate fetch.
 
-    The 01N51 warning triggers per-match-clause, so the criteria Cypher must
-    also use OPTIONAL MATCH.
+    The 01N51 warning triggers per-match-clause, so it must also use OPTIONAL MATCH.
     """
     assert _WARNING_PATTERN.search(_REFERENCES_CRITERIA_CYPHER) is None
     assert "OPTIONAL MATCH" in _REFERENCES_CRITERIA_CYPHER

@@ -206,7 +206,7 @@ class EmbeddingCounts:
 
 @dataclass
 class VerifyResult:
-    """Phase 3 verify outcome captured into the RunSummary.
+    """Verify outcome captured into the RunSummary.
 
     `ok=False` means at least one violation. `violations` is the full list
     surfaced through the JSON output for auditability without driver logs.

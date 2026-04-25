@@ -1,22 +1,18 @@
-"""Phase 2 deliverable: criteria injection into the SQL-gen prompt.
+"""Criteria injection into the SQL-gen prompt.
 
 The graph_rag_prompt renders the ContextBundle via bundle.to_text(), so a
 criteria list on the bundle flows directly into the prompt text. The tests
 in this module cover two orthogonal halves of the feature:
 
 1. Rendering (the bundle → text → prompt plumbing). Exercised via direct
-   ContextBundle construction, since Phase 2 itself never emits a non-null
-   `criteria` — declared FKs get `criteria=null`, and the Phase 6
-   query-log miner is the first source that populates the field. A
-   "declared FK with a known criteria string" fixture therefore doesn't
-   exist yet; constructing the bundle directly is how this phase's
-   deliverable gets satisfied without fabricating post-hoc source data.
+   ContextBundle construction — declared FKs get `criteria=null`, so a
+   "declared FK with a known criteria string" fixture doesn't exist;
+   constructing the bundle directly tests the rendering path without
+   fabricating source data.
 
 2. Flag gating (DBXCARTA_INJECT_CRITERIA → GraphRetriever branching).
    Exercised via a stub Neo4j session so the flag's effect on which
    Cypher statements run is observable without a live driver.
-
-See worklog/fk-gap-v3-build.md Phase 2.
 """
 
 from __future__ import annotations
@@ -71,7 +67,7 @@ def test_graph_rag_prompt_omits_predicate_when_bundle_empty() -> None:
 
 
 def test_criteria_default_empty_back_compat() -> None:
-    """Callers predating Phase 2 constructed ContextBundle without criteria;
+    """ContextBundle constructed without criteria;
     the field must default to an empty list so to_text() stays well-defined."""
     bundle = ContextBundle(columns=[ColumnEntry("c.s.t", "col", "INT")])
     assert bundle.criteria == []
