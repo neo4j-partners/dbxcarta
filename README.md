@@ -2,11 +2,11 @@
 
 *Inspired by [neocarta](https://github.com/neo4j-field/neocarta).*
 
-dbxcarta builds a metadata knowledge graph in Neo4j from Unity Catalog, designed as the semantic layer for **GraphRAG** workflows. Unity Catalog metadata, including table names, column descriptions, comments, and sampled values, is the unstructured content: each piece is embedded with a Databricks foundation model and stored as a vector property on its graph node. A downstream client, such as a Text2SQL agent, MCP tool, or schema-aware RAG pipeline, embeds a user question, runs a similarity search against the graph to find the most relevant schema nodes, then follows graph relationships to pull surrounding context: columns, values, and foreign-key references, all in a single retrieval step before the LLM call.
+dbxcarta builds a metadata knowledge graph in Neo4j from Unity Catalog. The graph serves as a semantic layer for **GraphRAG** workflows: a Text2SQL agent, MCP tool, or schema-aware RAG pipeline queries the graph at runtime to retrieve the schema context it needs before generating SQL.
 
-The graph enforces a stable, typed schema so the retrieval result is always structured: nodes carry dotted IDs (`catalog.schema.table.column`), typed labels, and explicit relationships, so the client always knows what it got back.
+The build pipeline extracts Unity Catalog metadata, including table names, column descriptions, comments, and sampled values, embeds each piece using a Databricks foundation model, and writes the result to Neo4j as typed nodes with vector properties. At query time, a client embeds a user question, runs a similarity search to find the most relevant schema nodes, then follows graph relationships to expand that seed set into a full schema subgraph: columns, values, and foreign-key references, all in one retrieval step before the LLM call.
 
-The output graph follows a standard shape so it can be consumed by downstream agents and MCP tooling that expect this schema:
+The graph follows a stable, typed schema:
 
 - **Nodes**: `Database`, `Schema`, `Table`, `Column`, `Value`
 - **Relationships**:
@@ -16,7 +16,7 @@ The output graph follows a standard shape so it can be consumed by downstream ag
   - `(:Column)-[:HAS_VALUE]->(:Value)`
   - `(:Column)-[:REFERENCES]->(:Column)` *(stubbed in v6; see Stage 6 in `dbxcarta-v6-plan.md`)*
 
-Each node carries a stable dotted `id` such as `catalog.schema.table.column`, plus a `description` and, where applicable, an `embedding` vector for semantic similarity search.
+Each node carries a stable dotted `id` such as `catalog.schema.table.column`, a `description`, and where applicable an `embedding` vector for semantic similarity search.
 
 ## Architecture
 
