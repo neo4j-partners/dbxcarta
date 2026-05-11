@@ -47,6 +47,8 @@ def main() -> None:
       any violation.
     - `dbxcarta preset finance-genie ...` prints or checks the Finance Genie
       companion configuration without dispatching a Databricks job.
+    - `dbxcarta demo finance-genie ...` runs the local read-only Finance Genie
+      semantic-layer demo.
     - All other invocations dispatch to the databricks_job_runner.Runner that
       backs `submit`/`status`/etc., with the legacy `--compute serverless`
       injection for the client script.
@@ -55,6 +57,8 @@ def main() -> None:
         sys.exit(_handle_verify(sys.argv[2:]))
     if sys.argv[1:3] == ["preset", "finance-genie"]:
         sys.exit(_handle_finance_genie_preset(sys.argv[3:]))
+    if sys.argv[1:3] == ["demo", "finance-genie"]:
+        sys.exit(_handle_finance_genie_demo(sys.argv[3:]))
 
     is_submit = "submit" in sys.argv[1:]
     is_client = _CLIENT_SCRIPT in sys.argv[1:]
@@ -214,6 +218,15 @@ def _handle_finance_genie_preset(argv: list[str]) -> int:
     report = readiness_from_table_names(table_names, catalog=catalog, schema=schema)
     print(report.format(strict_gold=args.strict_gold))
     return 0 if report.ok(strict_gold=args.strict_gold) else 1
+
+
+def _handle_finance_genie_demo(argv: list[str]) -> int:
+    from dotenv import load_dotenv
+
+    from dbxcarta.client.local_demo import main as demo_main
+
+    load_dotenv(Path(".env"), override=False)
+    return demo_main(argv)
 
 
 def _single_schema(value: str) -> str:

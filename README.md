@@ -31,6 +31,17 @@ Companion examples show how to point dbxcarta at a known upstream project:
   Finance Genie creates the finance Lakehouse tables and Gold graph-enriched
   features; dbxcarta creates the Neo4j semantic layer over those tables.
 
+### Example preset: Finance Genie
+
+The Finance Genie preset is the maintained example for using dbxcarta as a
+semantic-layer companion to an upstream Lakehouse project. It includes preset
+configuration, readiness checks, the finance question set upload helper, the
+Databricks batch evaluation flow, and a local read-only CLI client for
+interactive GraphRAG-to-SQL demos.
+
+See [`examples/finance-genie/README.md`](examples/finance-genie/README.md) for
+the complete setup and validation flow.
+
 Print the Finance Genie dbxcarta overlay:
 
 ```bash

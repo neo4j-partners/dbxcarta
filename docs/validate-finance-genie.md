@@ -29,6 +29,8 @@ dbxcarta owns the Neo4j semantic layer built from Unity Catalog metadata.
 - [Complete] Verify the dbxcarta run summary and Neo4j semantic-layer counts.
 - [Complete] Submit `run_dbxcarta_client.py` and monitor the Databricks job run to completion.
 - [Complete] Verify client run summary and GraphRAG arm results.
+- [Complete] Validate the local Finance Genie CLI demo preflight.
+- [Complete] Run one local CLI GraphRAG question end to end against Databricks SQL.
 
 ## Current Findings
 
@@ -63,6 +65,10 @@ dbxcarta owns the Neo4j semantic layer built from Unity Catalog metadata.
 - Reran client with criteria injection disabled as run `1002789398520910`; Databricks reported `SUCCESS`.
 - Clean client summary: `no_context` executed 2/12, `schema_dump` executed 12/12, `graph_rag` executed 12/12.
 - Clean `graph_rag` result: 12/12 parsed, 12/12 executed, 12/12 non-empty, reported correct rate 58.3%.
+- Added local CLI demo commands under `uv run dbxcarta demo finance-genie ...`.
+- Full local test suite passed after adding and reviewing the local CLI demo: 170 passed, 1 skipped, 3 deselected.
+- Local CLI preflight passed with warehouse `a2946a63e3a3643d`, chat endpoint `databricks-claude-sonnet-4-6`, embedding endpoint `databricks-gte-large-en`, 12 local questions, and 189 Neo4j schema lines.
+- Local CLI sample run passed for `fg_q01`: retrieved graph context, generated `SELECT COUNT(*) FROM ...accounts`, executed on Databricks SQL, returned `25000`, and matched the reference SQL.
 
 ## Databricks Monitoring
 
