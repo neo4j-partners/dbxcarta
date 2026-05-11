@@ -1,8 +1,8 @@
 """Neo4j-side I/O: bootstrap, purge, per-label count queries, graph load.
 
-Everything that holds a neo4j `Driver` or issues Cypher lives here. Extracted
-from pipeline.py during Phase 3.6 foundation rewrite so orchestration and
-I/O are separable.
+Everything that holds a neo4j `Driver` or issues Cypher lives here. The
+orchestrator deals in typed labels and relationship enums; this module owns
+the connector-facing Cypher and graph maintenance details.
 """
 
 from __future__ import annotations

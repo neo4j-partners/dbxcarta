@@ -18,64 +18,6 @@ The graph follows a stable, typed schema:
 
 Each node carries a stable dotted `id` such as `catalog.schema.table.column`, a `description`, and where applicable an `embedding` vector for semantic similarity search.
 
-## Architecture
-
-### Build time: pipeline writes the graph
-
-Unity Catalog metadata flows through a single Spark job that extracts, embeds, and loads every enabled node label into Neo4j. Embeddings are generated inside Spark via `ai_query` and materialized to a Delta staging table before the Neo4j write, so the embedding call happens exactly once per run.
-
-```
-┌──────────────────────────────────────────── BUILD TIME ────────────────────────────────────────────┐
-│                                                                                                    │
-│  Unity Catalog          Spark Pipeline                Delta Staging        Neo4j (Aura)            │
-│  ─────────────          ──────────────                ─────────────        ────────────            │
-│  information_schema ──► Preflight                                                                  │
-│  (tables, columns,      Extract (SQL)  ──► Transform ──► ai_query() ──► materialize ──► MERGE     │
-│   schemas, values)      builds DFs          embeds         (failOnError   Delta write    nodes +   │
-│                                             per label       =false)                     vector idx │
-│                                                                                                    │
-└────────────────────────────────────────────────────────────────────────────────────────────────────┘
-```
-
-### Query time: client retrieves schema context
-
-A client performs two steps: a vector similarity search to find the most relevant nodes, then a graph traversal to expand that seed set into a full schema subgraph. The combination delivers both semantic relevance and structural completeness: the LLM receives the right tables *and* their columns, values, and relationships.
-
-```
-┌──────────────────────────────────────────── QUERY TIME ────────────────────────────────────────────┐
-│                                                                                                    │
-│  User question                                                                                     │
-│       │                                                                                            │
-│       ▼                                                                                            │
-│  Client  (Text2SQL agent / MCP tool / schema-aware RAG pipeline)                                   │
-│       │                                                                                            │
-│       ├─ ① embed question ──► similarity search ──► top-k nodes (Table, Column, Value)            │
-│       │                        (cosine, vector idx)                                                │
-│       │                                                                                            │
-│       └─ ② graph traversal ──► HAS_COLUMN, HAS_VALUE, REFERENCES ──► full schema subgraph         │
-│                                                                                                    │
-│       combined context ──► LLM ──► SQL / answer                                                   │
-│                                                                                                    │
-└────────────────────────────────────────────────────────────────────────────────────────────────────┘
-```
-
-## Design
-
-Everything runs inside Databricks — no external orchestrators, no local execution, no service accounts.
-
-- **Single submission**: one script (`scripts/run_dbxcarta.py`) drives the whole pipeline in one Databricks Job. Phases are no longer dispatched via `DBXCARTA_JOB`; scope is controlled by per-label embedding flags in `.env`.
-- **Spark**: extraction and transformation use PySpark DataFrames, so the pipeline scales to large catalogs without single-process bottlenecks.
-- **Model Serving**: embeddings are generated in Spark via `ai_query` against a Databricks-hosted foundation model endpoint (`databricks-gte-large-en` by default), with `failOnError => false` so row-level failures are counted rather than thrown.
-- **Materialize-once**: enriched node DataFrames are written to a Delta staging table between transform and load, so the failure-rate aggregation and the Neo4j write both consume the staged rows without re-invoking `ai_query`.
-- **Neo4j Spark Connector**: bulk, partitioned writes from DataFrames. Relationship writes are `coalesce(1)` to avoid endpoint-node lock contention on Aura; `batch.size` is tuned via `DBXCARTA_NEO4J_BATCH_SIZE`.
-- **Preflight**: grants and serving-endpoint permissions required by the enabled flags are checked before any extract runs; missing permissions fail the run fast.
-- **Secrets**: Neo4j credentials live in a Databricks secret scope and are injected at job time, not read from a local file.
-- **Metadata source**: Unity Catalog `information_schema` only — no pluggable multi-source connector layer.
-- **Run observability**: every run emits a `RunSummary` to stdout, a timestamped JSON file in a UC Volume, and a row appended to a Delta table (`CREATE TABLE IF NOT EXISTS`, schema-merge on write) so history is queryable via SQL. The summary records per-label embedding attempts, successes, and failure rates alongside the threshold and the endpoint used.
-- **`databricks-job-runner`**: CLI wrapper around the Databricks SDK that handles upload, submit, and cleanup.
-
-See `docs/best-practices.md` for the design rules (Spark / Databricks, Neo4j Spark Connector, project-level principles) that shape the pipeline.
-
 ## Core vs examples
 
 Core dbxcarta does not create Lakehouse tables. It builds a semantic layer over
@@ -208,6 +150,113 @@ Remove the demo schemas when you are done:
 ```bash
 uv run python scripts/run_demo.py --teardown
 ```
+
+## Architecture
+
+### Graph schema
+
+```text
++----------------+     HAS_SCHEMA      +----------------+
+| Database       | -------------------> | Schema         |
+| id             |                      | id             |
+| name           |                      | name           |
++----------------+                      +----------------+
+                                                  |
+                                                  | HAS_TABLE
+                                                  v
+                                         +----------------+
+                                         | Table          |
+                                         | id             |
+                                         | name           |
+                                         | table_type     |
+                                         | embedding      |
+                                         +----------------+
+                                                  |
+                                                  | HAS_COLUMN
+                                                  v
+                                         +----------------+
+                                         | Column         |
+                                         | id             |
+                                         | name           |
+                                         | data_type      |
+                                         | embedding      |
+                                         +----------------+
+                                            |          |
+                                            |          | REFERENCES
+                                            |          v
+                                            |   +----------------+
+                                            |   | Column         |
+                                            |   | confidence     |
+                                            |   | source         |
+                                            |   | criteria       |
+                                            |   +----------------+
+                                            |
+                                            | HAS_VALUE
+                                            v
+                                         +----------------+
+                                         | Value          |
+                                         | id             |
+                                         | value          |
+                                         | count          |
+                                         | embedding      |
+                                         +----------------+
+```
+
+### Build time: pipeline writes the graph
+
+Unity Catalog metadata flows through a single Spark job that extracts, embeds, and loads every enabled node label into Neo4j. Embeddings are generated inside Spark via `ai_query` and materialized to a Delta staging table before the Neo4j write, so the embedding call happens exactly once per run.
+
+```
+┌──────────────────────────────────────────── BUILD TIME ────────────────────────────────────────────┐
+│                                                                                                    │
+│  Unity Catalog          Spark Pipeline                Delta Staging        Neo4j (Aura)            │
+│  ─────────────          ──────────────                ─────────────        ────────────            │
+│  information_schema ──► Preflight                                                                  │
+│  (tables, columns,      Extract (SQL)  ──► Transform ──► ai_query() ──► materialize ──► MERGE     │
+│   schemas, values)      builds DFs          embeds         (failOnError   Delta write    nodes +   │
+│                                             per label       =false)                     vector idx │
+│                                                                                                    │
+└────────────────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Query time: client retrieves schema context
+
+A client performs two steps: a vector similarity search to find the most relevant nodes, then a graph traversal to expand that seed set into a full schema subgraph. The combination delivers both semantic relevance and structural completeness: the LLM receives the right tables *and* their columns, values, and relationships.
+
+```
+┌──────────────────────────────────────────── QUERY TIME ────────────────────────────────────────────┐
+│                                                                                                    │
+│  User question                                                                                     │
+│       │                                                                                            │
+│       ▼                                                                                            │
+│  Client  (Text2SQL agent / MCP tool / schema-aware RAG pipeline)                                   │
+│       │                                                                                            │
+│       ├─ ① embed question ──► similarity search ──► top-k nodes (Table, Column, Value)            │
+│       │                        (cosine, vector idx)                                                │
+│       │                                                                                            │
+│       └─ ② graph traversal ──► HAS_COLUMN, HAS_VALUE, REFERENCES ──► full schema subgraph         │
+│                                                                                                    │
+│       combined context ──► LLM ──► SQL / answer                                                   │
+│                                                                                                    │
+└────────────────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+## Design
+
+Everything runs inside Databricks — no external orchestrators, no local execution, no service accounts.
+
+- **Single submission**: one script (`scripts/run_dbxcarta.py`) drives the whole pipeline in one Databricks Job. Phases are no longer dispatched via `DBXCARTA_JOB`; scope is controlled by per-label embedding flags in `.env`.
+- **Spark**: extraction and transformation use PySpark DataFrames, so the pipeline scales to large catalogs without single-process bottlenecks.
+- **Model Serving**: embeddings are generated in Spark via `ai_query` against a Databricks-hosted foundation model endpoint (`databricks-gte-large-en` by default), with `failOnError => false` so row-level failures are counted rather than thrown.
+- **Materialize-once**: enriched node DataFrames are written to a Delta staging table between transform and load, so the failure-rate aggregation and the Neo4j write both consume the staged rows without re-invoking `ai_query`.
+- **Neo4j Spark Connector**: bulk, partitioned writes from DataFrames. Relationship writes are `coalesce(1)` to avoid endpoint-node lock contention on Aura; `batch.size` is tuned via `DBXCARTA_NEO4J_BATCH_SIZE`.
+- **Preflight**: grants and serving-endpoint permissions required by the enabled flags are checked before any extract runs; missing permissions fail the run fast.
+- **Secrets**: Neo4j credentials live in a Databricks secret scope and are injected at job time, not read from a local file.
+- **Metadata source**: Unity Catalog `information_schema` only — no pluggable multi-source connector layer.
+- **Run observability**: every run emits a `RunSummary` to stdout, a timestamped JSON file in a UC Volume, and a row appended to a Delta table (`CREATE TABLE IF NOT EXISTS`, schema-merge on write) so history is queryable via SQL. The summary records per-label embedding attempts, successes, and failure rates alongside the threshold and the endpoint used.
+- **`databricks-job-runner`**: CLI wrapper around the Databricks SDK that handles upload, submit, and cleanup.
+
+See `docs/best-practices.md` for the design rules (Spark / Databricks, Neo4j Spark Connector, project-level principles) that shape the pipeline.
 
 ## Configuration
 

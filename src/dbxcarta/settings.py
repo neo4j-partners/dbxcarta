@@ -21,6 +21,13 @@ from dbxcarta.databricks import (
 
 
 class Settings(BaseSettings):
+    """Environment-backed configuration for the ingest job.
+
+    Required fields describe the Databricks catalog, summary sinks, and Neo4j
+    secret scope. Validators reject unsafe identifiers and incoherent feature
+    flag combinations before Spark or Neo4j work starts.
+    """
+
     databricks_secret_scope: str = "dbxcarta-neo4j"
     # Used by verify's catalog-vs-graph checks (information_schema queries).
     # When unset, those checks self-skip with a `catalog.no_warehouse` violation.
@@ -66,11 +73,13 @@ class Settings(BaseSettings):
     @field_validator("dbxcarta_catalog")
     @classmethod
     def _validate_catalog(cls, v: str) -> str:
+        """Require a single safe Databricks catalog identifier."""
         return validate_identifier(v)
 
     @field_validator("dbxcarta_summary_table")
     @classmethod
     def _validate_summary_table(cls, v: str) -> str:
+        """Require summary history to target catalog.schema.table explicitly."""
         # Persisted run history is a UC artifact, so require an explicit
         # catalog.schema.table target rather than relying on workspace defaults.
         split_qualified_name(v, expected_parts=3, label="summary table")
@@ -79,11 +88,13 @@ class Settings(BaseSettings):
     @field_validator("dbxcarta_summary_volume")
     @classmethod
     def _validate_summary_volume(cls, v: str) -> str:
+        """Require a UC Volume subpath for JSON summary output."""
         return validate_uc_volume_subpath(v, label="DBXCARTA_SUMMARY_VOLUME")
 
     @field_validator("dbxcarta_staging_path", "dbxcarta_ledger_path")
     @classmethod
     def _validate_optional_volume_subpath(cls, v: str) -> str:
+        """Normalize optional UC Volume paths while allowing unset values."""
         if not v.strip():
             return ""
         return validate_uc_volume_subpath(v.strip())
@@ -91,6 +102,7 @@ class Settings(BaseSettings):
     @field_validator("dbxcarta_embedding_endpoint")
     @classmethod
     def _validate_embedding_endpoint(cls, v: str) -> str:
+        """Reject endpoint names that cannot be safely interpolated into SQL."""
         return validate_serving_endpoint_name(v)
 
     @model_validator(mode="after")
@@ -120,6 +132,6 @@ class Settings(BaseSettings):
             raise ValueError(
                 "DBXCARTA_INFER_SEMANTIC=true requires"
                 " DBXCARTA_INCLUDE_EMBEDDINGS_COLUMNS=true"
-                " (Phase 4 consumes column embeddings)"
+                " (semantic FK discovery consumes column embeddings)"
             )
         return self

@@ -2,10 +2,10 @@
 
 Coverage:
 
-1. On the v5-fk fixture, infer_fk_pairs rediscovers the 3 declared FKs at
+1. On the declared-FK fixture, infer_fk_pairs rediscovers the 3 declared FKs at
    confidence ≥ 0.83. (Threshold originally read ≥ 0.90; relaxed because all
-   three v5-fk FKs are suffix matches, capped at 0.83 w/o comments per the
-   approved scoring table.)
+   three declared fixture FKs are suffix matches, capped at 0.83 w/o comments
+   per the approved scoring table.)
 2. On a synthetic no-FK fixture (same tables, constraints stripped), the
    name-based PK-likeness fallback recovers equivalent edges.
 3. Tie-break attenuation drops a 9-way fan-out and preserves a 2-way
@@ -86,7 +86,7 @@ def _v5fk_columns() -> list[ColumnMeta]:
 
 
 def _v5fk_pk_index() -> PKIndex:
-    """Declared PKs for the v5-fk fixture, built via ConstraintRow."""
+    """Declared PKs for the FK fixture, built via ConstraintRow."""
     rows = [
         ConstraintRow(
             table_catalog=_CAT, table_schema=schema, table_name=table,
@@ -101,7 +101,7 @@ def _v5fk_pk_index() -> PKIndex:
     return PKIndex.from_constraints(rows)
 
 
-# --- Deliverable 1: v5-fk rediscovery ---------------------------------------
+# --- Declared-FK rediscovery -------------------------------------------------
 
 def test_v5fk_rediscovers_three_declared_fks_at_0_83() -> None:
     refs, counters = infer_fk_pairs(
@@ -139,15 +139,15 @@ def test_v5fk_declared_duplicate_suppression() -> None:
     assert counters.rejections[RejectionReason.DUPLICATE_DECLARED] == 1
 
 
-# --- Deliverable 2: no-FK synthetic fallback --------------------------------
+# --- No-FK synthetic fallback ------------------------------------------------
 
 def test_no_fk_synthetic_recovers_via_name_heuristic() -> None:
     """With zero declared PKs, the `id`/`{table}_id` heuristic takes over.
 
-    All three v5-fk FKs are still recovered; confidences downgrade from 0.83
-    (suffix + declared_pk) to 0.78 (suffix + heuristic). 0.78 < 0.8 threshold,
-    so the worklog's "borderline audit-only" bucket is exercised — nothing is
-    emitted, and that's the correct behaviour.
+    All three fixture FKs are still evaluated; confidences downgrade from
+    0.83 (suffix + declared_pk) to 0.78 (suffix + heuristic). Because 0.78 is
+    below the 0.8 threshold, the below-threshold bucket is exercised. Nothing
+    is emitted, which is the correct behaviour without corroborating metadata.
     """
     empty_index = PKIndex.from_constraints([])
     refs, counters = infer_fk_pairs(
@@ -195,7 +195,7 @@ def test_no_fk_synthetic_with_comment_overlap_clears_threshold() -> None:
     assert edges_and_conf[suffix_edge] == _S_SUFFIX_UOH_COMMENT
 
 
-# --- Deliverable 3: tie-break attenuation -----------------------------------
+# --- Tie-break attenuation ---------------------------------------------------
 
 def test_tie_break_drops_nine_way_user_id_fanout() -> None:
     """9 tables named user across 9 schemas; every one passes stem match.
@@ -371,9 +371,10 @@ def test_counter_invariant_on_v5fk() -> None:
 def test_counter_invariant_on_sub_threshold_fixture() -> None:
     """The 0.78 (suffix + heuristic + no-comment) path exercises SUB_THRESHOLD.
 
-    With zero declared PKs, every v5-fk suffix match scores 0.78, which drops
-    pre-attenuation. This ensures the SUB_THRESHOLD counter is the one that
-    accounts for those drops — previously they were silent `continue`s.
+    With zero declared PKs, every declared-fixture suffix match scores 0.78,
+    which drops pre-attenuation. This ensures the SUB_THRESHOLD counter is the
+    one that accounts for those drops instead of hiding them behind a bare
+    `continue`.
     """
     empty_index = PKIndex.from_constraints([])
     _, counters = infer_fk_pairs(

@@ -73,6 +73,7 @@ def finance_genie_env(
         "DBXCARTA_EMBEDDING_FAILURE_THRESHOLD": "0.10",
         "DBXCARTA_CLIENT_QUESTIONS": f"{volume_path}/dbxcarta/questions.json",
         "DBXCARTA_CLIENT_ARMS": "no_context,schema_dump,graph_rag",
+        "DBXCARTA_INJECT_CRITERIA": "false",
     }
 
 

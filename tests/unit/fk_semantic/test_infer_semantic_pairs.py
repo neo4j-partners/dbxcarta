@@ -73,7 +73,7 @@ def _fixture_pk_index() -> PKIndex:
     return PKIndex.from_constraints(rows)
 
 
-# --- Deliverable 1: renamed FKs recovered -----------------------------------
+# --- Renamed FKs recovered ---------------------------------------------------
 
 def test_recovers_renamed_edges_above_threshold(phase4_embeddings_pkl: Path) -> None:
     """buyer_ref → customers.id and purchase_ref → orders.id both emit.

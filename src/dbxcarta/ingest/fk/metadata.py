@@ -91,7 +91,7 @@ class InferenceCounters:
 
     `composite_pk_skipped` is not a candidate outcome — it's a PKIndex
     construction observation recorded here so `as_summary_dict` can emit
-    the full metadata-phase summary in one call.
+    the full metadata-inference summary in one call.
 
     Flattens to run_summary.row_counts via as_summary_dict(prefix); the prefix
     concat is the single string-building point for these counters."""

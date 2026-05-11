@@ -3,7 +3,8 @@
 When enabled, skips ai_query for rows whose `embedding_text_hash` and
 `embedding_model` haven't changed since the last successful run. Narrow
 exception handling (`AnalysisException` only) — any other failure is signal.
-Extracted from pipeline.py during Phase 3.6 foundation rewrite.
+Each label gets its own Delta path so table, column, schema, database, and
+value embeddings can be invalidated independently.
 """
 
 from __future__ import annotations

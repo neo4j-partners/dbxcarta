@@ -65,13 +65,21 @@ def generate_id(*parts: str) -> str:
 
 
 def generate_value_id(column_id: str, value: object) -> str:
-    """Return the Value node id for a sampled distinct value."""
+    """Return the Value node id for a sampled distinct value.
+
+    The value portion is md5-hashed so long strings, booleans, and repeated
+    literal samples produce compact stable ids under their owning Column id.
+    """
     digest = hashlib.md5(str(value).encode()).hexdigest()
     return f"{column_id}.{digest}"
 
 
 def id_expr(*column_names: str):
-    """Return a PySpark Column expression equivalent to generate_id()."""
+    """Return a PySpark Column expression equivalent to generate_id().
+
+    Spark-side builders use this to avoid collecting source ids to the driver
+    or reimplementing normalization with ad hoc SQL strings.
+    """
     from pyspark.sql import functions as F
 
     parts = [F.col(c) for c in column_names]
@@ -79,7 +87,11 @@ def id_expr(*column_names: str):
 
 
 def value_id_expr():
-    """Return a PySpark Column expression equivalent to generate_value_id()."""
+    """Return a PySpark Column expression equivalent to generate_value_id().
+
+    Expects the input DataFrame to expose `col_id` and `val`, matching the
+    sample-value transform's intermediate schema.
+    """
     from pyspark.sql import functions as F
 
     return F.concat(F.col("col_id"), F.lit("."), F.md5(F.col("val")))

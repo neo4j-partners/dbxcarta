@@ -1,9 +1,9 @@
 """Pre-run checks: catalog accessibility, volume/table provisioning,
 embedding-endpoint reachability.
 
-Extracted from pipeline.py during Phase 3.6 foundation rewrite. Runs before
-any UC read or Neo4j write. A preflight failure means the rest of the run
-cannot succeed, so the caller should not catch these.
+Runs before any catalog extraction or Neo4j write. A preflight failure means
+the rest of the run cannot succeed, so the caller should let these exceptions
+fail the job after the run summary records the error.
 """
 
 from __future__ import annotations

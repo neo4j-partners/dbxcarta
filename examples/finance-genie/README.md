@@ -1,7 +1,7 @@
 # Finance Genie Companion Example
 
 This example shows dbxcarta as the semantic-layer companion to
-`/Users/ryanknight/projects/databricks/graph-enriched-lakehouse/finance-genie`.
+`/Users/ryanknight/projects/databricks/graph-on-databricks/finance-genie`.
 
 Finance Genie creates and enriches the Lakehouse tables. dbxcarta reads the
 resulting Unity Catalog metadata, embeds schema objects and sample values, and
@@ -83,6 +83,8 @@ The preset includes both base and Gold tables by targeting the full
 embeddings, and turns on semantic FK inference so dbxcarta can recover join
 paths from Finance Genie column names, comments, and embeddings even though the
 Finance Genie tables are not created with declared foreign-key constraints.
+The preset disables criteria injection because Finance Genie inferred
+relationships do not carry literal join-predicate strings.
 
 If you only want a cheaper first validation run, override the embedding flags
 in `.env` and start with `DBXCARTA_INCLUDE_EMBEDDINGS_TABLES=true` only.

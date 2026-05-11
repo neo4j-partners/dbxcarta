@@ -57,6 +57,7 @@ def test_finance_genie_env_defaults_validate_against_client_settings() -> None:
 
     assert client_settings.schemas_list == ["graph-enriched-schema"]
     assert client_settings.arms == ["no_context", "schema_dump", "graph_rag"]
+    assert env["DBXCARTA_INJECT_CRITERIA"] == "false"
 
 
 def test_readiness_all_tables_present_is_ready() -> None:

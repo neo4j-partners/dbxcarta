@@ -203,10 +203,10 @@ def pk_kind(
     """Classify target's PK-likeness.
 
     Falls back to name heuristics (column == "id", or == "{table}_id" and sole
-    _id-suffixed column) so phases still fire on catalogs with no declared
+    _id-suffixed column) so inference still works on catalogs with no declared
     PKs. The fallback collapses into UNIQUE_OR_HEUR rather than a third
-    bucket — Phase 3's score table has two PK columns, and Phase 4's floor/
-    cap is continuous so the kind only matters as a gate.
+    bucket because metadata scoring only distinguishes declared PKs from
+    weaker uniqueness evidence, and semantic scoring only needs a target gate.
     """
     if tgt.column in pk_index.pk_cols.get(tgt.table_key, frozenset()):
         return PKEvidence.DECLARED_PK

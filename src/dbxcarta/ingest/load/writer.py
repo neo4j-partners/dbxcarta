@@ -55,8 +55,9 @@ def write_relationship(
     When `properties` is non-empty, those DataFrame columns are written as
     relationship properties. The Neo4j Spark Connector's `keys` strategy
     requires an explicit `relationship.properties` option — extra columns
-    on the DataFrame are otherwise ignored. See worklog/fk-gap-v3-build.md
-    Phase 2.
+    on the DataFrame are otherwise ignored. Keeping the option conditional
+    lets simple relationships use only source/target ids while REFERENCES
+    edges can persist provenance, confidence, and criteria.
     """
     writer = (
         df.write.format(_FORMAT)

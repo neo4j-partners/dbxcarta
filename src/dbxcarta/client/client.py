@@ -1,11 +1,11 @@
 """DBxCarta client — Text2SQL evaluation harness.
 
-Phase 1: reference arm — feeds reference_sql through the executor to validate
-         the grading path end to end.
-Phase 2: no_context and schema_dump arms — LLM generation via ai_query batch,
-         SQL parsing, warehouse execution, and pass-rate comparison.
-Phase 3: graph_rag arm — question embeddings via serving endpoint, Neo4j
-         vector seed + structural walk for context, LLM generation via ai_query.
+Evaluation arms:
+  - reference: executes reference_sql directly to validate the grading path.
+  - no_context/schema_dump: generate SQL with ai_query, parse it, execute it
+    on the warehouse, and compare the result set against reference_sql.
+  - graph_rag: embed the question, retrieve graph context from Neo4j, then
+    generate and grade SQL through the same execution path.
 """
 
 from __future__ import annotations

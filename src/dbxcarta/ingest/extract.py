@@ -28,7 +28,10 @@ class ExtractResult:
     """Raw UC extraction + node/rel DataFrames. No FK edges, no counters.
 
     Fields are mutable only because embedding enrichment replaces the node
-    DataFrames in place after staging."""
+    DataFrames in place after staging. The cached information_schema
+    DataFrames stay attached so later FK discovery and sample-value transforms
+    can reuse the same catalog snapshot.
+    """
 
     database_df: "DataFrame"
     schema_node_df: "DataFrame"
@@ -42,6 +45,12 @@ class ExtractResult:
     columns_df: "DataFrame"
 
     def unpersist_cached(self) -> None:
+        """Release cached information_schema DataFrames after the ingest run.
+
+        Extraction caches the three source DataFrames because several
+        downstream steps read them. The pipeline calls this once the graph load
+        and verification steps no longer need the snapshot.
+        """
         self.schemata_df.unpersist()
         self.tables_df.unpersist()
         self.columns_df.unpersist()
@@ -56,7 +65,9 @@ def extract(
     """Pull information_schema metadata for the configured catalog/schemas.
 
     Populates `summary.extract` in the process — this is the one place the
-    extract counts are recorded."""
+    extract counts are recorded. The returned DataFrames are already filtered
+    to the requested schema scope and cached for reuse by later transforms.
+    """
     from pyspark.sql.functions import col
 
     catalog = settings.dbxcarta_catalog

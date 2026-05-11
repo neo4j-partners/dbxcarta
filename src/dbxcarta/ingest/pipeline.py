@@ -1,13 +1,15 @@
 """DBxCarta ingestion orchestrator.
 
-Thin coordinator after the Phase 3.6 foundation split. Its job is limited to:
+Thin coordinator for the ingest run. Its job is limited to:
   1. Construct Settings (fails loudly at boundary via cross-field validators).
   2. Run preflight (fails before any destructive action).
   3. Call extract → transform (embed, sample) → FK discovery → load.
   4. Emit the RunSummary.
 
-Everything substantive lives in focused ingest modules under `fk`, `transform`,
-and `load`.
+The module intentionally keeps domain work in focused ingest modules under
+`fk`, `transform`, and `load`. Pipeline functions here wire those modules
+together and update run-level counters so the Databricks task has one clear
+entry point.
 """
 
 from __future__ import annotations
@@ -72,7 +74,12 @@ _EMBEDDING_TEXT_EXPRS: dict[NodeLabel, str] = {
 
 @dataclass
 class ValueResult:
-    """Sample-values output; `None` at the call site means sampling was skipped."""
+    """Sample-values output passed from transform into FK discovery and load.
+
+    The pipeline uses `None` instead of an empty ValueResult when sampling is
+    disabled, so downstream branches can cleanly skip Value nodes and HAS_VALUE
+    relationships without inspecting Spark DataFrames.
+    """
 
     value_node_df: "DataFrame"
     has_value_df: "DataFrame"
@@ -80,6 +87,12 @@ class ValueResult:
 
 
 def run_dbxcarta() -> None:
+    """Databricks job entry point for a complete ingest run.
+
+    Builds settings and Spark context, executes the pipeline, records success
+    or failure on the run summary, and always emits the summary to stdout,
+    JSON, and Delta before returning or re-raising.
+    """
     settings = Settings()
 
     from pyspark.sql import SparkSession
@@ -105,6 +118,12 @@ def run_dbxcarta() -> None:
 
 
 def _build_summary(run_id: str, settings: Settings, schema_list: list[str]) -> RunSummary:
+    """Create the run summary shell before any Spark or Neo4j work begins.
+
+    Embedding flags are copied from Settings at startup so the emitted summary
+    records the requested configuration even if no rows are eligible for a
+    particular label.
+    """
     flags: dict[NodeLabel, bool] = {
         NodeLabel.TABLE: settings.dbxcarta_include_embeddings_tables,
         NodeLabel.COLUMN: settings.dbxcarta_include_embeddings_columns,
@@ -132,6 +151,12 @@ def _run(
     schema_list: list[str],
     summary: RunSummary,
 ) -> None:
+    """Execute the ingest workflow after settings and summary are initialized.
+
+    This method owns resource ordering: preflight and staging cleanup happen
+    before the Neo4j driver opens, graph constraints are bootstrapped before
+    writes, and cached extraction DataFrames are unpersisted after verification.
+    """
     from databricks.sdk.runtime import dbutils
     from neo4j import GraphDatabase
 
@@ -299,7 +324,11 @@ def _transform_sample_values(
 
 def _check_thresholds(settings: Settings, summary: RunSummary) -> None:
     """Raise RuntimeError if any per-label or aggregate embedding failure
-    rate exceeds the configured threshold."""
+    rate exceeds the configured threshold.
+
+    Called after embedding transforms but before Neo4j writes so a bad
+    endpoint run does not partially refresh the graph with missing vectors.
+    """
     threshold = settings.dbxcarta_embedding_failure_threshold
     for label, rate in summary.embeddings.failure_rate_per_label.items():
         if rate > threshold:
@@ -328,8 +357,12 @@ def _load(
     values: ValueResult | None,
     summary: RunSummary,
 ) -> None:
-    """Node writes omit coalesce(1); connector parallelizes at batch_size.
-    Relationship writes keep coalesce(1) to prevent lock contention."""
+    """Write extracted, inferred, and sampled graph artifacts to Neo4j.
+
+    Node writes omit coalesce(1) so the connector can parallelize at
+    `batch_size`. Relationship writes keep coalesce(1) to reduce lock
+    contention when multiple Spark partitions would merge adjacent edges.
+    """
     candidate_col_ids = sv.get_candidate_col_ids(extract_result.columns_df)
     purge_stale_values(driver, candidate_col_ids)
 
@@ -413,7 +446,11 @@ def _load(
 
 
 def _drop_cols(df: "DataFrame", *names: str) -> "DataFrame":
-    """Drop named columns from df if they exist; return the (possibly modified) df."""
+    """Drop optional pipeline-only columns before connector writes.
+
+    The helper is intentionally tolerant because embedding columns only exist
+    for labels whose embedding flag was enabled for this run.
+    """
     for name in names:
         if name in df.columns:
             df = df.drop(name)

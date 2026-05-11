@@ -14,7 +14,8 @@ Confidence model:
 Scale: driver-side cosine over candidate pairs. Candidate gates (PK-likeness,
 type compat, already-covered suppression) keep the working set a small
 fraction of the Cartesian product. Pure-Python cosine (no numpy) — adequate
-at the 10⁴–10⁵-column scale target; see worklog scale notes.
+for the expected catalog sizes because vector math only runs after the cheap
+candidate gates.
 
 Entry point: infer_semantic_pairs(embeddings, columns, pk_index, ...).
 """
@@ -70,8 +71,9 @@ class ColumnEmbedding:
 class ValueIndex:
     """Sampled distinct values per column, built at the sample-values boundary.
 
-    Empty when DBXCARTA_INCLUDE_VALUES is off — Phase 4 treats missing as
-    "no corroboration available" (bonus simply doesn't apply)."""
+    Empty when DBXCARTA_INCLUDE_VALUES is off. Missing values mean "no
+    corroboration available"; the semantic confidence bonus simply does not
+    apply."""
 
     values_by_col_id: dict[str, frozenset[str]]
 
@@ -127,8 +129,12 @@ class SemanticInferenceCounters:
 
 
 def _cosine(a: ColumnEmbedding, b: ColumnEmbedding) -> float:
-    """Pure-Python cosine. numpy is not a declared dep and isn't needed at
-    the worklog's scale target."""
+    """Pure-Python cosine.
+
+    numpy is not a declared dependency, and this function only runs after
+    target PK, type-compatibility, and prior-pair filters have reduced the
+    candidate set.
+    """
     if a.norm == 0.0 or b.norm == 0.0:
         return 0.0
     dot = sum(x * y for x, y in zip(a.vector, b.vector))

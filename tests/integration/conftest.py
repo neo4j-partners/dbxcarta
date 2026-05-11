@@ -1,8 +1,9 @@
 """Fixtures for tests/integration/.
 
 This conftest holds the live `ws`, `neo4j_driver`, and `run_summary` fixtures
-used by `test_semantic_search.py`. Phase 4 (worklog/cleanup-v3.md) replaces
-that test with an MLflow eval and deletes this directory entirely.
+used by `test_semantic_search.py`. These tests assume a completed DBxCarta
+run and live Databricks/Neo4j credentials, so local unit-test runs should not
+collect them unless integration tests are explicitly requested.
 """
 
 from __future__ import annotations

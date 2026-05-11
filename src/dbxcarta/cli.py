@@ -41,9 +41,10 @@ def _read_client_serverless(env_file: Path = Path(".env")) -> bool:
 def main() -> None:
     """Entry point.
 
-    - `dbxcarta verify [--run-id RUN_ID]` runs Phase 2 verify against the
-      most recent status='success' run summary in `dbxcarta_summary_volume`
-      (or the explicit run-id) and exits non-zero on any violation.
+    - `dbxcarta verify [--run-id RUN_ID]` runs graph and catalog verification
+      against the most recent status='success' run summary in
+      `dbxcarta_summary_volume` (or the explicit run-id) and exits non-zero on
+      any violation.
     - `dbxcarta preset finance-genie ...` prints or checks the Finance Genie
       companion configuration without dispatching a Databricks job.
     - All other invocations dispatch to the databricks_job_runner.Runner that

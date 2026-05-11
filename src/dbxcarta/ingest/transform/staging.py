@@ -1,8 +1,9 @@
 """UC Volume path resolution and Delta staging-root lifecycle.
 
 Everything in this module is pure path arithmetic or Delta/dbutils I/O —
-no Neo4j, no UC query. Extracted from pipeline.py (Phase 3.6 foundation
-rewrite) so pipeline.py is the orchestrator, not the junk drawer.
+no Neo4j driver state and no Unity Catalog metadata query. The staging root
+holds materialized embedding results for the current run only; the ledger root
+is the durable cross-run cache.
 """
 
 from __future__ import annotations
@@ -76,8 +77,8 @@ def truncate_staging_root(staging_root: str) -> None:
 
     Probe-first design: check existence via `dbutils.fs.ls` and narrow-catch
     only on the probe. Any failure from the destructive `rm` call propagates
-    as signal. The probe catch is scoped to `Py4JJavaError`, the only
-    exception type the dbutils.fs bridge raises when a path is missing.
+    as signal. Different Databricks runtimes wrap a missing path differently,
+    so the probe treats only known missing-path messages as non-existence.
     """
     from databricks.sdk.runtime import dbutils
     from py4j.protocol import Py4JJavaError
@@ -85,7 +86,13 @@ def truncate_staging_root(staging_root: str) -> None:
     try:
         dbutils.fs.ls(staging_root)
         exists = True
-    except Py4JJavaError:
+    except Py4JJavaError as exc:
+        if not _is_missing_path_error(exc):
+            raise
+        exists = False
+    except Exception as exc:
+        if not _is_missing_path_error(exc):
+            raise
         exists = False
 
     if exists:
@@ -93,6 +100,16 @@ def truncate_staging_root(staging_root: str) -> None:
         logger.info("[dbxcarta] truncated staging root %s", staging_root)
     else:
         logger.info("[dbxcarta] staging root %s not present", staging_root)
+
+
+def _is_missing_path_error(exc: BaseException) -> bool:
+    """Return True when dbutils.fs.ls failed because the path is absent."""
+    text = str(exc)
+    return (
+        "FileNotFoundException" in text
+        or "No such file or directory" in text
+        or "java.io.FileNotFoundException" in text
+    )
 
 
 def stage_embedded_nodes(df: "DataFrame", staging_root: str, label: NodeLabel) -> "DataFrame":

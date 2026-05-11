@@ -82,6 +82,11 @@ def load_summary_from_volume(
 
 
 def _mkdirs(dirpath: Path) -> None:
+    """Create local or UC Volume subdirectories needed for JSON summaries.
+
+    UC Volumes expose a FUSE path whose root must be provisioned by Databricks,
+    so this helper only creates subdirectories below the volume root.
+    """
     parts = dirpath.parts
     if len(parts) > 1 and parts[1] == "Volumes":
         # UC Volume FUSE mount: creating the volume root (/Volumes/cat/schema/vol)
@@ -96,11 +101,14 @@ def _mkdirs(dirpath: Path) -> None:
 
 @dataclass
 class ExtractCounts:
+    """Counts captured immediately after Unity Catalog extraction."""
+
     schemas: int = 0
     tables: int = 0
     columns: int = 0
 
     def as_row_counts(self) -> dict[str, int]:
+        """Flatten extraction counters into the shared row_counts map."""
         return {
             "schemas": self.schemas,
             "tables": self.tables,
@@ -135,6 +143,11 @@ class SampleValueCounts:
 
     @classmethod
     def from_sample_stats(cls, stats: "SampleStats") -> "SampleValueCounts":
+        """Copy Spark sample statistics into the run-summary DTO.
+
+        Keeping this conversion here prevents the pipeline from depending on
+        the summary's flattened wire keys.
+        """
         return cls(
             candidate_columns=stats.candidate_columns,
             sampled_columns=stats.sampled_columns,
@@ -154,6 +167,11 @@ class SampleValueCounts:
         )
 
     def as_row_counts(self) -> dict[str, int]:
+        """Flatten sample-value counters into the shared row_counts map.
+
+        Percentile keys are included only when the sampler computed them, which
+        keeps empty or disabled sampling runs from emitting misleading zeroes.
+        """
         out: dict[str, int] = {
             "candidate_columns": self.candidate_columns,
             "sampled_columns": self.sampled_columns,
@@ -190,18 +208,23 @@ class EmbeddingCounts:
     aggregate_failure_rate: float | None = None
 
     def as_flags_map(self) -> dict[str, bool]:
+        """Return embedding enablement keyed by public node-label strings."""
         return {k.value: v for k, v in self.flags.items()}
 
     def as_attempts_map(self) -> dict[str, int]:
+        """Return embedding attempt counts keyed by public node-label strings."""
         return {k.value: v for k, v in self.attempts.items()}
 
     def as_successes_map(self) -> dict[str, int]:
+        """Return embedding success counts keyed by public node-label strings."""
         return {k.value: v for k, v in self.successes.items()}
 
     def as_failure_rate_map(self) -> dict[str, float]:
+        """Return per-label embedding failure rates keyed by public labels."""
         return {k.value: v for k, v in self.failure_rate_per_label.items()}
 
     def as_ledger_hits_map(self) -> dict[str, int]:
+        """Return per-label ledger hit counts keyed by public labels."""
         return {k.value: v for k, v in self.ledger_hits.items()}
 
 
@@ -248,6 +271,11 @@ class RunSummary:
     verify: VerifyResult | None = None
 
     def finish(self, *, status: str, error: str | None = None) -> None:
+        """Mark the run terminal and stamp its end time.
+
+        The pipeline calls this exactly once on the success or failure path
+        before emitters serialize the summary.
+        """
         self.status = status
         self.error = error
         self.ended_at = datetime.now(timezone.utc)
@@ -317,6 +345,7 @@ class RunSummary:
         return d
 
     def emit_stdout(self) -> None:
+        """Print a compact human-readable summary to driver stdout."""
         print(
             f"[dbxcarta] run_id={self.run_id} job={self.job_name} "
             f"status={self.status} catalog={self.catalog}"
@@ -334,12 +363,18 @@ class RunSummary:
             print(f"  error: {self.error}")
 
     def emit_json(self, volume_path: str) -> None:
+        """Write the JSON summary file under the configured UC Volume path."""
         ts = (self.ended_at or self.started_at).strftime("%Y%m%dT%H%M%SZ")
         path = Path(volume_path) / f"{self.job_name}_{self.run_id}_{ts}.json"
         _mkdirs(path.parent)
         path.write_text(json.dumps(self.to_json_dict(), indent=2))
 
     def emit_delta(self, spark: "SparkSession", table_name: str) -> None:
+        """Append one summary row to the configured Delta history table.
+
+        The explicit schema keeps Spark from inferring unstable map and
+        timestamp types from a single Python Row.
+        """
         from pyspark.sql import Row
         from pyspark.sql.types import (
             ArrayType,
@@ -388,6 +423,7 @@ class RunSummary:
         )
 
     def emit(self, spark: "SparkSession", volume_path: str, table_name: str) -> None:
+        """Emit the run summary through all configured sinks."""
         self.emit_stdout()
         self.emit_json(volume_path)
         self.emit_delta(spark, table_name)

@@ -5,9 +5,9 @@ axis-aligned orthogonal basis construction: for target cosine `c`, the
 pair is `(1, 0, 0, ...)` and `(c, sqrt(1 - c²), 0, 0, ...)` — both unit
 vectors, inner product = c.
 
-The `phase4_embeddings_pkl` fixture materialises the worklog-mandated
-pickle file in tmp_path so the test proves the on-disk format works
-without checking in a binary artefact."""
+The `phase4_embeddings_pkl` fixture materialises a temporary pickle file so
+the test proves the on-disk embedding format works without checking in a
+binary artefact."""
 
 from __future__ import annotations
 
@@ -63,12 +63,12 @@ def phase4_vectors() -> dict[str, list[float]]:
 def phase4_embeddings_pkl(
     phase4_vectors: dict[str, list[float]], tmp_path_factory: pytest.TempPathFactory,
 ) -> Path:
-    """Materialise the worklog-mandated pickle artefact.
+    """Materialise a temporary pickle artefact.
 
     Test suite round-trips through this file so the pickle format is
-    exercised end-to-end. Located in the session's tmp dir because the
-    workstream's no-cloud-connectivity rule forbids checking in embeddings
-    that came from a real endpoint."""
+    exercised end-to-end. Located in the session's tmp dir so repository
+    fixtures stay text-only and do not depend on live endpoint output.
+    """
     path = tmp_path_factory.mktemp("phase4_fixture") / "phase4_embeddings.pkl"
     with path.open("wb") as f:
         pickle.dump(phase4_vectors, f)

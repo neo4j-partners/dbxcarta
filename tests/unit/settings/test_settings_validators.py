@@ -137,8 +137,9 @@ def test_settings_rejects_semantic_without_column_embeddings() -> None:
 def test_settings_rejects_value_embeddings_without_sampling() -> None:
     """DBXCARTA_INCLUDE_EMBEDDINGS_VALUES=true requires DBXCARTA_INCLUDE_VALUES=true.
 
-    Previously warned at runtime; Phase 3.6 moves the check to the Settings
-    cross-field validator so the job fails at startup instead of mid-run.
+    The Settings cross-field validator catches this at construction time so
+    the job fails at startup instead of reaching an embedding step with no
+    Value nodes to process.
     """
     with pytest.raises(ValidationError, match="DBXCARTA_INCLUDE_EMBEDDINGS_VALUES"):
         Settings(
