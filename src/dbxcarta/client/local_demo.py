@@ -39,6 +39,7 @@ _MUTATING_SQL_RE = re.compile(
 class DemoResult:
     question: str
     context_ids: list[str]
+    context_text: str
     generated_sql: str
     columns: list[str]
     rows: list[list[Any]]
@@ -192,9 +193,7 @@ def _handle_ask(args: argparse.Namespace) -> int:
 
     print(f"question: {result.question}")
     if args.show_context:
-        print("context_ids:")
-        for context_id in result.context_ids:
-            print(f"  {context_id}")
+        _print_context(result.context_ids, result.context_text)
     print("\ngenerated_sql:")
     print(result.generated_sql)
     if result.correct is not None:
@@ -235,11 +234,12 @@ def run_graph_rag_question(
     finally:
         retriever.close()
 
+    context_text = bundle.to_text()
     prompt = graph_rag_prompt(
         question,
         settings.dbxcarta_catalog,
         settings.schemas_list,
-        bundle.to_text(),
+        context_text,
     )
     if show_prompt:
         print("prompt:")
@@ -284,6 +284,7 @@ def run_graph_rag_question(
     return DemoResult(
         question=question,
         context_ids=bundle.seed_ids,
+        context_text=context_text,
         generated_sql=generated_sql,
         columns=cols or [],
         rows=rows,
@@ -355,6 +356,17 @@ def _print_rows(columns: list[str], rows: list[list[Any]], *, limit: int) -> Non
     remaining = len(rows) - len(visible_rows)
     if remaining > 0:
         print(f"... {remaining} more row(s)")
+
+
+def _print_context(context_ids: list[str], context_text: str) -> None:
+    print("context:")
+    print("  context_ids are vector-search seed nodes from the dbxcarta graph.")
+    print("  The model receives the expanded retrieved_context text below.")
+    print("context_ids:")
+    for context_id in context_ids:
+        print(f"  {context_id}")
+    print("\nretrieved_context:")
+    print(context_text or "(no retrieved context)")
 
 
 def _cell(value: Any) -> str:

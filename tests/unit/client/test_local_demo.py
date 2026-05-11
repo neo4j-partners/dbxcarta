@@ -6,6 +6,7 @@ import pytest
 
 from dbxcarta.client.local_demo import (
     _ensure_read_only_sql,
+    _print_context,
     _print_rows,
     _resolve_question,
     main,
@@ -84,3 +85,16 @@ def test_print_rows_limit_zero_without_columns(capsys) -> None:
     out = capsys.readouterr().out
     assert "col_1" in out
     assert "... 1 more row(s)" in out
+
+
+def test_print_context_explains_ids_and_prompt_context(capsys) -> None:
+    _print_context(
+        ["catalog.schema.table.column"],
+        "Table: catalog.schema.table\n  column (STRING)",
+    )
+
+    out = capsys.readouterr().out
+    assert "context_ids are vector-search seed nodes" in out
+    assert "model receives the expanded retrieved_context" in out
+    assert "catalog.schema.table.column" in out
+    assert "Table: catalog.schema.table" in out

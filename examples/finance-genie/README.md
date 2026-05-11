@@ -303,6 +303,11 @@ Ask one of the sample questions end to end:
 uv run dbxcarta demo finance-genie ask --question-id fg_q01 --show-context
 ```
 
+With `--show-context`, `context_ids` are the vector-search seed nodes retrieved
+from the dbxcarta graph. The SQL-generation model receives the expanded
+`retrieved_context` block, which includes relevant tables, columns, sample
+values, and any retrieved join predicates.
+
 Or ask an ad hoc finance question:
 
 ```bash
