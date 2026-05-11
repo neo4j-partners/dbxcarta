@@ -1,7 +1,15 @@
 from __future__ import annotations
 
 from pydantic import model_validator
+from pydantic import field_validator
 from pydantic_settings import BaseSettings
+
+from dbxcarta.databricks import (
+    split_qualified_name,
+    validate_identifier,
+    validate_serving_endpoint_name,
+    validate_uc_volume_subpath,
+)
 
 
 class ClientSettings(BaseSettings):
@@ -30,6 +38,45 @@ class ClientSettings(BaseSettings):
     # silently dropped.
     dbxcarta_confidence_threshold: float = 0.8
     dbxcarta_inject_criteria: bool = True
+
+    @field_validator("dbxcarta_catalog")
+    @classmethod
+    def _validate_catalog(cls, v: str) -> str:
+        return validate_identifier(v)
+
+    @field_validator("dbxcarta_summary_table")
+    @classmethod
+    def _validate_summary_table(cls, v: str) -> str:
+        split_qualified_name(v, expected_parts=3, label="summary table")
+        return v
+
+    @field_validator("dbxcarta_summary_volume")
+    @classmethod
+    def _validate_summary_volume(cls, v: str) -> str:
+        return validate_uc_volume_subpath(v, label="DBXCARTA_SUMMARY_VOLUME")
+
+    @field_validator("databricks_volume_path")
+    @classmethod
+    def _validate_volume_root(cls, v: str) -> str:
+        parts = v.rstrip("/").lstrip("/").split("/")
+        if len(parts) != 4 or parts[0] != "Volumes":
+            raise ValueError(
+                "DATABRICKS_VOLUME_PATH must be /Volumes/<catalog>/<schema>/<volume>"
+            )
+        for part in parts[1:]:
+            validate_identifier(part, label="volume path part")
+        return v.rstrip("/")
+
+    @field_validator(
+        "dbxcarta_chat_endpoint",
+        "dbxcarta_embedding_endpoint",
+        "dbxcarta_embed_endpoint",
+    )
+    @classmethod
+    def _validate_serving_endpoints(cls, v: str) -> str:
+        if not v.strip():
+            return ""
+        return validate_serving_endpoint_name(v.strip())
 
     @model_validator(mode="after")
     def _resolve_defaults(self) -> ClientSettings:

@@ -11,6 +11,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from dbxcarta.contract import NodeLabel
+from dbxcarta.databricks import uc_volume_parent, uc_volume_parts
 
 if TYPE_CHECKING:
     from pyspark.sql import DataFrame
@@ -27,15 +28,15 @@ def parse_volume_path(path: str) -> list[str]:
     Raises RuntimeError for bare volume roots so neither preflight nor
     resolve_staging_path silently accepts a path that will fail at runtime.
     """
-    parts = path.lstrip("/").split("/")
-    if len(parts) < 5 or parts[0] != "Volumes":
+    try:
+        return uc_volume_parts(path)
+    except ValueError as exc:
         raise RuntimeError(
             f"[dbxcarta] volume path must be at least"
             f" /Volumes/<cat>/<schema>/<vol>/<subdir>, got {path!r}."
             f" Set DBXCARTA_SUMMARY_VOLUME to a path with a subdirectory"
             f" under the volume root (e.g. /Volumes/cat/schema/vol/dbxcarta)."
-        )
-    return parts
+        ) from exc
 
 
 def resolve_staging_path(settings: "Settings") -> str:
@@ -49,9 +50,7 @@ def resolve_staging_path(settings: "Settings") -> str:
     if configured:
         return configured.rstrip("/")
     summary_root = settings.dbxcarta_summary_volume.rstrip("/")
-    parts = parse_volume_path(summary_root)
-    parent = "/" + "/".join(parts[:-1])
-    return f"{parent}/staging"
+    return f"{uc_volume_parent(summary_root)}/staging"
 
 
 def resolve_ledger_path(settings: "Settings") -> str:
@@ -65,9 +64,7 @@ def resolve_ledger_path(settings: "Settings") -> str:
     if configured:
         return configured.rstrip("/")
     summary_root = settings.dbxcarta_summary_volume.rstrip("/")
-    parts = parse_volume_path(summary_root)
-    parent = "/" + "/".join(parts[:-1])
-    return f"{parent}/ledger"
+    return f"{uc_volume_parent(summary_root)}/ledger"
 
 
 def truncate_staging_root(staging_root: str) -> None:

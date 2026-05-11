@@ -60,6 +60,7 @@ secrets.json
 secrets.yaml
 secrets.yml
 *_secret*
+!setup_secrets.sh
 *_credentials*
 
 # =============================================================================

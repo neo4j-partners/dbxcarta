@@ -1,7 +1,7 @@
 """Graph-structure invariants: node counts, contract version, relationship integrity.
 
-Ports tests/schema_graph/test_node_counts.py, test_contract_version.py,
-test_relationship_integrity.py.
+Mirrors the historical live graph checks for node counts, contract version,
+and relationship integrity.
 """
 
 from __future__ import annotations

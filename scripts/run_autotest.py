@@ -43,9 +43,9 @@ def _now_iso() -> str:
 
 
 def _make_ws():
-    from databricks.sdk import WorkspaceClient
-    profile = os.environ.get("DATABRICKS_PROFILE")
-    return WorkspaceClient(profile=profile) if profile else WorkspaceClient()
+    from dbxcarta.databricks import build_workspace_client
+
+    return build_workspace_client()
 
 
 def _run(cmd: list[str], *, env_overrides: dict[str, str] | None = None) -> subprocess.CompletedProcess:
@@ -107,8 +107,6 @@ def run_unit_tests() -> dict:
     print("\n=== Unit Test Gate ===")
     result = _run([
         "uv", "run", "pytest", "tests/", "-x", "-q",
-        "--ignore=tests/schema_graph",
-        "--ignore=tests/sample_values",
         "--ignore=tests/integration",
     ])
 
@@ -283,8 +281,8 @@ def run_assertions(run_summary: dict) -> dict:
 #
 # The fixture (tests/fixtures/setup_test_catalog.sql) is the authoritative
 # source for *declared* FKs. The pipeline also produces *inferred* FK edges
-# via `dbxcarta.fk_metadata` (column-comment hints) and optionally
-# `dbxcarta.fk_semantic`; replicating that logic here would just duplicate
+# via `dbxcarta.ingest.fk.metadata` (column-comment hints) and optionally
+# `dbxcarta.ingest.fk.semantic`; replicating that logic here would just duplicate
 # the pipeline. So this step asserts only what the fixture pins down (the
 # declared bucket) and reports the inferred bucket informationally so a
 # regression in inference is visible without being asserted against a

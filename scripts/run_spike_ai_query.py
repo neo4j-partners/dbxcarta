@@ -1,9 +1,9 @@
-"""Stage 0 spike — validate ai_query against databricks-bge-large-en.
+"""Stage 0 spike — validate ai_query against databricks-gte-large-en.
 
 Confirms:
   1. Output column type is array<double> (compatible with Neo4j Spark
      Connector's float-array write path).
-  2. Vector dimension matches the 1024 expected by bge-large-en.
+  2. Vector dimension matches the 1024 expected by gte-large-en.
   3. failOnError => false returns null for deliberately invalid input
      instead of aborting the query.
   4. The cluster's service principal has invoke permission on the
@@ -21,14 +21,18 @@ import os
 from pyspark.sql import Row, SparkSession
 from pyspark.sql.functions import expr
 
-ENDPOINT = os.environ.get("DBXCARTA_EMBEDDING_ENDPOINT", "databricks-bge-large-en")
+from dbxcarta.databricks import validate_serving_endpoint_name
+
+ENDPOINT = validate_serving_endpoint_name(
+    os.environ.get("DBXCARTA_EMBEDDING_ENDPOINT", "databricks-gte-large-en")
+)
 
 
 def main() -> None:
     spark = SparkSession.builder.getOrCreate()
 
     # Probes: normal identifier, normal sentence, empty string, oversized
-    # text (exceeds bge-large-en's 512-token window), and a NULL input to
+    # text (long enough to probe endpoint-side validation), and a NULL input to
     # observe whether null passes through as null or surfaces as a struct
     # with a populated errorMessage.
     oversized = "x " * 20000

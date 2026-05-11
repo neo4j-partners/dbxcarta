@@ -11,13 +11,13 @@ import logging
 from typing import TYPE_CHECKING
 
 from dbxcarta.contract import NodeLabel, REFERENCES_PROPERTIES, RelType
-from dbxcarta.writer import write_nodes, write_relationship
+from dbxcarta.ingest.load.writer import write_nodes, write_relationship
 
 if TYPE_CHECKING:
     from neo4j import Driver
 
     from dbxcarta.settings import Settings
-    from dbxcarta.writer import Neo4jConfig
+    from dbxcarta.ingest.load.writer import Neo4jConfig
 
 logger = logging.getLogger(__name__)
 

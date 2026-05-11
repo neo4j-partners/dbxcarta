@@ -14,6 +14,7 @@ from dbxcarta.client.client import (
     _resolve_staging_path,
 )
 from dbxcarta.client.schema_dump import _format_schema
+from dbxcarta.client.settings import ClientSettings
 from dbxcarta.client.summary import ClientRunSummary
 
 
@@ -235,6 +236,40 @@ def test_is_table_ref_relative_path():
 
 def test_is_table_ref_two_parts():
     assert not _is_table_ref("schema.table")
+
+
+def test_client_settings_requires_three_part_summary_table() -> None:
+    with pytest.raises(ValueError, match="summary table"):
+        ClientSettings(
+            dbxcarta_catalog="main",
+            dbxcarta_summary_volume="/Volumes/cat/schema/vol/runs",
+            dbxcarta_summary_table="schema.table",
+            databricks_warehouse_id="abc",
+            databricks_volume_path="/Volumes/cat/schema/vol",
+        )
+
+
+def test_client_settings_rejects_volume_root_as_summary_volume() -> None:
+    with pytest.raises(ValueError, match="DBXCARTA_SUMMARY_VOLUME"):
+        ClientSettings(
+            dbxcarta_catalog="main",
+            dbxcarta_summary_volume="/Volumes/cat/schema/vol",
+            dbxcarta_summary_table="cat.schema.table",
+            databricks_warehouse_id="abc",
+            databricks_volume_path="/Volumes/cat/schema/vol",
+        )
+
+
+def test_client_settings_rejects_unsafe_chat_endpoint() -> None:
+    with pytest.raises(ValueError, match="serving endpoint"):
+        ClientSettings(
+            dbxcarta_catalog="main",
+            dbxcarta_summary_volume="/Volumes/cat/schema/vol/runs",
+            dbxcarta_summary_table="cat.schema.table",
+            databricks_warehouse_id="abc",
+            databricks_volume_path="/Volumes/cat/schema/vol",
+            dbxcarta_chat_endpoint="bad'endpoint",
+        )
 
 
 # ---------------------------------------------------------------------------

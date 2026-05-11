@@ -44,12 +44,16 @@ def main() -> None:
     - `dbxcarta verify [--run-id RUN_ID]` runs Phase 2 verify against the
       most recent status='success' run summary in `dbxcarta_summary_volume`
       (or the explicit run-id) and exits non-zero on any violation.
+    - `dbxcarta preset finance-genie ...` prints or checks the Finance Genie
+      companion configuration without dispatching a Databricks job.
     - All other invocations dispatch to the databricks_job_runner.Runner that
       backs `submit`/`status`/etc., with the legacy `--compute serverless`
       injection for the client script.
     """
     if sys.argv[1:2] == ["verify"]:
         sys.exit(_handle_verify(sys.argv[2:]))
+    if sys.argv[1:3] == ["preset", "finance-genie"]:
+        sys.exit(_handle_finance_genie_preset(sys.argv[3:]))
 
     is_submit = "submit" in sys.argv[1:]
     is_client = _CLIENT_SCRIPT in sys.argv[1:]
@@ -78,7 +82,7 @@ def _handle_verify(argv: list[str]) -> int:
     args = parser.parse_args(argv)
 
     from dbxcarta.settings import Settings
-    from dbxcarta.summary import LoadSummaryError, load_summary_from_volume
+    from dbxcarta.ingest.summary import LoadSummaryError, load_summary_from_volume
     from dbxcarta.verify import verify_run
 
     settings = Settings()  # type: ignore[call-arg]
@@ -111,12 +115,135 @@ def _handle_verify(argv: list[str]) -> int:
     return 0 if report.ok else 1
 
 
-def _build_workspace_client():
+def _handle_finance_genie_preset(argv: list[str]) -> int:
+    import argparse
     import os
 
-    from databricks.sdk import WorkspaceClient
+    from dotenv import load_dotenv
 
-    return WorkspaceClient(profile=os.environ.get("DATABRICKS_PROFILE"))
+    from dbxcarta.databricks import validate_identifier
+    from dbxcarta.presets.finance_genie import (
+        FINANCE_GENIE_CATALOG,
+        FINANCE_GENIE_SCHEMA,
+        FINANCE_GENIE_VOLUME,
+        finance_genie_env,
+        format_env,
+        readiness_from_table_names,
+    )
+
+    load_dotenv(Path(".env"), override=False)
+
+    parser = argparse.ArgumentParser(prog="dbxcarta preset finance-genie")
+    actions = parser.add_mutually_exclusive_group(required=True)
+    actions.add_argument(
+        "--print-env",
+        action="store_true",
+        help="Print the recommended dbxcarta env overlay for Finance Genie.",
+    )
+    actions.add_argument(
+        "--check-ready",
+        action="store_true",
+        help="Check whether the expected Finance Genie UC tables exist.",
+    )
+    parser.add_argument("--catalog", default="")
+    parser.add_argument("--schema", default="")
+    parser.add_argument("--volume", default="")
+    parser.add_argument("--warehouse-id", default="")
+    parser.add_argument(
+        "--strict-gold",
+        action="store_true",
+        help="Fail readiness if Gold enrichment tables are missing.",
+    )
+    args = parser.parse_args(argv)
+
+    if args.print_env:
+        catalog = validate_identifier(
+            args.catalog or FINANCE_GENIE_CATALOG,
+            label="catalog",
+        )
+        schema = validate_identifier(
+            args.schema or FINANCE_GENIE_SCHEMA,
+            label="schema",
+        )
+        volume = validate_identifier(
+            args.volume or FINANCE_GENIE_VOLUME,
+            label="volume",
+        )
+    else:
+        catalog = validate_identifier(
+            args.catalog
+            or os.environ.get("DBXCARTA_CATALOG")
+            or os.environ.get("DATABRICKS_CATALOG")
+            or FINANCE_GENIE_CATALOG,
+            label="catalog",
+        )
+        schema = validate_identifier(
+            args.schema
+            or _single_schema(os.environ.get("DBXCARTA_SCHEMAS", ""))
+            or os.environ.get("DATABRICKS_SCHEMA")
+            or FINANCE_GENIE_SCHEMA,
+            label="schema",
+        )
+        volume = validate_identifier(
+            args.volume
+            or os.environ.get("DATABRICKS_VOLUME")
+            or FINANCE_GENIE_VOLUME,
+            label="volume",
+    )
+
+    if args.print_env:
+        print(
+            format_env(
+                finance_genie_env(catalog=catalog, schema=schema, volume=volume)
+            ),
+            end="",
+        )
+        return 0
+
+    warehouse_id = args.warehouse_id or os.environ.get("DATABRICKS_WAREHOUSE_ID", "")
+    if not warehouse_id:
+        print(
+            "error: DATABRICKS_WAREHOUSE_ID is required for --check-ready",
+            file=sys.stderr,
+        )
+        return 2
+
+    ws = _build_workspace_client()
+    table_names = _fetch_table_names(ws, warehouse_id, catalog, schema)
+    report = readiness_from_table_names(table_names, catalog=catalog, schema=schema)
+    print(report.format(strict_gold=args.strict_gold))
+    return 0 if report.ok(strict_gold=args.strict_gold) else 1
+
+
+def _single_schema(value: str) -> str:
+    schemas = [part.strip() for part in value.split(",") if part.strip()]
+    return schemas[0] if len(schemas) == 1 else ""
+
+
+def _fetch_table_names(ws, warehouse_id: str, catalog: str, schema: str) -> list[str]:
+    from databricks.sdk.service.sql import ExecuteStatementRequestOnWaitTimeout
+
+    from dbxcarta.databricks import quote_identifier
+
+    statement = (
+        "SELECT table_name "
+        f"FROM {quote_identifier(catalog)}.information_schema.tables "
+        f"WHERE table_schema = '{schema}'"
+    )
+    response = ws.statement_execution.execute_statement(
+        warehouse_id=warehouse_id,
+        statement=statement,
+        wait_timeout="50s",
+        on_wait_timeout=ExecuteStatementRequestOnWaitTimeout.CANCEL,
+    )
+    rows = getattr(getattr(response, "result", None), "data_array", None) or []
+    return [row[0] for row in rows if row]
+
+
+def _build_workspace_client():
+    from dbxcarta.databricks import build_workspace_client
+
+    return build_workspace_client()
 
 
 def _build_neo4j_driver(ws, settings):
@@ -133,5 +260,3 @@ def _build_neo4j_driver(ws, settings):
         _secret("NEO4J_URI"),
         auth=(_secret("NEO4J_USERNAME"), _secret("NEO4J_PASSWORD")),
     )
-
-

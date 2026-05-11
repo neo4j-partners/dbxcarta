@@ -11,7 +11,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from dbxcarta.staging import parse_volume_path
+from dbxcarta.databricks import quote_identifier, quote_qualified_name
+from dbxcarta.ingest.transform.staging import parse_volume_path
 
 if TYPE_CHECKING:
     from pyspark.sql import SparkSession
@@ -35,7 +36,7 @@ def preflight(spark: "SparkSession", settings: "Settings") -> None:
 
     catalog = settings.dbxcarta_catalog
     spark.sql(
-        f"SELECT 1 FROM `{catalog}`.information_schema.schemata LIMIT 1"
+        f"SELECT 1 FROM {quote_identifier(catalog)}.information_schema.schemata LIMIT 1"
     ).collect()
 
     parts = parse_volume_path(settings.dbxcarta_summary_volume)
@@ -44,8 +45,10 @@ def preflight(spark: "SparkSession", settings: "Settings") -> None:
         f"CREATE VOLUME IF NOT EXISTS `{vol_catalog}`.`{vol_schema}`.`{vol_name}`"
     )
 
-    table = settings.dbxcarta_summary_table
-    quoted_table = ".".join(f"`{p}`" for p in table.split("."))
+    quoted_table = quote_qualified_name(
+        settings.dbxcarta_summary_table,
+        expected_parts=3,
+    )
     spark.sql(f"""
         CREATE TABLE IF NOT EXISTS {quoted_table} (
             run_id STRING NOT NULL,

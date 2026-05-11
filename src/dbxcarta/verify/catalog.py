@@ -1,8 +1,7 @@
 """Catalog-vs-graph contract checks: id normalization + complex-type round-trip.
 
-Ports tests/schema_graph/test_id_normalization.py, test_complex_types.py.
-Both use the Databricks SQL warehouse to sample from `information_schema.columns`,
-then verify the corresponding nodes exist in Neo4j with the expected id / data_type.
+Uses the Databricks SQL warehouse to sample from `information_schema.columns`,
+then verifies the corresponding Neo4j nodes have the expected id and data_type.
 """
 
 from __future__ import annotations

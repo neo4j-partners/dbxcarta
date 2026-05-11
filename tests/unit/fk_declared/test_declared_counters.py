@@ -6,7 +6,7 @@ Counter names must match the existing row_counts wire shape except for
 
 from __future__ import annotations
 
-from dbxcarta.fk_declared import DeclaredCounters
+from dbxcarta.ingest.fk.declared import DeclaredCounters
 
 
 def test_as_row_counts_keys_match_wire_shape() -> None:

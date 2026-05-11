@@ -22,6 +22,7 @@ from databricks.sdk import WorkspaceClient
 from dbxcarta.client.executor import execute_sql, preflight_warehouse
 from dbxcarta.client.settings import ClientSettings
 from dbxcarta.client.summary import ClientRunSummary
+from dbxcarta.databricks import build_workspace_client, quote_qualified_name, uc_volume_parent
 
 _REFERENCE_ARM = "reference"
 _LLM_ARMS = {"no_context", "schema_dump"}
@@ -154,14 +155,14 @@ def _parse_sql(text: str | None) -> tuple[str | None, bool]:
 
 def _resolve_staging_path(settings: ClientSettings) -> str:
     summary_root = settings.dbxcarta_summary_volume.rstrip("/")
-    parts = summary_root.split("/")
-    if len(parts) < 6 or parts[1] != "Volumes":
+    try:
+        parent = uc_volume_parent(summary_root)
+    except ValueError as exc:
         raise RuntimeError(
             "Cannot derive client staging path from "
             f"DBXCARTA_SUMMARY_VOLUME={settings.dbxcarta_summary_volume!r}. "
             "Expected /Volumes/<cat>/<schema>/<volume>/<subdir>."
-        )
-    parent = "/".join(parts[:-1])
+        ) from exc
     return f"{parent}/client_staging"
 
 
@@ -430,8 +431,7 @@ def run_client() -> None:
 
     spark = SparkSession.builder.getOrCreate()
     run_id = os.environ.get("DATABRICKS_JOB_RUN_ID", "local")
-    profile = os.environ.get("DATABRICKS_PROFILE")
-    ws = WorkspaceClient(profile=profile) if profile else WorkspaceClient()
+    ws = build_workspace_client()
 
     _preflight(ws, settings)
 
@@ -516,7 +516,7 @@ def manage_questions(spark: Any, settings: ClientSettings, questions_path: str) 
         )
         for q in questions
     ]
-    quoted = ".".join(f"`{p}`" for p in target_table.split("."))
+    quoted = quote_qualified_name(target_table, expected_parts=3)
     (
         spark.createDataFrame(rows, schema=schema)
         .write.format("delta")

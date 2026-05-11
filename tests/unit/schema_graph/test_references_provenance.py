@@ -8,8 +8,8 @@ all flow through the same 5-column schema via the FKEdge dataclass.
 from __future__ import annotations
 
 from dbxcarta.contract import EdgeSource, REFERENCES_PROPERTIES
-from dbxcarta.fk_common import FKEdge
-from dbxcarta.schema_graph import build_references_rel
+from dbxcarta.ingest.fk.common import FKEdge
+from dbxcarta.ingest.schema_graph import build_references_rel
 
 
 _EXPECTED_COLUMNS = ("source_id", "target_id", "confidence", "source", "criteria")

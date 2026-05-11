@@ -1,6 +1,5 @@
 """REFERENCES (FK) edge invariants and fixture-coverage check.
 
-Ports the three live tests in tests/schema_graph/test_build_references_rel.py:
 - Edge-count invariant (universal): Neo4j REFERENCES count matches summary fk_edges.
 - Accounting invariant (universal): fk_skipped == fk_declared - fk_resolved.
 - Fixture-exact assertion (precondition-gated): only when seeded W8 fixture schemas

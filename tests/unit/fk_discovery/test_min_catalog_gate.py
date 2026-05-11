@@ -7,14 +7,14 @@ standing up Spark.
 
 from __future__ import annotations
 
-from dbxcarta.fk_discovery import _should_run_semantic
+from dbxcarta.ingest.fk.discovery import _should_run_semantic
 from dbxcarta.settings import Settings
 
 
 _BASE = {
     "dbxcarta_catalog": "main",
     "dbxcarta_summary_volume": "/Volumes/cat/schema/vol/dbxcarta",
-    "dbxcarta_summary_table": "schema.table",
+    "dbxcarta_summary_table": "cat.schema.table",
 }
 
 

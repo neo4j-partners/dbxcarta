@@ -34,28 +34,26 @@ markers = [
     "live: tests that require a live Databricks profile, Neo4j, and a previously-loaded catalog (default pytest skips these)",
 ]
 
-# Phase 3.5 / 3.6: mypy-strict covers the entire domain layer (FK types,
-# inference, extract, settings, summary, and pipeline-edge I/O helpers).
-# Not executed in this workstream (no code execution); the evaluate
-# workstream runs mypy.
+# Mypy-strict covers the ingestion domain layer: FK types, FK discovery,
+# extract, settings, summary, and pipeline-edge I/O helpers.
 [tool.mypy]
 python_version = "3.12"
 
 [[tool.mypy.overrides]]
 module = [
     "dbxcarta.contract",
-    "dbxcarta.fk_common",
-    "dbxcarta.fk_declared",
-    "dbxcarta.fk_metadata",
-    "dbxcarta.fk_semantic",
-    "dbxcarta.extract",
-    "dbxcarta.fk_discovery",
+    "dbxcarta.ingest.fk.common",
+    "dbxcarta.ingest.fk.declared",
+    "dbxcarta.ingest.fk.metadata",
+    "dbxcarta.ingest.fk.semantic",
+    "dbxcarta.ingest.extract",
+    "dbxcarta.ingest.fk.discovery",
     "dbxcarta.settings",
-    "dbxcarta.summary",
-    "dbxcarta.staging",
-    "dbxcarta.ledger",
-    "dbxcarta.neo4j_io",
-    "dbxcarta.preflight",
+    "dbxcarta.ingest.summary",
+    "dbxcarta.ingest.transform.staging",
+    "dbxcarta.ingest.transform.ledger",
+    "dbxcarta.ingest.load.neo4j_io",
+    "dbxcarta.ingest.preflight",
 ]
 disallow_untyped_defs = true
 disallow_incomplete_defs = true

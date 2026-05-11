@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from dbxcarta.databricks import quote_qualified_name
+
 if TYPE_CHECKING:
     from pyspark.sql import SparkSession
 
@@ -236,7 +238,7 @@ class ClientRunSummary:
             StructField("arm_non_empty_rate", MapType(StringType(), DoubleType())),
             StructField("arm_correct_rate", MapType(StringType(), DoubleType())),
         ])
-        quoted = ".".join(f"`{p}`" for p in table_name.split("."))
+        quoted = quote_qualified_name(table_name, expected_parts=3)
         row = Row(**self._to_delta_dict())
         (
             spark.createDataFrame([row], schema=schema)

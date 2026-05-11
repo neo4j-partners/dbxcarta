@@ -1,13 +1,12 @@
-"""Direct tests for the shared FK primitives in `fk_common`.
+"""Direct tests for the shared FK primitives in `dbxcarta.ingest.fk.common`.
 
-These helpers are called by all three discovery strategies (`fk_declared`,
-`fk_metadata`, `fk_semantic`). Direct coverage so future refactors have a
-safety net.
+These helpers are called by all three discovery strategies. Direct coverage
+keeps future refactors honest.
 """
 
 from __future__ import annotations
 
-from dbxcarta.fk_common import (
+from dbxcarta.ingest.fk.common import (
     ColumnMeta,
     ConstraintRow,
     PKEvidence,

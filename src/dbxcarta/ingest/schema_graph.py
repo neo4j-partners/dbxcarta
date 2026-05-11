@@ -9,7 +9,7 @@ from dbxcarta.contract import CONTRACT_VERSION, generate_id, id_expr
 if TYPE_CHECKING:
     from pyspark.sql import DataFrame, SparkSession
 
-    from dbxcarta.fk_common import FKEdge
+    from dbxcarta.ingest.fk.common import FKEdge
 
 
 def build_database_node(spark: "SparkSession", catalog: str) -> "DataFrame":

@@ -1,8 +1,4 @@
-"""HAS_VALUE / Value-node invariants. Self-skips when the run had no Values.
-
-Ports tests/sample_values/{test_cardinality_filter, test_relationship_integrity,
-test_value_id_shape, test_value_node_counts}.py.
-"""
+"""HAS_VALUE / Value-node invariants. Self-skips when the run had no Values."""
 
 from __future__ import annotations
 

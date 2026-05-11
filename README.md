@@ -14,7 +14,7 @@ The graph follows a stable, typed schema:
   - `(:Schema)-[:HAS_TABLE]->(:Table)`
   - `(:Table)-[:HAS_COLUMN]->(:Column)`
   - `(:Column)-[:HAS_VALUE]->(:Value)`
-  - `(:Column)-[:REFERENCES]->(:Column)` *(stubbed in v6; see Stage 6 in `dbxcarta-v6-plan.md`)*
+  - `(:Column)-[:REFERENCES]->(:Column)` from declared and inferred foreign keys
 
 Each node carries a stable dotted `id` such as `catalog.schema.table.column`, a `description`, and where applicable an `embedding` vector for semantic similarity search.
 
@@ -74,110 +74,159 @@ Everything runs inside Databricks — no external orchestrators, no local execut
 - **Run observability**: every run emits a `RunSummary` to stdout, a timestamped JSON file in a UC Volume, and a row appended to a Delta table (`CREATE TABLE IF NOT EXISTS`, schema-merge on write) so history is queryable via SQL. The summary records per-label embedding attempts, successes, and failure rates alongside the threshold and the endpoint used.
 - **`databricks-job-runner`**: CLI wrapper around the Databricks SDK that handles upload, submit, and cleanup.
 
-See `dbxcarta-v6-plan.md` for the full staged implementation plan and `docs/best-practices.md` for the design rules (Spark / Databricks, Neo4j Spark Connector, project-level principles) that shape the pipeline.
+See `docs/best-practices.md` for the design rules (Spark / Databricks, Neo4j Spark Connector, project-level principles) that shape the pipeline.
+
+## Core vs examples
+
+Core dbxcarta does not create Lakehouse tables. It builds a semantic layer over
+an existing Unity Catalog scope configured by `DBXCARTA_CATALOG` and
+`DBXCARTA_SCHEMAS`.
+
+Companion examples show how to point dbxcarta at a known upstream project:
+
+- `examples/finance-genie/` pairs dbxcarta with
+  `/Users/ryanknight/projects/databricks/graph-on-databricks/finance-genie`.
+  Finance Genie creates the finance Lakehouse tables and Gold graph-enriched
+  features; dbxcarta creates the Neo4j semantic layer over those tables.
+
+Print the Finance Genie dbxcarta overlay:
+
+```bash
+uv run dbxcarta preset finance-genie --print-env
+```
+
+Check whether the expected Finance Genie tables are present:
+
+```bash
+uv run dbxcarta preset finance-genie --check-ready
+```
 
 ## Quickstart
 
-One-time setup:
+This path creates the demo Unity Catalog schemas, builds the Neo4j semantic
+layer, then runs the demo client against that graph.
+
+### 1. Configure the project
 
 ```bash
 uv sync
-cp .env.sample .env          # fill in values
+cp .env.sample .env
+```
+
+Open `.env` and replace the placeholders. Keep the demo defaults already
+organized in `.env.sample`: the four `dbxcarta_test_*` schemas, table and
+column embeddings enabled, values enabled, `DBXCARTA_CLIENT_ARMS=graph_rag`,
+and `DBXCARTA_CLIENT_QUESTIONS` pointing at the UC Volume copy of
+`demo_questions.json`.
+
+Use an existing UC catalog, schema, and volume, or create them if your
+principal has permission:
+
+```bash
+uv run dbxcarta schema create <catalog>.<schema>
+uv run dbxcarta volume create <catalog>.<schema>.<volume>
+```
+
+Create the Neo4j secrets in Databricks. These keys are read from the secret
+scope at job runtime.
+
+```bash
 ./setup_secrets.sh --profile <your-profile>
 ```
 
-First green run (Table embeddings only; see Stage 3 in `dbxcarta-v6-plan.md`):
+If the Neo4j database already has dbxcarta data, clear it before the first demo
+run so constraints and vector indexes are created cleanly:
 
-1. In `.env`, set `DBXCARTA_INCLUDE_EMBEDDINGS_TABLES=true` and leave all other `DBXCARTA_INCLUDE_EMBEDDINGS_*` flags off. Constrain `DBXCARTA_SCHEMAS` to a single small schema.
-2. Bump `DBXCARTA_EMBEDDING_FAILURE_THRESHOLD=0.10` for small-fixture runs so a single transient endpoint failure doesn't abort. Restore to `0.05` once the run is green.
-3. Wipe the target Neo4j instance (Aura console reset, or `MATCH (n) DETACH DELETE n`) so the bootstrap creates the vector index from scratch.
-4. Build and upload the wheel, then submit (the `--upload` flag uploads every `scripts/*.py` before the run):
+```cypher
+MATCH (n) DETACH DELETE n;
+```
+
+### 2. Create the demo source schemas
+
+`scripts/run_demo.py` uses `DBXCARTA_CATALOG`, `DATABRICKS_WAREHOUSE_ID`, and
+`DATABRICKS_VOLUME_PATH` from `.env`. It creates and populates the demo source
+schemas in Unity Catalog.
+
+```bash
+uv run python scripts/run_demo.py
+```
+
+### 3. Build the semantic layer
+
+Upload the package wheel, upload the demo questions file to the configured UC
+Volume, then submit the ingest job. The `submit --upload` flag uploads
+`scripts/*.py`; it does not rebuild the wheel.
 
 ```bash
 uv run dbxcarta upload --wheel
+uv run dbxcarta upload --data tests/fixtures
 uv run dbxcarta submit --upload run_dbxcarta.py
 ```
 
-Equivalent without `--upload` (useful when you know scripts haven't changed since the last upload):
+The ingest run should finish with `status=success`. It writes the graph to
+Neo4j, writes JSON run output under `DBXCARTA_SUMMARY_VOLUME`, and appends a
+row to `DBXCARTA_SUMMARY_TABLE`.
+
+### 4. Run the demo client
+
+The demo client embeds each question, retrieves context from the Neo4j semantic
+layer, asks the configured chat endpoint for SQL, executes the SQL on the
+warehouse, and writes a client run summary.
 
 ```bash
-uv run dbxcarta upload --wheel
-uv run dbxcarta upload --all
-uv run dbxcarta submit run_dbxcarta.py
+uv run dbxcarta submit --upload run_dbxcarta_client.py
 ```
 
-The `submit` argument is a script name relative to `scripts/` — do not include the `scripts/` prefix. `submit` does not rebuild the wheel; re-run `upload --wheel` when `src/dbxcarta/` changes. `--upload` covers scripts only; the wheel must be uploaded separately.
-
-5. Verify: `status=success`, per-label embedding failure rate `0.0%`, staging Delta table row count equals the in-scope node count, and all five embedding properties (`embedding`, `embedding_text`, `embedding_text_hash`, `embedding_model`, `embedded_at`) present on every in-scope `Table` node.
-6. Submit again and confirm counts are idempotent. MERGE semantics guarantee no duplicate nodes.
-
-Verification suites:
-
-```bash
-uv run pytest tests/schema_graph
-uv run pytest tests/sample_values
-uv run pytest tests/embeddings
-```
-
-Tail logs from any run:
+Check the job output for per-arm `executed` and `non_empty` rates:
 
 ```bash
 uv run dbxcarta logs <run_id>
 ```
 
+### 5. Verify and clean up
+
+Run local tests:
+
+```bash
+uv run pytest
+```
+
+Run live integration tests after a successful ingest:
+
+```bash
+uv run pytest tests/integration -m live
+```
+
+Re-run structural verification against the most recent successful run summary:
+
+```bash
+uv run dbxcarta verify
+```
+
+Remove the demo schemas when you are done:
+
+```bash
+uv run python scripts/run_demo.py --teardown
+```
+
 ## Configuration
 
-All pipeline behavior is controlled by `.env`. See `.env.sample` for the full set. The key knobs:
+All pipeline and client behavior is controlled by `.env`. Copy
+`.env.sample`, fill in the placeholders, and use the comments in that file as
+the configuration reference. The sample is organized by Databricks auth,
+workspace locations, compute, secrets, Unity Catalog scope, run artifacts,
+embeddings, Neo4j write tuning, and client settings.
 
-- **Scope**: `DBXCARTA_CATALOG` (required), `DBXCARTA_SCHEMAS` (comma-separated bare schema names; empty = all).
-- **Sample values**: `DBXCARTA_INCLUDE_VALUES`, `DBXCARTA_SAMPLE_LIMIT`, `DBXCARTA_SAMPLE_CARDINALITY_THRESHOLD`.
-- **Embeddings — per label**: `DBXCARTA_INCLUDE_EMBEDDINGS_{TABLES,COLUMNS,VALUES,SCHEMAS,DATABASES}`. Each is independent; turn them on one at a time.
-- **Embeddings — endpoint**: `DBXCARTA_EMBEDDING_ENDPOINT` (default `databricks-gte-large-en`), `DBXCARTA_EMBEDDING_DIMENSION` (default `1024`), `DBXCARTA_EMBEDDING_FAILURE_THRESHOLD` (default `0.05`). The threshold is checked per label *and* in aggregate; either trip fails the run.
-- **Staging and Neo4j tuning**: `DBXCARTA_STAGING_PATH` (Delta staging root for materialize-once; defaults under the configured volume), `DBXCARTA_NEO4J_BATCH_SIZE` (default `20000`).
-- **Run summary**: `DBXCARTA_SUMMARY_VOLUME`, `DBXCARTA_SUMMARY_TABLE`.
+## Demo Client Details
 
-For the first green run, enable `DBXCARTA_INCLUDE_EMBEDDINGS_TABLES=true` only and constrain `DBXCARTA_SCHEMAS` to a single small schema. Expand coverage one label at a time after verifying failure rates and the vector index.
+The client is a batch evaluation job for the Neo4j semantic layer. In the
+quickstart it runs the `graph_rag` arm against `tests/fixtures/demo_questions.json`
+after that file is uploaded to `DATABRICKS_VOLUME_PATH`.
 
-## Client quick start
-
-The client is a batch evaluation job that measures whether GraphRAG retrieval from the Neo4j semantic layer produces more accurate SQL than a raw schema dump or no context at all. It runs three retrieval arms (no-context, schema-dump, GraphRAG hybrid) against a curated questions file and records execution rates per arm in a Delta run-summary table.
-
-Prerequisites: the server pipeline must have run at least once with `DBXCARTA_INCLUDE_EMBEDDINGS_TABLES=true` so the `table_embedding` vector index is ONLINE.
-
-**1. Set client variables in `.env`:**
-
-```bash
-DBXCARTA_CHAT_ENDPOINT=<model-serving-endpoint-name>   # required; no default
-# Optional — defaults shown
-DBXCARTA_EMBED_ENDPOINT=databricks-gte-large-en
-DBXCARTA_CLIENT_ARMS=no_context,schema_dump,graph_rag
-DBXCARTA_CLIENT_TOP_K=5
-DBXCARTA_CLIENT_TIMEOUT_SEC=30
-DBXCARTA_CLIENT_SERVERLESS=false                       # set true to run on serverless instead of the cluster
-```
-
-**2. Upload and submit:**
-
-```bash
-uv run dbxcarta upload --wheel
-uv run dbxcarta submit --upload run_dbxcarta_client.py
-```
-
-**3. Verify:** the run summary printed to the job log shows per-arm `executed` counts and `non_empty` rates. A JSON artifact lands in `DBXCARTA_SUMMARY_VOLUME` and a row is appended to `DBXCARTA_SUMMARY_TABLE`.
-
-Run the client test suite locally:
-
-```bash
-uv run pytest tests/client
-```
-
-**Questions file.** `examples/client/questions/questions.json` contains 20 curated questions spanning single-table counts, filter-with-literal, multi-table joins, and FK-walk queries. All 20 carry `reference_sql` for ground-truth grading. Edit this file to add questions for your catalog before the first run; the distribution of question types is what determines whether the harness can distinguish the retrieval arms.
-
-**Arms.** Run a single arm to iterate without paying the cost of the others:
-
-```bash
-DBXCARTA_CLIENT_ARMS=graph_rag uv run dbxcarta submit --upload run_dbxcarta_client.py
-```
+The question set exercises cross-schema joins (`sales` to `inventory` and
+`sales` to `hr`), self-referential FKs, composite FK paths, and intra-schema
+event analytics. For your own catalog, upload a replacement questions JSON file
+to the UC Volume and point `DBXCARTA_CLIENT_QUESTIONS` at it.
 
 ## Automated end-to-end test
 
@@ -221,7 +270,7 @@ The fixture covers all the structural edge cases:
 **Notes:**
 - The harness locates the `RunSummary` via a before/after volume diff — `DATABRICKS_JOB_RUN_ID` is not set for one-time `runs.submit()` jobs, so the file is always written as `dbxcarta_local_<ts>.json`.
 - Schema setup and teardown are idempotent — re-running always starts from a clean state.
-- Unit tests run with `--ignore=tests/schema_graph --ignore=tests/sample_values --ignore=tests/integration` to exclude slow live-catalog suites.
+- Unit tests run with `--ignore=tests/integration` to exclude slow live-catalog suites.
 - Results are also written locally to `outputs/autotest_results_<ts>.json` (git-ignored) for quick inspection without going back to the volume.
 
 ## Upload and submit

@@ -9,19 +9,15 @@ Internal DTOs elsewhere are `@dataclass`, per the skill's decision table.
 
 from __future__ import annotations
 
-import re
-
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings
 
-
-# Strict Databricks identifier: alphabetic/underscore start, then alphanumerics/
-# underscores/hyphens. Excludes backticks, dots, and spaces. Hyphens are valid
-# in catalog and schema names but require backtick-quoting in SQL. Backticks
-# are the actual injection vector and remain excluded.
-# Dotted names (`schema.table`, `cat.schema.table`) are split on `.` by their
-# field validator and validated per part.
-_IDENTIFIER_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_-]*$")
+from dbxcarta.databricks import (
+    split_qualified_name,
+    validate_identifier,
+    validate_serving_endpoint_name,
+    validate_uc_volume_subpath,
+)
 
 
 class Settings(BaseSettings):
@@ -70,22 +66,32 @@ class Settings(BaseSettings):
     @field_validator("dbxcarta_catalog")
     @classmethod
     def _validate_catalog(cls, v: str) -> str:
-        if not _IDENTIFIER_RE.match(v):
-            raise ValueError(f"Invalid Databricks identifier: {v!r}")
-        return v
+        return validate_identifier(v)
 
     @field_validator("dbxcarta_summary_table")
     @classmethod
     def _validate_summary_table(cls, v: str) -> str:
-        # Accepts `table`, `schema.table`, or `catalog.schema.table`. Each dot-
-        # separated part must be a strict Databricks identifier; this is the
-        # only place where a dotted value is accepted.
-        for part in v.split("."):
-            if not _IDENTIFIER_RE.match(part):
-                raise ValueError(
-                    f"Invalid identifier part {part!r} in table {v!r}"
-                )
+        # Persisted run history is a UC artifact, so require an explicit
+        # catalog.schema.table target rather than relying on workspace defaults.
+        split_qualified_name(v, expected_parts=3, label="summary table")
         return v
+
+    @field_validator("dbxcarta_summary_volume")
+    @classmethod
+    def _validate_summary_volume(cls, v: str) -> str:
+        return validate_uc_volume_subpath(v, label="DBXCARTA_SUMMARY_VOLUME")
+
+    @field_validator("dbxcarta_staging_path", "dbxcarta_ledger_path")
+    @classmethod
+    def _validate_optional_volume_subpath(cls, v: str) -> str:
+        if not v.strip():
+            return ""
+        return validate_uc_volume_subpath(v.strip())
+
+    @field_validator("dbxcarta_embedding_endpoint")
+    @classmethod
+    def _validate_embedding_endpoint(cls, v: str) -> str:
+        return validate_serving_endpoint_name(v)
 
     @model_validator(mode="after")
     def _validate_feature_coherence(self) -> "Settings":

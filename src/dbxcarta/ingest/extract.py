@@ -2,8 +2,8 @@
 
 This module does *only* UC extraction and DataFrame assembly for schemas,
 tables, and columns. FK discovery (declared, metadata, semantic) lives in
-`fk_discovery.py` and runs against the extracted material. Embedding
-enrichment happens later in the pipeline, before the Neo4j load.
+`dbxcarta.ingest.fk.discovery` and runs against the extracted material.
+Embedding enrichment happens later in the ingestion pipeline, before the Neo4j load.
 """
 
 from __future__ import annotations
@@ -12,8 +12,8 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-import dbxcarta.schema_graph as sg
-from dbxcarta.summary import ExtractCounts, RunSummary
+import dbxcarta.ingest.schema_graph as sg
+from dbxcarta.ingest.summary import ExtractCounts, RunSummary
 
 if TYPE_CHECKING:
     from pyspark.sql import DataFrame, SparkSession

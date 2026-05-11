@@ -11,7 +11,7 @@ import hashlib
 
 import pytest
 
-from dbxcarta.embeddings import _validate_embedding, add_embedding_column
+from dbxcarta.ingest.transform.embeddings import _validate_embedding, add_embedding_column
 
 
 EXPECTED_DIM = 1024
@@ -96,7 +96,7 @@ def test_wrong_shape_row_counted_as_failure(local_spark) -> None:
     because _validate_embedding nulls its embedding column."""
     from pyspark.sql.functions import col
 
-    from dbxcarta.embeddings import compute_failure_stats
+    from dbxcarta.ingest.transform.embeddings import compute_failure_stats
 
     df = _emb_raw_struct(
         local_spark,
@@ -146,7 +146,7 @@ def test_ledger_all_rows_hit_misses_empty(local_spark) -> None:
     from pyspark.sql.functions import sha2, expr
     from pyspark.sql.types import ArrayType, DoubleType, StringType, StructField, StructType, TimestampType
 
-    from dbxcarta.ledger import split_by_ledger
+    from dbxcarta.ingest.transform.ledger import split_by_ledger
 
     endpoint = "test-model"
     stored_vec = [0.5] * 4
@@ -191,7 +191,7 @@ def test_ledger_hash_mismatch_is_miss(local_spark) -> None:
     from pyspark.sql.functions import sha2, expr
     from pyspark.sql.types import ArrayType, DoubleType, StringType, StructField, StructType, TimestampType
 
-    from dbxcarta.ledger import split_by_ledger
+    from dbxcarta.ingest.transform.ledger import split_by_ledger
 
     endpoint = "test-model"
     stored_vec = [0.5] * 4
@@ -225,7 +225,7 @@ def test_ledger_model_mismatch_is_miss(local_spark) -> None:
     from pyspark.sql.functions import sha2, expr
     from pyspark.sql.types import ArrayType, DoubleType, StringType, StructField, StructType, TimestampType
 
-    from dbxcarta.ledger import split_by_ledger
+    from dbxcarta.ingest.transform.ledger import split_by_ledger
 
     current_endpoint = "new-model"
     stored_vec = [0.5] * 4

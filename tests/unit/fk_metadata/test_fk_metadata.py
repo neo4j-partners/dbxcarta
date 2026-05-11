@@ -28,7 +28,7 @@ from dataclasses import FrozenInstanceError
 import pytest
 
 from dbxcarta.contract import EdgeSource, REFERENCES_PROPERTIES
-from dbxcarta.fk_common import (
+from dbxcarta.ingest.fk.common import (
     ColumnMeta,
     ConstraintRow,
     DeclaredPair,
@@ -36,14 +36,14 @@ from dbxcarta.fk_common import (
     PKEvidence,
     PKIndex,
 )
-from dbxcarta.fk_metadata import (
+from dbxcarta.ingest.fk.metadata import (
     _SCORE_TABLE,
     NameMatchKind,
     RejectionReason,
     ScoreBucket,
     infer_fk_pairs,
 )
-from dbxcarta.schema_graph import build_references_rel
+from dbxcarta.ingest.schema_graph import build_references_rel
 
 
 _CAT = "main"

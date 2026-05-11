@@ -8,9 +8,9 @@ same meaning — "already emitted by an earlier strategy in this run."
 from __future__ import annotations
 
 from dbxcarta.contract import EdgeSource
-from dbxcarta.fk_common import ColumnMeta, ConstraintRow, DeclaredPair, PKIndex
-from dbxcarta.fk_metadata import infer_fk_pairs
-from dbxcarta.fk_semantic import ColumnEmbedding, infer_semantic_pairs
+from dbxcarta.ingest.fk.common import ColumnMeta, ConstraintRow, DeclaredPair, PKIndex
+from dbxcarta.ingest.fk.metadata import infer_fk_pairs
+from dbxcarta.ingest.fk.semantic import ColumnEmbedding, infer_semantic_pairs
 
 
 _CAT = "main"

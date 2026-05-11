@@ -4,7 +4,7 @@ Queries `information_schema.referential_constraints` + `key_column_usage`,
 emits one FKEdge per resolved column pair tagged with EdgeSource.DECLARED
 and confidence=1.0, and records the four declared counters.
 
-Peer of `fk_metadata.discover` and `fk_semantic.discover`; shares the
+Peer of `metadata.infer_fk_pairs` and `semantic.infer_semantic_pairs`; shares the
 uniform `prior_pairs` contract so the orchestrator can treat the three
 strategies identically.
 """
@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from dbxcarta.contract import EdgeSource, generate_id
-from dbxcarta.fk_common import DeclaredPair, FKEdge
+from dbxcarta.ingest.fk.common import DeclaredPair, FKEdge
 
 if TYPE_CHECKING:
     from pyspark.sql import DataFrame, SparkSession

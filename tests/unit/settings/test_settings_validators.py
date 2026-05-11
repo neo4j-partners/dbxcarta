@@ -19,7 +19,7 @@ from dbxcarta.settings import Settings
 
 _BASE_SETTINGS = {
     "dbxcarta_summary_volume": "/Volumes/cat/schema/vol/dbxcarta",
-    "dbxcarta_summary_table": "schema.table",
+    "dbxcarta_summary_table": "cat.schema.table",
 }
 
 
@@ -48,31 +48,71 @@ def test_settings_accepts_strict_catalog(good_catalog: str) -> None:
     assert s.dbxcarta_catalog == good_catalog
 
 
-@pytest.mark.parametrize("good_table", [
-    "table_name",
-    "schema.table",
-    "cat.schema.table",
-])
-def test_settings_accepts_dotted_summary_table(good_table: str) -> None:
+def test_settings_accepts_three_part_summary_table() -> None:
     s = Settings(
         dbxcarta_catalog="main",
         dbxcarta_summary_volume=_BASE_SETTINGS["dbxcarta_summary_volume"],
-        dbxcarta_summary_table=good_table,
+        dbxcarta_summary_table="cat.schema.table",
     )
-    assert s.dbxcarta_summary_table == good_table
+    assert s.dbxcarta_summary_table == "cat.schema.table"
 
 
 @pytest.mark.parametrize("bad_table", [
+    "table_name",           # unqualified
+    "schema.table",         # missing catalog
     "schema.`table`",       # backtick in a part — injection vector
     "schema..table",        # empty middle part
     "schema.1table",        # leading digit in a part
 ])
 def test_settings_rejects_malformed_summary_table(bad_table: str) -> None:
-    with pytest.raises(ValidationError, match="Invalid identifier part"):
+    with pytest.raises(ValidationError, match="Invalid Databricks"):
         Settings(
             dbxcarta_catalog="main",
             dbxcarta_summary_volume=_BASE_SETTINGS["dbxcarta_summary_volume"],
             dbxcarta_summary_table=bad_table,
+        )
+
+
+@pytest.mark.parametrize("bad_path", [
+    "/Volumes/cat/schema/vol",       # volume root, no subdir
+    "/dbfs/Volumes/cat/schema/vol/runs",
+    "/Volumes/cat/schema",
+])
+def test_settings_rejects_non_volume_summary_paths(bad_path: str) -> None:
+    with pytest.raises(ValidationError, match="DBXCARTA_SUMMARY_VOLUME"):
+        Settings(
+            dbxcarta_catalog="main",
+            dbxcarta_summary_volume=bad_path,
+            dbxcarta_summary_table=_BASE_SETTINGS["dbxcarta_summary_table"],
+        )
+
+
+def test_settings_accepts_explicit_staging_and_ledger_volume_paths() -> None:
+    s = Settings(
+        dbxcarta_catalog="main",
+        dbxcarta_staging_path="/Volumes/cat/schema/vol/staging/",
+        dbxcarta_ledger_path="/Volumes/cat/schema/vol/ledger/",
+        **_BASE_SETTINGS,
+    )
+    assert s.dbxcarta_staging_path == "/Volumes/cat/schema/vol/staging"
+    assert s.dbxcarta_ledger_path == "/Volumes/cat/schema/vol/ledger"
+
+
+def test_settings_rejects_path_traversal_in_volume_subdir() -> None:
+    with pytest.raises(ValidationError, match="invalid path segment"):
+        Settings(
+            dbxcarta_catalog="main",
+            dbxcarta_summary_volume="/Volumes/cat/schema/vol/../runs",
+            dbxcarta_summary_table=_BASE_SETTINGS["dbxcarta_summary_table"],
+        )
+
+
+def test_settings_rejects_unsafe_embedding_endpoint() -> None:
+    with pytest.raises(ValidationError, match="serving endpoint"):
+        Settings(
+            dbxcarta_catalog="main",
+            dbxcarta_embedding_endpoint="bad'endpoint",
+            **_BASE_SETTINGS,
         )
 
 

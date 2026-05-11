@@ -3,11 +3,11 @@
 Thin coordinator after the Phase 3.6 foundation split. Its job is limited to:
   1. Construct Settings (fails loudly at boundary via cross-field validators).
   2. Run preflight (fails before any destructive action).
-  3. Call extract → transform (embed, sample) → fk_discovery → load.
+  3. Call extract → transform (embed, sample) → FK discovery → load.
   4. Emit the RunSummary.
 
-Everything substantive lives in its own module — extract, fk_discovery,
-staging, ledger, neo4j_io, preflight, embeddings, sample_values.
+Everything substantive lives in focused ingest modules under `fk`, `transform`,
+and `load`.
 """
 
 from __future__ import annotations
@@ -17,29 +17,29 @@ import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-import dbxcarta.embeddings as emb
-import dbxcarta.sample_values as sv
+import dbxcarta.ingest.transform.embeddings as emb
+import dbxcarta.ingest.transform.sample_values as sv
 from dbxcarta.contract import CONTRACT_VERSION, NodeLabel, REFERENCES_PROPERTIES, RelType
-from dbxcarta.extract import ExtractResult, extract
-from dbxcarta.fk_discovery import FKDiscoveryResult, run_fk_discovery
-from dbxcarta.ledger import read_ledger, split_by_ledger, upsert_ledger
-from dbxcarta.neo4j_io import (
+from dbxcarta.ingest.extract import ExtractResult, extract
+from dbxcarta.ingest.fk.discovery import FKDiscoveryResult, run_fk_discovery
+from dbxcarta.ingest.transform.ledger import read_ledger, split_by_ledger, upsert_ledger
+from dbxcarta.ingest.load.neo4j_io import (
     bootstrap_constraints,
     purge_stale_values,
     query_counts,
     write_node,
     write_rel,
 )
-from dbxcarta.preflight import preflight
+from dbxcarta.ingest.preflight import preflight
 from dbxcarta.settings import Settings
-from dbxcarta.staging import (
+from dbxcarta.ingest.transform.staging import (
     resolve_ledger_path,
     resolve_staging_path,
     stage_embedded_nodes,
     truncate_staging_root,
 )
-from dbxcarta.summary import EmbeddingCounts, RunSummary, SampleValueCounts
-from dbxcarta.writer import Neo4jConfig
+from dbxcarta.ingest.summary import EmbeddingCounts, RunSummary, SampleValueCounts
+from dbxcarta.ingest.load.writer import Neo4jConfig
 
 if TYPE_CHECKING:
     from neo4j import Driver
@@ -186,7 +186,7 @@ def _verify(driver: "Driver", settings: Settings, summary: RunSummary) -> None:
     catch-all in run_dbxcarta() records the failure via summary.finish(failure).
     """
     from databricks.sdk import WorkspaceClient
-    from dbxcarta.summary import VerifyResult
+    from dbxcarta.ingest.summary import VerifyResult
     from dbxcarta.verify import verify_run
 
     summary_dict = summary.to_dict()

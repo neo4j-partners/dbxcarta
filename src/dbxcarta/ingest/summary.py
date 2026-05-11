@@ -17,15 +17,16 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from dbxcarta.contract import NodeLabel
+from dbxcarta.databricks import quote_qualified_name
 
 if TYPE_CHECKING:
     from databricks.sdk import WorkspaceClient
     from pyspark.sql import SparkSession
 
-    from dbxcarta.fk_declared import DeclaredCounters
-    from dbxcarta.fk_metadata import InferenceCounters
-    from dbxcarta.fk_semantic import SemanticInferenceCounters
-    from dbxcarta.sample_values import SampleStats
+    from dbxcarta.ingest.fk.declared import DeclaredCounters
+    from dbxcarta.ingest.fk.metadata import InferenceCounters
+    from dbxcarta.ingest.fk.semantic import SemanticInferenceCounters
+    from dbxcarta.ingest.transform.sample_values import SampleStats
 
 
 class LoadSummaryError(Exception):
@@ -376,7 +377,7 @@ class RunSummary:
             StructField("verify_violation_count", LongType()),
         ])
 
-        quoted_table = ".".join(f"`{p}`" for p in table_name.split("."))
+        quoted_table = quote_qualified_name(table_name, expected_parts=3)
         row = Row(**self.to_dict())
         (
             spark.createDataFrame([row], schema=schema)

@@ -138,14 +138,18 @@ Leave `DBXCARTA_SCHEMAS` blank to include all schemas in the catalog (including
 `dbxcarta_test_external`). Cross-schema FK edges (sales→hr, sales→inventory)
 only appear in Neo4j when **both** the source and target schemas are in scope.
 
-Then run the graph_rag arm:
+Upload the demo questions file and build the semantic layer:
 
 ```bash
-DBXCARTA_CATALOG=my_catalog \
-DBXCARTA_SCHEMAS=dbxcarta_test_sales,dbxcarta_test_inventory,dbxcarta_test_hr,dbxcarta_test_events \
-DBXCARTA_CLIENT_QUESTIONS=tests/fixtures/demo_questions.json \
-DBXCARTA_CLIENT_ARMS=graph_rag \
-python scripts/run_dbxcarta_client.py
+uv run dbxcarta upload --wheel
+uv run dbxcarta upload --data tests/fixtures
+uv run dbxcarta submit --upload run_dbxcarta.py
+```
+
+Then run the graph_rag demo client:
+
+```bash
+uv run dbxcarta submit --upload run_dbxcarta_client.py
 ```
 
 ### Demo questions

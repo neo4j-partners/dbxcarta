@@ -120,3 +120,9 @@ The preflight enumerates every grant and endpoint permission the enabled flags r
 `submit` is a reference operation, not a build operation. The runner attaches the wheel last uploaded to the UC Volume and executes the script last uploaded to the Databricks workspace; it does not rebuild or re-upload either on `submit`. Running stale code against real infrastructure produces misleading signal — apparent failures may be old bugs already fixed, apparent successes may hide regressions in new code, and the run summary reflects whatever the cluster actually ran, not what the local source says.
 
 Any time source files change, run `dbxcarta upload --wheel && dbxcarta upload --all` before `dbxcarta submit`. Treat `job_name` and `contract_version` in the JSON run summary as a quick sanity check that the expected code ran; a wrong prefix (e.g. `schema_graph_*` instead of `dbxcarta_*`) means the workspace script is stale and a re-upload is required before interpreting any results.
+
+### 6. Make Databricks targets explicit at the configuration boundary
+
+Pipeline-owned artifacts are Unity Catalog objects, so their configuration should name the exact UC target instead of relying on workspace defaults. `DBXCARTA_SUMMARY_TABLE` is required to be `catalog.schema.table`, and writable file locations must be `/Volumes/<catalog>/<schema>/<volume>/<subdir>`, not DBFS paths or bare volume roots.
+
+All dynamic identifiers are validated before use and then backtick-quoted at SQL construction. Serving endpoint names are validated before interpolation into `ai_query` calls. Local tooling builds `WorkspaceClient` from `DATABRICKS_PROFILE` when present, otherwise it lets the Databricks SDK use its default authentication chain.

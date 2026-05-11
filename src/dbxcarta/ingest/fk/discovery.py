@@ -17,29 +17,29 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-import dbxcarta.schema_graph as sg
-from dbxcarta.fk_common import (
+import dbxcarta.ingest.schema_graph as sg
+from dbxcarta.ingest.fk.common import (
     ColumnMeta,
     ConstraintRow,
     DeclaredPair,
     FKEdge,
     PKIndex,
 )
-from dbxcarta.fk_declared import discover_declared
-from dbxcarta.fk_metadata import infer_fk_pairs
-from dbxcarta.fk_semantic import (
+from dbxcarta.ingest.fk.declared import discover_declared
+from dbxcarta.ingest.fk.metadata import infer_fk_pairs
+from dbxcarta.ingest.fk.semantic import (
     ColumnEmbedding,
     ValueIndex,
     infer_semantic_pairs,
 )
-from dbxcarta.summary import RunSummary
+from dbxcarta.ingest.summary import RunSummary
 
 if TYPE_CHECKING:
     from pyspark.sql import DataFrame, SparkSession
 
-    from dbxcarta.extract import ExtractResult
+    from dbxcarta.ingest.extract import ExtractResult
     from dbxcarta.settings import Settings
-    from dbxcarta.sample_values import SampleStats
+    from dbxcarta.ingest.transform.sample_values import SampleStats
 
 logger = logging.getLogger(__name__)
 

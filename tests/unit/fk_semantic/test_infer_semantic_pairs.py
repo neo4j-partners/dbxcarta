@@ -6,7 +6,7 @@ Coverage:
    rename fixture plus hand-crafted vectors satisfying exact cosine
    constraints, `infer_semantic_pairs` recovers both edges at confidence ≥ 0.80.
 2. Min-catalog-size gate is exercised at the pipeline boundary; here we
-   exercise the pure function semantics (gate lives in `fk_discovery.py`).
+   exercise the pure function semantics (gate lives in `ingest.fk.discovery`).
 
 Additional invariants:
 - Frozen-dataclass immutability on ColumnEmbedding and ValueIndex.
@@ -25,8 +25,8 @@ from pathlib import Path
 import pytest
 
 from dbxcarta.contract import EdgeSource
-from dbxcarta.fk_common import ColumnMeta, ConstraintRow, DeclaredPair, PKIndex
-from dbxcarta.fk_semantic import (
+from dbxcarta.ingest.fk.common import ColumnMeta, ConstraintRow, DeclaredPair, PKIndex
+from dbxcarta.ingest.fk.semantic import (
     ColumnEmbedding,
     SemanticRejectionReason,
     ValueIndex,

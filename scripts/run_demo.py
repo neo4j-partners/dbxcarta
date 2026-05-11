@@ -16,10 +16,10 @@ Optional env vars (overridden by the corresponding CLI flags):
                                (e.g. /Volumes/main/default/dbxcarta)
                                Required only for dbxcarta_test_external schema.
 
-After setup, run the full demo via run_dbxcarta_client.py with:
+After setup, run the full demo via the dbxcarta CLI with:
     DBXCARTA_CATALOG=<catalog>
     DBXCARTA_SCHEMAS=dbxcarta_test_sales,dbxcarta_test_inventory,dbxcarta_test_hr,dbxcarta_test_events
-    DBXCARTA_CLIENT_QUESTIONS=tests/fixtures/demo_questions.json
+    DBXCARTA_CLIENT_QUESTIONS=/Volumes/<catalog>/<schema>/<volume>/demo_questions.json
     DBXCARTA_CLIENT_ARMS=graph_rag
 """
 
@@ -48,7 +48,6 @@ _TEARDOWN_SCHEMAS = _DEMO_SCHEMAS + [
     "dbxcarta_fk_test",
     "dbxcarta_fk_test_b",
 ]
-_DEMO_QUESTIONS_REL = "tests/fixtures/demo_questions.json"
 
 
 def _setup(
@@ -168,35 +167,41 @@ def _teardown(
         print(f"\nDone. {total} schema(s) removed.")
 
 
-def _print_next_steps(catalog: str) -> None:
+def _print_next_steps(catalog: str, volume_path: str) -> None:
     schemas = ",".join(_DEMO_SCHEMAS)
+    questions = (
+        f"{volume_path.rstrip('/')}/demo_questions.json"
+        if volume_path
+        else "/Volumes/<catalog>/<schema>/<volume>/demo_questions.json"
+    )
     print("""
 Next steps
 ----------
-1. Run the dbxcarta pipeline job against the new schemas:
-
-   DBXCARTA_CATALOG={catalog}
-   DBXCARTA_SCHEMAS={schemas}
-
-   (or leave DBXCARTA_SCHEMAS blank to include all schemas in the catalog)
-
-2. After the pipeline completes, run the graph_rag demo:
+1. Confirm these values in .env:
 
    DBXCARTA_CATALOG={catalog}
    DBXCARTA_SCHEMAS={schemas}
    DBXCARTA_CLIENT_QUESTIONS={questions}
    DBXCARTA_CLIENT_ARMS=graph_rag
 
-   python scripts/run_dbxcarta_client.py
+2. Upload the package and demo questions, then build the Neo4j semantic layer:
+
+   uv run dbxcarta upload --wheel
+   uv run dbxcarta upload --data tests/fixtures
+   uv run dbxcarta submit --upload run_dbxcarta.py
+
+3. After ingest succeeds, run the graph_rag demo client:
+
+   uv run dbxcarta submit --upload run_dbxcarta_client.py
 
    The question set exercises cross-schema joins (sales->inventory, sales->hr),
    self-referential FKs (hr.employees.manager_id), the composite FK path
    (product_suppliers), and intra-schema event analytics.
 
-3. To tear down the schemas after the demo:
+4. To tear down the schemas after the demo:
 
-   python scripts/run_demo.py --catalog {catalog} --teardown
-""".format(catalog=catalog, schemas=schemas, questions=_DEMO_QUESTIONS_REL))
+   uv run python scripts/run_demo.py --catalog {catalog} --teardown
+""".format(catalog=catalog, schemas=schemas, questions=questions))
 
 
 def main() -> None:
@@ -223,11 +228,10 @@ def main() -> None:
         print("ERROR: DATABRICKS_WAREHOUSE_ID is not set.", file=sys.stderr)
         sys.exit(1)
 
-    from databricks.sdk import WorkspaceClient
     from dbxcarta.client.executor import preflight_warehouse
+    from dbxcarta.databricks import build_workspace_client
 
-    profile = os.environ.get("DATABRICKS_PROFILE")
-    ws = WorkspaceClient(profile=profile) if profile else WorkspaceClient()
+    ws = build_workspace_client()
     preflight_warehouse(ws, warehouse_id)
 
     if args.teardown:
@@ -235,7 +239,7 @@ def main() -> None:
     else:
         _setup(ws, warehouse_id, args.catalog, args.volume_path)
         _insert_data(ws, warehouse_id, args.catalog, args.volume_path)
-        _print_next_steps(args.catalog)
+        _print_next_steps(args.catalog, args.volume_path)
 
 
 if __name__ == "__main__":

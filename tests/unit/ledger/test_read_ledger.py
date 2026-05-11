@@ -1,8 +1,7 @@
 """Ledger I/O boundary tests.
 
-Phase 3.5 narrowed `read_ledger` (then `_read_ledger` in pipeline.py) from
-bare `except Exception` to `AnalysisException`. Phase 3.6 moved it to
-`dbxcarta.ledger`. A non-existent Delta path returns None without raising;
+`read_ledger` lives at `dbxcarta.ingest.transform.ledger` and catches only
+`AnalysisException`. A non-existent Delta path returns None without raising;
 other failures are expected to propagate as signal.
 """
 
@@ -11,7 +10,7 @@ from __future__ import annotations
 import pytest
 
 from dbxcarta.contract import NodeLabel
-from dbxcarta.ledger import read_ledger
+from dbxcarta.ingest.transform.ledger import read_ledger
 
 
 @pytest.mark.skip(reason="requires Delta JAR on local Spark classpath — see worklog/fixspark.md")

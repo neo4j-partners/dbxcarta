@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from dbxcarta.contract import EdgeSource
-from dbxcarta.fk_common import (
+from dbxcarta.ingest.fk.common import (
     ColumnMeta,
     DeclaredPair,
     FKEdge,
