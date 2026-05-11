@@ -166,52 +166,9 @@ uv run python scripts/run_demo.py --teardown
 
 ### Graph schema
 
-```text
-+----------------+     HAS_SCHEMA      +----------------+
-| Database       | -------------------> | Schema         |
-| id             |                      | id             |
-| name           |                      | name           |
-+----------------+                      +----------------+
-                                                  |
-                                                  | HAS_TABLE
-                                                  v
-                                         +----------------+
-                                         | Table          |
-                                         | id             |
-                                         | name           |
-                                         | table_type     |
-                                         | embedding      |
-                                         +----------------+
-                                                  |
-                                                  | HAS_COLUMN
-                                                  v
-                                         +----------------+
-                                         | Column         |
-                                         | id             |
-                                         | name           |
-                                         | data_type      |
-                                         | embedding      |
-                                         +----------------+
-                                            |          |
-                                            |          | REFERENCES
-                                            |          v
-                                            |   +----------------+
-                                            |   | Column         |
-                                            |   | confidence     |
-                                            |   | source         |
-                                            |   | criteria       |
-                                            |   +----------------+
-                                            |
-                                            | HAS_VALUE
-                                            v
-                                         +----------------+
-                                         | Value          |
-                                         | id             |
-                                         | value          |
-                                         | count          |
-                                         | embedding      |
-                                         +----------------+
-```
+![dbxcarta Graph Schema](docs/graph-schema.png)
+
+Editable source: [`docs/graph-schema.excalidraw`](docs/graph-schema.excalidraw).
 
 ### Build time: pipeline writes the graph
 
@@ -220,15 +177,27 @@ Unity Catalog metadata flows through a single Spark job that extracts, embeds, a
 ```
 ┌──────────────────────────────────────────── BUILD TIME ────────────────────────────────────────────┐
 │                                                                                                    │
-│  Unity Catalog          Spark Pipeline                Delta Staging        Neo4j (Aura)            │
-│  ─────────────          ──────────────                ─────────────        ────────────            │
-│  information_schema ──► Preflight                                                                  │
-│  (tables, columns,      Extract (SQL)  ──► Transform ──► ai_query() ──► materialize ──► MERGE     │
-│   schemas, values)      builds DFs          embeds         (failOnError   Delta write    nodes +   │
-│                                             per label       =false)                     vector idx │
+│  ┌──────────────────┐   ┌──────────────────┐   ┌──────────────────┐   ┌──────────────────┐      │
+│  │ Unity Catalog    │──►│ Preflight        │──►│ Extract          │──►│ Transform        │      │
+│  │ information_schema│   │ permission check │   │ SQL to DataFrames│   │ typed graph rows │      │
+│  └──────────────────┘   └──────────────────┘   └──────────────────┘   └──────────────────┘      │
+│                                                                            │                       │
+│                                                                            ▼                       │
+│  ┌──────────────────┐   ┌──────────────────┐   ┌──────────────────┐                                │
+│  │ Neo4j (Aura)     │◄──│ Delta Staging    │◄──│ Embed            │                                │
+│  │ MERGE + indexes  │   │ materialized rows│   │ ai_query/label   │                                │
+│  └──────────────────┘   └──────────────────┘   └──────────────────┘                                │
 │                                                                                                    │
 └────────────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
+
+* **Unity Catalog**: reads source metadata from `information_schema`, including tables, columns, schemas, and sampled values.
+* **Preflight**: checks grants, endpoint access, and required configuration before the Spark job does any expensive work.
+* **Extract**: queries Unity Catalog metadata into Spark DataFrames for each enabled node and relationship type.
+* **Transform**: shapes raw metadata into stable graph rows with typed labels, dotted IDs, descriptions, and relationship keys.
+* **Embed**: calls `ai_query` inside Spark for each enabled label, with row-level failures captured instead of aborting the whole run.
+* **Delta Staging**: materializes enriched rows once so validation, summaries, and Neo4j writes reuse the same embedding results.
+* **Neo4j**: writes nodes and relationships with `MERGE`, then creates or updates the vector indexes used at query time.
 
 ### Query time: client retrieves schema context
 
@@ -237,20 +206,27 @@ A client performs two steps: a vector similarity search to find the most relevan
 ```
 ┌──────────────────────────────────────────── QUERY TIME ────────────────────────────────────────────┐
 │                                                                                                    │
-│  User question                                                                                     │
-│       │                                                                                            │
-│       ▼                                                                                            │
-│  Client  (Text2SQL agent / MCP tool / schema-aware RAG pipeline)                                   │
-│       │                                                                                            │
-│       ├─ ① embed question ──► similarity search ──► top-k nodes (Table, Column, Value)            │
-│       │                        (cosine, vector idx)                                                │
-│       │                                                                                            │
-│       └─ ② graph traversal ──► HAS_COLUMN, HAS_VALUE, REFERENCES ──► full schema subgraph         │
-│                                                                                                    │
-│       combined context ──► LLM ──► SQL / answer                                                   │
+│  ┌──────────────────┐   ┌──────────────────┐   ┌──────────────────┐   ┌──────────────────┐      │
+│  │ User Question    │──►│ Client           │──►│ Embed Question   │──►│ Vector Search    │      │
+│  │ natural language │   │ Text2SQL/MCP/RAG │   │ query vector     │   │ top-k graph nodes│      │
+│  └──────────────────┘   └──────────────────┘   └──────────────────┘   └──────────────────┘      │
+│                                                                            │                       │
+│                                                                            ▼                       │
+│  ┌──────────────────┐   ┌──────────────────┐   ┌──────────────────┐                                │
+│  │ SQL / Answer     │◄──│ LLM              │◄──│ Graph Traversal  │                                │
+│  │ generated result │   │ combined context │   │ schema subgraph  │                                │
+│  └──────────────────┘   └──────────────────┘   └──────────────────┘                                │
 │                                                                                                    │
 └────────────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
+
+* **User Question**: starts as a natural-language request from a Text2SQL, MCP, or schema-aware RAG workflow.
+* **Client**: coordinates retrieval by embedding the question, querying Neo4j, assembling context, and calling the LLM.
+* **Embed Question**: converts the user question into the same vector space used by table, column, and value embeddings.
+* **Vector Search**: finds the most semantically relevant `Table`, `Column`, and `Value` nodes using cosine similarity and Neo4j vector indexes.
+* **Graph Traversal**: expands the top-k seed nodes through `HAS_COLUMN`, `HAS_VALUE`, and `REFERENCES` relationships.
+* **LLM**: receives the combined schema context and produces the final SQL or answer.
+* **SQL / Answer**: returns the generated query or response to the calling workflow.
 
 ## Design
 
