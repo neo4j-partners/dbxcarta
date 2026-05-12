@@ -10,9 +10,9 @@ Confirms:
      serving endpoint (the spike call itself is the probe).
 
 Submit:
-    dbxcarta submit scripts/run_spike_ai_query.py
+    dbxcarta submit run_spike_ai_query.py
 """
-from _cluster_bootstrap import inject_params
+from dbxcarta.entrypoints._bootstrap import inject_params
 
 inject_params()
 

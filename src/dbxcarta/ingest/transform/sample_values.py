@@ -12,9 +12,6 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from py4j.protocol import Py4JJavaError
-from pyspark.errors import AnalysisException
-
 from dbxcarta.contract import CONTRACT_VERSION, generate_id, value_id_expr
 
 if TYPE_CHECKING:
@@ -253,6 +250,9 @@ def _cardinality_filter(
     chunk_size: int,
 ) -> tuple[list[TableCandidate], list[int], int]:
     """Return (filtered candidates, observed cardinalities, failed-table count)."""
+    from py4j.protocol import Py4JJavaError
+    from pyspark.errors import AnalysisException
+
     kept: list[TableCandidate] = []
     all_cards: list[int] = []
     failed_tables = 0
@@ -303,6 +303,8 @@ def _sample_values(
     fail. Per-column top-N is applied via a window function so no value rows
     are collected to the driver (best-practices Spark §5).
     """
+    from py4j.protocol import Py4JJavaError
+    from pyspark.errors import AnalysisException
     from pyspark.sql.functions import col, concat, lit, lower, row_number, translate
     from pyspark.sql.window import Window
 
@@ -345,6 +347,9 @@ def _filter_readable_schemas(
     candidates: list[TableCandidate],
 ) -> tuple[list[TableCandidate], int]:
     """Probe up to K tables per schema; drop schemas where all probes fail."""
+    from py4j.protocol import Py4JJavaError
+    from pyspark.errors import AnalysisException
+
     by_schema: dict[tuple[str, str], list[TableCandidate]] = {}
     for c in candidates:
         by_schema.setdefault((c.catalog, c.schema_name), []).append(c)

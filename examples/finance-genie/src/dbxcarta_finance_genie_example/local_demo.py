@@ -1,4 +1,11 @@
-"""Read-only local CLI demo for the Finance Genie semantic layer."""
+"""Read-only local CLI demo for the Finance Genie semantic layer.
+
+Lives in the example package, not in dbxcarta core. Imports a handful of
+underscore-prefixed helpers from `dbxcarta.client.client`; those names are
+internal to dbxcarta and this dependency is the deliberate price of running a
+read-only local demo without re-implementing SQL parsing and result-set
+comparison. A production preset would re-implement these locally.
+"""
 
 from __future__ import annotations
 
@@ -22,12 +29,7 @@ from dbxcarta.client.schema_dump import fetch_schema_dump
 from dbxcarta.client.settings import ClientSettings
 from dbxcarta.databricks import build_workspace_client
 
-DEFAULT_QUESTIONS = (
-    Path(__file__).resolve().parents[3]
-    / "examples"
-    / "finance-genie"
-    / "questions.json"
-)
+DEFAULT_QUESTIONS = Path(__file__).resolve().with_name("questions.json")
 _READ_ONLY_SQL_RE = re.compile(r"^\s*(SELECT|WITH|EXPLAIN)\b", re.IGNORECASE)
 _MUTATING_SQL_RE = re.compile(
     r"\b(ALTER|COPY|CREATE|DELETE|DROP|INSERT|MERGE|REPLACE|TRUNCATE|UPDATE)\b",
@@ -379,3 +381,7 @@ def _clip(value: str, width: int) -> str:
     if len(value) <= width:
         return value.ljust(width)
     return value[: width - 3] + "..."
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,8 +1,8 @@
-"""Cluster bootstrap helpers — imported by job scripts running on Databricks.
+"""Cluster bootstrap helpers, imported by in-package entrypoints.
 
-The databricks_job_runner package is local-only and not installed on the
-cluster. Uploading this module alongside the job scripts lets each job import
-inject_params here instead of depending on databricks_job_runner at runtime.
+Moved here from `scripts/_cluster_bootstrap.py` so the wheel itself carries the
+KEY=VALUE-to-environment converter; a Databricks job does not need any
+separately uploaded helper file.
 """
 from __future__ import annotations
 

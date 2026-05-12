@@ -176,17 +176,12 @@ def run_ingest() -> dict:
     if r.returncode != 0:
         return {"status": "fail", "error": "wheel upload failed"}
 
-    print("  Uploading scripts...")
-    r = _run(["uv", "run", "dbxcarta", "upload", "--all"])
-    if r.returncode != 0:
-        return {"status": "fail", "error": "scripts upload failed"}
-
     files_before = set(list_volume_files(ws, summary_volume))
 
     print("  Submitting pipeline run...")
     schemas_val = ",".join(FIXTURE_SCHEMAS)
     r = _run(
-        ["uv", "run", "dbxcarta", "submit", "run_dbxcarta.py"],
+        ["uv", "run", "dbxcarta", "submit-entrypoint", "ingest"],
         env_overrides={"DBXCARTA_SCHEMAS": schemas_val},
     )
     if r.returncode != 0:

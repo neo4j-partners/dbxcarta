@@ -18,25 +18,6 @@ runner = Runner(
     secret_keys=["NEO4J_URI", "NEO4J_USERNAME", "NEO4J_PASSWORD"],
 )
 
-_CLIENT_SCRIPT = "run_dbxcarta_client.py"
-
-
-def _read_client_serverless(env_file: Path = Path(".env")) -> bool:
-    import os
-    env_val = os.environ.get("DBXCARTA_CLIENT_SERVERLESS")
-    if env_val is not None:
-        return env_val.strip().lower() in ("1", "true", "yes")
-    if not env_file.exists():
-        return False
-    for line in env_file.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        key, _, value = line.partition("=")
-        if key.strip() == "DBXCARTA_CLIENT_SERVERLESS":
-            return value.strip().strip("'\"").lower() in ("1", "true", "yes")
-    return False
-
 
 def main() -> None:
     """Entry point.
@@ -45,29 +26,20 @@ def main() -> None:
       against the most recent status='success' run summary in
       `dbxcarta_summary_volume` (or the explicit run-id) and exits non-zero on
       any violation.
-    - `dbxcarta preset finance-genie ...` prints or checks the Finance Genie
-      companion configuration without dispatching a Databricks job.
-    - `dbxcarta demo finance-genie ...` runs the local read-only Finance Genie
-      semantic-layer demo.
-    - All other invocations dispatch to the databricks_job_runner.Runner that
-      backs `submit`/`status`/etc., with the legacy `--compute serverless`
-      injection for the client script.
+    - `dbxcarta preset <import-path> {--print-env|--check-ready|--upload-questions}`
+      resolves the given preset from a `module.path:attr` import spec and runs
+      the requested action against it. Presets ship as their own pip packages;
+      dbxcarta core ships no preset implementations.
+    - `dbxcarta submit-entrypoint {ingest|client}` submits the installed wheel's
+      Databricks entrypoints without uploading per-repo runner scripts.
+    - All other invocations dispatch to the databricks_job_runner.Runner.
     """
     if sys.argv[1:2] == ["verify"]:
         sys.exit(_handle_verify(sys.argv[2:]))
-    if sys.argv[1:3] == ["preset", "finance-genie"]:
-        sys.exit(_handle_finance_genie_preset(sys.argv[3:]))
-    if sys.argv[1:3] == ["demo", "finance-genie"]:
-        sys.exit(_handle_finance_genie_demo(sys.argv[3:]))
-
-    is_submit = "submit" in sys.argv[1:]
-    is_client = _CLIENT_SCRIPT in sys.argv[1:]
-    has_compute = "--compute" in sys.argv[1:]
-
-    if is_submit and is_client and not has_compute and _read_client_serverless():
-        idx = sys.argv.index("submit")
-        sys.argv.insert(idx + 1, "--compute")
-        sys.argv.insert(idx + 2, "serverless")
+    if sys.argv[1:2] == ["preset"]:
+        sys.exit(_handle_preset(sys.argv[2:]))
+    if sys.argv[1:2] == ["submit-entrypoint"]:
+        sys.exit(_handle_submit_entrypoint(sys.argv[2:]))
 
     runner.main()
 
@@ -120,138 +92,218 @@ def _handle_verify(argv: list[str]) -> int:
     return 0 if report.ok else 1
 
 
-def _handle_finance_genie_preset(argv: list[str]) -> int:
+def _handle_preset(argv: list[str]) -> int:
     import argparse
     import os
 
     from dotenv import load_dotenv
 
-    from dbxcarta.databricks import validate_identifier
-    from dbxcarta.presets.finance_genie import (
-        FINANCE_GENIE_CATALOG,
-        FINANCE_GENIE_SCHEMA,
-        FINANCE_GENIE_VOLUME,
-        finance_genie_env,
-        format_env,
-        readiness_from_table_names,
-    )
-
     load_dotenv(Path(".env"), override=False)
 
-    parser = argparse.ArgumentParser(prog="dbxcarta preset finance-genie")
+    parser = argparse.ArgumentParser(prog="dbxcarta preset")
+    parser.add_argument(
+        "spec",
+        help="Preset import spec in 'package.module:attr' form (e.g. dbxcarta_finance_genie_example:preset).",
+    )
     actions = parser.add_mutually_exclusive_group(required=True)
     actions.add_argument(
         "--print-env",
         action="store_true",
-        help="Print the recommended dbxcarta env overlay for Finance Genie.",
+        help="Print the preset's recommended dbxcarta env overlay.",
     )
     actions.add_argument(
         "--check-ready",
         action="store_true",
-        help="Check whether the expected Finance Genie UC tables exist.",
+        help="Run the preset's readiness check against the configured warehouse.",
     )
-    parser.add_argument("--catalog", default="")
-    parser.add_argument("--schema", default="")
-    parser.add_argument("--volume", default="")
-    parser.add_argument("--warehouse-id", default="")
-    parser.add_argument(
-        "--strict-gold",
+    actions.add_argument(
+        "--upload-questions",
         action="store_true",
-        help="Fail readiness if Gold enrichment tables are missing.",
+        help="Invoke the preset's demo-question upload helper.",
+    )
+    parser.add_argument(
+        "--warehouse-id",
+        default="",
+        help="Override DATABRICKS_WAREHOUSE_ID for --check-ready.",
+    )
+    parser.add_argument(
+        "--strict-optional",
+        action="store_true",
+        help="Fail readiness if optional (e.g. Gold) tables are missing.",
     )
     args = parser.parse_args(argv)
 
-    if args.print_env:
-        catalog = validate_identifier(
-            args.catalog or FINANCE_GENIE_CATALOG,
-            label="catalog",
-        )
-        schema = validate_identifier(
-            args.schema or FINANCE_GENIE_SCHEMA,
-            label="schema",
-        )
-        volume = validate_identifier(
-            args.volume or FINANCE_GENIE_VOLUME,
-            label="volume",
-        )
-    else:
-        catalog = validate_identifier(
-            args.catalog
-            or os.environ.get("DBXCARTA_CATALOG")
-            or os.environ.get("DATABRICKS_CATALOG")
-            or FINANCE_GENIE_CATALOG,
-            label="catalog",
-        )
-        schema = validate_identifier(
-            args.schema
-            or _single_schema(os.environ.get("DBXCARTA_SCHEMAS", ""))
-            or os.environ.get("DATABRICKS_SCHEMA")
-            or FINANCE_GENIE_SCHEMA,
-            label="schema",
-        )
-        volume = validate_identifier(
-            args.volume
-            or os.environ.get("DATABRICKS_VOLUME")
-            or FINANCE_GENIE_VOLUME,
-            label="volume",
+    from dbxcarta.preset_loader import load_preset
+    from dbxcarta.presets import (
+        QuestionsUploadable,
+        ReadinessCheckable,
+        format_env,
     )
 
-    if args.print_env:
-        print(
-            format_env(
-                finance_genie_env(catalog=catalog, schema=schema, volume=volume)
-            ),
-            end="",
-        )
-        return 0
-
-    warehouse_id = args.warehouse_id or os.environ.get("DATABRICKS_WAREHOUSE_ID", "")
-    if not warehouse_id:
-        print(
-            "error: DATABRICKS_WAREHOUSE_ID is required for --check-ready",
-            file=sys.stderr,
-        )
+    try:
+        preset = load_preset(args.spec)
+    except (ValueError, ImportError, AttributeError, TypeError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
         return 2
 
-    ws = _build_workspace_client()
-    table_names = _fetch_table_names(ws, warehouse_id, catalog, schema)
-    report = readiness_from_table_names(table_names, catalog=catalog, schema=schema)
-    print(report.format(strict_gold=args.strict_gold))
-    return 0 if report.ok(strict_gold=args.strict_gold) else 1
+    if args.print_env:
+        print(format_env(preset.env()), end="")
+        return 0
+
+    if args.check_ready:
+        if not isinstance(preset, ReadinessCheckable):
+            print(
+                f"error: preset {args.spec!r} does not implement readiness()",
+                file=sys.stderr,
+            )
+            return 2
+        warehouse_id = args.warehouse_id or os.environ.get("DATABRICKS_WAREHOUSE_ID", "")
+        if not warehouse_id:
+            print(
+                "error: DATABRICKS_WAREHOUSE_ID is required for --check-ready",
+                file=sys.stderr,
+            )
+            return 2
+        ws = _build_workspace_client()
+        report = preset.readiness(ws, warehouse_id)
+        print(report.format(strict_optional=args.strict_optional))
+        return 0 if report.ok(strict_optional=args.strict_optional) else 1
+
+    if args.upload_questions:
+        if not isinstance(preset, QuestionsUploadable):
+            print(
+                f"error: preset {args.spec!r} does not implement upload_questions()",
+                file=sys.stderr,
+            )
+            return 2
+        ws = _build_workspace_client()
+        preset.upload_questions(ws)
+        return 0
+
+    return 2  # unreachable: argparse requires one of the action flags.
 
 
-def _handle_finance_genie_demo(argv: list[str]) -> int:
-    from dotenv import load_dotenv
+def _handle_submit_entrypoint(argv: list[str]) -> int:
+    import argparse
 
-    from dbxcarta.client.local_demo import main as demo_main
+    from databricks_job_runner.errors import RunnerError
 
-    load_dotenv(Path(".env"), override=False)
-    return demo_main(argv)
-
-
-def _single_schema(value: str) -> str:
-    schemas = [part.strip() for part in value.split(",") if part.strip()]
-    return schemas[0] if len(schemas) == 1 else ""
-
-
-def _fetch_table_names(ws, warehouse_id: str, catalog: str, schema: str) -> list[str]:
-    from databricks.sdk.service.sql import ExecuteStatementRequestOnWaitTimeout
-
-    from dbxcarta.databricks import quote_identifier
-
-    statement = (
-        "SELECT table_name "
-        f"FROM {quote_identifier(catalog)}.information_schema.tables "
-        f"WHERE table_schema = '{schema}'"
+    parser = argparse.ArgumentParser(prog="dbxcarta submit-entrypoint")
+    parser.add_argument(
+        "entrypoint",
+        choices=("ingest", "client"),
+        help="Installed dbxcarta wheel entrypoint to submit as a Databricks job.",
     )
-    response = ws.statement_execution.execute_statement(
-        warehouse_id=warehouse_id,
-        statement=statement,
-        wait_timeout="50s",
-        on_wait_timeout=ExecuteStatementRequestOnWaitTimeout.CANCEL,
+    parser.add_argument(
+        "--compute",
+        choices=("cluster", "serverless"),
+        default=None,
+        help="Override DATABRICKS_COMPUTE_MODE for this submission.",
     )
-    rows = getattr(getattr(response, "result", None), "data_array", None) or []
-    return [row[0] for row in rows if row]
+    parser.add_argument(
+        "--no-wait",
+        action="store_true",
+        help="Submit the job and return immediately.",
+    )
+    args = parser.parse_args(argv)
+
+    console_entrypoints = {
+        "ingest": "dbxcarta-ingest",
+        "client": "dbxcarta-client",
+    }
+    try:
+        _submit_wheel_entrypoint(
+            args.entrypoint,
+            console_entrypoints[args.entrypoint],
+            compute_mode=args.compute,
+            no_wait=args.no_wait,
+        )
+    except RunnerError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    return 0
+
+
+def _submit_wheel_entrypoint(
+    name: str,
+    console_entrypoint: str,
+    *,
+    compute_mode: str | None,
+    no_wait: bool,
+) -> None:
+    from databricks.sdk.service.jobs import (
+        PythonWheelTask,
+        RunResultState,
+        SubmitTask,
+    )
+    from databricks_job_runner.errors import RunnerError
+
+    if not runner.wheel_package:
+        raise RunnerError("wheel_package not configured for this runner.")
+    wheel_name = runner.find_wheel()
+    if not wheel_name:
+        raise RunnerError(
+            "no dbxcarta wheel found in dist/. Run `uv run dbxcarta upload --wheel` first."
+        )
+    wheel_path = f"{runner.wheel_volume_dir}/{wheel_name}"
+
+    params = runner.config.env_params(secret_keys=runner.secret_keys)
+    run_name = f"{runner.run_name_prefix}: {name}"
+    compute = runner._compute(compute_mode)
+
+    print("Submitting wheel entrypoint")
+    print(f"  Entrypoint: {console_entrypoint}")
+    print(f"  Wheel:      {wheel_path}")
+    print(f"  Run name:   {run_name}")
+    if params:
+        print(f"  Params:     {len(params)} env values from .env")
+    print("---")
+
+    compute.validate(runner.ws)
+    task = SubmitTask(
+        task_key=f"run_{name}",
+        python_wheel_task=PythonWheelTask(
+            package_name=runner.wheel_package,
+            entry_point=console_entrypoint,
+            parameters=params if params else None,
+        ),
+    )
+    task = compute.decorate_task(task, wheel_path)
+
+    waiter = runner.ws.jobs.submit(
+        run_name=run_name,
+        tasks=[task],
+        environments=compute.environments(wheel_path),
+    )
+
+    run_id = waiter.run_id
+    if run_id is None:
+        raise RunnerError("Databricks did not return a run_id for the submitted job.")
+    print(f"  Run ID:     {run_id}")
+
+    if no_wait:
+        print("\nJob submitted (--no-wait). Check status in the Databricks UI.")
+    else:
+        print("  Waiting for completion...")
+        run = waiter.result()
+        result_state = run.state.result_state if run.state else None
+        state_name = result_state.value if result_state else "UNKNOWN"
+        page_url = run.run_page_url or ""
+
+        print(f"\n  Result:     {state_name}")
+        if page_url:
+            print(f"  URL:        {page_url}")
+
+        if result_state != RunResultState.SUCCESS:
+            raise RunnerError(f"Job finished with non-success state: {state_name}")
+        print("\nJob complete.")
+
+    print()
+    print("Next steps:")
+    print(f"  View logs:          {runner.cli_command} logs {run_id}")
+    if runner.config.databricks_volume_path:
+        print(f"  List results:       {runner.cli_command} download --list results")
+        print(f"  Download results:   {runner.cli_command} download results/<filename>")
 
 
 def _build_workspace_client():

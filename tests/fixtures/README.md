@@ -143,13 +143,13 @@ Upload the demo questions file and build the semantic layer:
 ```bash
 uv run dbxcarta upload --wheel
 uv run dbxcarta upload --data tests/fixtures
-uv run dbxcarta submit --upload run_dbxcarta.py
+uv run dbxcarta submit-entrypoint ingest
 ```
 
 Then run the graph_rag demo client:
 
 ```bash
-uv run dbxcarta submit --upload run_dbxcarta_client.py
+uv run dbxcarta submit-entrypoint client
 ```
 
 ### Demo questions

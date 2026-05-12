@@ -18,13 +18,39 @@ The graph follows a stable, typed schema:
 
 Each node carries a stable dotted `id` such as `catalog.schema.table.column`, a `description`, and where applicable an `embedding` vector for semantic similarity search.
 
-## Core vs examples
+## Use dbxcarta as a library
 
 Core dbxcarta does not create Lakehouse tables. It builds a semantic layer over
 an existing Unity Catalog scope configured by `DBXCARTA_CATALOG` and
 `DBXCARTA_SCHEMAS`.
 
-Companion examples show how to point dbxcarta at a known upstream project:
+Outside applications can depend on dbxcarta as a normal Python package, build
+their own `Settings`, and call the ingest function directly from code running
+with Databricks Spark access:
+
+```python
+from dbxcarta import Settings, run_dbxcarta
+
+settings = Settings(
+    dbxcarta_catalog="analytics",
+    dbxcarta_schemas="finance,customer_success",
+    dbxcarta_summary_volume="/Volumes/analytics/ops/dbxcarta/summaries",
+    dbxcarta_summary_table="analytics.ops.dbxcarta_runs",
+    dbxcarta_include_embeddings_tables=True,
+    dbxcarta_include_embeddings_columns=True,
+)
+
+run_dbxcarta(settings=settings)
+```
+
+The no-argument form, `run_dbxcarta()`, is the Databricks wheel entrypoint used
+by the CLI. It loads the same `Settings` model from environment variables and
+then runs the same pipeline.
+
+## Examples and presets
+
+Companion examples show how to package reusable configuration for a known
+upstream project:
 
 - `examples/finance-genie/` pairs dbxcarta with
   `/Users/ryanknight/projects/databricks/graph-on-databricks/finance-genie`.
@@ -33,26 +59,62 @@ Companion examples show how to point dbxcarta at a known upstream project:
 
 ### Example preset: Finance Genie
 
-The Finance Genie preset is the maintained example for using dbxcarta as a
-semantic-layer companion to an upstream Lakehouse project. It includes preset
-configuration, readiness checks, the finance question set upload helper, the
-Databricks batch evaluation flow, and a local read-only CLI client for
-interactive GraphRAG-to-SQL demos.
+The Finance Genie preset is the maintained example of dbxcarta CLI automation.
+It lives in `examples/finance-genie/` as its own Python package
+(`dbxcarta-finance-genie-example`) that depends on dbxcarta as a normal pip
+dependency. dbxcarta core itself ships no preset implementations.
 
 See [`examples/finance-genie/README.md`](examples/finance-genie/README.md) for
-the complete setup and validation flow.
+the complete setup, validation flow, and the template a new preset package
+should follow.
 
-Print the Finance Genie dbxcarta overlay:
+Install the example package alongside dbxcarta, then pass its import path to the
+CLI when you want repeatable environment overlays or demo automation:
 
 ```bash
-uv run dbxcarta preset finance-genie --print-env
+uv pip install -e examples/finance-genie/
+uv run dbxcarta preset dbxcarta_finance_genie_example:preset --print-env
 ```
 
 Check whether the expected Finance Genie tables are present:
 
 ```bash
-uv run dbxcarta preset finance-genie --check-ready
+uv run dbxcarta preset dbxcarta_finance_genie_example:preset --check-ready --strict-optional
 ```
+
+Upload the preset's demo question set to the configured UC Volume:
+
+```bash
+uv run dbxcarta preset dbxcarta_finance_genie_example:preset --upload-questions
+```
+
+## Public API and version contract
+
+External projects depend on dbxcarta as a normal pip package. The primary
+public surface is whatever `dbxcarta/__init__.py` re-exports today:
+
+- Pipeline entrypoints: `run_dbxcarta`, `run_client`, plus the installed
+  wheel entrypoints `dbxcarta-ingest` and `dbxcarta-client`, submitted through
+  `uv run dbxcarta submit-entrypoint {ingest|client}`.
+- Settings: `Settings` (pydantic-settings model). Pass explicit field values
+  from code, or let the no-argument CLI/job path load the same fields from env
+  vars.
+- Preset protocol: `Preset`, `ReadinessReport`, `load_preset`, `format_env`.
+  A preset is a small configuration adapter published by an external package
+  and referenced by an import-path spec like `your_pkg.module:preset`. Optional
+  readiness and question-upload hooks live in `dbxcarta.presets` for CLI and
+  demo integrations; they are not required for library consumption.
+- Verification: `verify_run`, `Report`, `Violation`.
+- Contract enums and constants: `NodeLabel`, `RelType`, `EdgeSource`,
+  `CONTRACT_VERSION`, `REFERENCES_PROPERTIES`.
+- Databricks helpers used by external presets: `validate_identifier`,
+  `validate_uc_volume_subpath`, `build_workspace_client`.
+
+Anything not in `__init__.py` is internal even if importable. Removing or
+renaming any name in the list above is a breaking change and rolls the
+major version. Adding new names is additive and rolls the minor version. The
+exception is `dbxcarta.presets`, which also exposes optional CLI/demo extension
+protocols for preset packages.
 
 ## Quickstart
 
@@ -107,13 +169,12 @@ uv run python scripts/run_demo.py
 ### 3. Build the semantic layer
 
 Upload the package wheel, upload the demo questions file to the configured UC
-Volume, then submit the ingest job. The `submit --upload` flag uploads
-`scripts/*.py`; it does not rebuild the wheel.
+Volume, then submit the installed wheel's ingest entrypoint.
 
 ```bash
 uv run dbxcarta upload --wheel
 uv run dbxcarta upload --data tests/fixtures
-uv run dbxcarta submit --upload run_dbxcarta.py
+uv run dbxcarta submit-entrypoint ingest
 ```
 
 The ingest run should finish with `status=success`. It writes the graph to
@@ -127,7 +188,7 @@ layer, asks the configured chat endpoint for SQL, executes the SQL on the
 warehouse, and writes a client run summary.
 
 ```bash
-uv run dbxcarta submit --upload run_dbxcarta_client.py
+uv run dbxcarta submit-entrypoint client
 ```
 
 Check the job output for per-arm `executed` and `non_empty` rates:
@@ -232,7 +293,7 @@ A client performs two steps: a vector similarity search to find the most relevan
 
 Everything runs inside Databricks — no external orchestrators, no local execution, no service accounts.
 
-- **Single submission**: one script (`scripts/run_dbxcarta.py`) drives the whole pipeline in one Databricks Job. Phases are no longer dispatched via `DBXCARTA_JOB`; scope is controlled by per-label embedding flags in `.env`.
+- **Single submission**: one installed wheel entrypoint (`dbxcarta-ingest`, submitted with `dbxcarta submit-entrypoint ingest`) drives the whole pipeline in one Databricks Job. Phases are no longer dispatched via `DBXCARTA_JOB`; scope is controlled by per-label embedding flags in `.env`.
 - **Spark**: extraction and transformation use PySpark DataFrames, so the pipeline scales to large catalogs without single-process bottlenecks.
 - **Model Serving**: embeddings are generated in Spark via `ai_query` against a Databricks-hosted foundation model endpoint (`databricks-gte-large-en` by default), with `failOnError => false` so row-level failures are counted rather than thrown.
 - **Materialize-once**: enriched node DataFrames are written to a Delta staging table between transform and load, so the failure-rate aggregation and the Neo4j write both consume the staged rows without re-invoking `ai_query`.
@@ -291,7 +352,7 @@ uv run python scripts/run_autotest.py
 | 0 — Preflight | Verifies workspace connectivity and that the SQL warehouse is reachable |
 | 1 — Unit test gate | Runs the fast offline pytest suite; aborts if any test fails |
 | 2 — Schema setup | Tears down and recreates the fixture schemas (`dbxcarta_test_{sales,inventory,hr,events}`) in `dbxcarta-catalog` using `tests/fixtures/setup_test_catalog.sql` |
-| 3 — Ingest run | Builds and uploads the wheel, uploads scripts, submits `run_dbxcarta.py`, waits for `SUCCESS`, and downloads the `RunSummary` JSON |
+| 3 — Ingest run | Builds and uploads the wheel, submits `dbxcarta-ingest`, waits for `SUCCESS`, and downloads the `RunSummary` JSON |
 | 4 — Assertions | Validates the `RunSummary`: `status=success`, `error=null`, `schemas >= 4`, `tables >= 19`, `fk_declared >= 16`, `fk_edges >= 16`, `neo4j_counts` non-empty |
 | 5 — Output JSON | Writes `autotest_results_<ts>.json` to `DBXCARTA_SUMMARY_VOLUME/autotest/` and locally to `outputs/` (git-ignored) |
 

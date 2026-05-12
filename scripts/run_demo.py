@@ -188,11 +188,11 @@ Next steps
 
    uv run dbxcarta upload --wheel
    uv run dbxcarta upload --data tests/fixtures
-   uv run dbxcarta submit --upload run_dbxcarta.py
+   uv run dbxcarta submit-entrypoint ingest
 
 3. After ingest succeeds, run the graph_rag demo client:
 
-   uv run dbxcarta submit --upload run_dbxcarta_client.py
+   uv run dbxcarta submit-entrypoint client
 
    The question set exercises cross-schema joins (sales->inventory, sales->hr),
    self-referential FKs (hr.employees.manager_id), the composite FK path

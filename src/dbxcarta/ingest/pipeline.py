@@ -86,25 +86,35 @@ class ValueResult:
     sample_stats: sv.SampleStats
 
 
-def run_dbxcarta() -> None:
-    """Databricks job entry point for a complete ingest run.
+def run_dbxcarta(
+    *,
+    settings: Settings | None = None,
+    spark: "SparkSession | None" = None,
+) -> None:
+    """Run a complete ingest.
 
-    Builds settings and Spark context, executes the pipeline, records success
-    or failure on the run summary, and always emits the summary to stdout,
-    JSON, and Delta before returning or re-raising.
+    When called with no arguments, this remains the Databricks wheel entrypoint:
+    settings are loaded from environment variables and the active Spark session
+    is resolved lazily. Library consumers can pass explicit settings and, when
+    they already own Spark setup, an existing Spark session.
     """
-    settings = Settings()
+    resolved_settings = settings if settings is not None else Settings()
 
-    from pyspark.sql import SparkSession
+    if spark is None:
+        from pyspark.sql import SparkSession
 
-    spark = SparkSession.builder.getOrCreate()
+        spark = SparkSession.builder.getOrCreate()
     run_id = os.environ.get("DATABRICKS_JOB_RUN_ID", "local")
-    schema_list = [s.strip() for s in settings.dbxcarta_schemas.split(",") if s.strip()]
+    schema_list = [
+        s.strip()
+        for s in resolved_settings.dbxcarta_schemas.split(",")
+        if s.strip()
+    ]
 
-    summary = _build_summary(run_id, settings, schema_list)
+    summary = _build_summary(run_id, resolved_settings, schema_list)
 
     try:
-        _run(spark, settings, schema_list, summary)
+        _run(spark, resolved_settings, schema_list, summary)
         summary.finish(status="success")
     except Exception as exc:
         # Top-level catch-all is deliberate: the purpose here is to record
@@ -114,7 +124,11 @@ def run_dbxcarta() -> None:
         summary.finish(status="failure", error=str(exc))
         raise
     finally:
-        summary.emit(spark, settings.dbxcarta_summary_volume, settings.dbxcarta_summary_table)
+        summary.emit(
+            spark,
+            resolved_settings.dbxcarta_summary_volume,
+            resolved_settings.dbxcarta_summary_table,
+        )
 
 
 def _build_summary(run_id: str, settings: Settings, schema_list: list[str]) -> RunSummary:

@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from dbxcarta.client.local_demo import (
+from dbxcarta_finance_genie_example.local_demo import (
     _ensure_read_only_sql,
     _print_context,
     _print_rows,

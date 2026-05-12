@@ -17,6 +17,8 @@ dependencies = [
 
 [project.scripts]
 dbxcarta = "dbxcarta.cli:main"
+dbxcarta-client = "dbxcarta.entrypoints.client:main"
+dbxcarta-ingest = "dbxcarta.entrypoints.ingest:main"
 
 [project.optional-dependencies]
 test = [
