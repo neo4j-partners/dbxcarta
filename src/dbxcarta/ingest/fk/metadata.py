@@ -8,6 +8,12 @@ Entry point: infer_fk_pairs(columns, pk_index, prior_pairs).
 Returns (edges, counters) where edges are FKEdge dataclasses tagged with
 EdgeSource.INFERRED_METADATA and counters is an InferenceCounters aggregate
 feeding the run summary.
+
+Schema scope: pairs are only considered when source and target columns share
+the same (catalog, schema). Cross-schema candidates are skipped before the
+candidate counter increments, mirroring the `src is tgt` skip. This keeps
+multi-schema runs (e.g. one catalog containing many independent application
+schemas) from inferring spurious FKs across unrelated applications.
 """
 
 from __future__ import annotations
@@ -186,6 +192,8 @@ def infer_fk_pairs(
     for src in columns:
         for tgt in columns:
             if src is tgt:
+                continue
+            if src.catalog != tgt.catalog or src.schema != tgt.schema:
                 continue
             counters.record_candidate()
 

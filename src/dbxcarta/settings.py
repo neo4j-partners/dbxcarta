@@ -33,6 +33,11 @@ class Settings(BaseSettings):
     # When unset, those checks self-skip with a `catalog.no_warehouse` violation.
     databricks_warehouse_id: str = ""
     dbxcarta_catalog: str
+    # Comma-separated list of bare schema names under dbxcarta_catalog.
+    # Blank string means "every schema in the catalog". Whitespace around each
+    # name is stripped. FK inference (metadata and semantic) is restricted to
+    # column pairs within the same (catalog, schema), so listing many schemas
+    # produces disjoint subgraphs by design.
     dbxcarta_schemas: str = ""
     dbxcarta_summary_volume: str
     dbxcarta_summary_table: str

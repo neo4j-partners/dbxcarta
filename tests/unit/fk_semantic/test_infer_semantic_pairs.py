@@ -250,6 +250,52 @@ def test_columns_without_embeddings_are_silently_skipped(
     assert counters.considered == counters.accepted + total_rejections
 
 
+# --- Within-schema scope ----------------------------------------------------
+
+def test_cross_schema_pairs_silently_skipped() -> None:
+    """A perfect-cosine pair across two schemas produces no semantic edge.
+
+    Identical unit vectors would emit a semantic edge for an in-schema pair,
+    but the cross-schema guard skips the candidate before `record_considered`
+    runs. No edges, no rejection counters incremented.
+    """
+    columns = [
+        ColumnMeta(
+            catalog=_CAT, schema="primary", table="customers", column="id",
+            data_type="BIGINT", comment=None,
+        ),
+        ColumnMeta(
+            catalog=_CAT, schema="replica", table="orders", column="customer_id",
+            data_type="BIGINT", comment=None,
+        ),
+    ]
+    vec = [1.0] + [0.0] * 1023
+    embeddings = {
+        f"{_CAT}.primary.customers.id": ColumnEmbedding.from_vector(
+            f"{_CAT}.primary.customers.id", vec,
+        ),
+        f"{_CAT}.replica.orders.customer_id": ColumnEmbedding.from_vector(
+            f"{_CAT}.replica.orders.customer_id", vec,
+        ),
+    }
+    pk_index = PKIndex.from_constraints([
+        ConstraintRow(
+            table_catalog=_CAT, table_schema="primary", table_name="customers",
+            column_name="id", constraint_type="PRIMARY KEY",
+            ordinal_position=1, constraint_name="primary_customers_pk",
+        ),
+    ])
+    refs, counters = infer_semantic_pairs(
+        columns=columns,
+        embeddings=embeddings,
+        pk_index=pk_index,
+        prior_pairs=frozenset(),
+    )
+    assert refs == []
+    assert counters.considered == 0
+    assert counters.accepted == 0
+
+
 # --- Counter invariant ------------------------------------------------------
 
 def test_counter_invariant(phase4_embeddings_pkl: Path) -> None:

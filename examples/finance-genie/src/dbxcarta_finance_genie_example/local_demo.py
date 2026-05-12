@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from dotenv import load_dotenv
+
 # Brittle dep: dbxcarta.client.client exposes these helpers under underscore
 # names. They are stable in practice (question loading, embedding, SQL parsing,
 # result-set comparison) and re-implementing them locally would duplicate the
@@ -33,6 +35,10 @@ from dbxcarta.client.settings import ClientSettings
 from dbxcarta.databricks import build_workspace_client
 
 DEFAULT_QUESTIONS = Path(__file__).resolve().with_name("questions.json")
+# Anchor .env lookup to the example package root so the demo never inherits
+# the parent dbxcarta repo's .env. parents[2] resolves to examples/finance-genie/
+# (local_demo.py -> dbxcarta_finance_genie_example -> src -> finance-genie).
+DEMO_ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 _READ_ONLY_SQL_RE = re.compile(r"^\s*(SELECT|WITH|EXPLAIN)\b", re.IGNORECASE)
 _MUTATING_SQL_RE = re.compile(
     r"\b(ALTER|COPY|CREATE|DELETE|DROP|INSERT|MERGE|REPLACE|TRUNCATE|UPDATE)\b",
@@ -54,6 +60,7 @@ class DemoResult:
 
 
 def main(argv: list[str] | None = None) -> int:
+    load_dotenv(DEMO_ENV_FILE, override=False)
     parser = _build_parser()
     args = parser.parse_args(argv)
 

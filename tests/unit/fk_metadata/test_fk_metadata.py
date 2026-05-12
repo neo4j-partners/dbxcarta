@@ -48,7 +48,7 @@ from dbxcarta.ingest.schema_graph import build_references_rel
 
 _CAT = "main"
 _SA = "dbxcarta_fk_test"
-_SB = "dbxcarta_fk_test_b"
+_SB = "dbxcarta_fk_test_b"  # used by within-schema rejection tests below
 
 # Score constants resolved once from the scoring table so tests move with it.
 _S_SUFFIX_DPK_NO_COMMENT = _SCORE_TABLE[
@@ -80,8 +80,8 @@ def _v5fk_columns() -> list[ColumnMeta]:
         _col(_SA, "orders", "customer_id"),
         _col(_SA, "order_items", "id"),
         _col(_SA, "order_items", "order_id"),
-        _col(_SB, "shipments", "id"),
-        _col(_SB, "shipments", "order_id"),
+        _col(_SA, "shipments", "id"),
+        _col(_SA, "shipments", "order_id"),
     ]
 
 
@@ -95,7 +95,7 @@ def _v5fk_pk_index() -> PKIndex:
         )
         for schema, table in [
             (_SA, "customers"), (_SA, "orders"),
-            (_SA, "order_items"), (_SB, "shipments"),
+            (_SA, "order_items"), (_SA, "shipments"),
         ]
     ]
     return PKIndex.from_constraints(rows)
@@ -111,7 +111,7 @@ def test_v5fk_rediscovers_three_declared_fks_at_0_83() -> None:
     expected = {
         (f"{_CAT}.{_SA}.orders.customer_id",     f"{_CAT}.{_SA}.customers.id"),
         (f"{_CAT}.{_SA}.order_items.order_id",   f"{_CAT}.{_SA}.orders.id"),
-        (f"{_CAT}.{_SB}.shipments.order_id",     f"{_CAT}.{_SA}.orders.id"),
+        (f"{_CAT}.{_SA}.shipments.order_id",     f"{_CAT}.{_SA}.orders.id"),
     }
     assert expected.issubset(edges), f"missing: {expected - edges}"
     for r in refs:
@@ -197,32 +197,47 @@ def test_no_fk_synthetic_with_comment_overlap_clears_threshold() -> None:
 
 # --- Tie-break attenuation ---------------------------------------------------
 
-def test_tie_break_drops_nine_way_user_id_fanout() -> None:
-    """9 tables named user across 9 schemas; every one passes stem match.
+def test_tie_break_drops_user_id_fanout_within_schema() -> None:
+    """user_id source fans out across all stem-matching `user*` tables in one schema.
 
-    With n=9 (suffix source) and n=8 (each exact-match id source), every
-    candidate attenuates below the 0.8 threshold. Entire fan-out drops.
-    The 9 user_id → 9 user.id attenuations contribute at least 9 tie-break
-    rejections; the additional 72 from id↔id cross-matches take the total to
-    81. We assert the lower bound and the "no emitted edge" outcome.
+    With three stem-matching tables (`user`, `users`, `useres`) and the source's
+    own `accounts.id` as a fourth `id` target, every source ends up with three
+    same-schema candidates. denom = sqrt(2) ≈ 1.41 attenuates the 0.83 suffix
+    score to 0.587 and the 0.90 exact-id score to 0.638, both below the 0.80
+    threshold. The full set of candidates collapses to zero emitted edges and
+    contributes many tie-break rejections.
+
+    Single-schema by construction: FK inference no longer crosses schemas, so
+    the tie-break behaviour is exercised within one application boundary.
     """
+    schema = "tenant"
     columns: list[ColumnMeta] = [
         ColumnMeta(
-            catalog=_CAT, schema="src_schema", table="accounts",
+            catalog=_CAT, schema=schema, table="accounts",
             column="user_id", data_type="BIGINT", comment=None,
         ),
+        ColumnMeta(
+            catalog=_CAT, schema=schema, table="accounts", column="id",
+            data_type="BIGINT", comment=None,
+        ),
     ]
-    constraint_rows: list[ConstraintRow] = []
-    for i in range(9):
-        schema = f"tenant_{i}"
+    user_tables = ["user", "users", "useres"]
+    constraint_rows: list[ConstraintRow] = [
+        ConstraintRow(
+            table_catalog=_CAT, table_schema=schema, table_name="accounts",
+            column_name="id", constraint_type="PRIMARY KEY",
+            ordinal_position=1, constraint_name=f"{schema}_accounts_pk",
+        ),
+    ]
+    for table_name in user_tables:
         columns.append(ColumnMeta(
-            catalog=_CAT, schema=schema, table="user", column="id",
+            catalog=_CAT, schema=schema, table=table_name, column="id",
             data_type="BIGINT", comment=None,
         ))
         constraint_rows.append(ConstraintRow(
-            table_catalog=_CAT, table_schema=schema, table_name="user",
+            table_catalog=_CAT, table_schema=schema, table_name=table_name,
             column_name="id", constraint_type="PRIMARY KEY",
-            ordinal_position=1, constraint_name=f"{schema}_user_pk",
+            ordinal_position=1, constraint_name=f"{schema}_{table_name}_pk",
         ))
     pk_index = PKIndex.from_constraints(constraint_rows)
 
@@ -233,39 +248,43 @@ def test_tie_break_drops_nine_way_user_id_fanout() -> None:
     assert counters.rejections[RejectionReason.TIE_BREAK] >= 9
 
 
-def test_tie_break_preserves_two_way_polymorphic_pair() -> None:
-    """Source column `user_id` with targets in two `user`-stemmed schemas.
+def test_tie_break_preserves_two_way_user_stem_pair() -> None:
+    """Source column `user_id` with two stem-matching tables in the same schema.
 
-    The two suffix candidates (user_id → primary.user.id / replica.users.id)
-    land at n=2, denom=1, full 0.83 score preserved. The two id↔id exact
-    cross-matches between primary.user.id and replica.users.id also pass
-    (n=1, 0.90 each) — expected side effect of exact-match symmetry. Assert
-    the polymorphic-suffix invariant as a subset rather than a total count.
+    With `user` and `users` co-located in one schema, both suffix candidates
+    (user_id → user.id / users.id) land at n=2, denom=1, full 0.83 score
+    preserved. The id↔id exact cross-matches between user.id and users.id also
+    pass (n=1, 0.90 each) as a side effect of exact-match symmetry. Assert
+    the suffix invariant as a subset rather than a total count.
+
+    Replaces the prior cross-schema polymorphic test: the suffix-tolerant
+    plural rule is what made that pattern interesting, and it still works in
+    a single-schema layout.
     """
     columns = [
         ColumnMeta(
-            catalog=_CAT, schema="primary", table="accounts",
+            catalog=_CAT, schema="shop", table="accounts",
             column="user_id", data_type="BIGINT", comment=None,
         ),
         ColumnMeta(
-            catalog=_CAT, schema="primary", table="user",
+            catalog=_CAT, schema="shop", table="user",
             column="id", data_type="BIGINT", comment=None,
         ),
         ColumnMeta(
-            catalog=_CAT, schema="replica", table="users",
+            catalog=_CAT, schema="shop", table="users",
             column="id", data_type="BIGINT", comment=None,
         ),
     ]
     constraint_rows = [
         ConstraintRow(
-            table_catalog=_CAT, table_schema="primary", table_name="user",
+            table_catalog=_CAT, table_schema="shop", table_name="user",
             column_name="id", constraint_type="PRIMARY KEY",
-            ordinal_position=1, constraint_name="primary_user_pk",
+            ordinal_position=1, constraint_name="shop_user_pk",
         ),
         ConstraintRow(
-            table_catalog=_CAT, table_schema="replica", table_name="users",
+            table_catalog=_CAT, table_schema="shop", table_name="users",
             column_name="id", constraint_type="PRIMARY KEY",
-            ordinal_position=1, constraint_name="replica_users_pk",
+            ordinal_position=1, constraint_name="shop_users_pk",
         ),
     ]
     pk_index = PKIndex.from_constraints(constraint_rows)
@@ -273,8 +292,8 @@ def test_tie_break_preserves_two_way_polymorphic_pair() -> None:
         columns, pk_index, prior_pairs=frozenset(),
     )
     suffix_targets = {
-        (f"{_CAT}.primary.accounts.user_id", f"{_CAT}.primary.user.id"),
-        (f"{_CAT}.primary.accounts.user_id", f"{_CAT}.replica.users.id"),
+        (f"{_CAT}.shop.accounts.user_id", f"{_CAT}.shop.user.id"),
+        (f"{_CAT}.shop.accounts.user_id", f"{_CAT}.shop.users.id"),
     }
     edges_and_conf = {(r.source_id, r.target_id): r.confidence for r in refs}
     assert suffix_targets.issubset(edges_and_conf.keys())
@@ -308,6 +327,40 @@ def test_build_inferred_dataframe_empty_rows(local_spark) -> None:
     df = build_references_rel(local_spark, [])
     assert tuple(df.columns) == _EXPECTED_COLUMNS
     assert df.count() == 0
+
+
+# --- Within-schema scope ----------------------------------------------------
+
+def test_cross_schema_candidates_silently_rejected() -> None:
+    """Identical column patterns across two schemas produce no inferred edges.
+
+    Same schema would emit `orders.customer_id → customers.id`. With the
+    columns split across two schemas, the candidate is skipped before
+    `record_candidate()`, so the candidate counter does not increment and no
+    edge is emitted. This is the unit-level guarantee that multi-schema runs
+    (e.g. schemapile) cannot manufacture spurious cross-application FKs.
+    """
+    columns = [
+        ColumnMeta(
+            catalog=_CAT, schema=_SA, table="customers", column="id",
+            data_type="BIGINT", comment=None,
+        ),
+        ColumnMeta(
+            catalog=_CAT, schema=_SB, table="orders", column="customer_id",
+            data_type="BIGINT", comment=None,
+        ),
+    ]
+    pk_index = PKIndex.from_constraints([
+        ConstraintRow(
+            table_catalog=_CAT, table_schema=_SA, table_name="customers",
+            column_name="id", constraint_type="PRIMARY KEY",
+            ordinal_position=1, constraint_name="customers_pk",
+        ),
+    ])
+    refs, counters = infer_fk_pairs(columns, pk_index, prior_pairs=frozenset())
+    assert refs == []
+    assert counters.candidates == 0
+    assert counters.accepted == 0
 
 
 # --- Type-compatibility sanity ----------------------------------------------

@@ -4,6 +4,12 @@ Runs after metadata. Considers only column pairs not already covered by
 earlier strategies (declared + metadata). Candidate gate reuses
 `pk_kind` and `types_compatible` from `dbxcarta.ingest.fk.common`.
 
+Schema scope: pairs are only considered when source and target columns share
+the same (catalog, schema). Cross-schema candidates are skipped before the
+`considered` counter increments. This matches the metadata strategy and
+prevents cosine matches from connecting unrelated application schemas under
+the same catalog.
+
 Confidence model:
   - Cosine similarity ≥ `threshold` (default 0.85) to be considered.
   - Base confidence = clamp(similarity, 0.80, 0.90).
@@ -180,6 +186,8 @@ def infer_semantic_pairs(
             continue
         for tgt in columns:
             if src is tgt:
+                continue
+            if src.catalog != tgt.catalog or src.schema != tgt.schema:
                 continue
             tgt_emb = embeddings.get(tgt.col_id)
             if tgt_emb is None:

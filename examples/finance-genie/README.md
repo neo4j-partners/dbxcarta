@@ -201,13 +201,25 @@ uv run dbxcarta submit-entrypoint client
 ### 10. Run the local CLI demo
 
 After the semantic layer is built, use the local read-only CLI in this
-package to demonstrate the flow without submitting another Databricks job:
+package to demonstrate the flow without submitting another Databricks job.
+
+The local demo loads its own `.env` from this directory and never inherits
+the parent dbxcarta repo's `.env`. Copy the sample and fill in your
+workspace, warehouse, chat endpoint, and Neo4j credentials:
 
 ```bash
-uv run python -m dbxcarta_finance_genie_example.local_demo preflight
-uv run python -m dbxcarta_finance_genie_example.local_demo questions
-uv run python -m dbxcarta_finance_genie_example.local_demo ask --question-id fg_q01 --show-context
-uv run python -m dbxcarta_finance_genie_example.local_demo sql "SELECT COUNT(*) FROM \`graph-enriched-lakehouse\`.\`graph-enriched-schema\`.accounts"
+cp examples/finance-genie/.env.sample examples/finance-genie/.env
+# edit examples/finance-genie/.env
+```
+
+Then run any of the demo subcommands from anywhere (they resolve `.env`
+relative to the package, not the current working directory):
+
+```bash
+uv run --directory examples/finance-genie python -m dbxcarta_finance_genie_example.local_demo preflight
+uv run --directory examples/finance-genie python -m dbxcarta_finance_genie_example.local_demo questions
+uv run --directory examples/finance-genie python -m dbxcarta_finance_genie_example.local_demo ask --question-id fg_q01 --show-context
+uv run --directory examples/finance-genie python -m dbxcarta_finance_genie_example.local_demo sql "SELECT COUNT(*) FROM \`graph-enriched-lakehouse\`.\`graph-enriched-schema\`.accounts"
 ```
 
 The local demo allows only `SELECT`, `WITH`, and `EXPLAIN` statements.

@@ -1,0 +1,130 @@
+from __future__ import annotations
+
+from dbxcarta_schemapile_example.candidate_selector import (
+    _sanitize_schema_name,
+    select_candidates,
+)
+from dbxcarta_schemapile_example.config import SchemaPileConfig
+from pathlib import Path
+
+
+def _config() -> SchemaPileConfig:
+    return SchemaPileConfig(
+        repo=Path("/tmp/schemapile"),
+        input_filename="schemapile-perm.json",
+        target_tables=1000,
+        strategy="random",
+        seed=42,
+        min_tables=2,
+        max_tables=100,
+        min_fk_edges=1,
+        require_self_contained=True,
+        require_data=False,
+        slice_cache=Path("/tmp/slice.json"),
+        candidate_cache=Path("/tmp/candidates.json"),
+        candidate_min_tables=2,
+        candidate_max_tables=20,
+        candidate_min_fk_edges=1,
+        candidate_require_data=False,
+        candidate_limit=10,
+        catalog="schemapile_lakehouse",
+        meta_schema="_meta",
+        volume="schemapile_volume",
+        questions_path="/Volumes/schemapile_lakehouse/_meta/schemapile_volume/dbxcarta/questions.json",
+        question_model="databricks-meta-llama-3-3-70b-instruct",
+        questions_per_schema=6,
+        question_temperature=0.2,
+    )
+
+
+def _entry(tables):
+    return {
+        "TABLES": {
+            name: {
+                "COLUMNS": {
+                    col["name"]: {
+                        "DATA_TYPE": col["type"],
+                        "VALUES": col.get("values"),
+                    }
+                    for col in table["columns"]
+                },
+                "PRIMARY_KEYS": table.get("pks", []),
+                "FOREIGN_KEYS": table.get("fks", []),
+            }
+            for name, table in tables.items()
+        }
+    }
+
+
+def test_select_candidates_keeps_schemas_with_fks():
+    config = _config()
+    slice_data = {
+        "ecommerce.sql": _entry({
+            "customers": {
+                "columns": [
+                    {"name": "id", "type": "INT"},
+                    {"name": "name", "type": "VARCHAR(255)"},
+                ],
+                "pks": ["id"],
+                "fks": [],
+            },
+            "orders": {
+                "columns": [
+                    {"name": "id", "type": "INT"},
+                    {"name": "customer_id", "type": "INT"},
+                ],
+                "pks": ["id"],
+                "fks": [
+                    {
+                        "COLUMNS": ["customer_id"],
+                        "FOREIGN_TABLE": "customers",
+                        "REFERRED_COLUMNS": ["id"],
+                    }
+                ],
+            },
+        }),
+        "no_fk.sql": _entry({
+            "a": {"columns": [{"name": "x", "type": "INT"}]},
+            "b": {"columns": [{"name": "y", "type": "INT"}]},
+        }),
+    }
+    candidates = select_candidates(slice_data, config)
+    assert len(candidates) == 1
+    assert candidates[0].source_id == "ecommerce.sql"
+    assert candidates[0].uc_schema.startswith("sp_")
+    assert {t.name for t in candidates[0].tables} == {"customers", "orders"}
+
+
+def test_select_candidates_drops_outside_size_window():
+    config = _config()
+    big_tables = {
+        f"t{i}": {"columns": [{"name": "id", "type": "INT"}], "fks": []}
+        for i in range(50)
+    }
+    big_tables["t0"]["fks"] = [{
+        "COLUMNS": ["id"],
+        "FOREIGN_TABLE": "t1",
+        "REFERRED_COLUMNS": ["id"],
+    }]
+    slice_data = {"too_big.sql": _entry(big_tables)}
+    cfg = _config()
+    # candidate_max_tables defaults to 20 in our test config, so 50 should drop
+    candidates = select_candidates(slice_data, cfg)
+    assert candidates == []
+
+
+def test_sanitize_schema_name_basic():
+    used: set[str] = set()
+    assert _sanitize_schema_name("ecommerce.sql", used=used) == "sp_ecommerce"
+    used.add("sp_ecommerce")
+    assert _sanitize_schema_name("ecommerce.sql", used=used) == "sp_ecommerce_2"
+
+
+def test_sanitize_schema_name_leading_digit():
+    used: set[str] = set()
+    assert _sanitize_schema_name("321738_db.sql", used=used) == "sp_321738_db"
+
+
+def test_sanitize_schema_name_punctuation():
+    used: set[str] = set()
+    assert _sanitize_schema_name("Some App-Name.sql", used=used) == "sp_some_app_name"
