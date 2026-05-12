@@ -1,0 +1,66 @@
+name: Supply Chain
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate locked build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+
+      - name: Set up Java for PySpark tests
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Check lockfile
+        run: uv lock --check
+
+      - name: Sync frozen test environment
+        run: uv sync --frozen --extra test
+
+      - name: Run unit tests
+        run: uv run pytest
+
+      - name: Clean package output
+        run: rm -rf dist
+
+      - name: Build package
+        run: uv build --sdist --wheel
+
+      - name: Inspect package artifacts
+        run: uv run python scripts/security/artifact_audit.py inspect dist
+
+      - name: Write artifact provenance
+        run: >
+          uv run python scripts/security/artifact_audit.py provenance dist
+          --output dist/supply-chain-provenance.json
+
+      - name: Upload package evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-evidence
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
+            dist/supply-chain-provenance.json

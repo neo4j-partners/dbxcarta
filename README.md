@@ -311,6 +311,26 @@ The fixture covers all the structural edge cases:
 
 ## Upload and submit
 
+### Supply-chain checks
+
+Run the local supply-chain checks before submitting a changed package to
+Databricks:
+
+```bash
+uv lock --check
+uv sync --frozen --extra test
+uv run pytest
+rm -rf dist
+uv build --sdist --wheel
+uv run python scripts/security/artifact_audit.py inspect dist
+uv run python scripts/security/artifact_audit.py provenance dist \
+  --output dist/supply-chain-provenance.json
+```
+
+The provenance file records the source commit, lockfile hash, package version,
+and SHA256 hashes for built artifacts. Treat it as audit evidence for the
+reviewed artifacts.
+
 **`upload`**
 - `--wheel` — builds the package, bumps the patch version, and uploads the wheel to `DATABRICKS_VOLUME_PATH/wheels/`. Re-run whenever `src/dbxcarta/` changes.
 - `--all` — copies every `scripts/*.py` to the workspace. Re-run whenever `scripts/` changes.
@@ -318,6 +338,12 @@ The fixture covers all the structural edge cases:
 **`submit <script>`**
 
 The script name is relative to `scripts/`. Scripts named `run_dbxcarta*` auto-attach the latest uploaded wheel. All non-Databricks `.env` variables are forwarded to the job.
+
+Supply-chain note: `upload --wheel` currently combines version bumping,
+building, and UC Volume upload. For reviewed releases, prefer a CI-built wheel
+and provenance manifest as the artifact of record. A future hardening step
+should make Databricks submission select a wheel by explicit version or hash
+instead of by latest local wheel mtime.
 
 - `--upload` — uploads `scripts/*.py` before submitting, replacing a separate `upload --all` step.
 - `--no-wait` — returns immediately with the run ID.
