@@ -1,0 +1,32 @@
+[
+  {
+    "shape": "single_table_filter",
+    "question": "Which students are enrolled in course 3 and have an email address on record?",
+    "sql": "SELECT id, name, course, phone_number, email, group_id FROM `schemapile_lakehouse`.`sp_033815_schema`.`students` WHERE course = 3 AND email IS NOT NULL AND email <> ''"
+  },
+  {
+    "shape": "single_table_filter",
+    "question": "List all subjects that have more than 60 hours assigned.",
+    "sql": "SELECT id, name, hours_number FROM `schemapile_lakehouse`.`sp_033815_schema`.`subjects` WHERE hours_number > 60"
+  },
+  {
+    "shape": "two_table_join",
+    "question": "Show each student's name along with the name of their group.",
+    "sql": "SELECT s.id, s.name AS student_name, g.name AS group_name FROM `schemapile_lakehouse`.`sp_033815_schema`.`students` s JOIN `schemapile_lakehouse`.`sp_033815_schema`.`groups_table` g ON s.group_id = g.id"
+  },
+  {
+    "shape": "two_table_join",
+    "question": "List each lesson's UUID together with the name of the subject it covers and the lesson type name.",
+    "sql": "SELECT l.uuid, sub.name AS subject_name, lt.name AS lesson_type_name FROM `schemapile_lakehouse`.`sp_033815_schema`.`lessons` l JOIN `schemapile_lakehouse`.`sp_033815_schema`.`subjects` sub ON l.subject_id = sub.id JOIN `schemapile_lakehouse`.`sp_033815_schema`.`lesson_types` lt ON l.lesson_type = lt.id"
+  },
+  {
+    "shape": "aggregation",
+    "question": "What is the average grade per subject, ordered by average grade descending?",
+    "sql": "SELECT p.subject_id, sub.name AS subject_name, AVG(p.grade) AS avg_grade FROM `schemapile_lakehouse`.`sp_033815_schema`.`progress` p JOIN `schemapile_lakehouse`.`sp_033815_schema`.`subjects` sub ON p.subject_id = sub.id GROUP BY p.subject_id, sub.name ORDER BY avg_grade DESC"
+  },
+  {
+    "shape": "aggregation",
+    "question": "How many lessons has each teacher taught, and what are their names?",
+    "sql": "SELECT t.id, t.name AS teacher_name, COUNT(l.uuid) AS lesson_count FROM `schemapile_lakehouse`.`sp_033815_schema`.`teachers` t LEFT JOIN `schemapile_lakehouse`.`sp_033815_schema`.`lessons` l ON t.id = l.teacher_id GROUP BY t.id, t.name ORDER BY lesson_count DESC"
+  }
+]

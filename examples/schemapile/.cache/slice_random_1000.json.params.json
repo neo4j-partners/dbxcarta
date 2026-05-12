@@ -1,0 +1,12 @@
+{
+  "input": "/Users/ryanknight/projects/databricks/schemapile/schemapile-perm.json",
+  "input_size": 300124495,
+  "target_tables": 1000,
+  "strategy": "random",
+  "seed": 42,
+  "min_tables": 2,
+  "max_tables": 100,
+  "min_fk_edges": 1,
+  "require_self_contained": true,
+  "require_data": false
+}

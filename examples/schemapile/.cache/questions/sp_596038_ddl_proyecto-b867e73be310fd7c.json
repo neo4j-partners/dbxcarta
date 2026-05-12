@@ -1,0 +1,32 @@
+[
+  {
+    "shape": "single_table_filter",
+    "question": "Find all players whose salary is greater than 50000, showing their full name and nickname.",
+    "sql": "SELECT `Nombre`, `Apellido1`, `Apellido2`, `Nickname`, `Sueldo` FROM `schemapile_lakehouse`.`sp_596038_ddl_proyecto`.`Jugador` WHERE `Sueldo` > 50000"
+  },
+  {
+    "shape": "single_table_filter",
+    "question": "List all matches that took place in the year 2023.",
+    "sql": "SELECT `Id_partido`, `Fecha`, `Id_jornada` FROM `schemapile_lakehouse`.`sp_596038_ddl_proyecto`.`Partido` WHERE YEAR(`Fecha`) = 2023"
+  },
+  {
+    "shape": "two_table_join",
+    "question": "Show each player's full name along with the name of the team they belong to.",
+    "sql": "SELECT j.`Nombre`, j.`Apellido1`, j.`Apellido2`, e.`Nombre` AS `Nombre_equipo` FROM `schemapile_lakehouse`.`sp_596038_ddl_proyecto`.`Jugador` j JOIN `schemapile_lakehouse`.`sp_596038_ddl_proyecto`.`Equipo` e ON j.`Id_equipo` = e.`Id_equipo`"
+  },
+  {
+    "shape": "two_table_join",
+    "question": "List each person's full name along with their profile name.",
+    "sql": "SELECT p.`Nombre`, p.`Apellido1`, p.`Apellido2`, pr.`Nombre` AS `Nombre_perfil` FROM `schemapile_lakehouse`.`sp_596038_ddl_proyecto`.`Persona` p JOIN `schemapile_lakehouse`.`sp_596038_ddl_proyecto`.`Perfil` pr ON p.`Id_perfil` = pr.`Id_perfil`"
+  },
+  {
+    "shape": "aggregation",
+    "question": "How many players does each team have? Show the team name and the player count.",
+    "sql": "SELECT e.`Nombre` AS `Nombre_equipo`, COUNT(j.`Id_jugador`) AS `Num_jugadores` FROM `schemapile_lakehouse`.`sp_596038_ddl_proyecto`.`Equipo` e LEFT JOIN `schemapile_lakehouse`.`sp_596038_ddl_proyecto`.`Jugador` j ON e.`Id_equipo` = j.`Id_equipo` GROUP BY e.`Id_equipo`, e.`Nombre`"
+  },
+  {
+    "shape": "aggregation",
+    "question": "What is the average, minimum, and maximum salary of players grouped by team?",
+    "sql": "SELECT e.`Nombre` AS `Nombre_equipo`, AVG(j.`Sueldo`) AS `Sueldo_promedio`, MIN(j.`Sueldo`) AS `Sueldo_minimo`, MAX(j.`Sueldo`) AS `Sueldo_maximo` FROM `schemapile_lakehouse`.`sp_596038_ddl_proyecto`.`Jugador` j JOIN `schemapile_lakehouse`.`sp_596038_ddl_proyecto`.`Equipo` e ON j.`Id_equipo` = e.`Id_equipo` GROUP BY e.`Id_equipo`, e.`Nombre`"
+  }
+]

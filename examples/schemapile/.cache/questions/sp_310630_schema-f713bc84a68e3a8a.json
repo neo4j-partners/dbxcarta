@@ -1,0 +1,32 @@
+[
+  {
+    "shape": "single_table_filter",
+    "question": "Which users are from the United States (country code 'US')?",
+    "sql": "SELECT `id`, `login`, `country_code` FROM `schemapile_lakehouse`.`sp_310630_schema`.`users` WHERE `country_code` = 'US'"
+  },
+  {
+    "shape": "single_table_filter",
+    "question": "Find all result files that are duplicates and have more than 5 authors.",
+    "sql": "SELECT `login`, `name`, `link_file`, `path_file`, `n_authors`, `n_revs` FROM `schemapile_lakehouse`.`sp_310630_schema`.`result_files` WHERE `duplicate` = TRUE AND `n_authors` > 5"
+  },
+  {
+    "shape": "two_table_join",
+    "question": "List all projects along with the login of their owner.",
+    "sql": "SELECT p.`id`, p.`name`, p.`forked_from`, p.`deleted`, u.`login` FROM `schemapile_lakehouse`.`sp_310630_schema`.`projects` p JOIN `schemapile_lakehouse`.`sp_310630_schema`.`users` u ON p.`owner_id` = u.`id`"
+  },
+  {
+    "shape": "two_table_join",
+    "question": "Show result files along with whether their XML is valid, joining on path_file.",
+    "sql": "SELECT rf.`login`, rf.`name`, rf.`path_file`, rf.`n_authors`, rf.`age_months`, rx.`valid`, rx.`valid_after_repairing` FROM `schemapile_lakehouse`.`sp_310630_schema`.`result_files` rf JOIN `schemapile_lakehouse`.`sp_310630_schema`.`result_xml_original` rx ON rf.`path_file` = rx.`path_file`"
+  },
+  {
+    "shape": "aggregation",
+    "question": "How many projects does each owner have, ordered by project count descending?",
+    "sql": "SELECT `owner_id`, COUNT(*) AS `project_count` FROM `schemapile_lakehouse`.`sp_310630_schema`.`projects` GROUP BY `owner_id` ORDER BY `project_count` DESC"
+  },
+  {
+    "shape": "aggregation",
+    "question": "What is the average number of commits and the total number of projects per programming language in result_projects?",
+    "sql": "SELECT `language`, COUNT(*) AS `total_projects`, AVG(`n_commits`) AS `avg_commits` FROM `schemapile_lakehouse`.`sp_310630_schema`.`result_projects` GROUP BY `language` ORDER BY `total_projects` DESC"
+  }
+]

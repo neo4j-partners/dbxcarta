@@ -1,0 +1,32 @@
+[
+  {
+    "shape": "single_table_filter",
+    "question": "Find all orders placed by the user with username 'john_doe'.",
+    "sql": "SELECT * FROM `schemapile_lakehouse`.`sp_594700_takeout`.`orders` WHERE `username` = 'john_doe'"
+  },
+  {
+    "shape": "single_table_filter",
+    "question": "List all user orders that are currently in state 'delivered'.",
+    "sql": "SELECT * FROM `schemapile_lakehouse`.`sp_594700_takeout`.`user_orders` WHERE `state` = 'delivered'"
+  },
+  {
+    "shape": "two_table_join",
+    "question": "Show each order along with the receiver name and receiver address from user_orders.",
+    "sql": "SELECT o.`order_id`, o.`username`, uo.`reciever`, uo.`recieve_address`, uo.`state` FROM `schemapile_lakehouse`.`sp_594700_takeout`.`orders` o JOIN `schemapile_lakehouse`.`sp_594700_takeout`.`user_orders` uo ON o.`order_id` = uo.`order_id`"
+  },
+  {
+    "shape": "two_table_join",
+    "question": "List all dish inclusions along with the order's username for orders that include more than 2 of a dish.",
+    "sql": "SELECT oi.`dish_id`, oi.`order_id`, oi.`amount`, oi.`attribute`, o.`username` FROM `schemapile_lakehouse`.`sp_594700_takeout`.`order_include` oi JOIN `schemapile_lakehouse`.`sp_594700_takeout`.`orders` o ON oi.`order_id` = o.`order_id` WHERE oi.`amount` > 2"
+  },
+  {
+    "shape": "aggregation",
+    "question": "How many orders has each user placed?",
+    "sql": "SELECT `username`, COUNT(`order_id`) AS `order_count` FROM `schemapile_lakehouse`.`sp_594700_takeout`.`orders` GROUP BY `username`"
+  },
+  {
+    "shape": "aggregation",
+    "question": "What is the average score given by each reviewer (use_username) across all their reviews?",
+    "sql": "SELECT `use_username`, AVG(`score`) AS `avg_score`, COUNT(*) AS `review_count` FROM `schemapile_lakehouse`.`sp_594700_takeout`.`score` GROUP BY `use_username`"
+  }
+]

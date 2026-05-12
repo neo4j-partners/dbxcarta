@@ -188,12 +188,14 @@ def _call_model(
     config: SchemaPileConfig,
     entry: dict[str, Any],
 ) -> list[dict[str, Any]]:
+    from databricks.sdk.service.serving import ChatMessage, ChatMessageRole
+
     prompt = _build_prompt(entry, config)
     response = ws.serving_endpoints.query(
         name=config.question_model,
         messages=[
-            {"role": "system", "content": _SYSTEM_PROMPT},
-            {"role": "user", "content": prompt},
+            ChatMessage(role=ChatMessageRole.SYSTEM, content=_SYSTEM_PROMPT),
+            ChatMessage(role=ChatMessageRole.USER, content=prompt),
         ],
         temperature=config.question_temperature,
         max_tokens=2000,

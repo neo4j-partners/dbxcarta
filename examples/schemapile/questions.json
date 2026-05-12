@@ -1,0 +1,10 @@
+[
+  {
+    "id": "sp_0000",
+    "schema": "sp_300813_erzeuge_zielzustand",
+    "source_id": "300813_erzeuge_zielzustand.sql",
+    "shape": "aggregation",
+    "question": "How many distinct tab_a_id values exist in tab_no_action, and what is the total number of rows?",
+    "sql": "SELECT COUNT(DISTINCT `tab_a_id`) AS `distinct_tab_a_ids`, COUNT(*) AS `total_rows` FROM `schemapile_lakehouse`.`sp_300813_erzeuge_zielzustand`.`tab_no_action`"
+  }
+]

@@ -1,0 +1,32 @@
+[
+  {
+    "shape": "single_table_filter",
+    "question": "What are the names and prices of all items that cost more than 50 USD?",
+    "sql": "SELECT `name`, `price_usd` FROM `schemapile_lakehouse`.`sp_435873_db`.`items` WHERE `price_usd` > 50"
+  },
+  {
+    "shape": "single_table_filter",
+    "question": "Which orders have a status of 'delivered' and were created after January 1, 2023?",
+    "sql": "SELECT `id`, `status`, `created_at`, `delivered_at`, `user_id` FROM `schemapile_lakehouse`.`sp_435873_db`.`orders` WHERE `status` = 'delivered' AND `created_at` > '2023-01-01'"
+  },
+  {
+    "shape": "two_table_join",
+    "question": "List each order ID along with the email of the user who placed it.",
+    "sql": "SELECT o.`id` AS order_id, u.`email` AS user_email FROM `schemapile_lakehouse`.`sp_435873_db`.`orders` o JOIN `schemapile_lakehouse`.`sp_435873_db`.`users` u ON o.`user_id` = u.`id`"
+  },
+  {
+    "shape": "two_table_join",
+    "question": "Show the names of all items along with the name of their category.",
+    "sql": "SELECT i.`name` AS item_name, c.`name` AS category_name FROM `schemapile_lakehouse`.`sp_435873_db`.`items` i JOIN `schemapile_lakehouse`.`sp_435873_db`.`categories` c ON i.`category_id` = c.`id`"
+  },
+  {
+    "shape": "aggregation",
+    "question": "How many orders has each user placed? Return the user ID and their order count.",
+    "sql": "SELECT `user_id`, COUNT(`id`) AS order_count FROM `schemapile_lakehouse`.`sp_435873_db`.`orders` GROUP BY `user_id`"
+  },
+  {
+    "shape": "aggregation",
+    "question": "What is the average price of items in each category? Return the category ID and the average price.",
+    "sql": "SELECT `category_id`, AVG(`price_usd`) AS avg_price FROM `schemapile_lakehouse`.`sp_435873_db`.`items` GROUP BY `category_id`"
+  }
+]

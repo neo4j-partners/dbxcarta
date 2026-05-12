@@ -323,11 +323,63 @@ sign-off line that the phase meets the quality bar.
   - Items still pending under Phase 0: a live-workspace two-schema
     integration fixture run, and the independent review-pass sign-off
     (second checkbox on each line).
-- Phase 1: pending.
-- Phase 2: pending.
-- Phase 3: pending.
-- Phase 4: pending.
-- Phase 5: pending.
+- Phase 1: code complete 2026-05-12 by Claude.
+  - `examples/schemapile/src/dbxcarta_schemapile_example/candidate_selector.py`
+    builds the deterministic candidate-table JSON the materializer and the
+    question generator both read.
+  - `examples/schemapile/src/dbxcarta_schemapile_example/question_generator.py`
+    prompts a Databricks foundation-model endpoint via
+    `ws.serving_endpoints.query`, caches per (uc_schema, model, seed,
+    temperature), then validates each pair against the materialized tables
+    on the configured SQL warehouse (error / empty / trivial / accepted).
+  - Generated outputs are formatted as a list of
+    `{id, schema, source_id, shape, question, sql}` entries written to
+    `questions.json`.
+  - Quality caveat is in the README.
+  - Live-model invocation, validator execution, and acceptance-rate tuning
+    are pending until the user supplies `.env`.
+- Phase 2: first-pass complete 2026-05-12 by Claude.
+  - `slice_runner.py` shells out to `$SCHEMAPILE_REPO/slice.py` via `uv run`,
+    writes JSON to `SCHEMAPILE_SLICE_CACHE`, and stores a `.params.json`
+    sidecar so subsequent invocations with the same parameters skip the
+    re-run.
+  - Preflight refuses to run when the upstream repo, the upstream
+    `slice.py`, or `schemapile-perm.json` is missing, pointing the user at
+    `https://github.com/amsterdata/schemapile`.
+  - Unit tests cover argument translation, cache hit, cache miss, and the
+    three preflight failure modes.
+- Phase 3: code complete 2026-05-12 by Claude.
+  - `bootstrap.py` creates the catalog, `_meta` schema, and volume via the
+    SQL warehouse. The catalog-collision guard lives in `config.py`'s
+    `_PROJECT_CATALOGS_BLOCKLIST` so the bootstrap entrypoint cannot run
+    against `graph-enriched-lakehouse` or other reserved catalogs.
+  - A `--drop-all --yes-i-mean-it` teardown path is wired up.
+  - Live-workspace bootstrap run is pending until the user supplies `.env`.
+- Phase 4: code complete 2026-05-12 by Claude.
+  - `materialize.py` reads the candidate-table JSON, creates one UC schema
+    per candidate, and creates one Delta table per table spec via the SQL
+    warehouse.
+  - Type coercion uses a documented map; unknown types fall back to
+    `STRING` and the fallback count is reported per run.
+  - Each Delta table carries `schemapile.source_id`, `original_name`,
+    `primary_keys`, and `foreign_keys` as TBLPROPERTIES.
+  - Sample VALUES insertion is deferred to v2 (documented in the README);
+    v1 produces typed-but-empty tables.
+  - `.env.generated` is written with the `DBXCARTA_SCHEMAS=...` line.
+  - Live-workspace materialize run is pending until the user supplies `.env`.
+- Phase 5: first-pass complete 2026-05-12 by Claude.
+  - `examples/schemapile/` package skeleton matches the finance-genie
+    layout: `pyproject.toml`, `README.md`, `.env.sample`, `src/`, `tests/`.
+  - `SchemaPilePreset` implements `env()`, `readiness()`, and
+    `upload_questions()` and is verified to satisfy `Preset`,
+    `ReadinessCheckable`, and `QuestionsUploadable` runtime-checkable
+    protocols.
+  - Entrypoints are wired in `pyproject.toml`: `-slice`, `-select`,
+    `-bootstrap`, `-materialize`, `-generate-questions`.
+  - `uv run dbxcarta preset dbxcarta_schemapile_example:preset --print-env`
+    resolves and prints the overlay.
+  - Combined test run: `uv run pytest tests/unit/ examples/schemapile/tests/`
+    reports 195 passed, 1 skipped.
 - Phase 6: pending.
 
 ---

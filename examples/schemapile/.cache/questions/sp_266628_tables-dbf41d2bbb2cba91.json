@@ -1,0 +1,32 @@
+[
+  {
+    "shape": "single_table_filter",
+    "question": "Find all users who have more than 1000 followers and joined (registered) after January 1, 2020.",
+    "sql": "SELECT username, firstName, lastName, followers, registery_date FROM `schemapile_lakehouse`.`sp_266628_tables`.`users` WHERE followers > 1000 AND registery_date > '2020-01-01'"
+  },
+  {
+    "shape": "single_table_filter",
+    "question": "List all tweets of type 'retweet' that have more than 50 likes.",
+    "sql": "SELECT tweetid, username, tweet_content, likes, timestamp_t FROM `schemapile_lakehouse`.`sp_266628_tables`.`tweet` WHERE type = 'retweet' AND likes > 50"
+  },
+  {
+    "shape": "two_table_join",
+    "question": "Show the username, first name, last name, and tweet content for all tweets posted by users whose bio contains the word 'developer'.",
+    "sql": "SELECT u.username, u.firstName, u.lastName, t.tweet_content, t.timestamp_t FROM `schemapile_lakehouse`.`sp_266628_tables`.`users` u JOIN `schemapile_lakehouse`.`sp_266628_tables`.`tweet` t ON u.username = t.username WHERE u.bio LIKE '%developer%'"
+  },
+  {
+    "shape": "two_table_join",
+    "question": "List all hashtags along with the tweet content and the username of the tweet author for tweets that contain the hashtag '#AI'.",
+    "sql": "SELECT h.hashtag, t.tweet_content, t.username FROM `schemapile_lakehouse`.`sp_266628_tables`.`hashtag` h JOIN `schemapile_lakehouse`.`sp_266628_tables`.`tweet` t ON h.tweetid = t.tweetid WHERE h.hashtag = '#AI'"
+  },
+  {
+    "shape": "aggregation",
+    "question": "How many tweets has each user posted? Return the username and their tweet count, ordered by tweet count descending.",
+    "sql": "SELECT username, COUNT(tweetid) AS tweet_count FROM `schemapile_lakehouse`.`sp_266628_tables`.`tweet` GROUP BY username ORDER BY tweet_count DESC"
+  },
+  {
+    "shape": "aggregation",
+    "question": "For each tweet, show the tweet ID and the total number of likes it has received from the likes table, only including tweets with at least 5 likes.",
+    "sql": "SELECT tweetid, COUNT(username) AS total_likes FROM `schemapile_lakehouse`.`sp_266628_tables`.`likes` GROUP BY tweetid HAVING COUNT(username) >= 5 ORDER BY total_likes DESC"
+  }
+]

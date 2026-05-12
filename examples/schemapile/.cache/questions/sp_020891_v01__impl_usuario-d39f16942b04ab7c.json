@@ -1,0 +1,32 @@
+[
+  {
+    "shape": "single_table_filter",
+    "question": "Which users are currently active?",
+    "sql": "SELECT id_usuario, ds_nome, ds_login FROM `schemapile_lakehouse`.`sp_020891_v01__impl_usuario`.`tb_usuario` WHERE fl_ativo = TRUE"
+  },
+  {
+    "shape": "single_table_filter",
+    "question": "List all permissions that have a description containing the word 'admin'.",
+    "sql": "SELECT id_permissao, ds_permissao, ds_descricao FROM `schemapile_lakehouse`.`sp_020891_v01__impl_usuario`.`tb_permissao` WHERE LOWER(ds_descricao) LIKE '%admin%'"
+  },
+  {
+    "shape": "two_table_join",
+    "question": "Show the names of all users along with the names of the groups they belong to.",
+    "sql": "SELECT u.ds_nome AS usuario_nome, g.ds_nome AS grupo_nome FROM `schemapile_lakehouse`.`sp_020891_v01__impl_usuario`.`tb_usuario` u JOIN `schemapile_lakehouse`.`sp_020891_v01__impl_usuario`.`tb_usuario_x_grupo` uxg ON u.id_usuario = uxg.id_usuario JOIN `schemapile_lakehouse`.`sp_020891_v01__impl_usuario`.`tb_grupo` g ON uxg.id_grupo = g.id_grupo"
+  },
+  {
+    "shape": "two_table_join",
+    "question": "List all permissions assigned to each group, showing the group name and permission name.",
+    "sql": "SELECT g.ds_nome AS grupo_nome, p.ds_permissao AS permissao_nome FROM `schemapile_lakehouse`.`sp_020891_v01__impl_usuario`.`tb_grupo` g JOIN `schemapile_lakehouse`.`sp_020891_v01__impl_usuario`.`tb_permissao_x_grupo` pxg ON g.id_grupo = pxg.id_grupo JOIN `schemapile_lakehouse`.`sp_020891_v01__impl_usuario`.`tb_permissao` p ON pxg.id_permissao = p.id_permissao"
+  },
+  {
+    "shape": "aggregation",
+    "question": "How many users belong to each group?",
+    "sql": "SELECT g.ds_nome AS grupo_nome, COUNT(uxg.id_usuario) AS total_usuarios FROM `schemapile_lakehouse`.`sp_020891_v01__impl_usuario`.`tb_grupo` g LEFT JOIN `schemapile_lakehouse`.`sp_020891_v01__impl_usuario`.`tb_usuario_x_grupo` uxg ON g.id_grupo = uxg.id_grupo GROUP BY g.ds_nome"
+  },
+  {
+    "shape": "aggregation",
+    "question": "How many permissions are assigned to each group, ordered from most to fewest?",
+    "sql": "SELECT g.ds_nome AS grupo_nome, COUNT(pxg.id_permissao) AS total_permissoes FROM `schemapile_lakehouse`.`sp_020891_v01__impl_usuario`.`tb_grupo` g LEFT JOIN `schemapile_lakehouse`.`sp_020891_v01__impl_usuario`.`tb_permissao_x_grupo` pxg ON g.id_grupo = pxg.id_grupo GROUP BY g.ds_nome ORDER BY total_permissoes DESC"
+  }
+]

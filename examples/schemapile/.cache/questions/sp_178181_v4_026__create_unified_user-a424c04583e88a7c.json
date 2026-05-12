@@ -1,0 +1,32 @@
+[
+  {
+    "shape": "single_table_filter",
+    "question": "Find all organizations that have not been deleted and belong to the 'enterprise' kind.",
+    "sql": "SELECT id, name, kind, parent_id, scope_id, created_at, updated_at FROM `schemapile_lakehouse`.`sp_178181_v4_026__create_unified_user`.`organizations` WHERE deleted_at IS NULL AND kind = 'enterprise'"
+  },
+  {
+    "shape": "single_table_filter",
+    "question": "List all users who are currently disabled and have not been deleted.",
+    "sql": "SELECT id, account_id, email, name, phone_number, created_at FROM `schemapile_lakehouse`.`sp_178181_v4_026__create_unified_user`.`users` WHERE is_disabled = TRUE AND deleted_at IS NULL"
+  },
+  {
+    "shape": "two_table_join",
+    "question": "List all account access methods along with the creation timestamp of the associated account.",
+    "sql": "SELECT aam.id, aam.account_id, aam.name, aam.algorithm, aam.created_at AS method_created_at, a.created_at AS account_created_at FROM `schemapile_lakehouse`.`sp_178181_v4_026__create_unified_user`.`account_access_methods` aam JOIN `schemapile_lakehouse`.`sp_178181_v4_026__create_unified_user`.`accounts` a ON aam.account_id = a.id"
+  },
+  {
+    "shape": "two_table_join",
+    "question": "Show each role along with the name of the scope it belongs to (scope source).",
+    "sql": "SELECT r.id AS role_id, r.name AS role_name, r.created_at, s.source AS scope_source FROM `schemapile_lakehouse`.`sp_178181_v4_026__create_unified_user`.`roles` r JOIN `schemapile_lakehouse`.`sp_178181_v4_026__create_unified_user`.`scopes` s ON r.scope_id = s.id WHERE r.deleted_at IS NULL"
+  },
+  {
+    "shape": "aggregation",
+    "question": "How many active (non-deleted) users are associated with each account?",
+    "sql": "SELECT account_id, COUNT(*) AS active_user_count FROM `schemapile_lakehouse`.`sp_178181_v4_026__create_unified_user`.`users` WHERE deleted_at IS NULL GROUP BY account_id ORDER BY active_user_count DESC"
+  },
+  {
+    "shape": "aggregation",
+    "question": "How many permissions are assigned to each role, grouped by role ID?",
+    "sql": "SELECT rp.role_id, COUNT(rp.permission_id) AS permission_count FROM `schemapile_lakehouse`.`sp_178181_v4_026__create_unified_user`.`role_permissions` rp JOIN `schemapile_lakehouse`.`sp_178181_v4_026__create_unified_user`.`roles` r ON rp.role_id = r.id WHERE r.deleted_at IS NULL GROUP BY rp.role_id ORDER BY permission_count DESC"
+  }
+]

@@ -1,0 +1,32 @@
+[
+  {
+    "shape": "single_table_filter",
+    "question": "Find all users whose email address contains 'gmail.com'.",
+    "sql": "SELECT username, email, name, surname FROM `schemapile_lakehouse`.`sp_289361_schema`.`users` WHERE email LIKE '%gmail.com%'"
+  },
+  {
+    "shape": "single_table_filter",
+    "question": "List all articles that belong to the category named 'Technology'.",
+    "sql": "SELECT articlesid, title, description FROM `schemapile_lakehouse`.`sp_289361_schema`.`articles` WHERE categoryid = 'Technology'"
+  },
+  {
+    "shape": "two_table_join",
+    "question": "Show the title and description of each article along with the category description for that article.",
+    "sql": "SELECT a.articlesid, a.title, a.description, c.description AS category_description FROM `schemapile_lakehouse`.`sp_289361_schema`.`articles` a JOIN `schemapile_lakehouse`.`sp_289361_schema`.`category` c ON a.categoryid = c.name"
+  },
+  {
+    "shape": "two_table_join",
+    "question": "List all materials along with the title of the article they belong to.",
+    "sql": "SELECT m.materialid, m.filepath, m.virustotalurl, a.title FROM `schemapile_lakehouse`.`sp_289361_schema`.`material` m JOIN `schemapile_lakehouse`.`sp_289361_schema`.`articles` a ON m.articlesid = a.articlesid"
+  },
+  {
+    "shape": "aggregation",
+    "question": "How many articles has each advertiser published? Show the advertiser ID and the count of articles.",
+    "sql": "SELECT advertiserid, COUNT(articlesid) AS article_count FROM `schemapile_lakehouse`.`sp_289361_schema`.`articles` GROUP BY advertiserid"
+  },
+  {
+    "shape": "aggregation",
+    "question": "How many articles exist in each category? Return the category name and the article count, ordered by article count descending.",
+    "sql": "SELECT categoryid, COUNT(articlesid) AS article_count FROM `schemapile_lakehouse`.`sp_289361_schema`.`articles` GROUP BY categoryid ORDER BY article_count DESC"
+  }
+]

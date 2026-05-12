@@ -1,0 +1,6005 @@
+{
+  "format_version": 1,
+  "source_slice": ".cache/slice_random_1000.json",
+  "selection_params": {
+    "candidate_min_tables": 3,
+    "candidate_max_tables": 20,
+    "candidate_min_fk_edges": 2,
+    "candidate_require_data": false,
+    "candidate_limit": 20
+  },
+  "schemas": [
+    {
+      "source_id": "492424_create-adventuresOverflow.sql",
+      "uc_schema": "sp_492424_create_adventuresoverflow",
+      "rationale": "tables=6 fk_density=1.83 data_tables=0",
+      "tables": [
+        {
+          "name": "sales.DimDate",
+          "columns": [
+            {
+              "name": "DateKey",
+              "type": ""
+            },
+            {
+              "name": "FullDateAlternateKey",
+              "type": ""
+            },
+            {
+              "name": "EnglishDayNameOfWeek",
+              "type": ""
+            },
+            {
+              "name": "EnglishMonthName",
+              "type": ""
+            },
+            {
+              "name": "FiscalQuarter",
+              "type": ""
+            },
+            {
+              "name": "FiscalYear",
+              "type": ""
+            },
+            {
+              "name": "FiscalSemester",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "DateKey"
+          ],
+          "foreign_keys": [],
+          "has_values": false
+        },
+        {
+          "name": "sales.DimSalesTerritory",
+          "columns": [
+            {
+              "name": "SalesTerritoryKey",
+              "type": ""
+            },
+            {
+              "name": "SalesTerritoryRegion",
+              "type": ""
+            },
+            {
+              "name": "SalesTerritoryCountry",
+              "type": ""
+            },
+            {
+              "name": "SalesTerritoryGroup",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "SalesTerritoryKey"
+          ],
+          "foreign_keys": [],
+          "has_values": false
+        },
+        {
+          "name": "sales.DimDateHoliday",
+          "columns": [
+            {
+              "name": "DateHolidayKey",
+              "type": ""
+            },
+            {
+              "name": "DateKey",
+              "type": ""
+            },
+            {
+              "name": "TerritoryCode",
+              "type": ""
+            },
+            {
+              "name": "HolidayFlag",
+              "type": ""
+            },
+            {
+              "name": "HolidayName",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "DateHolidayKey"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "DateKey"
+              ],
+              "foreign_table": "sales.DimDate",
+              "referred_columns": [
+                "DateKey"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "sales.DimCustomer",
+          "columns": [
+            {
+              "name": "CustomerKey",
+              "type": ""
+            },
+            {
+              "name": "GeographyKey",
+              "type": ""
+            },
+            {
+              "name": "FirstName",
+              "type": ""
+            },
+            {
+              "name": "LastName",
+              "type": ""
+            },
+            {
+              "name": "BirthDate",
+              "type": ""
+            },
+            {
+              "name": "MaritalStatus",
+              "type": ""
+            },
+            {
+              "name": "Gender",
+              "type": ""
+            },
+            {
+              "name": "EmailAddress",
+              "type": ""
+            },
+            {
+              "name": "YearlyIncome",
+              "type": ""
+            },
+            {
+              "name": "EnglishEducation",
+              "type": ""
+            },
+            {
+              "name": "DateFirstPurchase",
+              "type": ""
+            },
+            {
+              "name": "SalesTerritoryKey",
+              "type": ""
+            },
+            {
+              "name": "City",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "CustomerKey"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "SalesTerritoryKey"
+              ],
+              "foreign_table": "sales.DimSalesTerritory",
+              "referred_columns": [
+                "SalesTerritoryKey"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "sales.FactInternetSales",
+          "columns": [
+            {
+              "name": "OrderSalesNumber",
+              "type": ""
+            },
+            {
+              "name": "ProductKey",
+              "type": ""
+            },
+            {
+              "name": "OrderDateKey",
+              "type": ""
+            },
+            {
+              "name": "DueDateKey",
+              "type": ""
+            },
+            {
+              "name": "ShipDateKey",
+              "type": ""
+            },
+            {
+              "name": "CustomerKey",
+              "type": ""
+            },
+            {
+              "name": "SalesTerritoryKey",
+              "type": ""
+            },
+            {
+              "name": "OrderQuantity",
+              "type": ""
+            },
+            {
+              "name": "UnitPrice",
+              "type": ""
+            },
+            {
+              "name": "DiscountAmount",
+              "type": ""
+            },
+            {
+              "name": "SalesAmount",
+              "type": ""
+            },
+            {
+              "name": "OrderDate",
+              "type": ""
+            },
+            {
+              "name": "DueDate",
+              "type": ""
+            },
+            {
+              "name": "ShipDate",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "OrderSalesNumber"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "OrderDateKey"
+              ],
+              "foreign_table": "sales.DimDate",
+              "referred_columns": [
+                "DateKey"
+              ]
+            },
+            {
+              "columns": [
+                "DueDateKey"
+              ],
+              "foreign_table": "sales.DimDate",
+              "referred_columns": [
+                "DateKey"
+              ]
+            },
+            {
+              "columns": [
+                "ShipDateKey"
+              ],
+              "foreign_table": "sales.DimDate",
+              "referred_columns": [
+                "DateKey"
+              ]
+            },
+            {
+              "columns": [
+                "CustomerKey"
+              ],
+              "foreign_table": "sales.DimCustomer",
+              "referred_columns": [
+                "CustomerKey"
+              ]
+            },
+            {
+              "columns": [
+                "SalesTerritoryKey"
+              ],
+              "foreign_table": "sales.DimSalesTerritory",
+              "referred_columns": [
+                "SalesTerritoryKey"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "sales.FactPosts",
+          "columns": [
+            {
+              "name": "PostKey",
+              "type": ""
+            },
+            {
+              "name": "AnswerCount",
+              "type": ""
+            },
+            {
+              "name": "Body",
+              "type": ""
+            },
+            {
+              "name": "ClosedDate",
+              "type": ""
+            },
+            {
+              "name": "CommentCount",
+              "type": ""
+            },
+            {
+              "name": "CreationDate",
+              "type": ""
+            },
+            {
+              "name": "FavoriteCount",
+              "type": ""
+            },
+            {
+              "name": "LastActivityDate",
+              "type": ""
+            },
+            {
+              "name": "LastEditDate",
+              "type": ""
+            },
+            {
+              "name": "Score",
+              "type": ""
+            },
+            {
+              "name": "Title",
+              "type": ""
+            },
+            {
+              "name": "ViewCount",
+              "type": ""
+            },
+            {
+              "name": "ClosedDateKey",
+              "type": ""
+            },
+            {
+              "name": "CreationDateKey",
+              "type": ""
+            },
+            {
+              "name": "LastActivityDateKey",
+              "type": ""
+            },
+            {
+              "name": "LastEditDateKey",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "PostKey"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "ClosedDateKey"
+              ],
+              "foreign_table": "sales.DimDate",
+              "referred_columns": [
+                "DateKey"
+              ]
+            },
+            {
+              "columns": [
+                "CreationDateKey"
+              ],
+              "foreign_table": "sales.DimDate",
+              "referred_columns": [
+                "DateKey"
+              ]
+            },
+            {
+              "columns": [
+                "LastActivityDateKey"
+              ],
+              "foreign_table": "sales.DimDate",
+              "referred_columns": [
+                "DateKey"
+              ]
+            },
+            {
+              "columns": [
+                "LastEditDateKey"
+              ],
+              "foreign_table": "sales.DimDate",
+              "referred_columns": [
+                "DateKey"
+              ]
+            }
+          ],
+          "has_values": false
+        }
+      ]
+    },
+    {
+      "source_id": "310630_schema.sql",
+      "uc_schema": "sp_310630_schema",
+      "rationale": "tables=6 fk_density=1.67 data_tables=0",
+      "tables": [
+        {
+          "name": "users",
+          "columns": [
+            {
+              "name": "id",
+              "type": ""
+            },
+            {
+              "name": "login",
+              "type": ""
+            },
+            {
+              "name": "country_code",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "id"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "id"
+              ],
+              "foreign_table": "projects",
+              "referred_columns": [
+                "owner_id"
+              ]
+            },
+            {
+              "columns": [
+                "login"
+              ],
+              "foreign_table": "to_query_projects",
+              "referred_columns": [
+                "login"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "projects",
+          "columns": [
+            {
+              "name": "id",
+              "type": ""
+            },
+            {
+              "name": "name",
+              "type": ""
+            },
+            {
+              "name": "owner_id",
+              "type": ""
+            },
+            {
+              "name": "forked_from",
+              "type": ""
+            },
+            {
+              "name": "deleted",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "id"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "name"
+              ],
+              "foreign_table": "to_query_projects",
+              "referred_columns": [
+                "name"
+              ]
+            },
+            {
+              "columns": [
+                "id"
+              ],
+              "foreign_table": "projects",
+              "referred_columns": [
+                "forked_from"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "to_query_projects",
+          "columns": [
+            {
+              "name": "id",
+              "type": ""
+            },
+            {
+              "name": "login",
+              "type": ""
+            },
+            {
+              "name": "name",
+              "type": ""
+            },
+            {
+              "name": "status",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "id"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "login"
+              ],
+              "foreign_table": "result_files",
+              "referred_columns": [
+                "login"
+              ]
+            },
+            {
+              "columns": [
+                "name"
+              ],
+              "foreign_table": "result_files",
+              "referred_columns": [
+                "name"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "result_files",
+          "columns": [
+            {
+              "name": "login",
+              "type": ""
+            },
+            {
+              "name": "name",
+              "type": ""
+            },
+            {
+              "name": "link_file",
+              "type": ""
+            },
+            {
+              "name": "path_file",
+              "type": ""
+            },
+            {
+              "name": "path_copy_file",
+              "type": ""
+            },
+            {
+              "name": "n_authors",
+              "type": ""
+            },
+            {
+              "name": "n_revs",
+              "type": ""
+            },
+            {
+              "name": "age_months",
+              "type": ""
+            },
+            {
+              "name": "duplicate",
+              "type": ""
+            },
+            {
+              "name": "is_xml",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "path_file"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "path_file"
+              ],
+              "foreign_table": "result_xml_original",
+              "referred_columns": [
+                "path_file"
+              ]
+            },
+            {
+              "columns": [
+                "path_copy_file"
+              ],
+              "foreign_table": "result_xml_original",
+              "referred_columns": [
+                "path_copy_file"
+              ]
+            },
+            {
+              "columns": [
+                "login"
+              ],
+              "foreign_table": "result_projects",
+              "referred_columns": [
+                "login"
+              ]
+            },
+            {
+              "columns": [
+                "name"
+              ],
+              "foreign_table": "result_projects",
+              "referred_columns": [
+                "name"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "result_projects",
+          "columns": [
+            {
+              "name": "login",
+              "type": ""
+            },
+            {
+              "name": "name",
+              "type": ""
+            },
+            {
+              "name": "language",
+              "type": ""
+            },
+            {
+              "name": "created_at",
+              "type": ""
+            },
+            {
+              "name": "last_commit_at",
+              "type": ""
+            },
+            {
+              "name": "n_commits",
+              "type": ""
+            },
+            {
+              "name": "location_country",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "login",
+            "name"
+          ],
+          "foreign_keys": [],
+          "has_values": false
+        },
+        {
+          "name": "result_xml_original",
+          "columns": [
+            {
+              "name": "path_file",
+              "type": ""
+            },
+            {
+              "name": "path_copy_file",
+              "type": ""
+            },
+            {
+              "name": "has_copy",
+              "type": ""
+            },
+            {
+              "name": "n_xml_elements",
+              "type": ""
+            },
+            {
+              "name": "valid",
+              "type": ""
+            },
+            {
+              "name": "valid_after_repairing",
+              "type": ""
+            },
+            {
+              "name": "constraints_list",
+              "type": ""
+            },
+            {
+              "name": "constraints_list_after_repairing",
+              "type": ""
+            },
+            {
+              "name": "BPMNDiagram",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "path_file"
+          ],
+          "foreign_keys": [],
+          "has_values": false
+        }
+      ]
+    },
+    {
+      "source_id": "266628_tables.sql",
+      "uc_schema": "sp_266628_tables",
+      "rationale": "tables=8 fk_density=1.62 data_tables=0",
+      "tables": [
+        {
+          "name": "users",
+          "columns": [
+            {
+              "name": "username",
+              "type": ""
+            },
+            {
+              "name": "firstName",
+              "type": ""
+            },
+            {
+              "name": "lastName",
+              "type": ""
+            },
+            {
+              "name": "birthDate",
+              "type": ""
+            },
+            {
+              "name": "registery_date",
+              "type": ""
+            },
+            {
+              "name": "bio",
+              "type": ""
+            },
+            {
+              "name": "followers",
+              "type": ""
+            },
+            {
+              "name": "following",
+              "type": ""
+            },
+            {
+              "name": "password",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "username"
+          ],
+          "foreign_keys": [],
+          "has_values": false
+        },
+        {
+          "name": "tweet",
+          "columns": [
+            {
+              "name": "tweetid",
+              "type": ""
+            },
+            {
+              "name": "type",
+              "type": ""
+            },
+            {
+              "name": "username",
+              "type": ""
+            },
+            {
+              "name": "tweet_content",
+              "type": ""
+            },
+            {
+              "name": "ref_id",
+              "type": ""
+            },
+            {
+              "name": "timestamp_t",
+              "type": ""
+            },
+            {
+              "name": "likes",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "tweetid"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "username"
+              ],
+              "foreign_table": "users",
+              "referred_columns": [
+                "username"
+              ]
+            },
+            {
+              "columns": [
+                "ref_id"
+              ],
+              "foreign_table": "tweet",
+              "referred_columns": [
+                "tweetid"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "message",
+          "columns": [
+            {
+              "name": "mess_id",
+              "type": ""
+            },
+            {
+              "name": "type",
+              "type": ""
+            },
+            {
+              "name": "s_id",
+              "type": ""
+            },
+            {
+              "name": "r_id",
+              "type": ""
+            },
+            {
+              "name": "content",
+              "type": ""
+            },
+            {
+              "name": "ref_id",
+              "type": ""
+            },
+            {
+              "name": "timestamp_t",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "mess_id"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "s_id"
+              ],
+              "foreign_table": "users",
+              "referred_columns": [
+                "username"
+              ]
+            },
+            {
+              "columns": [
+                "r_id"
+              ],
+              "foreign_table": "users",
+              "referred_columns": [
+                "username"
+              ]
+            },
+            {
+              "columns": [
+                "ref_id"
+              ],
+              "foreign_table": "tweet",
+              "referred_columns": [
+                "tweetid"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "login_record",
+          "columns": [
+            {
+              "name": "username",
+              "type": ""
+            },
+            {
+              "name": "timestamp_t",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "username",
+            "timestamp_t"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "username"
+              ],
+              "foreign_table": "users",
+              "referred_columns": [
+                "username"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "follow",
+          "columns": [
+            {
+              "name": "follower",
+              "type": ""
+            },
+            {
+              "name": "following",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "follower",
+            "following"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "follower"
+              ],
+              "foreign_table": "users",
+              "referred_columns": [
+                "username"
+              ]
+            },
+            {
+              "columns": [
+                "following"
+              ],
+              "foreign_table": "users",
+              "referred_columns": [
+                "username"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "hashtag",
+          "columns": [
+            {
+              "name": "hashtag",
+              "type": ""
+            },
+            {
+              "name": "tweetid",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "hashtag",
+            "tweetid"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "tweetid"
+              ],
+              "foreign_table": "tweet",
+              "referred_columns": [
+                "tweetid"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "likes",
+          "columns": [
+            {
+              "name": "username",
+              "type": ""
+            },
+            {
+              "name": "tweetid",
+              "type": ""
+            },
+            {
+              "name": "timeStamp_l",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "tweetid",
+            "username"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "tweetid"
+              ],
+              "foreign_table": "tweet",
+              "referred_columns": [
+                "tweetid"
+              ]
+            },
+            {
+              "columns": [
+                "username"
+              ],
+              "foreign_table": "users",
+              "referred_columns": [
+                "username"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "block",
+          "columns": [
+            {
+              "name": "username",
+              "type": ""
+            },
+            {
+              "name": "blocked_user",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "username",
+            "blocked_user"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "username"
+              ],
+              "foreign_table": "users",
+              "referred_columns": [
+                "username"
+              ]
+            },
+            {
+              "columns": [
+                "blocked_user"
+              ],
+              "foreign_table": "users",
+              "referred_columns": [
+                "username"
+              ]
+            }
+          ],
+          "has_values": false
+        }
+      ]
+    },
+    {
+      "source_id": "535132_zhuanglang.sql",
+      "uc_schema": "sp_535132_zhuanglang",
+      "rationale": "tables=5 fk_density=1.40 data_tables=5",
+      "tables": [
+        {
+          "name": "teacher",
+          "columns": [
+            {
+              "name": "username",
+              "type": ""
+            },
+            {
+              "name": "pwd",
+              "type": ""
+            },
+            {
+              "name": "salt",
+              "type": ""
+            },
+            {
+              "name": "nkuorzhuanglang",
+              "type": ""
+            },
+            {
+              "name": "name",
+              "type": ""
+            },
+            {
+              "name": "person_no",
+              "type": ""
+            },
+            {
+              "name": "mail",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "username"
+          ],
+          "foreign_keys": [],
+          "has_values": true
+        },
+        {
+          "name": "book",
+          "columns": [
+            {
+              "name": "id",
+              "type": ""
+            },
+            {
+              "name": "name",
+              "type": ""
+            },
+            {
+              "name": "upload",
+              "type": ""
+            },
+            {
+              "name": "discipline",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "id"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "upload"
+              ],
+              "foreign_table": "teacher",
+              "referred_columns": [
+                "username"
+              ]
+            }
+          ],
+          "has_values": true
+        },
+        {
+          "name": "section",
+          "columns": [
+            {
+              "name": "id",
+              "type": ""
+            },
+            {
+              "name": "number",
+              "type": ""
+            },
+            {
+              "name": "upload",
+              "type": ""
+            },
+            {
+              "name": "note",
+              "type": ""
+            },
+            {
+              "name": "belong",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "id"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "upload"
+              ],
+              "foreign_table": "teacher",
+              "referred_columns": [
+                "username"
+              ]
+            },
+            {
+              "columns": [
+                "belong"
+              ],
+              "foreign_table": "book",
+              "referred_columns": [
+                "id"
+              ]
+            }
+          ],
+          "has_values": true
+        },
+        {
+          "name": "class",
+          "columns": [
+            {
+              "name": "id",
+              "type": ""
+            },
+            {
+              "name": "number",
+              "type": ""
+            },
+            {
+              "name": "upload",
+              "type": ""
+            },
+            {
+              "name": "note",
+              "type": ""
+            },
+            {
+              "name": "belong",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "id"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "upload"
+              ],
+              "foreign_table": "teacher",
+              "referred_columns": [
+                "username"
+              ]
+            },
+            {
+              "columns": [
+                "belong"
+              ],
+              "foreign_table": "section",
+              "referred_columns": [
+                "id"
+              ]
+            }
+          ],
+          "has_values": true
+        },
+        {
+          "name": "resources",
+          "columns": [
+            {
+              "name": "id",
+              "type": ""
+            },
+            {
+              "name": "md5",
+              "type": ""
+            },
+            {
+              "name": "name",
+              "type": ""
+            },
+            {
+              "name": "path",
+              "type": ""
+            },
+            {
+              "name": "upload",
+              "type": ""
+            },
+            {
+              "name": "videoorslide",
+              "type": ""
+            },
+            {
+              "name": "bilibili",
+              "type": ""
+            },
+            {
+              "name": "note",
+              "type": ""
+            },
+            {
+              "name": "belong",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "id"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "upload"
+              ],
+              "foreign_table": "teacher",
+              "referred_columns": [
+                "username"
+              ]
+            },
+            {
+              "columns": [
+                "belong"
+              ],
+              "foreign_table": "class",
+              "referred_columns": [
+                "id"
+              ]
+            }
+          ],
+          "has_values": true
+        }
+      ]
+    },
+    {
+      "source_id": "300813_erzeuge_zielzustand.sql",
+      "uc_schema": "sp_300813_erzeuge_zielzustand",
+      "rationale": "tables=14 fk_density=1.36 data_tables=0",
+      "tables": [
+        {
+          "name": "tab_a",
+          "columns": [
+            {
+              "name": "tab_a_id",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "tab_a_id"
+          ],
+          "foreign_keys": [],
+          "has_values": false
+        },
+        {
+          "name": "tab_b",
+          "columns": [
+            {
+              "name": "tab_b_id",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "tab_b_id"
+          ],
+          "foreign_keys": [],
+          "has_values": false
+        },
+        {
+          "name": "tab_c",
+          "columns": [
+            {
+              "name": "tab_c_id",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "tab_c_id"
+          ],
+          "foreign_keys": [],
+          "has_values": false
+        },
+        {
+          "name": "tab_d",
+          "columns": [
+            {
+              "name": "tab d id",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "tab d id"
+          ],
+          "foreign_keys": [],
+          "has_values": false
+        },
+        {
+          "name": "tab_del_cas",
+          "columns": [
+            {
+              "name": "tab_a_id",
+              "type": ""
+            },
+            {
+              "name": "tab_b_id",
+              "type": ""
+            },
+            {
+              "name": "tab_c_id",
+              "type": ""
+            },
+            {
+              "name": "tab_d_id",
+              "type": ""
+            }
+          ],
+          "primary_keys": [],
+          "foreign_keys": [
+            {
+              "columns": [
+                "tab_a_id"
+              ],
+              "foreign_table": "tab_a",
+              "referred_columns": [
+                "tab_a_id"
+              ]
+            },
+            {
+              "columns": [
+                "tab_b_id"
+              ],
+              "foreign_table": "tab_b",
+              "referred_columns": [
+                "tab_b_id"
+              ]
+            },
+            {
+              "columns": [
+                "tab_c_id"
+              ],
+              "foreign_table": "tab_c",
+              "referred_columns": [
+                "tab_c_id"
+              ]
+            },
+            {
+              "columns": [
+                "tab_d_id"
+              ],
+              "foreign_table": "tab_d",
+              "referred_columns": [
+                "tab d id"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "tab_no_action",
+          "columns": [
+            {
+              "name": "tab_a_id",
+              "type": ""
+            },
+            {
+              "name": "tab_b_id",
+              "type": ""
+            },
+            {
+              "name": "tab_c_id",
+              "type": ""
+            },
+            {
+              "name": "tab_d_id",
+              "type": ""
+            }
+          ],
+          "primary_keys": [],
+          "foreign_keys": [
+            {
+              "columns": [
+                "tab_a_id"
+              ],
+              "foreign_table": "tab_a",
+              "referred_columns": [
+                "tab_a_id"
+              ]
+            },
+            {
+              "columns": [
+                "tab_b_id"
+              ],
+              "foreign_table": "tab_b",
+              "referred_columns": [
+                "tab_b_id"
+              ]
+            },
+            {
+              "columns": [
+                "tab_c_id"
+              ],
+              "foreign_table": "tab_c",
+              "referred_columns": [
+                "tab_c_id"
+              ]
+            },
+            {
+              "columns": [
+                "tab_d_id"
+              ],
+              "foreign_table": "tab_d",
+              "referred_columns": [
+                "tab d id"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "tab_set_null",
+          "columns": [
+            {
+              "name": "tab_a_id",
+              "type": ""
+            },
+            {
+              "name": "tab_b_id",
+              "type": ""
+            },
+            {
+              "name": "tab_c_id",
+              "type": ""
+            },
+            {
+              "name": "tab_d_id",
+              "type": ""
+            }
+          ],
+          "primary_keys": [],
+          "foreign_keys": [
+            {
+              "columns": [
+                "tab_a_id"
+              ],
+              "foreign_table": "tab_a",
+              "referred_columns": [
+                "tab_a_id"
+              ]
+            },
+            {
+              "columns": [
+                "tab_b_id"
+              ],
+              "foreign_table": "tab_b",
+              "referred_columns": [
+                "tab_b_id"
+              ]
+            },
+            {
+              "columns": [
+                "tab_c_id"
+              ],
+              "foreign_table": "tab_c",
+              "referred_columns": [
+                "tab_c_id"
+              ]
+            },
+            {
+              "columns": [
+                "tab_d_id"
+              ],
+              "foreign_table": "tab_d",
+              "referred_columns": [
+                "tab d id"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "tab_2_column_pk",
+          "columns": [
+            {
+              "name": "id1",
+              "type": ""
+            },
+            {
+              "name": "id2",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "id1",
+            "id2"
+          ],
+          "foreign_keys": [],
+          "has_values": false
+        },
+        {
+          "name": "tab_wrong_fk_name",
+          "columns": [
+            {
+              "name": "id",
+              "type": ""
+            }
+          ],
+          "primary_keys": [],
+          "foreign_keys": [
+            {
+              "columns": [
+                "id"
+              ],
+              "foreign_table": "tab_a",
+              "referred_columns": [
+                "tab_a_id"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "tab_wrong_fk_column",
+          "columns": [
+            {
+              "name": "id",
+              "type": ""
+            }
+          ],
+          "primary_keys": [],
+          "foreign_keys": [
+            {
+              "columns": [
+                "id"
+              ],
+              "foreign_table": "tab_b",
+              "referred_columns": [
+                "tab_b_id"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "tab_wrong_fk_column_order",
+          "columns": [
+            {
+              "name": "id1",
+              "type": ""
+            },
+            {
+              "name": "id2",
+              "type": ""
+            }
+          ],
+          "primary_keys": [],
+          "foreign_keys": [
+            {
+              "columns": [
+                "id1",
+                "id2"
+              ],
+              "foreign_table": "tab_2_column_pk",
+              "referred_columns": [
+                "id1",
+                "id2"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "tab_mixed_name_1",
+          "columns": [
+            {
+              "name": "id",
+              "type": ""
+            },
+            {
+              "name": "id_1",
+              "type": ""
+            },
+            {
+              "name": "id_2",
+              "type": ""
+            }
+          ],
+          "primary_keys": [],
+          "foreign_keys": [
+            {
+              "columns": [
+                "id"
+              ],
+              "foreign_table": "tab_a",
+              "referred_columns": [
+                "tab_a_id"
+              ]
+            },
+            {
+              "columns": [
+                "id_1"
+              ],
+              "foreign_table": "tab_a",
+              "referred_columns": [
+                "tab_a_id"
+              ]
+            },
+            {
+              "columns": [
+                "id_2"
+              ],
+              "foreign_table": "tab_b",
+              "referred_columns": [
+                "tab_b_id"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "tab_mixed_name_2",
+          "columns": [
+            {
+              "name": "id",
+              "type": ""
+            }
+          ],
+          "primary_keys": [],
+          "foreign_keys": [
+            {
+              "columns": [
+                "id"
+              ],
+              "foreign_table": "tab_a",
+              "referred_columns": [
+                "tab_a_id"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "tab_index_test",
+          "columns": [
+            {
+              "name": "tab_index_test_id",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "tab_index_test_id"
+          ],
+          "foreign_keys": [],
+          "has_values": false
+        }
+      ]
+    },
+    {
+      "source_id": "002489_project.sql",
+      "uc_schema": "sp_002489_project",
+      "rationale": "tables=8 fk_density=1.25 data_tables=0",
+      "tables": [
+        {
+          "name": "projects",
+          "columns": [
+            {
+              "name": "id",
+              "type": ""
+            },
+            {
+              "name": "name",
+              "type": ""
+            },
+            {
+              "name": "description",
+              "type": ""
+            },
+            {
+              "name": "process",
+              "type": ""
+            },
+            {
+              "name": "current_iteration",
+              "type": ""
+            },
+            {
+              "name": "start_date",
+              "type": ""
+            },
+            {
+              "name": "end_date",
+              "type": ""
+            },
+            {
+              "name": "version",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "id"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "current_iteration"
+              ],
+              "foreign_table": "iterations",
+              "referred_columns": [
+                "id"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "members",
+          "columns": [
+            {
+              "name": "id",
+              "type": ""
+            },
+            {
+              "name": "name",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "id"
+          ],
+          "foreign_keys": [],
+          "has_values": false
+        },
+        {
+          "name": "project_members",
+          "columns": [
+            {
+              "name": "project",
+              "type": ""
+            },
+            {
+              "name": "member",
+              "type": ""
+            },
+            {
+              "name": "role",
+              "type": ""
+            }
+          ],
+          "primary_keys": [],
+          "foreign_keys": [
+            {
+              "columns": [
+                "project"
+              ],
+              "foreign_table": "projects",
+              "referred_columns": [
+                "id"
+              ]
+            },
+            {
+              "columns": [
+                "member"
+              ],
+              "foreign_table": "members",
+              "referred_columns": [
+                "id"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "iterations",
+          "columns": [
+            {
+              "name": "id",
+              "type": ""
+            },
+            {
+              "name": "project",
+              "type": ""
+            },
+            {
+              "name": "iteration",
+              "type": ""
+            },
+            {
+              "name": "number",
+              "type": ""
+            },
+            {
+              "name": "start_date",
+              "type": ""
+            },
+            {
+              "name": "end_date",
+              "type": ""
+            },
+            {
+              "name": "current_activity",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "id"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "project"
+              ],
+              "foreign_table": "projects",
+              "referred_columns": [
+                "id"
+              ]
+            },
+            {
+              "columns": [
+                "current_activity"
+              ],
+              "foreign_table": "activities",
+              "referred_columns": [
+                "id"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "activities",
+          "columns": [
+            {
+              "name": "id",
+              "type": ""
+            },
+            {
+              "name": "iteration",
+              "type": ""
+            },
+            {
+              "name": "current_task",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "id"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "iteration"
+              ],
+              "foreign_table": "iterations",
+              "referred_columns": [
+                "id"
+              ]
+            },
+            {
+              "columns": [
+                "current_task"
+              ],
+              "foreign_table": "tasks",
+              "referred_columns": [
+                "id"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "tasks",
+          "columns": [
+            {
+              "name": "id",
+              "type": ""
+            },
+            {
+              "name": "task",
+              "type": ""
+            },
+            {
+              "name": "member",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "id"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "member"
+              ],
+              "foreign_table": "members",
+              "referred_columns": [
+                "id"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "artifacts",
+          "columns": [
+            {
+              "name": "id",
+              "type": ""
+            },
+            {
+              "name": "artifact",
+              "type": ""
+            },
+            {
+              "name": "filename",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "id"
+          ],
+          "foreign_keys": [],
+          "has_values": false
+        },
+        {
+          "name": "task_artifacts",
+          "columns": [
+            {
+              "name": "task",
+              "type": ""
+            },
+            {
+              "name": "artifact",
+              "type": ""
+            }
+          ],
+          "primary_keys": [],
+          "foreign_keys": [
+            {
+              "columns": [
+                "task"
+              ],
+              "foreign_table": "tasks",
+              "referred_columns": [
+                "id"
+              ]
+            },
+            {
+              "columns": [
+                "artifact"
+              ],
+              "foreign_table": "artifacts",
+              "referred_columns": [
+                "id"
+              ]
+            }
+          ],
+          "has_values": false
+        }
+      ]
+    },
+    {
+      "source_id": "594700_takeout.sql",
+      "uc_schema": "sp_594700_takeout",
+      "rationale": "tables=8 fk_density=1.25 data_tables=0",
+      "tables": [
+        {
+          "name": "location",
+          "columns": [
+            {
+              "name": "uuid",
+              "type": ""
+            },
+            {
+              "name": "order_id",
+              "type": ""
+            },
+            {
+              "name": "x",
+              "type": ""
+            },
+            {
+              "name": "y",
+              "type": ""
+            },
+            {
+              "name": "time",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "uuid"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "order_id"
+              ],
+              "foreign_table": "orders",
+              "referred_columns": [
+                "order_id"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "order_include",
+          "columns": [
+            {
+              "name": "dish_id",
+              "type": ""
+            },
+            {
+              "name": "order_id",
+              "type": ""
+            },
+            {
+              "name": "amount",
+              "type": ""
+            },
+            {
+              "name": "attribute",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "dish_id",
+            "order_id"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "order_id"
+              ],
+              "foreign_table": "orders",
+              "referred_columns": [
+                "order_id"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "orders",
+          "columns": [
+            {
+              "name": "order_id",
+              "type": ""
+            },
+            {
+              "name": "username",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "order_id"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "username"
+              ],
+              "foreign_table": "user",
+              "referred_columns": [
+                "username"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "score",
+          "columns": [
+            {
+              "name": "use_username",
+              "type": ""
+            },
+            {
+              "name": "username",
+              "type": ""
+            },
+            {
+              "name": "score",
+              "type": ""
+            },
+            {
+              "name": "comment",
+              "type": ""
+            },
+            {
+              "name": "img",
+              "type": ""
+            },
+            {
+              "name": "type",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "use_username",
+            "username"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "username"
+              ],
+              "foreign_table": "user",
+              "referred_columns": [
+                "username"
+              ]
+            },
+            {
+              "columns": [
+                "use_username"
+              ],
+              "foreign_table": "user",
+              "referred_columns": [
+                "username"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "score_dish",
+          "columns": [
+            {
+              "name": "username",
+              "type": ""
+            },
+            {
+              "name": "dish_id",
+              "type": ""
+            },
+            {
+              "name": "grade",
+              "type": ""
+            },
+            {
+              "name": "comment",
+              "type": ""
+            },
+            {
+              "name": "img",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "username",
+            "dish_id"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "username"
+              ],
+              "foreign_table": "user",
+              "referred_columns": [
+                "username"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "store",
+          "columns": [
+            {
+              "name": "store_id",
+              "type": ""
+            },
+            {
+              "name": "username",
+              "type": ""
+            },
+            {
+              "name": "address",
+              "type": ""
+            },
+            {
+              "name": "s_phone",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "store_id"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "username"
+              ],
+              "foreign_table": "user",
+              "referred_columns": [
+                "username"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "user",
+          "columns": [
+            {
+              "name": "username",
+              "type": ""
+            },
+            {
+              "name": "store_id",
+              "type": ""
+            },
+            {
+              "name": "use_username",
+              "type": ""
+            },
+            {
+              "name": "role",
+              "type": ""
+            },
+            {
+              "name": "phone",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "username"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "store_id"
+              ],
+              "foreign_table": "store",
+              "referred_columns": [
+                "store_id"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "user_orders",
+          "columns": [
+            {
+              "name": "username",
+              "type": ""
+            },
+            {
+              "name": "order_id",
+              "type": ""
+            },
+            {
+              "name": "state",
+              "type": ""
+            },
+            {
+              "name": "reciever",
+              "type": ""
+            },
+            {
+              "name": "recieve_address",
+              "type": ""
+            },
+            {
+              "name": "r_phone",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "username",
+            "order_id"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "username"
+              ],
+              "foreign_table": "user",
+              "referred_columns": [
+                "username"
+              ]
+            },
+            {
+              "columns": [
+                "order_id"
+              ],
+              "foreign_table": "orders",
+              "referred_columns": [
+                "order_id"
+              ]
+            }
+          ],
+          "has_values": false
+        }
+      ]
+    },
+    {
+      "source_id": "178181_V4.026__create_unified_user.sql",
+      "uc_schema": "sp_178181_v4_026__create_unified_user",
+      "rationale": "tables=13 fk_density=1.23 data_tables=0",
+      "tables": [
+        {
+          "name": "scopes",
+          "columns": [
+            {
+              "name": "id",
+              "type": ""
+            },
+            {
+              "name": "source",
+              "type": ""
+            },
+            {
+              "name": "parent_id",
+              "type": ""
+            },
+            {
+              "name": "parent_path",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "id"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "parent_id"
+              ],
+              "foreign_table": "scopes",
+              "referred_columns": [
+                "id"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "organizations",
+          "columns": [
+            {
+              "name": "id",
+              "type": ""
+            },
+            {
+              "name": "name",
+              "type": ""
+            },
+            {
+              "name": "kind",
+              "type": ""
+            },
+            {
+              "name": "parent_id",
+              "type": ""
+            },
+            {
+              "name": "scope_id",
+              "type": ""
+            },
+            {
+              "name": "created_at",
+              "type": ""
+            },
+            {
+              "name": "updated_at",
+              "type": ""
+            },
+            {
+              "name": "deleted_at",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "id"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "parent_id"
+              ],
+              "foreign_table": "organizations",
+              "referred_columns": [
+                "id"
+              ]
+            },
+            {
+              "columns": [
+                "scope_id"
+              ],
+              "foreign_table": "scopes",
+              "referred_columns": [
+                "id"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "scope_domains",
+          "columns": [
+            {
+              "name": "id",
+              "type": ""
+            },
+            {
+              "name": "scope_id",
+              "type": ""
+            },
+            {
+              "name": "domain",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "id"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "scope_id"
+              ],
+              "foreign_table": "scopes",
+              "referred_columns": [
+                "id"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "systems",
+          "columns": [
+            {
+              "name": "id",
+              "type": ""
+            },
+            {
+              "name": "name",
+              "type": ""
+            },
+            {
+              "name": "description",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "id"
+          ],
+          "foreign_keys": [],
+          "has_values": false
+        },
+        {
+          "name": "resources",
+          "columns": [
+            {
+              "name": "id",
+              "type": ""
+            },
+            {
+              "name": "name",
+              "type": ""
+            },
+            {
+              "name": "system_id",
+              "type": ""
+            },
+            {
+              "name": "description",
+              "type": ""
+            },
+            {
+              "name": "actions",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "id"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "system_id"
+              ],
+              "foreign_table": "systems",
+              "referred_columns": [
+                "id"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "permissions",
+          "columns": [
+            {
+              "name": "id",
+              "type": ""
+            },
+            {
+              "name": "scope_id",
+              "type": ""
+            },
+            {
+              "name": "resource_id",
+              "type": ""
+            },
+            {
+              "name": "actions",
+              "type": ""
+            },
+            {
+              "name": "frn",
+              "type": ""
+            },
+            {
+              "name": "created_at",
+              "type": ""
+            },
+            {
+              "name": "updated_at",
+              "type": ""
+            },
+            {
+              "name": "deleted_at",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "id"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "resource_id"
+              ],
+              "foreign_table": "resources",
+              "referred_columns": [
+                "id"
+              ]
+            },
+            {
+              "columns": [
+                "scope_id"
+              ],
+              "foreign_table": "scopes",
+              "referred_columns": [
+                "id"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "roles",
+          "columns": [
+            {
+              "name": "id",
+              "type": ""
+            },
+            {
+              "name": "name",
+              "type": ""
+            },
+            {
+              "name": "scope_id",
+              "type": ""
+            },
+            {
+              "name": "created_at",
+              "type": ""
+            },
+            {
+              "name": "updated_at",
+              "type": ""
+            },
+            {
+              "name": "deleted_at",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "id"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "scope_id"
+              ],
+              "foreign_table": "scopes",
+              "referred_columns": [
+                "id"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "role_permissions",
+          "columns": [
+            {
+              "name": "id",
+              "type": ""
+            },
+            {
+              "name": "role_id",
+              "type": ""
+            },
+            {
+              "name": "permission_id",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "id"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "role_id"
+              ],
+              "foreign_table": "roles",
+              "referred_columns": [
+                "id"
+              ]
+            },
+            {
+              "columns": [
+                "permission_id"
+              ],
+              "foreign_table": "permissions",
+              "referred_columns": [
+                "id"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "accounts",
+          "columns": [
+            {
+              "name": "id",
+              "type": ""
+            },
+            {
+              "name": "ratchet",
+              "type": ""
+            },
+            {
+              "name": "created_at",
+              "type": ""
+            },
+            {
+              "name": "updated_at",
+              "type": ""
+            },
+            {
+              "name": "deleted_at",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "id"
+          ],
+          "foreign_keys": [],
+          "has_values": false
+        },
+        {
+          "name": "account_roles",
+          "columns": [
+            {
+              "name": "id",
+              "type": ""
+            },
+            {
+              "name": "account_id",
+              "type": ""
+            },
+            {
+              "name": "role_id",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "id"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "account_id"
+              ],
+              "foreign_table": "accounts",
+              "referred_columns": [
+                "id"
+              ]
+            },
+            {
+              "columns": [
+                "role_id"
+              ],
+              "foreign_table": "roles",
+              "referred_columns": [
+                "id"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "account_access_methods",
+          "columns": [
+            {
+              "name": "id",
+              "type": ""
+            },
+            {
+              "name": "account_id",
+              "type": ""
+            },
+            {
+              "name": "name",
+              "type": ""
+            },
+            {
+              "name": "hashed_password",
+              "type": ""
+            },
+            {
+              "name": "algorithm",
+              "type": ""
+            },
+            {
+              "name": "created_at",
+              "type": ""
+            },
+            {
+              "name": "updated_at",
+              "type": ""
+            },
+            {
+              "name": "deleted_at",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "id"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "account_id"
+              ],
+              "foreign_table": "accounts",
+              "referred_columns": [
+                "id"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "account_organizations",
+          "columns": [
+            {
+              "name": "id",
+              "type": ""
+            },
+            {
+              "name": "account_id",
+              "type": ""
+            },
+            {
+              "name": "organization_id",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "id"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "account_id"
+              ],
+              "foreign_table": "accounts",
+              "referred_columns": [
+                "id"
+              ]
+            },
+            {
+              "columns": [
+                "organization_id"
+              ],
+              "foreign_table": "organizations",
+              "referred_columns": [
+                "id"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "users",
+          "columns": [
+            {
+              "name": "id",
+              "type": ""
+            },
+            {
+              "name": "account_id",
+              "type": ""
+            },
+            {
+              "name": "email",
+              "type": ""
+            },
+            {
+              "name": "is_disabled",
+              "type": ""
+            },
+            {
+              "name": "disabled_by",
+              "type": ""
+            },
+            {
+              "name": "is_blacklisted",
+              "type": ""
+            },
+            {
+              "name": "blacklisted_by",
+              "type": ""
+            },
+            {
+              "name": "name",
+              "type": ""
+            },
+            {
+              "name": "phone_number",
+              "type": ""
+            },
+            {
+              "name": "created_at",
+              "type": ""
+            },
+            {
+              "name": "updated_at",
+              "type": ""
+            },
+            {
+              "name": "deleted_at",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "id"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "account_id"
+              ],
+              "foreign_table": "accounts",
+              "referred_columns": [
+                "id"
+              ]
+            }
+          ],
+          "has_values": false
+        }
+      ]
+    },
+    {
+      "source_id": "169810_init.sql",
+      "uc_schema": "sp_169810_init",
+      "rationale": "tables=6 fk_density=1.17 data_tables=1",
+      "tables": [
+        {
+          "name": "Customer",
+          "columns": [
+            {
+              "name": "uid",
+              "type": ""
+            },
+            {
+              "name": "username",
+              "type": ""
+            },
+            {
+              "name": "password",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "uid"
+          ],
+          "foreign_keys": [],
+          "has_values": false
+        },
+        {
+          "name": "Shoe",
+          "columns": [
+            {
+              "name": "sid",
+              "type": ""
+            },
+            {
+              "name": "stock",
+              "type": ""
+            },
+            {
+              "name": "price",
+              "type": ""
+            },
+            {
+              "name": "size",
+              "type": ""
+            },
+            {
+              "name": "colour",
+              "type": ""
+            },
+            {
+              "name": "image_url",
+              "type": ""
+            },
+            {
+              "name": "name",
+              "type": ""
+            },
+            {
+              "name": "description",
+              "type": ""
+            },
+            {
+              "name": "brand",
+              "type": ""
+            },
+            {
+              "name": "style",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "sid"
+          ],
+          "foreign_keys": [],
+          "has_values": true
+        },
+        {
+          "name": "Review",
+          "columns": [
+            {
+              "name": "uid",
+              "type": ""
+            },
+            {
+              "name": "sid",
+              "type": ""
+            },
+            {
+              "name": "rating",
+              "type": ""
+            },
+            {
+              "name": "comment",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "uid",
+            "sid"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "uid"
+              ],
+              "foreign_table": "Customer",
+              "referred_columns": [
+                "uid"
+              ]
+            },
+            {
+              "columns": [
+                "sid"
+              ],
+              "foreign_table": "Shoe",
+              "referred_columns": [
+                "sid"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "PaymentMethod",
+          "columns": [
+            {
+              "name": "uid",
+              "type": ""
+            },
+            {
+              "name": "cardNumber",
+              "type": ""
+            },
+            {
+              "name": "type",
+              "type": ""
+            },
+            {
+              "name": "isDefault",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "uid",
+            "cardNumber"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "uid"
+              ],
+              "foreign_table": "Customer",
+              "referred_columns": [
+                "uid"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "Transaction",
+          "columns": [
+            {
+              "name": "tid",
+              "type": ""
+            },
+            {
+              "name": "uid",
+              "type": ""
+            },
+            {
+              "name": "sid",
+              "type": ""
+            },
+            {
+              "name": "datetime",
+              "type": ""
+            },
+            {
+              "name": "quantity",
+              "type": ""
+            },
+            {
+              "name": "address",
+              "type": ""
+            },
+            {
+              "name": "cardNumber",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "tid"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "uid"
+              ],
+              "foreign_table": "Customer",
+              "referred_columns": [
+                "uid"
+              ]
+            },
+            {
+              "columns": [
+                "sid"
+              ],
+              "foreign_table": "Shoe",
+              "referred_columns": [
+                "sid"
+              ]
+            },
+            {
+              "columns": [
+                "uid",
+                "cardNumber"
+              ],
+              "foreign_table": "PaymentMethod",
+              "referred_columns": [
+                "uid",
+                "cardNumber"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "AddressBook",
+          "columns": [
+            {
+              "name": "uid",
+              "type": ""
+            },
+            {
+              "name": "address",
+              "type": ""
+            },
+            {
+              "name": "isDefault",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "uid",
+            "address"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "uid"
+              ],
+              "foreign_table": "Customer",
+              "referred_columns": [
+                "uid"
+              ]
+            }
+          ],
+          "has_values": false
+        }
+      ]
+    },
+    {
+      "source_id": "352545_capstone.sql",
+      "uc_schema": "sp_352545_capstone",
+      "rationale": "tables=18 fk_density=1.17 data_tables=6",
+      "tables": [
+        {
+          "name": "user_role",
+          "columns": [
+            {
+              "name": "role_id",
+              "type": ""
+            },
+            {
+              "name": "role",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "role_id"
+          ],
+          "foreign_keys": [],
+          "has_values": true
+        },
+        {
+          "name": "user",
+          "columns": [
+            {
+              "name": "user_id",
+              "type": ""
+            },
+            {
+              "name": "role_id",
+              "type": ""
+            },
+            {
+              "name": "password",
+              "type": ""
+            },
+            {
+              "name": "status",
+              "type": ""
+            },
+            {
+              "name": "fname",
+              "type": ""
+            },
+            {
+              "name": "mname",
+              "type": ""
+            },
+            {
+              "name": "lname",
+              "type": ""
+            },
+            {
+              "name": "birthdate",
+              "type": ""
+            },
+            {
+              "name": "contact_no",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "user_id"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "role_id"
+              ],
+              "foreign_table": "user_role",
+              "referred_columns": [
+                "role_id"
+              ]
+            }
+          ],
+          "has_values": true
+        },
+        {
+          "name": "course",
+          "columns": [
+            {
+              "name": "course_id",
+              "type": ""
+            },
+            {
+              "name": "course_name",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "course_id"
+          ],
+          "foreign_keys": [],
+          "has_values": true
+        },
+        {
+          "name": "student",
+          "columns": [
+            {
+              "name": "student_id",
+              "type": ""
+            },
+            {
+              "name": "course_id",
+              "type": ""
+            },
+            {
+              "name": "year_level",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "student_id"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "student_id"
+              ],
+              "foreign_table": "user",
+              "referred_columns": [
+                "user_id"
+              ]
+            },
+            {
+              "columns": [
+                "course_id"
+              ],
+              "foreign_table": "course",
+              "referred_columns": [
+                "course_id"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "instructor",
+          "columns": [
+            {
+              "name": "instructor_id",
+              "type": ""
+            },
+            {
+              "name": "position",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "instructor_id"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "instructor_id"
+              ],
+              "foreign_table": "user",
+              "referred_columns": [
+                "user_id"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "room_type",
+          "columns": [
+            {
+              "name": "room_type_id",
+              "type": ""
+            },
+            {
+              "name": "room_type",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "room_type_id"
+          ],
+          "foreign_keys": [],
+          "has_values": false
+        },
+        {
+          "name": "room",
+          "columns": [
+            {
+              "name": "room_id",
+              "type": ""
+            },
+            {
+              "name": "room_type",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "room_id"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "room_type"
+              ],
+              "foreign_table": "room_type",
+              "referred_columns": [
+                "room_type_id"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "subject",
+          "columns": [
+            {
+              "name": "subject_code",
+              "type": ""
+            },
+            {
+              "name": "subject_title",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "subject_code"
+          ],
+          "foreign_keys": [],
+          "has_values": true
+        },
+        {
+          "name": "academic_year",
+          "columns": [
+            {
+              "name": "academic_year_id",
+              "type": ""
+            },
+            {
+              "name": "academic_year",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "academic_year_id"
+          ],
+          "foreign_keys": [],
+          "has_values": true
+        },
+        {
+          "name": "semester",
+          "columns": [
+            {
+              "name": "semester_id",
+              "type": ""
+            },
+            {
+              "name": "semester",
+              "type": ""
+            },
+            {
+              "name": "academic_year_id",
+              "type": ""
+            },
+            {
+              "name": "start_date",
+              "type": ""
+            },
+            {
+              "name": "end_date",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "semester_id"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "academic_year_id"
+              ],
+              "foreign_table": "academic_year",
+              "referred_columns": [
+                "academic_year_id"
+              ]
+            }
+          ],
+          "has_values": true
+        },
+        {
+          "name": "seat_plan",
+          "columns": [
+            {
+              "name": "seat_id",
+              "type": ""
+            },
+            {
+              "name": "row",
+              "type": ""
+            },
+            {
+              "name": "column",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "seat_id"
+          ],
+          "foreign_keys": [],
+          "has_values": false
+        },
+        {
+          "name": "class",
+          "columns": [
+            {
+              "name": "class_id",
+              "type": ""
+            },
+            {
+              "name": "subject_code",
+              "type": ""
+            },
+            {
+              "name": "room_id",
+              "type": ""
+            },
+            {
+              "name": "semester_id",
+              "type": ""
+            },
+            {
+              "name": "start_time",
+              "type": ""
+            },
+            {
+              "name": "end_time",
+              "type": ""
+            },
+            {
+              "name": "days",
+              "type": ""
+            },
+            {
+              "name": "instructor_id",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "class_id"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "semester_id"
+              ],
+              "foreign_table": "semester",
+              "referred_columns": [
+                "semester_id"
+              ]
+            },
+            {
+              "columns": [
+                "subject_code"
+              ],
+              "foreign_table": "subject",
+              "referred_columns": [
+                "subject_code"
+              ]
+            },
+            {
+              "columns": [
+                "room_id"
+              ],
+              "foreign_table": "room",
+              "referred_columns": [
+                "room_id"
+              ]
+            },
+            {
+              "columns": [
+                "instructor_id"
+              ],
+              "foreign_table": "instructor",
+              "referred_columns": [
+                "instructor_id"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "class_member",
+          "columns": [
+            {
+              "name": "student_id",
+              "type": ""
+            },
+            {
+              "name": "class_id",
+              "type": ""
+            },
+            {
+              "name": "status",
+              "type": ""
+            },
+            {
+              "name": "seat_id",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "student_id"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "student_id"
+              ],
+              "foreign_table": "student",
+              "referred_columns": [
+                "student_id"
+              ]
+            },
+            {
+              "columns": [
+                "class_id"
+              ],
+              "foreign_table": "class",
+              "referred_columns": [
+                "class_id"
+              ]
+            },
+            {
+              "columns": [
+                "seat_id"
+              ],
+              "foreign_table": "seat_plan",
+              "referred_columns": [
+                "seat_id"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "attendance_status",
+          "columns": [
+            {
+              "name": "attendance_status",
+              "type": ""
+            },
+            {
+              "name": "definition",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "attendance_status"
+          ],
+          "foreign_keys": [],
+          "has_values": false
+        },
+        {
+          "name": "attendance",
+          "columns": [
+            {
+              "name": "attendance_id",
+              "type": ""
+            },
+            {
+              "name": "class_id",
+              "type": ""
+            },
+            {
+              "name": "student_id",
+              "type": ""
+            },
+            {
+              "name": "attendance_datetime",
+              "type": ""
+            },
+            {
+              "name": "attendance_status",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "attendance_id"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "attendance_status"
+              ],
+              "foreign_table": "attendance_status",
+              "referred_columns": [
+                "attendance_status"
+              ]
+            },
+            {
+              "columns": [
+                "class_id"
+              ],
+              "foreign_table": "class_member",
+              "referred_columns": [
+                "class_id"
+              ]
+            },
+            {
+              "columns": [
+                "student_id"
+              ],
+              "foreign_table": "class_member",
+              "referred_columns": [
+                "student_id"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "class_calendar",
+          "columns": [
+            {
+              "name": "class_calendar_id",
+              "type": ""
+            },
+            {
+              "name": "class_id",
+              "type": ""
+            },
+            {
+              "name": "event_date",
+              "type": ""
+            },
+            {
+              "name": "event",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "class_calendar_id"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "class_id"
+              ],
+              "foreign_table": "class",
+              "referred_columns": [
+                "class_id"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "consultation",
+          "columns": [
+            {
+              "name": "consultation_id",
+              "type": ""
+            },
+            {
+              "name": "instructor_id",
+              "type": ""
+            },
+            {
+              "name": "class_id",
+              "type": ""
+            },
+            {
+              "name": "datetime_scheduled",
+              "type": ""
+            },
+            {
+              "name": "start_time",
+              "type": ""
+            },
+            {
+              "name": "end_time",
+              "type": ""
+            },
+            {
+              "name": "issue_topic",
+              "type": ""
+            },
+            {
+              "name": "remarks",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "consultation_id"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "instructor_id"
+              ],
+              "foreign_table": "instructor",
+              "referred_columns": [
+                "instructor_id"
+              ]
+            },
+            {
+              "columns": [
+                "class_id"
+              ],
+              "foreign_table": "class",
+              "referred_columns": [
+                "class_id"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "consultee",
+          "columns": [
+            {
+              "name": "consultation_id",
+              "type": ""
+            },
+            {
+              "name": "student_id",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "consultation_id"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "consultation_id"
+              ],
+              "foreign_table": "consultation",
+              "referred_columns": [
+                "consultation_id"
+              ]
+            },
+            {
+              "columns": [
+                "student_id"
+              ],
+              "foreign_table": "class_member",
+              "referred_columns": [
+                "student_id"
+              ]
+            }
+          ],
+          "has_values": false
+        }
+      ]
+    },
+    {
+      "source_id": "365427_schema.sql",
+      "uc_schema": "sp_365427_schema",
+      "rationale": "tables=4 fk_density=1.00 data_tables=0",
+      "tables": [
+        {
+          "name": "Contact",
+          "columns": [
+            {
+              "name": "contant_id",
+              "type": ""
+            },
+            {
+              "name": "phone_number",
+              "type": ""
+            },
+            {
+              "name": "e_mail",
+              "type": ""
+            },
+            {
+              "name": "pat_id",
+              "type": ""
+            },
+            {
+              "name": "doc_id",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "contant_id"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "doc_id"
+              ],
+              "foreign_table": "Doctor",
+              "referred_columns": [
+                "doctor_id"
+              ]
+            },
+            {
+              "columns": [
+                "pat_id"
+              ],
+              "foreign_table": "Patient",
+              "referred_columns": [
+                "patient_id"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "Appointments",
+          "columns": [
+            {
+              "name": "appoi_id",
+              "type": ""
+            },
+            {
+              "name": "day",
+              "type": ""
+            },
+            {
+              "name": "time_from",
+              "type": ""
+            },
+            {
+              "name": "time_to",
+              "type": ""
+            },
+            {
+              "name": "pat_id",
+              "type": ""
+            },
+            {
+              "name": "doc_id",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "appoi_id"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "doc_id"
+              ],
+              "foreign_table": "Doctor",
+              "referred_columns": [
+                "doctor_id"
+              ]
+            },
+            {
+              "columns": [
+                "pat_id"
+              ],
+              "foreign_table": "Patient",
+              "referred_columns": [
+                "patient_id"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "Patient",
+          "columns": [
+            {
+              "name": "patient_id",
+              "type": ""
+            },
+            {
+              "name": "patient_first_name",
+              "type": ""
+            },
+            {
+              "name": "patient_last_name",
+              "type": ""
+            },
+            {
+              "name": "gender",
+              "type": ""
+            },
+            {
+              "name": "date_of_birth",
+              "type": ""
+            },
+            {
+              "name": "patient_image",
+              "type": ""
+            },
+            {
+              "name": "patient_password",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "patient_id"
+          ],
+          "foreign_keys": [],
+          "has_values": false
+        },
+        {
+          "name": "Doctor",
+          "columns": [
+            {
+              "name": "doctor_id",
+              "type": ""
+            },
+            {
+              "name": "doctor_name",
+              "type": ""
+            },
+            {
+              "name": "doctor_speciailty",
+              "type": ""
+            },
+            {
+              "name": "doc_location",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "doctor_id"
+          ],
+          "foreign_keys": [],
+          "has_values": false
+        }
+      ]
+    },
+    {
+      "source_id": "435873_db.sql",
+      "uc_schema": "sp_435873_db",
+      "rationale": "tables=7 fk_density=0.86 data_tables=0",
+      "tables": [
+        {
+          "name": "users",
+          "columns": [
+            {
+              "name": "id",
+              "type": ""
+            },
+            {
+              "name": "email",
+              "type": ""
+            },
+            {
+              "name": "password",
+              "type": ""
+            },
+            {
+              "name": "name",
+              "type": ""
+            },
+            {
+              "name": "role",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "id"
+          ],
+          "foreign_keys": [],
+          "has_values": false
+        },
+        {
+          "name": "categories",
+          "columns": [
+            {
+              "name": "id",
+              "type": ""
+            },
+            {
+              "name": "name",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "id"
+          ],
+          "foreign_keys": [],
+          "has_values": false
+        },
+        {
+          "name": "items",
+          "columns": [
+            {
+              "name": "id",
+              "type": ""
+            },
+            {
+              "name": "name",
+              "type": ""
+            },
+            {
+              "name": "price_usd",
+              "type": ""
+            },
+            {
+              "name": "description",
+              "type": ""
+            },
+            {
+              "name": "category_id",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "id"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "category_id"
+              ],
+              "foreign_table": "categories",
+              "referred_columns": [
+                "id"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "orders",
+          "columns": [
+            {
+              "name": "id",
+              "type": ""
+            },
+            {
+              "name": "status",
+              "type": ""
+            },
+            {
+              "name": "created_at",
+              "type": ""
+            },
+            {
+              "name": "delivered_at",
+              "type": ""
+            },
+            {
+              "name": "cacelled_at",
+              "type": ""
+            },
+            {
+              "name": "opened_at",
+              "type": ""
+            },
+            {
+              "name": "accepted_at",
+              "type": ""
+            },
+            {
+              "name": "user_id",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "id"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "user_id"
+              ],
+              "foreign_table": "users",
+              "referred_columns": [
+                "id"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "orders_items",
+          "columns": [
+            {
+              "name": "order_id",
+              "type": ""
+            },
+            {
+              "name": "item_id",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "order_id",
+            "item_id"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "order_id"
+              ],
+              "foreign_table": "orders",
+              "referred_columns": [
+                "id"
+              ]
+            },
+            {
+              "columns": [
+                "item_id"
+              ],
+              "foreign_table": "items",
+              "referred_columns": [
+                "id"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "spots",
+          "columns": [
+            {
+              "name": "id",
+              "type": ""
+            },
+            {
+              "name": "label",
+              "type": ""
+            },
+            {
+              "name": "is_free",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "id"
+          ],
+          "foreign_keys": [],
+          "has_values": false
+        },
+        {
+          "name": "spots_users",
+          "columns": [
+            {
+              "name": "spot_id",
+              "type": ""
+            },
+            {
+              "name": "user_id",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "spot_id",
+            "user_id"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "spot_id"
+              ],
+              "foreign_table": "spots",
+              "referred_columns": [
+                "id"
+              ]
+            },
+            {
+              "columns": [
+                "user_id"
+              ],
+              "foreign_table": "users",
+              "referred_columns": [
+                "id"
+              ]
+            }
+          ],
+          "has_values": false
+        }
+      ]
+    },
+    {
+      "source_id": "596038_DDL_Proyecto.sql",
+      "uc_schema": "sp_596038_ddl_proyecto",
+      "rationale": "tables=7 fk_density=0.86 data_tables=1",
+      "tables": [
+        {
+          "name": "Perfil",
+          "columns": [
+            {
+              "name": "Id_perfil",
+              "type": ""
+            },
+            {
+              "name": "Nombre",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "Id_perfil"
+          ],
+          "foreign_keys": [],
+          "has_values": true
+        },
+        {
+          "name": "Persona",
+          "columns": [
+            {
+              "name": "Id_persona",
+              "type": ""
+            },
+            {
+              "name": "Nombre",
+              "type": ""
+            },
+            {
+              "name": "Apellido1",
+              "type": ""
+            },
+            {
+              "name": "Apellido2",
+              "type": ""
+            },
+            {
+              "name": "Fecha_alta",
+              "type": ""
+            },
+            {
+              "name": "Usuario",
+              "type": ""
+            },
+            {
+              "name": "Contrasenna",
+              "type": ""
+            },
+            {
+              "name": "Email",
+              "type": ""
+            },
+            {
+              "name": "Id_perfil",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "Id_persona"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "Id_perfil"
+              ],
+              "foreign_table": "Perfil",
+              "referred_columns": [
+                "Id_perfil"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "Equipo",
+          "columns": [
+            {
+              "name": "Id_equipo",
+              "type": ""
+            },
+            {
+              "name": "Nombre",
+              "type": ""
+            },
+            {
+              "name": "Fecha_creacion",
+              "type": ""
+            },
+            {
+              "name": "Comentario",
+              "type": ""
+            },
+            {
+              "name": "Lugar",
+              "type": ""
+            },
+            {
+              "name": "Id_persona",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "Id_equipo"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "Id_persona"
+              ],
+              "foreign_table": "Persona",
+              "referred_columns": [
+                "Id_persona"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "Jugador",
+          "columns": [
+            {
+              "name": "Id_jugador",
+              "type": ""
+            },
+            {
+              "name": "Dni",
+              "type": ""
+            },
+            {
+              "name": "Nombre",
+              "type": ""
+            },
+            {
+              "name": "Apellido1",
+              "type": ""
+            },
+            {
+              "name": "Apellido2",
+              "type": ""
+            },
+            {
+              "name": "Nickname",
+              "type": ""
+            },
+            {
+              "name": "Sueldo",
+              "type": ""
+            },
+            {
+              "name": "Fecha_alta",
+              "type": ""
+            },
+            {
+              "name": "Comentario",
+              "type": ""
+            },
+            {
+              "name": "Id_equipo",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "Id_jugador"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "Id_equipo"
+              ],
+              "foreign_table": "Equipo",
+              "referred_columns": [
+                "Id_equipo"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "Jornada",
+          "columns": [
+            {
+              "name": "Id_jornada",
+              "type": ""
+            },
+            {
+              "name": "Fecha_inicio",
+              "type": ""
+            },
+            {
+              "name": "Fecha_fin",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "Id_jornada"
+          ],
+          "foreign_keys": [],
+          "has_values": false
+        },
+        {
+          "name": "Partido",
+          "columns": [
+            {
+              "name": "Id_partido",
+              "type": ""
+            },
+            {
+              "name": "Fecha",
+              "type": ""
+            },
+            {
+              "name": "Id_jornada",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "Id_partido"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "Id_jornada"
+              ],
+              "foreign_table": "Jornada",
+              "referred_columns": [
+                "Id_jornada"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "Marcador",
+          "columns": [
+            {
+              "name": "Id_marcador",
+              "type": ""
+            },
+            {
+              "name": "Puntuacion",
+              "type": ""
+            },
+            {
+              "name": "Visitante",
+              "type": ""
+            },
+            {
+              "name": "Id_partido",
+              "type": ""
+            },
+            {
+              "name": "Id_equipo",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "Id_marcador"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "Id_partido"
+              ],
+              "foreign_table": "Partido",
+              "referred_columns": [
+                "Id_partido"
+              ]
+            },
+            {
+              "columns": [
+                "Id_equipo"
+              ],
+              "foreign_table": "Equipo",
+              "referred_columns": [
+                "Id_equipo"
+              ]
+            }
+          ],
+          "has_values": false
+        }
+      ]
+    },
+    {
+      "source_id": "008582_auth-services-schema-mysql.sql",
+      "uc_schema": "sp_008582_auth_services_schema_mysql",
+      "rationale": "tables=6 fk_density=0.83 data_tables=0",
+      "tables": [
+        {
+          "name": "user_table",
+          "columns": [
+            {
+              "name": "id",
+              "type": ""
+            },
+            {
+              "name": "uid",
+              "type": ""
+            },
+            {
+              "name": "active",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "id"
+          ],
+          "foreign_keys": [],
+          "has_values": false
+        },
+        {
+          "name": "role_table",
+          "columns": [
+            {
+              "name": "id",
+              "type": ""
+            },
+            {
+              "name": "role_name",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "id"
+          ],
+          "foreign_keys": [],
+          "has_values": false
+        },
+        {
+          "name": "authority_table",
+          "columns": [
+            {
+              "name": "id",
+              "type": ""
+            },
+            {
+              "name": "uid",
+              "type": ""
+            },
+            {
+              "name": "authority",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "id"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "uid"
+              ],
+              "foreign_table": "user_table",
+              "referred_columns": [
+                "uid"
+              ]
+            },
+            {
+              "columns": [
+                "authority"
+              ],
+              "foreign_table": "role_table",
+              "referred_columns": [
+                "role_name"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "username_password_table",
+          "columns": [
+            {
+              "name": "id",
+              "type": ""
+            },
+            {
+              "name": "user_name",
+              "type": ""
+            },
+            {
+              "name": "password",
+              "type": ""
+            },
+            {
+              "name": "uid",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "id"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "uid"
+              ],
+              "foreign_table": "user_table",
+              "referred_columns": [
+                "uid"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "client_id_table",
+          "columns": [
+            {
+              "name": "id",
+              "type": ""
+            },
+            {
+              "name": "uid",
+              "type": ""
+            },
+            {
+              "name": "client_id",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "id"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "uid"
+              ],
+              "foreign_table": "user_table",
+              "referred_columns": [
+                "uid"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "api_key_table",
+          "columns": [
+            {
+              "name": "id",
+              "type": ""
+            },
+            {
+              "name": "client_id",
+              "type": ""
+            },
+            {
+              "name": "api_key",
+              "type": ""
+            },
+            {
+              "name": "api_key_desc",
+              "type": ""
+            },
+            {
+              "name": "active",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "id"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "client_id"
+              ],
+              "foreign_table": "client_id_table",
+              "referred_columns": [
+                "client_id"
+              ]
+            }
+          ],
+          "has_values": false
+        }
+      ]
+    },
+    {
+      "source_id": "289361_schema.sql",
+      "uc_schema": "sp_289361_schema",
+      "rationale": "tables=6 fk_density=0.83 data_tables=0",
+      "tables": [
+        {
+          "name": "users",
+          "columns": [
+            {
+              "name": "username",
+              "type": ""
+            },
+            {
+              "name": "email",
+              "type": ""
+            },
+            {
+              "name": "name",
+              "type": ""
+            },
+            {
+              "name": "surname",
+              "type": ""
+            },
+            {
+              "name": "biografy",
+              "type": ""
+            },
+            {
+              "name": "imageprofile",
+              "type": ""
+            },
+            {
+              "name": "password",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "username"
+          ],
+          "foreign_keys": [],
+          "has_values": false
+        },
+        {
+          "name": "advertiser",
+          "columns": [
+            {
+              "name": "advertiserid",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "advertiserid"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "advertiserid"
+              ],
+              "foreign_table": "users",
+              "referred_columns": [
+                "username"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "reader",
+          "columns": [
+            {
+              "name": "readerid",
+              "type": ""
+            }
+          ],
+          "primary_keys": [],
+          "foreign_keys": [
+            {
+              "columns": [
+                "readerid"
+              ],
+              "foreign_table": "users",
+              "referred_columns": [
+                "username"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "category",
+          "columns": [
+            {
+              "name": "name",
+              "type": ""
+            },
+            {
+              "name": "description",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "name"
+          ],
+          "foreign_keys": [],
+          "has_values": false
+        },
+        {
+          "name": "articles",
+          "columns": [
+            {
+              "name": "articlesid",
+              "type": ""
+            },
+            {
+              "name": "advertiserid",
+              "type": ""
+            },
+            {
+              "name": "categoryid",
+              "type": ""
+            },
+            {
+              "name": "title",
+              "type": ""
+            },
+            {
+              "name": "description",
+              "type": ""
+            },
+            {
+              "name": "markdown",
+              "type": ""
+            },
+            {
+              "name": "imagearticle",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "articlesid"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "advertiserid"
+              ],
+              "foreign_table": "advertiser",
+              "referred_columns": [
+                "advertiserid"
+              ]
+            },
+            {
+              "columns": [
+                "categoryid"
+              ],
+              "foreign_table": "category",
+              "referred_columns": [
+                "name"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "material",
+          "columns": [
+            {
+              "name": "materialid",
+              "type": ""
+            },
+            {
+              "name": "articlesid",
+              "type": ""
+            },
+            {
+              "name": "filepath",
+              "type": ""
+            },
+            {
+              "name": "virustotalurl",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "materialid"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "articlesid"
+              ],
+              "foreign_table": "articles",
+              "referred_columns": [
+                "articlesid"
+              ]
+            }
+          ],
+          "has_values": false
+        }
+      ]
+    },
+    {
+      "source_id": "413175_01.TableDesign_Exam21Oct2018.sql",
+      "uc_schema": "sp_413175_01_tabledesign_exam21oct2018",
+      "rationale": "tables=6 fk_density=0.83 data_tables=0",
+      "tables": [
+        {
+          "name": "planets",
+          "columns": [
+            {
+              "name": "id",
+              "type": ""
+            },
+            {
+              "name": "name",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "id"
+          ],
+          "foreign_keys": [],
+          "has_values": false
+        },
+        {
+          "name": "spaceports",
+          "columns": [
+            {
+              "name": "id",
+              "type": ""
+            },
+            {
+              "name": "name",
+              "type": ""
+            },
+            {
+              "name": "planet_id",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "id"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "planet_id"
+              ],
+              "foreign_table": "planets",
+              "referred_columns": [
+                "id"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "spaceships",
+          "columns": [
+            {
+              "name": "id",
+              "type": ""
+            },
+            {
+              "name": "name",
+              "type": ""
+            },
+            {
+              "name": "manufacturer",
+              "type": ""
+            },
+            {
+              "name": "light_speed_rate",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "id"
+          ],
+          "foreign_keys": [],
+          "has_values": false
+        },
+        {
+          "name": "colonists",
+          "columns": [
+            {
+              "name": "id",
+              "type": ""
+            },
+            {
+              "name": "first_name",
+              "type": ""
+            },
+            {
+              "name": "last_name",
+              "type": ""
+            },
+            {
+              "name": "ucn",
+              "type": ""
+            },
+            {
+              "name": "birth_date",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "id"
+          ],
+          "foreign_keys": [],
+          "has_values": false
+        },
+        {
+          "name": "journeys",
+          "columns": [
+            {
+              "name": "id",
+              "type": ""
+            },
+            {
+              "name": "journey_start",
+              "type": ""
+            },
+            {
+              "name": "journey_end",
+              "type": ""
+            },
+            {
+              "name": "purpose",
+              "type": ""
+            },
+            {
+              "name": "destination_spaceport_id",
+              "type": ""
+            },
+            {
+              "name": "spaceship_id",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "id"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "destination_spaceport_id"
+              ],
+              "foreign_table": "spaceports",
+              "referred_columns": [
+                "id"
+              ]
+            },
+            {
+              "columns": [
+                "spaceship_id"
+              ],
+              "foreign_table": "spaceships",
+              "referred_columns": [
+                "id"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "travel_cards",
+          "columns": [
+            {
+              "name": "id",
+              "type": ""
+            },
+            {
+              "name": "card_number",
+              "type": ""
+            },
+            {
+              "name": "job_during_journey",
+              "type": ""
+            },
+            {
+              "name": "colonist_id",
+              "type": ""
+            },
+            {
+              "name": "journey_id",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "id"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "colonist_id"
+              ],
+              "foreign_table": "colonists",
+              "referred_columns": [
+                "id"
+              ]
+            },
+            {
+              "columns": [
+                "journey_id"
+              ],
+              "foreign_table": "journeys",
+              "referred_columns": [
+                "id"
+              ]
+            }
+          ],
+          "has_values": false
+        }
+      ]
+    },
+    {
+      "source_id": "422245_tableschemata.sql",
+      "uc_schema": "sp_422245_tableschemata",
+      "rationale": "tables=6 fk_density=0.83 data_tables=0",
+      "tables": [
+        {
+          "name": "titles",
+          "columns": [
+            {
+              "name": "title_id",
+              "type": ""
+            },
+            {
+              "name": "title",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "title_id"
+          ],
+          "foreign_keys": [],
+          "has_values": false
+        },
+        {
+          "name": "employees",
+          "columns": [
+            {
+              "name": "emp_no",
+              "type": ""
+            },
+            {
+              "name": "emp_title_id",
+              "type": ""
+            },
+            {
+              "name": "birth_date",
+              "type": ""
+            },
+            {
+              "name": "first_name",
+              "type": ""
+            },
+            {
+              "name": "last_name",
+              "type": ""
+            },
+            {
+              "name": "sex",
+              "type": ""
+            },
+            {
+              "name": "hire_date",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "emp_no"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "emp_title_id"
+              ],
+              "foreign_table": "titles",
+              "referred_columns": [
+                "title_id"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "departments",
+          "columns": [
+            {
+              "name": "dept_no",
+              "type": ""
+            },
+            {
+              "name": "dept_name",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "dept_no"
+          ],
+          "foreign_keys": [],
+          "has_values": false
+        },
+        {
+          "name": "dept_manager",
+          "columns": [
+            {
+              "name": "dept_no",
+              "type": ""
+            },
+            {
+              "name": "emp_no",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "dept_no",
+            "emp_no"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "emp_no"
+              ],
+              "foreign_table": "employees",
+              "referred_columns": [
+                "emp_no"
+              ]
+            },
+            {
+              "columns": [
+                "dept_no"
+              ],
+              "foreign_table": "departments",
+              "referred_columns": [
+                "dept_no"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "salaries",
+          "columns": [
+            {
+              "name": "emp_no",
+              "type": ""
+            },
+            {
+              "name": "salary",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "emp_no"
+          ],
+          "foreign_keys": [],
+          "has_values": false
+        },
+        {
+          "name": "dept_emp",
+          "columns": [
+            {
+              "name": "emp_no",
+              "type": ""
+            },
+            {
+              "name": "dept_no",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "dept_no",
+            "emp_no"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "emp_no"
+              ],
+              "foreign_table": "employees",
+              "referred_columns": [
+                "emp_no"
+              ]
+            },
+            {
+              "columns": [
+                "dept_no"
+              ],
+              "foreign_table": "departments",
+              "referred_columns": [
+                "dept_no"
+              ]
+            }
+          ],
+          "has_values": false
+        }
+      ]
+    },
+    {
+      "source_id": "020891_V01__impl_usuario.sql",
+      "uc_schema": "sp_020891_v01__impl_usuario",
+      "rationale": "tables=5 fk_density=0.80 data_tables=5",
+      "tables": [
+        {
+          "name": "tb_grupo",
+          "columns": [
+            {
+              "name": "id_grupo",
+              "type": ""
+            },
+            {
+              "name": "ds_nome",
+              "type": ""
+            },
+            {
+              "name": "ds_descricao",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "id_grupo"
+          ],
+          "foreign_keys": [],
+          "has_values": true
+        },
+        {
+          "name": "tb_permissao",
+          "columns": [
+            {
+              "name": "id_permissao",
+              "type": ""
+            },
+            {
+              "name": "ds_permissao",
+              "type": ""
+            },
+            {
+              "name": "ds_descricao",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "id_permissao"
+          ],
+          "foreign_keys": [],
+          "has_values": true
+        },
+        {
+          "name": "tb_usuario",
+          "columns": [
+            {
+              "name": "id_usuario",
+              "type": ""
+            },
+            {
+              "name": "ds_nome",
+              "type": ""
+            },
+            {
+              "name": "ds_login",
+              "type": ""
+            },
+            {
+              "name": "ds_senha",
+              "type": ""
+            },
+            {
+              "name": "fl_ativo",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "id_usuario"
+          ],
+          "foreign_keys": [],
+          "has_values": true
+        },
+        {
+          "name": "tb_usuario_x_grupo",
+          "columns": [
+            {
+              "name": "id_usuario",
+              "type": ""
+            },
+            {
+              "name": "id_grupo",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "id_usuario",
+            "id_grupo"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "id_usuario"
+              ],
+              "foreign_table": "tb_usuario",
+              "referred_columns": [
+                "id_usuario"
+              ]
+            },
+            {
+              "columns": [
+                "id_grupo"
+              ],
+              "foreign_table": "tb_grupo",
+              "referred_columns": [
+                "id_grupo"
+              ]
+            }
+          ],
+          "has_values": true
+        },
+        {
+          "name": "tb_permissao_x_grupo",
+          "columns": [
+            {
+              "name": "id_permissao",
+              "type": ""
+            },
+            {
+              "name": "id_grupo",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "id_permissao",
+            "id_grupo"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "id_permissao"
+              ],
+              "foreign_table": "tb_permissao",
+              "referred_columns": [
+                "id_permissao"
+              ]
+            },
+            {
+              "columns": [
+                "id_grupo"
+              ],
+              "foreign_table": "tb_grupo",
+              "referred_columns": [
+                "id_grupo"
+              ]
+            }
+          ],
+          "has_values": true
+        }
+      ]
+    },
+    {
+      "source_id": "359146_formasnormais.sql",
+      "uc_schema": "sp_359146_formasnormais",
+      "rationale": "tables=5 fk_density=0.80 data_tables=0",
+      "tables": [
+        {
+          "name": "PACIENTE",
+          "columns": [
+            {
+              "name": "IDPACIENTE",
+              "type": ""
+            },
+            {
+              "name": "NOME",
+              "type": ""
+            },
+            {
+              "name": "SEXO",
+              "type": ""
+            },
+            {
+              "name": "EMAIL",
+              "type": ""
+            },
+            {
+              "name": "NASCIMENTO",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "IDPACIENTE"
+          ],
+          "foreign_keys": [],
+          "has_values": false
+        },
+        {
+          "name": "MEDICO",
+          "columns": [
+            {
+              "name": "IDMEDICO",
+              "type": ""
+            },
+            {
+              "name": "NOME",
+              "type": ""
+            },
+            {
+              "name": "SEXO",
+              "type": ""
+            },
+            {
+              "name": "ESPECIALIDADE",
+              "type": ""
+            },
+            {
+              "name": "FUNCIONARIO",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "IDMEDICO"
+          ],
+          "foreign_keys": [],
+          "has_values": false
+        },
+        {
+          "name": "HOSPITAL",
+          "columns": [
+            {
+              "name": "IDHOSPITAL",
+              "type": ""
+            },
+            {
+              "name": "NOME",
+              "type": ""
+            },
+            {
+              "name": "BAIRRO",
+              "type": ""
+            },
+            {
+              "name": "CIDADE",
+              "type": ""
+            },
+            {
+              "name": "ESTADO",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "IDHOSPITAL"
+          ],
+          "foreign_keys": [],
+          "has_values": false
+        },
+        {
+          "name": "CONSULTA",
+          "columns": [
+            {
+              "name": "IDCONSULTA",
+              "type": ""
+            },
+            {
+              "name": "ID_PACIENTE",
+              "type": ""
+            },
+            {
+              "name": "ID_MEDICO",
+              "type": ""
+            },
+            {
+              "name": "ID_HOSPITAL",
+              "type": ""
+            },
+            {
+              "name": "DATA",
+              "type": ""
+            },
+            {
+              "name": "DIAGNOSTIVO",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "IDCONSULTA"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "ID_PACIENTE"
+              ],
+              "foreign_table": "PACIENTE",
+              "referred_columns": [
+                "IDPACIENTE"
+              ]
+            },
+            {
+              "columns": [
+                "ID_MEDICO"
+              ],
+              "foreign_table": "MEDICO",
+              "referred_columns": [
+                "IDMEDICO"
+              ]
+            },
+            {
+              "columns": [
+                "ID_HOSPITAL"
+              ],
+              "foreign_table": "HOSPITAL",
+              "referred_columns": [
+                "IDHOSPITAL"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "INTERNACAO",
+          "columns": [
+            {
+              "name": "IDINTERNACAO",
+              "type": ""
+            },
+            {
+              "name": "ENTRADA",
+              "type": ""
+            },
+            {
+              "name": "QUARTO",
+              "type": ""
+            },
+            {
+              "name": "SAIDA",
+              "type": ""
+            },
+            {
+              "name": "OBSERVACOES",
+              "type": ""
+            },
+            {
+              "name": "ID_CONSULTA",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "IDINTERNACAO"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "ID_CONSULTA"
+              ],
+              "foreign_table": "CONSULTA",
+              "referred_columns": [
+                "IDCONSULTA"
+              ]
+            }
+          ],
+          "has_values": false
+        }
+      ]
+    },
+    {
+      "source_id": "033815_schema.sql",
+      "uc_schema": "sp_033815_schema",
+      "rationale": "tables=8 fk_density=0.75 data_tables=0",
+      "tables": [
+        {
+          "name": "lesson_types",
+          "columns": [
+            {
+              "name": "id",
+              "type": ""
+            },
+            {
+              "name": "name",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "id"
+          ],
+          "foreign_keys": [],
+          "has_values": false
+        },
+        {
+          "name": "teacher_positions",
+          "columns": [
+            {
+              "name": "id",
+              "type": ""
+            },
+            {
+              "name": "name",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "id"
+          ],
+          "foreign_keys": [],
+          "has_values": false
+        },
+        {
+          "name": "groups_table",
+          "columns": [
+            {
+              "name": "id",
+              "type": ""
+            },
+            {
+              "name": "name",
+              "type": ""
+            },
+            {
+              "name": "students_number",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "id"
+          ],
+          "foreign_keys": [],
+          "has_values": false
+        },
+        {
+          "name": "subjects",
+          "columns": [
+            {
+              "name": "id",
+              "type": ""
+            },
+            {
+              "name": "name",
+              "type": ""
+            },
+            {
+              "name": "hours_number",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "id"
+          ],
+          "foreign_keys": [],
+          "has_values": false
+        },
+        {
+          "name": "students",
+          "columns": [
+            {
+              "name": "id",
+              "type": ""
+            },
+            {
+              "name": "name",
+              "type": ""
+            },
+            {
+              "name": "course",
+              "type": ""
+            },
+            {
+              "name": "phone_number",
+              "type": ""
+            },
+            {
+              "name": "email",
+              "type": ""
+            },
+            {
+              "name": "group_id",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "id"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "group_id"
+              ],
+              "foreign_table": "groups_table",
+              "referred_columns": [
+                "id"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "teachers",
+          "columns": [
+            {
+              "name": "id",
+              "type": ""
+            },
+            {
+              "name": "name",
+              "type": ""
+            },
+            {
+              "name": "phone_number",
+              "type": ""
+            },
+            {
+              "name": "position",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "id"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "position"
+              ],
+              "foreign_table": "teacher_positions",
+              "referred_columns": [
+                "id"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "lessons",
+          "columns": [
+            {
+              "name": "uuid",
+              "type": ""
+            },
+            {
+              "name": "subject_id",
+              "type": ""
+            },
+            {
+              "name": "teacher_id",
+              "type": ""
+            },
+            {
+              "name": "lesson_type",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "uuid"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "subject_id"
+              ],
+              "foreign_table": "subjects",
+              "referred_columns": [
+                "id"
+              ]
+            },
+            {
+              "columns": [
+                "teacher_id"
+              ],
+              "foreign_table": "teachers",
+              "referred_columns": [
+                "id"
+              ]
+            },
+            {
+              "columns": [
+                "lesson_type"
+              ],
+              "foreign_table": "lesson_types",
+              "referred_columns": [
+                "id"
+              ]
+            }
+          ],
+          "has_values": false
+        },
+        {
+          "name": "progress",
+          "columns": [
+            {
+              "name": "uuid",
+              "type": ""
+            },
+            {
+              "name": "student_id",
+              "type": ""
+            },
+            {
+              "name": "subject_id",
+              "type": ""
+            },
+            {
+              "name": "grade",
+              "type": ""
+            }
+          ],
+          "primary_keys": [
+            "uuid"
+          ],
+          "foreign_keys": [
+            {
+              "columns": [
+                "subject_id"
+              ],
+              "foreign_table": "subjects",
+              "referred_columns": [
+                "id"
+              ]
+            }
+          ],
+          "has_values": false
+        }
+      ]
+    }
+  ]
+}
