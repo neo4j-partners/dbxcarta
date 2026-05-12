@@ -1,10 +1,7 @@
 """Read-only local CLI demo for the Finance Genie semantic layer.
 
-Lives in the example package, not in dbxcarta core. Imports a handful of
-underscore-prefixed helpers from `dbxcarta.client.client`; those names are
-internal to dbxcarta and this dependency is the deliberate price of running a
-read-only local demo without re-implementing SQL parsing and result-set
-comparison. A production preset would re-implement these locally.
+Lives in the example package, not in dbxcarta core. The dependency on private
+helpers in `dbxcarta.client.client` is annotated inline at the import site.
 """
 
 from __future__ import annotations
@@ -16,6 +13,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+# Brittle dep: dbxcarta.client.client exposes these helpers under underscore
+# names. They are stable in practice (question loading, embedding, SQL parsing,
+# result-set comparison) and re-implementing them locally would duplicate the
+# core client harness. If they are renamed or removed, either promote them to a
+# documented dbxcarta.client public surface or re-implement the four functions
+# inline in this module.
 from dbxcarta.client.client import (
     _compare_result_sets,
     _embed_questions,

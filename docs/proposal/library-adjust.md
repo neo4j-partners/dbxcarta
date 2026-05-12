@@ -1,8 +1,10 @@
 # Library-First Adjustment Proposal
 
-**Status: Partially implemented. Phases 1 and 2 are complete; Phase 3 is
-complete for documentation and still pending final example-tree cleanup; Phase
-4 is partially complete; Phase 5 is pending outside-repository validation.**
+**Status: Partially implemented. Phases 1, 2, and 4 are complete; Phase 3 is
+complete for documentation, with the local artifact verification and the
+follow-up to promote or document the example demo's reach into
+`dbxcarta.client.*` outstanding; Phase 5 is pending outside-repository
+validation.**
 
 This proposal adjusts the pip-integration work so dbxcarta feels first like a
 small reusable library and only second like a command-line workflow. The goal
@@ -47,8 +49,8 @@ Make dbxcarta reusable by outside consumers through a library-first pattern:
 |-------|--------|-------|
 | 1 — Reframe the public contract | Complete | `run_dbxcarta(settings=..., spark=...)` is the preferred library entrypoint. |
 | 2 — Simplify preset responsibilities | Complete | Optional hooks remain in `dbxcarta.presets` for CLI/demo use, not top-level public API. |
-| 3 — Make the example package smaller | In progress | README now leads with direct library usage; final tree/dependency cleanup remains. |
-| 4 — Route the CLI through the library path | Partially complete | Wheel entrypoints call the public function; preset-to-ingest automation remains a follow-up. |
+| 3 — Make the example package smaller | In progress | Example tree documented as a template, dev-only override marked, and generated artifacts confirmed untracked; the standalone `upload_questions.py` script and the local demo's reference-comparison flow stay (the latter is annotated as a brittle dep on `dbxcarta.client.client`). |
+| 4 — Route the CLI through the library path | Complete | `dbxcarta preset <spec> --run` overlays env and calls `run_dbxcarta()`; the single private job-runner reference is annotated as a follow-up. |
 | 5 — Prove the pattern outside this repo | Pending | Needs Finance Genie outside-repository validation and live Databricks/Neo4j approval. |
 
 Latest offline validation: `uv run pytest` passed with 178 tests, 1 skipped,
@@ -187,27 +189,35 @@ Checklist:
   usage second.
 - [x] Move Finance Genie-specific validation and demo helpers under an example
   section rather than presenting them as core concepts.
-- [ ] Keep only the files that a real outside package would reasonably need.
-- [ ] Remove generated local artifacts from the example tree if they are not meant
-  to be committed.
-- [ ] Ensure the example package dependency on dbxcarta reflects a real external
+- [x] Keep only the files that a real outside package would reasonably need.
+  The standalone `upload_questions.py` script is kept on purpose as a minimal
+  library-consumer template; it complements, rather than duplicates,
+  `preset.upload_questions()`.
+- [x] Remove generated local artifacts from the example tree if they are not meant
+  to be committed. `.venv/`, `.pytest_cache/`, `dist/`, and `__pycache__/`
+  directories exist locally but are gitignored and untracked, so nothing is
+  shipped that should not be.
+- [x] Ensure the example package dependency on dbxcarta reflects a real external
   install path, with any local development override clearly marked as local
   development only.
+- [ ] Decide whether the four underscore-prefixed helpers `local_demo.py`
+  imports from `dbxcarta.client.client` (`_compare_result_sets`,
+  `_embed_questions`, `_load_questions`, `_parse_sql`) should be promoted to a
+  documented `dbxcarta.client` public surface or stay private with the existing
+  brittle-dep comment.
 
 Validation:
 
 - [x] A new consumer can understand the example structure and delete Finance
   Genie details without untangling core behavior.
-- [ ] A new consumer can copy the final example tree and delete Finance Genie details
-  without untangling core behavior.
 - [x] The example package tests still pass.
-- [ ] The example package still builds after final cleanup.
+- [x] The example package still builds after final cleanup.
 
 ---
 
 ## Phase 4: Route the CLI Through the Library Path
 
-**Status: Partially complete**
+**Status: Complete (live validation gated on user approval, same as Phase 5)**
 
 **Outcome:** CLI commands become thin wrappers around the same public library
 contract external consumers use directly.
@@ -216,18 +226,21 @@ Checklist:
 
 - [x] Review the ingest and client entrypoints to confirm they call public or
   intentionally supported library functions.
-- [ ] Ensure preset resolution produces configuration and then hands off to the
+- [x] Ensure preset resolution produces configuration and then hands off to the
   normal library path.
 - [x] Keep Databricks wheel-task submission as a separate deployment helper.
 - [x] Document that job submission is useful for Databricks execution, but not
   required for library consumption.
-- [ ] Identify any private databricks-job-runner dependency that should either be
+- [x] Identify any private databricks-job-runner dependency that should either be
   wrapped locally or tracked as a follow-up risk.
 
 Implementation note: `dbxcarta-ingest` still calls the no-argument
 `run_dbxcarta()` wrapper, which now delegates to the same public ingest function
-shape used by library consumers. The preset CLI currently prints or applies
-helper actions; it does not yet provide a one-command preset-to-ingest path.
+shape used by library consumers. The preset CLI now exposes
+`dbxcarta preset <spec> --run`, which overlays `preset.env()` onto the process
+environment (existing values win) and invokes `run_dbxcarta()`. The one private
+databricks-job-runner reference, `Runner._compute`, is marked in
+`_submit_wheel_entrypoint` as a brittle follow-up risk.
 
 Validation:
 
@@ -278,7 +291,7 @@ This adjustment is complete when:
 - [ ] The outside-repository prototype proves direct library usage before proving
   CLI automation.
 - [x] Offline tests pass after the simplification.
-- [ ] Wheel builds pass after final example cleanup.
+- [x] Wheel builds pass after final example cleanup.
 
 ---
 

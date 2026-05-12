@@ -26,10 +26,12 @@ def main() -> None:
       against the most recent status='success' run summary in
       `dbxcarta_summary_volume` (or the explicit run-id) and exits non-zero on
       any violation.
-    - `dbxcarta preset <import-path> {--print-env|--check-ready|--upload-questions}`
+    - `dbxcarta preset <import-path> {--print-env|--check-ready|--upload-questions|--run}`
       resolves the given preset from a `module.path:attr` import spec and runs
-      the requested action against it. Presets ship as their own pip packages;
-      dbxcarta core ships no preset implementations.
+      the requested action against it. `--run` overlays the preset env onto the
+      current environment (existing values win) and invokes the same ingest
+      entrypoint a library consumer would call. Presets ship as their own pip
+      packages; dbxcarta core ships no preset implementations.
     - `dbxcarta submit-entrypoint {ingest|client}` submits the installed wheel's
       Databricks entrypoints without uploading per-repo runner scripts.
     - All other invocations dispatch to the databricks_job_runner.Runner.
@@ -121,6 +123,14 @@ def _handle_preset(argv: list[str]) -> int:
         action="store_true",
         help="Invoke the preset's demo-question upload helper.",
     )
+    actions.add_argument(
+        "--run",
+        action="store_true",
+        help=(
+            "Overlay the preset's env onto os.environ (existing values win) and"
+            " invoke run_dbxcarta() the same way an external library consumer would."
+        ),
+    )
     parser.add_argument(
         "--warehouse-id",
         default="",
@@ -178,6 +188,14 @@ def _handle_preset(argv: list[str]) -> int:
             return 2
         ws = _build_workspace_client()
         preset.upload_questions(ws)
+        return 0
+
+    if args.run:
+        for key, value in preset.env().items():
+            os.environ.setdefault(key, value)
+        from dbxcarta.ingest import run_dbxcarta
+
+        run_dbxcarta()
         return 0
 
     return 2  # unreachable: argparse requires one of the action flags.
@@ -249,6 +267,10 @@ def _submit_wheel_entrypoint(
 
     params = runner.config.env_params(secret_keys=runner.secret_keys)
     run_name = f"{runner.run_name_prefix}: {name}"
+    # Brittle dep: databricks_job_runner exposes no public compute resolver, so
+    # we reach into Runner._compute() to honour DATABRICKS_COMPUTE_MODE and the
+    # --compute override. If the runner renames or removes this, replace with a
+    # local cluster/serverless resolver built from runner.config.
     compute = runner._compute(compute_mode)
 
     print("Submitting wheel entrypoint")

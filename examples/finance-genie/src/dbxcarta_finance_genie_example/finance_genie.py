@@ -18,7 +18,6 @@ from typing import TYPE_CHECKING
 
 from dbxcarta import (
     ReadinessReport,
-    build_workspace_client,
     validate_identifier,
 )
 from dbxcarta.databricks import quote_identifier
