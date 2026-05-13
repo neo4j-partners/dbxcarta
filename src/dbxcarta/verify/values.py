@@ -32,8 +32,13 @@ def _check_value_count(driver: "Driver", summary: dict[str, Any]) -> list[Violat
     expected = (summary.get("row_counts") or {}).get("value_nodes")
     if expected is None:
         return []
+    catalog: str = summary.get("catalog") or ""
+    prefix = catalog + "."
     with driver.session() as s:
-        actual = s.run(f"MATCH (n:{NodeLabel.VALUE}) RETURN count(n) AS cnt").single()["cnt"]
+        actual = s.run(
+            f"MATCH (n:{NodeLabel.VALUE}) WHERE n.id STARTS WITH $prefix RETURN count(n) AS cnt",
+            prefix=prefix,
+        ).single()["cnt"]
     if actual != expected:
         return [Violation(
             code="values.count_mismatch",

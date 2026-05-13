@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from dbxcarta.contract import RelType
+from dbxcarta.contract import NodeLabel, RelType
 from dbxcarta.verify import Violation
 
 if TYPE_CHECKING:
@@ -59,11 +59,19 @@ def check(driver: "Driver", summary: dict[str, Any]) -> list[Violation]:
 def _check_edge_count(driver: "Driver", summary: dict[str, Any]) -> list[Violation]:
     """Neo4j's REFERENCES edge count must match declared + inferred FKs from
     the summary. A mismatch implies the Spark Connector dropped rows where an
-    endpoint Column node did not exist."""
+    endpoint Column node did not exist.
+
+    Scoped via the source Column's id prefix so a shared Neo4j instance with
+    data from multiple catalogs does not produce false positives.
+    """
+    catalog: str = summary.get("catalog") or ""
+    prefix = catalog + "."
     expected = _expected_edge_total(summary)
     with driver.session() as s:
         edges = s.run(
-            f"MATCH ()-[r:{RelType.REFERENCES}]->() RETURN count(r) AS cnt"
+            f"MATCH (src:{NodeLabel.COLUMN})-[r:{RelType.REFERENCES}]->()"
+            f" WHERE src.id STARTS WITH $prefix RETURN count(r) AS cnt",
+            prefix=prefix,
         ).single()["cnt"]
     if edges != expected:
         return [Violation(

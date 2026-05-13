@@ -218,6 +218,28 @@ def test_compute_aggregates_no_gradable_excludes_correct_rate():
     assert "no_context" not in summary.arm_correct_rate
 
 
+def test_emit_stdout_skips_incomplete_retrieval_metrics(capsys):
+    summary = ClientRunSummary(
+        run_id="test-1",
+        job_name="test",
+        catalog="cat",
+        schemas=[],
+        arms=["graph_rag"],
+    )
+    summary.add_result(
+        "q1",
+        "q?",
+        "graph_rag",
+        top1_schema_match=True,
+        schema_in_context=False,
+        context_purity=None,
+    )
+    summary.finish(status="success")
+
+    summary.emit_stdout()
+    assert "retrieval:" not in capsys.readouterr().out
+
+
 # ---------------------------------------------------------------------------
 # _is_table_ref
 # ---------------------------------------------------------------------------

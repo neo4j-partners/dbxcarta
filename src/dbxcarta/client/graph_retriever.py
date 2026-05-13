@@ -57,12 +57,18 @@ class GraphRetriever(Retriever):
         inject_criteria = self._settings.dbxcarta_inject_criteria
 
         with self._driver.session() as session:
-            col_seeds = _query_vector_seeds(session, _COL_INDEX, embedding, top_k)
-            tbl_seeds = _query_vector_seeds(session, _TABLE_INDEX, embedding, top_k)
+            col_seed_pairs = _query_vector_seeds(session, _COL_INDEX, embedding, top_k)
+            tbl_seed_pairs = _query_vector_seeds(session, _TABLE_INDEX, embedding, top_k)
+            col_seeds = [id_ for id_, _ in col_seed_pairs]
+            tbl_seeds = [id_ for id_, _ in tbl_seed_pairs]
+            col_seed_scores = [score for _, score in col_seed_pairs]
+            tbl_seed_scores = [score for _, score in tbl_seed_pairs]
+
             parent_tbl_ids = _parent_table_ids(session, col_seeds)
             ref_tbl_ids = _references_table_ids(session, col_seeds, threshold)
+            expansion_tbl_ids = list(dict.fromkeys(parent_tbl_ids + ref_tbl_ids))
 
-            all_tbl_ids = list(dict.fromkeys(tbl_seeds + parent_tbl_ids + ref_tbl_ids))
+            all_tbl_ids = list(dict.fromkeys(tbl_seeds + expansion_tbl_ids))
             columns = _fetch_columns(session, all_tbl_ids, catalog, schemas)
             # Fetch values for every retrieved column, not just col_seeds, so
             # low-cardinality categorical/enum columns surface their values
@@ -82,18 +88,25 @@ class GraphRetriever(Retriever):
             values=values,
             seed_ids=col_seeds + tbl_seeds,
             criteria=criteria,
+            col_seed_ids=col_seeds,
+            col_seed_scores=col_seed_scores,
+            tbl_seed_ids=tbl_seeds,
+            tbl_seed_scores=tbl_seed_scores,
+            expansion_tbl_ids=expansion_tbl_ids,
         )
 
 
-def _query_vector_seeds(session, index: str, embedding: list[float], k: int) -> list[str]:
+def _query_vector_seeds(
+    session, index: str, embedding: list[float], k: int
+) -> list[tuple[str, float]]:
     result = session.run(
         f"CALL db.index.vector.queryNodes('{index}', $k, $vec) "
         "YIELD node, score "
-        "RETURN node.id AS id",
+        "RETURN node.id AS id, score",
         k=k,
         vec=list(embedding),
     )
-    return [row["id"] for row in result]
+    return [(row["id"], row["score"]) for row in result]
 
 
 def _parent_table_ids(session, col_ids: list[str]) -> list[str]:

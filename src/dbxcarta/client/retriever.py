@@ -23,6 +23,12 @@ class ContextBundle:
     values: dict[str, list[str]] = field(default_factory=dict)
     seed_ids: list[str] = field(default_factory=list)
     criteria: list[str] = field(default_factory=list)
+    # Phase E diagnostics — populated by GraphRetriever, empty for other arms.
+    col_seed_ids: list[str] = field(default_factory=list)
+    col_seed_scores: list[float] = field(default_factory=list)
+    tbl_seed_ids: list[str] = field(default_factory=list)
+    tbl_seed_scores: list[float] = field(default_factory=list)
+    expansion_tbl_ids: list[str] = field(default_factory=list)
 
     def to_text(self) -> str:
         if not self.columns:

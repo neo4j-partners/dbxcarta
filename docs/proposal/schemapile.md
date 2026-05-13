@@ -1,6 +1,6 @@
 # SchemaPile Preset Example Proposal
 
-**Status: Draft. Not yet implemented.**
+**Status: Complete. Phases 0-6 implemented and evaluated 2026-05-13. See `schemapile-v2.md` for the Phase C/D audit trail and three-arm results.**
 
 This proposal adds a second standalone preset example under `examples/` that
 uses the [SchemaPile](https://github.com/amsterdata/schemapile) corpus as its
@@ -341,6 +341,12 @@ sign-off line that the phase meets the quality bar.
     SDK `QueryEndpointResponse` object — it now branches explicitly on
     dict vs. SDK dataclass so a missing `choices` field cannot
     AttributeError.
+  - 2026-05-13 fix: the generator prompt now uses the same sanitized table
+    and column names that the materializer creates, so generated SQL targets
+    the actual Delta objects rather than raw schemapile DDL names.
+  - 2026-05-13 fix: SQL validation now rejects non-SELECTs,
+    multi-statement strings, unqualified table references, and references
+    outside the configured schemapile catalog before executing model output.
   - Quality caveat is in the README.
   - Live-model invocation completed against `azure-rk-knight` on 2026-05-12:
     20 candidate schemas prompted, per-schema caches written under
@@ -387,6 +393,8 @@ sign-off line that the phase meets the quality bar.
     `sp_020891_v01__impl_usuario`) were created and populated, confirmed
     by Phase 1's SQL validator accepting reference queries that join and
     aggregate against the materialized rows.
+  - 2026-05-13 fix: schema comments now SQL-escape the schemapile source id
+    before interpolating it into DDL.
 - Phase 5: first-pass complete 2026-05-12 by Claude.
   - `examples/schemapile/` package skeleton matches the finance-genie
     layout: `pyproject.toml`, `README.md`, `.env.sample`, `src/`, `tests/`.
@@ -401,10 +409,16 @@ sign-off line that the phase meets the quality bar.
   - Combined test run on 2026-05-12 after the questions-format and
     `_first_message_text` fixes: `uv run pytest tests/unit/
     examples/schemapile/tests/` reports 210 passed, 1 skipped.
-- Phase 6: pending — Phases 1-5 have been exercised end to end, but the
-  dbxcarta `ingest` and `client` entrypoints have not yet been submitted
-  against the schemapile catalog. The questions.json format fix landed
-  on 2026-05-12 unblocks the reference arm of the client run.
+  - 2026-05-13 fix: `upload_questions()` now defaults to the example's
+    checked-in `questions.json` instead of the caller's current working
+    directory and validates the JSON fixture shape before upload.
+  - 2026-05-13 fix: the reserved-catalog guard is now case-insensitive.
+  - 2026-05-13 verification: `uv run pytest tests/unit/
+    examples/schemapile/tests/` reports 222 passed, 1 skipped.
+- Phase 6: **Complete 2026-05-13, Ryan Knight.** Full audit trail and three-arm results in `schemapile-v2.md`. Summary:
+  - Ingest run `851447708465990`: 20 schemas, 152 tables, 666 columns, 119 value nodes ingested into `schemapile_lakehouse`. Column embedding rate 100%. 1215 REFERENCES edges (0 declared, 24 inferred_metadata, 1191 semantic). Zero cross-schema inferred pairs. `verify` reports OK (0 violations).
+  - Client run `686670956217613` (n=9 questions, `no_context` / `schema_dump` / `graph_rag`): `schema_dump` executes at 100% / 44% correct; `graph_rag` executes at 78% / 43% correct (of gradable); `no_context` 0% execution (expected — questions require knowing table names).
+  - Defect found and resolved: verify gate counted total-graph nodes instead of catalog-scoped nodes, causing false failures when other catalogs exist in the same Neo4j instance. Fixed in v0.2.38 (`verify/graph.py`, `references.py`, `values.py`).
 
 ---
 
@@ -442,8 +456,11 @@ Stage boundaries:
    schema, one UC schema and one Delta table per table entry. Where the
    schemapile entry carries `VALUES` sample data, the rows are inserted.
    Where it does not, the table is created empty with the declared column
-   types and primary keys. Foreign keys are recorded as Delta table
-   properties so dbxcarta can pick them up alongside semantic inference.
+   types. Primary keys and foreign keys are recorded as Delta table
+   properties for traceability in v1; they are not emitted as Unity Catalog
+   constraints, so dbxcarta's declared-FK extractor does not consume them.
+   FK discovery for this example relies on semantic inference unless a
+   follow-up adds real UC constraints.
 4. **Run dbxcarta.** The preset's `env()` overlay points dbxcarta at the
    schemapile catalog with `DBXCARTA_SCHEMAS` set to a comma-separated
    list of UC schemas produced in stage 3. From here, the flow is identical
@@ -462,14 +479,20 @@ examples/schemapile/
 ├── src/dbxcarta_schemapile_example/
 │   ├── __init__.py
 │   ├── preset.py               # SchemaPilePreset + module-level `preset`
+│   ├── config.py               # one-shot .env parser
 │   ├── slice_runner.py         # wraps slice.py, reads .env, writes cache
+│   ├── candidate_selector.py   # slice JSON -> candidate-table JSON
+│   ├── bootstrap.py            # provisions the UC catalog and volume
 │   ├── materialize.py          # slice JSON -> Delta tables in UC
-│   ├── questions.json
-│   └── upload_questions.py
+│   └── question_generator.py   # LLM + SQL validation -> questions.json
+├── questions.json
 └── tests/
     ├── test_preset.py
+    ├── test_candidate_selector.py
+    ├── test_config.py
     ├── test_slice_runner.py
-    └── test_materialize.py
+    ├── test_materialize.py
+    └── test_question_generator.py
 ```
 
 The `preset.py` module exports a `SchemaPilePreset` dataclass and a
@@ -602,10 +625,12 @@ The materializer:
 - For each schemapile schema entry, creates a UC schema named
   `sp_<sanitized_schema_id>` under `$DBXCARTA_CATALOG`.
 - For each table entry, runs `CREATE TABLE IF NOT EXISTS ... USING DELTA`
-  with translated column types, primary keys, and (when `INCLUDE_VALUES` is
-  on) the sample rows from the entry's `VALUES`.
-- Records FKs as table properties so dbxcarta can read them alongside
-  semantic inference.
+  with translated column types and, when `INCLUDE_VALUES` is on, the sample
+  rows from the entry's `VALUES`.
+- Records primary keys and FKs as table properties for traceability. dbxcarta
+  v1 does not consume those properties as declared constraints, so FK
+  discovery for this example relies on metadata and semantic inference unless
+  a follow-up emits real Unity Catalog constraints.
 - Updates a `.env.generated` file with the comma-separated list of UC
   schemas in `DBXCARTA_SCHEMAS`.
 

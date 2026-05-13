@@ -22,6 +22,8 @@ examples/schemapile/
 │   ├── bootstrap.py             # provisions the UC catalog and volume
 │   ├── materialize.py           # candidate JSON -> Delta tables
 │   └── question_generator.py    # LLM + SQL validation -> questions.json
+├── scripts/                     # one-off utilities, see scripts/README.md
+│   └── dump_question_context.py # Neo4j -> docs/proposal/questions-schema.md
 └── tests/
 ```
 
@@ -169,6 +171,17 @@ uv run dbxcarta verify
 # Run the client evaluation arms.
 uv run dbxcarta submit-entrypoint client
 ```
+
+## Supporting scripts
+
+One-off utilities live in `scripts/`. See `scripts/README.md` for the
+full list. The current entry:
+
+- `dump_question_context.py` — queries the live Neo4j graph and emits
+  the three context blocks (schema dump, FK list, sample values) used
+  by the question-generation prompt in `docs/proposal/more-questions.md`.
+  Regenerate `docs/proposal/questions-schema.md` whenever the ingest
+  graph changes.
 
 ## Phase dependencies and order
 

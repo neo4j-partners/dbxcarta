@@ -2,361 +2,370 @@
 
 ## Goal
 
-Improve metadata-based foreign-key inference by replacing the current fixed
-name/comment scoring heuristic with better matching algorithms, then compare
-the results against the existing implementation before choosing a production
-path.
+Improve metadata-based foreign-key inference by fixing the bottlenecks observed
+when the current matcher is run against the schemapile benchmark, in this
+priority order: target-stem matching, abbreviation and tokenization gaps, and
+residual semantic gaps that require an embedding score.
 
 The current implementation in `src/dbxcarta/ingest/fk/metadata.py` is
-deliberately conservative. It accepts exact column-name matches and a small set
-of suffix patterns such as `_id`, `_fk`, and `_ref`, gates candidates by type
+deliberately conservative. It accepts exact column-name matches and a fixed
+suffix list (`_id`, `_fk`, `_ref`), requires the source column's stem to match
+the target table name with `+s/+es` plural rules, gates candidates by type
 compatibility and target primary-key evidence, adds a binary comment-overlap
-signal, then applies tie-break attenuation. That keeps false positives low, but
-it misses common naming variations such as `customer_key`, `cust_id`,
-`account_identifier`, `jobTitleId`, and comments with semantically similar but
-non-identical wording.
+signal, then applies tie-break attenuation.
 
-This proposal evaluates two parallel replacement tracks:
+Two updates change the shape of this proposal from the earlier draft:
 
-- RapidFuzz, for a low-risk improvement to the current scoring logic.
-- Valentine, for a broader schema-matching approach designed around tabular
-  column matching.
+1. `examples/schemapile` provides a labeled corpus of real schemas with
+   declared foreign keys. It replaces the "build a benchmark" phase with "load
+   schemapile and measure."
+2. The system will scale to 10K+ tables. Per-pair cost dominates asymptotic
+   shape at this size, which rules out per-pair LLM calls and pushes toward
+   deterministic scorers plus precomputed embeddings.
 
-Both tracks should preserve the current safety gates: type compatibility,
-target key evidence, duplicate suppression, confidence thresholds, provenance,
-and run-summary counters.
+The earlier two-track RapidFuzz/Valentine evaluation is dropped. RapidFuzz
+survives as one helper inside the deterministic fix, not as a top-level track.
+Valentine and other record-linkage frameworks are deferred unless
+instrumentation shows a class of failures they uniquely solve.
 
 ## Assumptions
 
-- The metadata matcher remains a driver-side Python step for this evaluation.
+- Schemapile is the primary benchmark. Existing metadata unit tests remain
+  regression tests.
+- The metadata matcher remains a driver-side Python step.
 - Declared foreign keys remain authoritative and continue to suppress duplicate
   inferred edges.
-- Candidate generation should still prefer key-like target columns. A generic
-  matcher should not be allowed to propose arbitrary column-to-column joins
-  without primary-key or unique-key evidence.
-- The existing metadata tests are treated as regression tests, not as the full
-  evaluation set.
-- The comparison phase needs a small labeled benchmark of accepted and rejected
-  FK candidates. Existing declared FK fixtures can seed this benchmark, but they
-  are not enough by themselves.
+- Target candidates still require primary-key or unique-key evidence. A name
+  match without key evidence is not a valid FK candidate.
+- Comments are uneven across real schemas. Comment-based signals must not be
+  required for an accepted match.
+- Scale target is roughly 10K tables and ~100K columns total. Same-schema
+  partitioning keeps per-schema candidate sets in the low thousands.
 
 ## Risks
 
-- Higher recall can degrade retrieval if ambiguous matches survive. The
-  comparison must measure false positives, not only accepted-edge count.
-- Generic schema matchers may optimize for column equivalence rather than FK
-  directionality. The evaluator must distinguish "same concept" from "source
-  references target key."
-- Instance-based matching can become expensive if it requires loading data
-  values for every candidate pair. Keep the first Valentine experiment
-  schema-only unless a scoped value sample is available.
-- Adding large dependencies may complicate Databricks job packaging. Dependency
-  size and wheel availability should be part of the recommendation.
+- Higher recall can degrade retrieval if ambiguous matches survive. Every
+  change reports precision against schemapile, not only accepted-edge count.
+- Tie-break attenuation `score / sqrt(n-1)` penalizes every candidate when one
+  source column has many matches. Relaxing name rules increases `n` and can
+  paradoxically reduce accepted edges. A margin-based tie-break is evaluated
+  alongside any recall change.
+- Abbreviation dictionaries drift as new schemas are added. The dictionary
+  needs an update path, not a one-time hand-curated list.
+- Embedding inference adds a one-time cost per ingest. Persisting embeddings
+  alongside column metadata is required to keep per-run cost bounded.
+- The PK-evidence gate may itself be the dominant rejection bucket. If so, no
+  name-matching work moves the needle, and the plan pivots to PK inference
+  instead. Phase 1 instrumentation answers this before later phases run.
 
 ## Phase Checklist
 
-### Phase 1: Baseline Harness
+### Phase 1: Instrument the Current Matcher on Schemapile
 
 Status: Pending
 
-Goal: Create a stable way to compare the current matcher, RapidFuzz, and
-Valentine on the same inputs.
+Goal: Measure where the current matcher actually fails before changing
+anything.
 
 Checklist:
 
-- Capture the current metadata matcher's output for existing FK fixtures.
-- Build a benchmark dataset with positive pairs from declared FKs and curated
-  negative pairs that are plausible but wrong.
-- Include examples for exact matches, suffix matches, pluralized table names,
-  abbreviated names, camel-case names, comment-only hints, cross-schema
-  collisions, and high-fanout ambiguous IDs.
-- Record baseline metrics: precision, recall, F1, accepted edge count,
-  duplicate-suppression count, tie-break rejections, and runtime.
-- Preserve current counter invariants so every candidate is accepted or rejected
-  with an observable reason.
+- Wire schemapile through the existing ingest path so declared FKs become
+  ground-truth labels and inferred edges can be scored against them.
+- Run `infer_fk_pairs` across the schemapile corpus and collect the existing
+  `InferenceCounters` per schema and in aggregate.
+- For every missed declared FK, classify the rejection bucket: `rejected_name`,
+  `rejected_type`, `rejected_pk`, `rejected_sub_threshold`, `rejected_tie_break`,
+  `rejected_duplicate_declared`, or "never enumerated as candidate."
+- Within `rejected_name`, break down the failure mode further: stem-vs-table
+  mismatch, suffix not in `_STEM_SUFFIXES`, camelCase boundary not tokenized,
+  abbreviation mismatch, neither column ends in a key-like suffix.
+- Record baseline precision, recall, F1, and runtime against the schemapile
+  labels.
+- Sample 30-50 false positives for qualitative review.
 
 Validation:
 
-- The existing metadata unit tests pass unchanged.
-- The benchmark runner can execute the current matcher and produce a comparable
-  metrics report.
+- Existing metadata unit tests pass unchanged.
+- A single report shows rejection-bucket counts and the within-`rejected_name`
+  failure-mode breakdown.
+- Decision gate: if `rejected_pk` or `rejected_type` dominates missed FKs,
+  pause Phase 2 and 3 and scope PK-inference work instead.
 
 Notes:
 
-- This phase should finish before either matching track is judged.
-- It does not need to change production inference behavior.
+- This phase does not change production behavior.
+- The report is reproducible so later phases compare against the same baseline
+  numbers.
 
-### Phase 2A: RapidFuzz Track
+### Phase 2: Deterministic Stem and Tokenization Fix
 
 Status: Pending
 
-Goal: Improve the existing deterministic matcher with better string similarity
-while keeping the current architecture and safety gates.
+Goal: Recover the schemapile failures driven by stem-vs-table mismatch, suffix
+coverage, camelCase, and common abbreviations. No new runtime dependencies
+beyond RapidFuzz, which sits inside this phase as a scoring helper.
 
 Checklist:
 
-- Add normalized metadata strings for source column, target column, target
-  table, and source/target comments.
-- Replace the binary name kind with a richer name score that accounts for
-  exact match, suffix match, abbreviation, token overlap, edit distance, and
-  camel-case or snake-case tokenization.
-- Replace binary comment overlap with a comment similarity score.
-- Preserve type compatibility and target PK evidence as mandatory gates.
-- Keep tie-break attenuation or replace it only if the benchmark shows a better
-  ambiguity rule.
-- Map the RapidFuzz score into the existing confidence range so downstream
-  thresholds remain meaningful.
-- Add counters or debug fields that explain which signal contributed to an
-  accepted match.
+- Tokenize column and table names with camelCase, PascalCase, and snake_case
+  awareness before any comparison. `jobTitleId` becomes `[job, title, id]`.
+- Expand `_STEM_SUFFIXES` based on Phase 1 frequency data. Likely additions
+  include `_key`, `_identifier`, `_no`, `_num`, `_code`, and camelCase `Id`.
+  Drive the list from observed schemapile suffixes, not guesses.
+- Replace the strict `_stem_matches_table` equality check with a token-set
+  comparison that accepts singular/plural variants and known abbreviations.
+  Use RapidFuzz token-set or token-sort ratios with a high cutoff inside this
+  single comparison only.
+- Build an abbreviation dictionary from two sources: hand-curated common short
+  forms such as `cust→customer`, `addr→address`, `qty→quantity`, and
+  `org→organization`; and mined pairs from schemapile's declared FKs where a
+  short stem reliably maps to a longer target table name.
+- Keep type compatibility and target PK evidence as mandatory gates. No score
+  change weakens these.
+- Replace count-based tie-break attenuation with a margin rule: accept the top
+  candidate when its score exceeds the runner-up by at least δ; otherwise
+  reject as ambiguous. Calibrate δ on schemapile.
+- Preserve the existing `_SCORE_TABLE` shape so `NameMatchKind × PKEvidence ×
+  comment_present` still maps to a discrete confidence. New match kinds get
+  their own rows, not a continuous remap.
+- Extend `InferenceCounters` with the new match-kind buckets and rejection
+  reasons so observability remains intact.
 
 Validation:
 
-- Existing metadata tests pass.
-- Benchmark precision does not regress below the current matcher.
-- Benchmark recall improves on abbreviation, camel-case, and comment-variant
-  cases.
-- Runtime remains acceptable for the scale target of roughly one thousand
-  tables.
+- Existing metadata unit tests pass.
+- Schemapile precision does not regress against the Phase 1 baseline.
+- Schemapile recall improves measurably on stem-vs-table, abbreviation, and
+  camelCase classes identified in Phase 1.
+- Margin tie-break does not reduce accepted edge count for cases that
+  previously had `n=1` candidates.
+- Runtime per schema stays within budget for the 10K-table target.
 
 Notes:
 
-- This is the lowest-risk path because it can be implemented as an internal
-  scorer behind the existing candidate filters.
-- RapidFuzz should be treated as an algorithmic dependency, not as a full FK
-  inference framework.
+- This phase is the highest-leverage work and likely closes 60-80% of the gap
+  if Phase 1 confirms the stem-bottleneck hypothesis.
+- The abbreviation dictionary is checked into the repo with provenance
+  comments. It is not a learned artifact yet.
 
-### Phase 2B: Valentine Track
+### Phase 3: Embedding-Backed Residual Scorer
 
-Status: Pending
+Status: Pending, conditional on Phase 2 leaving a meaningful gap.
 
-Goal: Evaluate whether a schema-matching library can discover better column
-relationships than a custom FK heuristic.
+Goal: Recover schemapile failures that survive Phase 2, primarily semantic
+mismatches in column names and comments where deterministic rules cannot
+reach.
 
 Checklist:
 
-- Model candidate source and target metadata as DataFrames suitable for
-  Valentine.
-- Start with schema-only matching to avoid data-loading cost and isolate the
-  value of names and comments.
-- Evaluate at least one structural/schema matcher and one token/string-oriented
-  matcher available through Valentine's API.
-- Apply dbxcarta's type and target-key gates before accepting any Valentine
-  match as a foreign-key edge.
-- Convert Valentine similarity scores into dbxcarta confidence scores with a
-  documented calibration rule.
-- Preserve provenance in a way that distinguishes Valentine-derived metadata
-  edges from the current metadata scorer during evaluation.
-- Measure dependency, packaging, and runtime cost in the Databricks job
-  environment.
+- Pick a small CPU-resident embedding model. Candidates: `all-MiniLM-L6-v2`
+  (22M params), `BAAI/bge-small-en-v1.5`, or `fastembed`. Choose based on
+  Databricks job packaging cost and inference speed.
+- Encode each column once per ingest from a structured string that includes
+  table name, column name, data type, and comment. Persist embeddings
+  alongside column metadata so per-run cost is bounded to new or changed
+  columns.
+- Use the embedding score as a tiebreaker and recall booster behind the same
+  PK and type gates, not as a replacement for the deterministic scorer.
+- Define a fixed combining rule: deterministic score is primary, embedding
+  similarity raises confidence into a higher bucket only when PK evidence
+  agrees and the embedding similarity clears a threshold. Document the rule
+  in code with the schemapile-derived calibration.
+- Add a counter `accepted_with_embedding_boost` so the contribution of
+  embeddings is observable.
+- Re-evaluate the margin tie-break δ in the presence of embedding scores.
 
 Validation:
 
-- Existing metadata tests pass when Valentine output is routed through the
-  same FK acceptance contract.
-- Benchmark recall improves on cases where schema-matching structure helps.
-- False positives from concept-equivalent but non-FK columns are identified
-  and counted.
-- Runtime and dependency overhead are documented.
+- Existing metadata unit tests pass.
+- Schemapile recall improves on the residual classes identified after Phase 2,
+  with no precision regression.
+- One-time embedding pass over the 10K-table target completes within an
+  acceptable ingest budget.
+- Storage cost for persisted embeddings is documented.
 
 Notes:
 
-- Valentine is more domain-specific than generic record linkage because it is
-  designed for column matching across tabular datasets.
-- Its output still needs FK-specific gating because a schema match is not
-  automatically a valid join relationship.
+- If Phase 2 closes the gap that schemapile reveals, Phase 3 stays on the
+  shelf.
+- Sentence embeddings of short strings are noisy. The structured-string format
+  matters more than the model choice. Tuning time goes into the input template
+  before swapping models.
 
-### Phase 3: Comparative Evaluation
+## Deferred Options
 
-Status: Pending
+These are not part of the current plan but are recorded so future work has
+context.
 
-Goal: Compare the baseline, RapidFuzz track, and Valentine track using the same
-metrics and decide which approach should become the production matcher.
-
-Checklist:
-
-- Run all three matchers against the benchmark dataset.
-- Compare precision, recall, F1, accepted edge count, rejected candidate count,
-  duplicate suppression, tie-break behavior, and runtime.
-- Compare qualitative examples where the matchers disagree.
-- Identify matches that improve retrieval context versus matches that create
-  ambiguous or misleading joins.
-- Decide whether to adopt RapidFuzz, Valentine, a hybrid, or no replacement.
-- Document calibration changes needed for confidence thresholds.
-- Update the production implementation plan based on the chosen path.
-
-Validation:
-
-- The selected matcher has no precision regression on the curated benchmark.
-- The selected matcher improves recall on at least one class of currently
-  missed relationship.
-- The selected matcher preserves observability: candidate counts, rejection
-  reasons, accepted counts, and confidence buckets remain explainable.
-
-Notes:
-
-- The likely production recommendation is RapidFuzz first, with Valentine kept
-  as an experimental or offline evaluation path unless it shows a clear quality
-  gain that justifies the added complexity.
+- **Valentine.** Designed for cross-dataset schema matching, optimizes for
+  "same concept" rather than asymmetric "A references B." After applying FK
+  gates, little of Valentine's distinct value remains over an embedding score.
+  Revisit only if Phase 3 underperforms and a structural matcher is
+  hypothesized to help.
+- **GLiNER for comment entity extraction.** Useful where comments are rich and
+  descriptive. Overlaps with embeddings on the same use case. Consider only if
+  Phase 3 reveals a class of comment-driven matches that embeddings miss but
+  typed entity extraction catches.
+- **Record-linkage frameworks (recordlinkage, Splink, Dedupe).** Reframe FK
+  inference as candidate-pair classification with learned weights. Requires
+  labeled candidate pairs beyond what schemapile alone provides. Defer until a
+  labeling workflow exists.
+- **Per-pair LLM scorer.** Quality is likely highest, cost is prohibitive at
+  10K+ tables. Out of scope for the inference path. Possibly viable as a
+  one-shot offline reviewer for low-confidence accepted edges.
+- **N-gram blocking and MinHash candidate generation.** Relevant only if
+  profiling in Phase 2 or 3 shows candidate enumeration is the bottleneck.
+  Same-schema partitioning likely keeps inner-loop size small enough that this
+  is unnecessary.
 
 ## Completion Criteria
 
-- A benchmark exists that can evaluate the current matcher and both proposed
-  tracks.
-- RapidFuzz and Valentine have each been tested against the same input corpus.
-- The final recommendation is based on measured precision, recall, runtime,
-  dependency cost, and ease of explaining accepted edges.
-- The selected implementation preserves dbxcarta's existing FK safety gates and
+- Phase 1 produces a rejection-bucket and failure-mode report against
+  schemapile that determines whether Phase 2 or PK-inference work is the right
+  next step.
+- Phase 2 improves schemapile recall on stem, abbreviation, and tokenization
+  classes without precision regression and without runtime regression at the
+  10K-table scale.
+- Phase 3 runs only if Phase 2 leaves measurable residual recall on
+  schemapile.
+- The selected implementation preserves the existing FK safety gates and
   run-summary observability.
+- The abbreviation dictionary, suffix list, and any model or threshold choices
+  are checked into the repo with provenance.
 
 ## Research Notes
 
 ### Current dbxcarta Matcher
 
-The current metadata inference path is deterministic and intentionally narrow.
-It:
+The current path:
 
-- Checks whether source and target column names match exactly.
-- Checks whether a source column ending in `_id`, `_fk`, or `_ref` appears to
-  reference the target table's `id` column.
+- Accepts exact column-name matches.
+- Accepts source columns ending in `_id`, `_fk`, or `_ref` that reference the
+  target table's `id` column, gated by `_stem_matches_table` (`stem == table`
+  or `+s`/`+es`).
 - Requires compatible data types.
-- Requires the target column to have declared or heuristic primary-key evidence.
-- Adds a small confidence boost when source and target comments share tokens.
-- Attenuates scores when a source column has multiple plausible targets.
+- Requires target primary-key evidence: declared PK, UNIQUE leftmost, or an
+  `id`/`*_id` heuristic.
+- Adds a small confidence boost when source and target comments share tokens
+  of length >= 4.
+- Attenuates scores when a source column has multiple plausible targets via
+  `score / sqrt(n-1)`.
 - Suppresses pairs already covered by declared FK discovery.
 
-This is a strong baseline for precision, but it is brittle around
-abbreviations, token rearrangements, naming style differences, and comments
-that use related words without exact token overlap.
+Failure modes observed by inspection, to be confirmed by Phase 1 against
+schemapile:
+
+- `cust_id` fails to match `customers.id` because `cust` is not equal to
+  `customer`.
+- `account_identifier` fails because `_identifier` is not in `_STEM_SUFFIXES`.
+- `jobTitleId` fails the lowercase suffix check unless camelCase is tokenized
+  first.
+- Comment overlap is binary and length-gated, so semantically similar comments
+  using different vocabulary contribute nothing.
 
 ### RapidFuzz
 
-RapidFuzz is a fast Python and C++ string-matching library. It provides common
-similarity algorithms such as Levenshtein-based ratios, partial ratios,
-weighted ratios, token-sort ratios, and token-set ratios. It is MIT licensed,
-has prebuilt wheels for common platforms, and supports Python 3.10 or later.
+Fast Python and C++ string-matching library. Used inside Phase 2 for token-set
+and token-sort comparisons during stem-vs-table matching. Not a top-level
+track in this plan.
 
 Source: <https://github.com/rapidfuzz/RapidFuzz>
 
-Fit for dbxcarta:
+### Embedding Models for Phase 3
 
-- Best for improving the current name and comment scoring logic.
-- Low architectural risk because it can sit behind the existing candidate
-  gates.
-- Useful for abbreviations, token order changes, punctuation differences,
-  snake-case/camel-case normalization, and fuzzy comment overlap.
-- Not a full FK inference system by itself.
+- `sentence-transformers/all-MiniLM-L6-v2`: 22M params, widely used, ~5ms per
+  string batched on CPU.
+- `BAAI/bge-small-en-v1.5`: small, strong on retrieval benchmarks.
+- `fastembed`: ONNX-based runtime with bundled small models and low cold-start
+  cost.
 
-### Valentine
+Model choice is secondary to the input template. Encoding
+`f"{table}.{column} ({data_type}): {comment}"` provides more context than the
+bare column name.
 
-Valentine is a Python package for identifying potential relationships among
-columns of tabular datasets represented as pandas or Polars DataFrames. It
-implements several schema- and instance-based matching algorithms behind a
-single API, including COMA, Cupid, distribution-based matching, Jaccard
-distance, and Similarity Flooding. It supports Python versions compatible with
-this project.
+### Schemapile as Benchmark
 
-Source: <https://delftdata.github.io/valentine/>
+`examples/schemapile` ships labeled schemas with declared FKs. Declared FKs
+serve as positive labels. Curated negative labels are added incrementally for
+cases where the matcher produces high-confidence false positives during Phase
+1 review.
 
-Fit for dbxcarta:
+---
 
-- Best domain-specific candidate for schema and column matching.
-- Can evaluate whether schema-matching algorithms outperform hand-written FK
-  heuristics.
-- Needs FK-specific gates because column similarity is not the same as join
-  validity.
-- Instance-based matching may require additional sampling and runtime controls.
+## Client Retrieval Diagnostics (Phase E)
 
-### Python Record Linkage Toolkit
+### `client_retrieval` Delta table
 
-The Python Record Linkage Toolkit provides indexing, comparison functions, and
-classifiers for record linkage and deduplication. It supports string, numeric,
-and date comparisons, as well as supervised and unsupervised classifiers.
+Per-question retrieval trace written by the `graph_rag` arm alongside the
+run summary. Table name: `<catalog>.<schema>.client_retrieval` (same catalog
+and schema as `dbxcarta_summary_table`). One row per (run_id, question_id).
 
-Source: <https://recordlinkage.readthedocs.io/en/latest/about.html>
+| Column | Type | Description |
+|---|---|---|
+| `run_id` | STRING | Job run id from `DATABRICKS_JOB_RUN_ID` or "local" |
+| `question_id` | STRING | Question identifier from the questions source |
+| `question` | STRING | Natural-language question text |
+| `target_schema` | STRING | Ground-truth schema from `question.schema` |
+| `col_seed_ids` | ARRAY\<STRING\> | Column-index vector seed IDs |
+| `col_seed_scores` | ARRAY\<DOUBLE\> | Cosine scores for each column seed |
+| `tbl_seed_ids` | ARRAY\<STRING\> | Table-index vector seed IDs |
+| `tbl_seed_scores` | ARRAY\<DOUBLE\> | Cosine scores for each table seed |
+| `schema_scores` | MAP\<STRING, DOUBLE\> | Normalized aggregate score per schema |
+| `chosen_schemas` | ARRAY\<STRING\> | Schemas present in the final rendered context |
+| `expansion_tbl_ids` | ARRAY\<STRING\> | Tables added via HAS_COLUMN parent and REFERENCES expansion |
+| `final_col_ids` | ARRAY\<STRING\> | All column IDs in the rendered context |
+| `rendered_context` | STRING | Full text handed to the LLM prompt |
+| `generated_sql` | STRING | SQL produced by the LLM |
+| `reference_sql` | STRING | Ground-truth SQL from the question record |
+| `parsed` | BOOLEAN | Generated SQL passed the parse check |
+| `executed` | BOOLEAN | Generated SQL executed without error |
+| `correct` | BOOLEAN | Result set matched the reference |
+| `execution_error` | STRING | Error string if parse or execution failed |
+| `top1_schema_match` | BOOLEAN | Top schema by score equals `target_schema` |
+| `schema_in_context` | BOOLEAN | `target_schema` appears in `chosen_schemas` |
+| `context_purity` | DOUBLE | Fraction of `final_col_ids` from `target_schema` |
 
-Fit for dbxcarta:
+### Retrieval-correctness metrics
 
-- Useful if FK inference is reframed as candidate-pair classification.
-- Could combine name similarity, comment similarity, type compatibility, PK
-  evidence, schema proximity, and historical labels into a learned model.
-- More general than needed for the first improvement.
-- Best suited for a later phase if labeled candidate pairs become available.
+Three per-arm metrics are computed from trace data and appended to the
+standard run summary (`client_run_summary` table and stdout):
 
-### Splink
+- `top1_schema_match_rate` — fraction of questions where the highest-scoring
+  schema by aggregate seed score equals the target schema. Measures whether
+  the vector search alone points at the right schema.
+- `schema_in_context_rate` — fraction of questions where the target schema
+  appears anywhere in the rendered context (schema-set recall). A failure
+  here means the LLM had no chance to pick the right schema.
+- `mean_context_purity` — average fraction of rendered columns from the
+  target schema. Low purity means the context is dominated by columns from
+  the wrong schema.
 
-Splink is a probabilistic record-linkage package based on the Fellegi-Sunter
-model. It supports large-scale linkage using backends such as DuckDB and Spark
-and includes diagnostics for understanding linkage quality.
+### Failure triage workflow
 
-Source: <https://moj-analytical-services.github.io/splink/index.html>
+To diagnose a failed question without re-running the client:
 
-Fit for dbxcarta:
+```sql
+SELECT
+  question_id, question, target_schema,
+  schema_scores, chosen_schemas,
+  top1_schema_match, schema_in_context, context_purity,
+  parsed, executed, correct, execution_error,
+  rendered_context, generated_sql, reference_sql
+FROM <catalog>.<schema>.client_retrieval
+WHERE run_id = '<run_id>'
+  AND (correct = false OR executed = false)
+ORDER BY question_id
+```
 
-- Relevant if FK inference needs a scalable probabilistic model.
-- Potentially attractive in Databricks because Spark-style execution is part of
-  the design.
-- Less directly schema-specific than Valentine.
-- Requires multiple independent metadata features to work well, not just a
-  single name/comment text field.
+Use `top1_schema_match`, `schema_in_context`, and `context_purity` to
+classify the failure stage:
 
-### Dedupe
-
-Dedupe is a machine-learning library for fuzzy matching, deduplication, and
-entity resolution. It learns similarity weights and blocking rules from human
-training labels.
-
-Source: <https://docs.dedupe.io/>
-
-Fit for dbxcarta:
-
-- Strong option if a human labeling workflow is added for FK candidates.
-- Could learn weights instead of relying on a hand-tuned score table.
-- Higher operational overhead than RapidFuzz or Valentine.
-- Not the right first step unless labeled examples are part of the roadmap.
-
-### Jellyfish
-
-Jellyfish provides approximate and phonetic string matching, including
-Levenshtein, Damerau-Levenshtein, Jaro, Jaro-Winkler, Jaccard, Hamming, and
-phonetic encodings.
-
-Source: <https://jamesturk.github.io/jellyfish/>
-
-Fit for dbxcarta:
-
-- Useful for individual string metrics, especially Jaro-Winkler.
-- Smaller surface area than RapidFuzz for token-oriented matching.
-- Phonetic encodings are less relevant for database column names than for human
-  names.
-
-### TextDistance and Similar Libraries
-
-TextDistance, strsimpy, and related libraries provide broad collections of
-string distance algorithms. They are useful for experimentation, but they are
-less compelling as a production dependency here than RapidFuzz because
-RapidFuzz is faster, actively used, and has practical token-based scorers.
-
-## Option Summary
-
-| Option | Best Use | Strength | Main Concern | Recommendation |
-|---|---|---|---|---|
-| RapidFuzz | Improve current heuristic | Fast, focused, low-risk fuzzy name/comment scoring | Does not infer FK semantics alone | First implementation track |
-| Valentine | Schema/column matching | Purpose-built for table column matching | Needs FK gates and dependency review | Second implementation track |
-| recordlinkage | Candidate-pair classification | Flexible comparisons and classifiers | More general than needed without labels | Later if benchmark labels mature |
-| Splink | Probabilistic linkage at scale | Scalable and diagnostic-rich | Less schema-specific; needs rich features | Consider only for large-scale model path |
-| dedupe | Human-trained entity resolution | Learns weights from labels | Requires labeling workflow | Defer |
-| Jellyfish | Individual string metrics | Simple approximate and phonetic matching | Narrower than RapidFuzz for this use case | Use only if RapidFuzz is too heavy |
-| TextDistance/strsimpy | Algorithm experiments | Many distance functions | Production fit is weaker than RapidFuzz | Research only |
-
-## Recommendation
-
-Proceed with the two-track evaluation, but treat RapidFuzz as the likely
-production path unless Valentine produces a measurable quality improvement that
-justifies its additional abstraction and dependency cost.
-
-RapidFuzz aligns with the current design: keep conservative FK gates, improve
-the brittle name/comment score, preserve confidence scoring, and maintain
-explainable run summaries. Valentine is worth testing because it is the most
-schema-specific library found in the research, but its matches must be
-converted into FK-safe candidates rather than accepted as relationships
-directly.
+1. `schema_in_context = false` → schema selection failure; the right schema
+   never made it into the context. Root cause: vector seeds all landed in
+   the wrong schema.
+2. `schema_in_context = true`, `context_purity < 0.5` → retrieval dilution;
+   the right schema is present but outnumbered by columns from other schemas.
+3. `context_purity >= 0.5`, `executed = false` → SQL generation or parse
+   failure with the right schema in context.
+4. `executed = true`, `correct = false` → wrong query despite correct schema
+   context; inspect `rendered_context` and `generated_sql` side by side.

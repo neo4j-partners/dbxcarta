@@ -34,6 +34,10 @@ class ArmResult:
     correct: bool = False
     gradable: bool = False
     error: str | None = None
+    # Phase E retrieval diagnostics — only set for the graph_rag arm.
+    top1_schema_match: bool | None = None
+    schema_in_context: bool | None = None
+    context_purity: float | None = None
 
 
 @dataclass
@@ -67,6 +71,10 @@ class ClientRunSummary:
     arm_execution_rate: dict[str, float] = field(default_factory=dict)
     arm_non_empty_rate: dict[str, float] = field(default_factory=dict)
     arm_correct_rate: dict[str, float] = field(default_factory=dict)
+    # Phase E retrieval metrics — only populated for graph_rag arm.
+    arm_top1_schema_match_rate: dict[str, float] = field(default_factory=dict)
+    arm_schema_in_context_rate: dict[str, float] = field(default_factory=dict)
+    arm_mean_context_purity: dict[str, float] = field(default_factory=dict)
 
     def add_result(
         self,
@@ -82,6 +90,9 @@ class ClientRunSummary:
         correct: bool = False,
         gradable: bool = False,
         error: str | None = None,
+        top1_schema_match: bool | None = None,
+        schema_in_context: bool | None = None,
+        context_purity: float | None = None,
     ) -> None:
         result = ArmResult(
             arm=arm,
@@ -93,6 +104,9 @@ class ClientRunSummary:
             correct=correct,
             gradable=gradable,
             error=error,
+            top1_schema_match=top1_schema_match,
+            schema_in_context=schema_in_context,
+            context_purity=context_purity,
         )
         for qr in self.question_results:
             if qr.question_id == question_id:
@@ -140,6 +154,24 @@ class ClientRunSummary:
             if c["gradable"] > 0:
                 self.arm_correct_rate[arm] = round(c["correct"] / c["gradable"], 3)
 
+        # Retrieval metrics — aggregate over questions that have a target schema.
+        for arm in counts:
+            arm_results = [
+                ar
+                for qr in self.question_results
+                for ar in qr.arm_results
+                if ar.arm == arm
+            ]
+            top1_vals = [ar.top1_schema_match for ar in arm_results if ar.top1_schema_match is not None]
+            recall_vals = [ar.schema_in_context for ar in arm_results if ar.schema_in_context is not None]
+            purity_vals = [ar.context_purity for ar in arm_results if ar.context_purity is not None]
+            if top1_vals:
+                self.arm_top1_schema_match_rate[arm] = round(sum(top1_vals) / len(top1_vals), 3)
+            if recall_vals:
+                self.arm_schema_in_context_rate[arm] = round(sum(recall_vals) / len(recall_vals), 3)
+            if purity_vals:
+                self.arm_mean_context_purity[arm] = round(sum(purity_vals) / len(purity_vals), 3)
+
     def finish(self, *, status: str, error: str | None = None) -> None:
         self.status = status
         self.error = error
@@ -167,6 +199,9 @@ class ClientRunSummary:
             "arm_execution_rate": self.arm_execution_rate,
             "arm_non_empty_rate": self.arm_non_empty_rate,
             "arm_correct_rate": self.arm_correct_rate,
+            "arm_top1_schema_match_rate": self.arm_top1_schema_match_rate,
+            "arm_schema_in_context_rate": self.arm_schema_in_context_rate,
+            "arm_mean_context_purity": self.arm_mean_context_purity,
         }
 
     def _to_json_dict(self) -> dict:
@@ -195,6 +230,15 @@ class ClientRunSummary:
                 f"exec_rate={exec_rate:.1%} non_empty_rate={non_empty_rate:.1%} "
                 f"correct_rate={correct_rate:.1%}"
             )
+            top1 = self.arm_top1_schema_match_rate.get(arm)
+            recall = self.arm_schema_in_context_rate.get(arm)
+            purity = self.arm_mean_context_purity.get(arm)
+            if top1 is not None and recall is not None and purity is not None:
+                print(
+                    f"    retrieval: top1_schema_match={top1:.1%} "
+                    f"schema_in_context={recall:.1%} "
+                    f"context_purity={purity:.1%}"
+                )
         if self.error:
             print(f"  error: {self.error}")
 
@@ -237,6 +281,9 @@ class ClientRunSummary:
             StructField("arm_execution_rate", MapType(StringType(), DoubleType())),
             StructField("arm_non_empty_rate", MapType(StringType(), DoubleType())),
             StructField("arm_correct_rate", MapType(StringType(), DoubleType())),
+            StructField("arm_top1_schema_match_rate", MapType(StringType(), DoubleType())),
+            StructField("arm_schema_in_context_rate", MapType(StringType(), DoubleType())),
+            StructField("arm_mean_context_purity", MapType(StringType(), DoubleType())),
         ])
         quoted = quote_qualified_name(table_name, expected_parts=3)
         row = Row(**self._to_delta_dict())

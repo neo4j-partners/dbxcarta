@@ -38,6 +38,11 @@ _LARGE_COUNT_TOLERANCE = 0.10     # row count divergence above 10% → immediate
 _LARGE_SAMPLE_MATCH_RATE = 0.80   # fraction of stride-sampled rows that must match exactly
 
 
+def _client_retrieval_table(settings: ClientSettings) -> str:
+    parts = settings.dbxcarta_summary_table.split(".")
+    return f"{parts[0]}.{parts[1]}.client_retrieval"
+
+
 def _is_table_ref(source: str) -> bool:
     """Return True when source looks like a three-part catalog.schema.table name."""
     return len(source.split(".")) == 3 and not source.startswith(("/", "."))
@@ -404,6 +409,13 @@ def _run_graph_rag_arm(
     from dbxcarta.client.generation import generate_sql_batch
     from dbxcarta.client.graph_retriever import GraphRetriever
     from dbxcarta.client.prompt import graph_rag_prompt
+    from dbxcarta.client.trace import (
+        RetrievalTrace,
+        chosen_schemas_from_columns,
+        compute_retrieval_metrics,
+        emit_retrieval_traces,
+        schema_scores_from_seeds,
+    )
 
     catalog = settings.dbxcarta_catalog
     schemas = settings.schemas_list
@@ -426,13 +438,39 @@ def _run_graph_rag_arm(
     retriever = GraphRetriever(settings)
     try:
         questions_with_prompts = []
-        context_ids_map: dict[str, list[str]] = {}
+        traces: dict[str, RetrievalTrace] = {}
         for q, emb in zip(questions, embeddings):
+            qid = q["question_id"]
             bundle = retriever.retrieve(q["question"], emb)
             context_text = bundle.to_text()
             prompt = graph_rag_prompt(q["question"], catalog, schemas, context_text)
-            questions_with_prompts.append({"question_id": q["question_id"], "prompt": prompt})
-            context_ids_map[q["question_id"]] = bundle.seed_ids
+            questions_with_prompts.append({"question_id": qid, "prompt": prompt})
+
+            final_col_ids = [c.column_id for c in bundle.columns if c.column_id]
+            sch_scores = schema_scores_from_seeds(
+                bundle.col_seed_ids,
+                bundle.col_seed_scores,
+                bundle.tbl_seed_ids,
+                bundle.tbl_seed_scores,
+            )
+            trace = RetrievalTrace(
+                run_id=summary.run_id,
+                question_id=qid,
+                question=q["question"],
+                target_schema=q.get("schema"),
+                col_seed_ids=bundle.col_seed_ids,
+                col_seed_scores=bundle.col_seed_scores,
+                tbl_seed_ids=bundle.tbl_seed_ids,
+                tbl_seed_scores=bundle.tbl_seed_scores,
+                schema_scores=sch_scores,
+                chosen_schemas=chosen_schemas_from_columns(bundle.columns),
+                expansion_tbl_ids=bundle.expansion_tbl_ids,
+                final_col_ids=final_col_ids,
+                rendered_context=context_text,
+                reference_sql=q.get("reference_sql"),
+            )
+            compute_retrieval_metrics(trace)
+            traces[qid] = trace
     finally:
         retriever.close()
 
@@ -448,18 +486,25 @@ def _run_graph_rag_arm(
         qid = q["question_id"]
         raw_sql, ai_error = responses.get(qid, (None, "no response"))
         cleaned_sql, parse_ok = _parse_sql(raw_sql)
+        trace = traces.get(qid)
 
         if not parse_ok:
+            if trace:
+                trace.generated_sql = raw_sql
+                trace.execution_error = ai_error or "response did not contain valid SQL"
             summary.add_result(
                 question_id=qid,
                 question=q["question"],
                 arm="graph_rag",
                 sql=raw_sql,
-                context_ids=context_ids_map.get(qid, []),
+                context_ids=traces[qid].col_seed_ids + traces[qid].tbl_seed_ids if trace else [],
                 parsed=False,
                 executed=False,
                 non_empty=False,
                 error=ai_error or "response did not contain valid SQL",
+                top1_schema_match=trace.top1_schema_match if trace else None,
+                schema_in_context=trace.schema_in_context if trace else None,
+                context_purity=trace.context_purity if trace else None,
             )
             continue
 
@@ -480,19 +525,34 @@ def _run_graph_rag_arm(
                 settings.databricks_warehouse_id,
                 settings.dbxcarta_client_timeout_sec,
             )
+
+        if trace:
+            trace.generated_sql = cleaned_sql
+            trace.parsed = True
+            trace.executed = executed
+            trace.correct = correct
+            trace.execution_error = exec_error
+
         summary.add_result(
             question_id=qid,
             question=q["question"],
             arm="graph_rag",
             sql=cleaned_sql,
-            context_ids=context_ids_map.get(qid, []),
+            context_ids=trace.col_seed_ids + trace.tbl_seed_ids if trace else [],
             parsed=True,
             executed=executed,
             non_empty=non_empty,
             correct=correct,
             gradable=gradable,
             error=exec_error,
+            top1_schema_match=trace.top1_schema_match if trace else None,
+            schema_in_context=trace.schema_in_context if trace else None,
+            context_purity=trace.context_purity if trace else None,
         )
+
+    emit_retrieval_traces(
+        spark, list(traces.values()), _client_retrieval_table(settings)
+    )
 
 
 def run_client() -> None:

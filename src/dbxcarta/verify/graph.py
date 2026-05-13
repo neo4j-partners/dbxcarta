@@ -24,7 +24,13 @@ def check(driver: "Driver", summary: dict[str, Any]) -> list[Violation]:
 
 
 def _check_node_counts(driver: "Driver", summary: dict[str, Any]) -> list[Violation]:
-    """Neo4j node counts match what the job reported writing."""
+    """Neo4j node counts match what the job reported writing.
+
+    Queries are scoped to the current catalog so a shared Neo4j instance
+    holding data from multiple catalogs does not produce false positives.
+    """
+    catalog: str = summary.get("catalog") or ""
+    prefix = catalog + "."
     counts = summary.get("row_counts") or {}
     expected = {
         NodeLabel.DATABASE: counts.get("databases", 1),
@@ -32,12 +38,31 @@ def _check_node_counts(driver: "Driver", summary: dict[str, Any]) -> list[Violat
         NodeLabel.TABLE: counts.get("tables"),
         NodeLabel.COLUMN: counts.get("columns"),
     }
+    _cypher: dict[NodeLabel, tuple[str, dict]] = {
+        NodeLabel.DATABASE: (
+            f"MATCH (n:{NodeLabel.DATABASE}) WHERE n.id = $catalog RETURN count(n) AS cnt",
+            {"catalog": catalog},
+        ),
+        NodeLabel.SCHEMA: (
+            f"MATCH (n:{NodeLabel.SCHEMA}) WHERE n.id STARTS WITH $prefix RETURN count(n) AS cnt",
+            {"prefix": prefix},
+        ),
+        NodeLabel.TABLE: (
+            f"MATCH (n:{NodeLabel.TABLE}) WHERE n.id STARTS WITH $prefix RETURN count(n) AS cnt",
+            {"prefix": prefix},
+        ),
+        NodeLabel.COLUMN: (
+            f"MATCH (n:{NodeLabel.COLUMN}) WHERE n.id STARTS WITH $prefix RETURN count(n) AS cnt",
+            {"prefix": prefix},
+        ),
+    }
     out: list[Violation] = []
     with driver.session() as s:
         for label, exp in expected.items():
             if exp is None:
                 continue
-            actual = s.run(f"MATCH (n:{label}) RETURN count(n) AS cnt").single()["cnt"]
+            cypher, params = _cypher[label]
+            actual = s.run(cypher, **params).single()["cnt"]
             if actual != exp:
                 out.append(Violation(
                     code=f"graph.node_count_mismatch.{label.value}",
