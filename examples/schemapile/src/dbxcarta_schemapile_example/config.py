@@ -87,7 +87,7 @@ def load_config(env: dict[str, str] | None = None) -> SchemaPileConfig:
     repo = Path(repo_str).expanduser().resolve()
 
     catalog = _required(e, "DBXCARTA_CATALOG")
-    if catalog in _PROJECT_CATALOGS_BLOCKLIST:
+    if catalog.casefold() in _PROJECT_CATALOGS_BLOCKLIST:
         raise ValueError(
             f"DBXCARTA_CATALOG={catalog!r} collides with a known project catalog;"
             " choose a dedicated catalog for the schemapile example"

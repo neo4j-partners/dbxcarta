@@ -12,6 +12,7 @@ Resolvable via:
 
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -28,6 +29,7 @@ _DEFAULT_CATALOG = "schemapile_lakehouse"
 _DEFAULT_META_SCHEMA = "_meta"
 _DEFAULT_VOLUME = "schemapile_volume"
 _QUESTIONS_FILENAME = "questions.json"
+_QUESTIONS_FILE = Path(__file__).resolve().parents[2] / _QUESTIONS_FILENAME
 
 
 @dataclass(frozen=True)
@@ -145,12 +147,8 @@ class SchemaPilePreset:
             raise ValueError(
                 f"DBXCARTA_CLIENT_QUESTIONS must be a /Volumes/... .json path, got {dest!r}"
             )
-        source = Path(os.environ.get("SCHEMAPILE_QUESTIONS_FILE", "questions.json"))
-        if not source.is_file():
-            raise FileNotFoundError(
-                f"questions file not found at {source};"
-                " run dbxcarta-schemapile-generate-questions first"
-            )
+        source = Path(os.environ.get("SCHEMAPILE_QUESTIONS_FILE", str(_QUESTIONS_FILE)))
+        _validate_questions_file(source)
         _ensure_parent_dir(ws, dest)
         with source.open("rb") as fh:
             ws.files.upload(file_path=dest, contents=fh, overwrite=True)
@@ -185,6 +183,25 @@ def _ensure_parent_dir(ws: "WorkspaceClient", dest: str) -> None:
         ws.files.create_directory(parent)
     except ResourceAlreadyExists:
         pass
+
+
+def _validate_questions_file(path: Path) -> None:
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"questions file not found at {path};"
+            " run dbxcarta-schemapile-generate-questions first"
+        )
+    with path.open("r", encoding="utf-8") as fh:
+        data = json.load(fh)
+    if not isinstance(data, list) or not data:
+        raise ValueError(f"questions file must be a non-empty JSON array: {path}")
+    for i, row in enumerate(data):
+        if not isinstance(row, dict):
+            raise ValueError(f"questions[{i}] must be an object: {path}")
+        if not row.get("question_id") or not row.get("question"):
+            raise ValueError(
+                f"questions[{i}] must include question_id and question: {path}"
+            )
 
 
 def _bool(value: bool) -> str:

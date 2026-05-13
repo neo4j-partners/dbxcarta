@@ -30,6 +30,12 @@ def test_load_config_rejects_project_catalog(tmp_path):
     assert "collides" in str(exc.value)
 
 
+def test_load_config_rejects_project_catalog_case_insensitive(tmp_path):
+    with pytest.raises(ValueError) as exc:
+        load_config(_base_env(tmp_path, DBXCARTA_CATALOG="Graph-Enriched-Lakehouse"))
+    assert "collides" in str(exc.value)
+
+
 def test_load_config_requires_repo(tmp_path):
     env = _base_env(tmp_path)
     env["SCHEMAPILE_REPO"] = ""

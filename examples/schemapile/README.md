@@ -118,12 +118,13 @@ uv run dbxcarta-schemapile-materialize
 
 Creates one UC schema per candidate (`sp_<sanitized_id>`) and one Delta
 table per table spec. Types are coerced to Delta with a documented map;
-anything unrecognized falls back to `STRING`. Schemapile sample VALUES are
-not inserted in v1: the materialized tables are typed-but-empty, and the
-dbxcarta evaluation relies on metadata. The original source filename,
-primary key list, and foreign key list are recorded as Delta table
-properties on every table so the trace from a UC table to its schemapile
-origin is always one query away.
+anything unrecognized falls back to `STRING`. When the candidate JSON
+carries row-aligned sample VALUES for a table, the materializer
+`DELETE`s and re-`INSERT`s those rows so re-runs are idempotent; tables
+without sample VALUES land typed-but-empty. The original source
+filename, primary key list, and foreign key list are recorded as Delta
+table properties on every table so the trace from a UC table to its
+schemapile origin is always one query away.
 
 The step writes `examples/schemapile/.env.generated` with the
 `DBXCARTA_SCHEMAS=...` line that the dbxcarta runner needs.

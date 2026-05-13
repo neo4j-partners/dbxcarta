@@ -4,7 +4,12 @@ import pytest
 
 from dbxcarta import Preset, ReadinessReport
 from dbxcarta.presets import QuestionsUploadable, ReadinessCheckable
-from dbxcarta_schemapile_example.preset import SchemaPilePreset, preset
+from dbxcarta_schemapile_example.preset import (
+    _QUESTIONS_FILE,
+    _validate_questions_file,
+    SchemaPilePreset,
+    preset,
+)
 
 
 def test_preset_satisfies_required_protocol():
@@ -67,3 +72,22 @@ def test_readiness_report_format_contains_status():
     formatted = report.format()
     assert "status: ready" in formatted
     assert "scope: schemapile_lakehouse.sp_a" in formatted
+
+
+def test_default_questions_file_points_to_example_fixture():
+    assert _QUESTIONS_FILE.name == "questions.json"
+    assert _QUESTIONS_FILE.parent.name == "schemapile"
+
+
+def test_validate_questions_file_rejects_empty_array(tmp_path):
+    path = tmp_path / "questions.json"
+    path.write_text("[]")
+    with pytest.raises(ValueError):
+        _validate_questions_file(path)
+
+
+def test_validate_questions_file_requires_question_fields(tmp_path):
+    path = tmp_path / "questions.json"
+    path.write_text('[{"question_id": "q1"}]')
+    with pytest.raises(ValueError):
+        _validate_questions_file(path)

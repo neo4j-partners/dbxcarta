@@ -332,12 +332,20 @@ sign-off line that the phase meets the quality bar.
     `ws.serving_endpoints.query`, caches per (uc_schema, model, seed,
     temperature), then validates each pair against the materialized tables
     on the configured SQL warehouse (error / empty / trivial / accepted).
-  - Generated outputs are formatted as a list of
-    `{id, schema, source_id, shape, question, sql}` entries written to
-    `questions.json`.
+  - 2026-05-12 fix: `_format_questions` now emits `question_id` /
+    `reference_sql` (was: `id` / `sql`) so the dbxcarta client's reference
+    arm can consume the file; `schema`, `source_id`, and `shape` stay
+    alongside as failure-analysis metadata. The committed
+    `examples/schemapile/questions.json` was rewritten in place to match.
+  - 2026-05-12 fix: `_first_message_text` no longer calls `.get()` on the
+    SDK `QueryEndpointResponse` object — it now branches explicitly on
+    dict vs. SDK dataclass so a missing `choices` field cannot
+    AttributeError.
   - Quality caveat is in the README.
-  - Live-model invocation, validator execution, and acceptance-rate tuning
-    are pending until the user supplies `.env`.
+  - Live-model invocation completed against `azure-rk-knight` on 2026-05-12:
+    20 candidate schemas prompted, per-schema caches written under
+    `.cache/questions/`, validator accepted 9 pairs into `questions.json`.
+  - Acceptance-rate tuning (raise yield from 9/120 ~= 8%) is still open.
 - Phase 2: first-pass complete 2026-05-12 by Claude.
   - `slice_runner.py` shells out to `$SCHEMAPILE_REPO/slice.py` via `uv run`,
     writes JSON to `SCHEMAPILE_SLICE_CACHE`, and stores a `.params.json`
@@ -354,7 +362,10 @@ sign-off line that the phase meets the quality bar.
     `_PROJECT_CATALOGS_BLOCKLIST` so the bootstrap entrypoint cannot run
     against `graph-enriched-lakehouse` or other reserved catalogs.
   - A `--drop-all --yes-i-mean-it` teardown path is wired up.
-  - Live-workspace bootstrap run is pending until the user supplies `.env`.
+  - Live-workspace bootstrap completed on 2026-05-12 (the schemapile
+    catalog, `_meta` schema, and volume are present — implied by the
+    successful materialize and SQL-validation runs documented under
+    Phases 4 and 1).
 - Phase 4: code complete 2026-05-12 by Claude.
   - `materialize.py` reads the candidate-table JSON, creates one UC schema
     per candidate, and creates one Delta table per table spec via the SQL
@@ -363,10 +374,19 @@ sign-off line that the phase meets the quality bar.
     `STRING` and the fallback count is reported per run.
   - Each Delta table carries `schemapile.source_id`, `original_name`,
     `primary_keys`, and `foreign_keys` as TBLPROPERTIES.
-  - Sample VALUES insertion is deferred to v2 (documented in the README);
-    v1 produces typed-but-empty tables.
+  - Sample VALUES insertion is implemented in v1: when the candidate
+    JSON exposes row-aligned `rows` for a table, the materializer
+    `DELETE`s and re-`INSERT`s those rows so re-runs are idempotent. Rows
+    are quoted as string literals; Delta auto-casts on insert. Tables
+    without sample VALUES land empty with the declared schema. The
+    README's "Materialize the slice as Delta tables" section was
+    refreshed on 2026-05-12 to match.
   - `.env.generated` is written with the `DBXCARTA_SCHEMAS=...` line.
-  - Live-workspace materialize run is pending until the user supplies `.env`.
+  - Live-workspace materialize completed on 2026-05-12 against
+    `schemapile_lakehouse`: 20 UC schemas (e.g. `sp_535132_zhuanglang`,
+    `sp_020891_v01__impl_usuario`) were created and populated, confirmed
+    by Phase 1's SQL validator accepting reference queries that join and
+    aggregate against the materialized rows.
 - Phase 5: first-pass complete 2026-05-12 by Claude.
   - `examples/schemapile/` package skeleton matches the finance-genie
     layout: `pyproject.toml`, `README.md`, `.env.sample`, `src/`, `tests/`.
@@ -378,9 +398,13 @@ sign-off line that the phase meets the quality bar.
     `-bootstrap`, `-materialize`, `-generate-questions`.
   - `uv run dbxcarta preset dbxcarta_schemapile_example:preset --print-env`
     resolves and prints the overlay.
-  - Combined test run: `uv run pytest tests/unit/ examples/schemapile/tests/`
-    reports 195 passed, 1 skipped.
-- Phase 6: pending.
+  - Combined test run on 2026-05-12 after the questions-format and
+    `_first_message_text` fixes: `uv run pytest tests/unit/
+    examples/schemapile/tests/` reports 210 passed, 1 skipped.
+- Phase 6: pending — Phases 1-5 have been exercised end to end, but the
+  dbxcarta `ingest` and `client` entrypoints have not yet been submitted
+  against the schemapile catalog. The questions.json format fix landed
+  on 2026-05-12 unblocks the reference arm of the client run.
 
 ---
 

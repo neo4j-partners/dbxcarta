@@ -32,6 +32,10 @@ from typing import Any, TYPE_CHECKING
 
 from dbxcarta.databricks import build_workspace_client
 from dbxcarta_schemapile_example.config import SchemaPileConfig, load_config
+from dbxcarta_schemapile_example.materialize import (
+    _sanitize_column_name,
+    _sanitize_table_name,
+)
 
 if TYPE_CHECKING:
     from databricks.sdk import WorkspaceClient
@@ -222,21 +226,32 @@ def _build_prompt(entry: dict[str, Any], config: SchemaPileConfig) -> str:
     tables = entry.get("tables") or []
     ddl_lines: list[str] = []
     for table in tables:
+        table_name = _sanitize_table_name(str(table.get("name", "")))
+        if not table_name:
+            continue
+        materialized_columns = [
+            (_sanitize_column_name(str(c.get("name", ""))), c)
+            for c in (table.get("columns") or [])
+        ]
+        materialized_columns = [(name, c) for name, c in materialized_columns if name]
         cols = ", ".join(
-            f"{c['name']} {c['type']}" for c in (table.get("columns") or [])
+            f"{name} {c.get('type', '')}" for name, c in materialized_columns
         )
         pk = table.get("primary_keys") or []
-        pk_clause = f" PK({', '.join(pk)})" if pk else ""
+        materialized_pk = [
+            name for name in (_sanitize_column_name(str(c)) for c in pk) if name
+        ]
+        pk_clause = f" PK({', '.join(materialized_pk)})" if materialized_pk else ""
         fks = table.get("foreign_keys") or []
         fk_clause = ""
         if fks:
             fk_clause = " FKs: " + "; ".join(
-                f"{', '.join(fk.get('columns') or [])} -> "
-                f"{fk.get('foreign_table', '?')}"
-                f"({', '.join(fk.get('referred_columns') or [])})"
+                f"{', '.join(_sanitize_fk_columns(fk.get('columns') or []))} -> "
+                f"{_sanitize_table_name(str(fk.get('foreign_table') or '?'))}"
+                f"({', '.join(_sanitize_fk_columns(fk.get('referred_columns') or []))})"
                 for fk in fks
             )
-        ddl_lines.append(f"- {table['name']}({cols}){pk_clause}{fk_clause}")
+        ddl_lines.append(f"- {table_name}({cols}){pk_clause}{fk_clause}")
     schema_block = "\n".join(ddl_lines) if ddl_lines else "(no tables)"
 
     n = config.questions_per_schema
@@ -256,6 +271,13 @@ def _build_prompt(entry: dict[str, Any], config: SchemaPileConfig) -> str:
     """)
 
 
+def _sanitize_fk_columns(columns: list[Any]) -> list[str]:
+    return [
+        name for name in (_sanitize_column_name(str(column)) for column in columns)
+        if name
+    ]
+
+
 _JSON_BLOCK_RE = re.compile(r"\[\s*\{.*?\}\s*\]", re.DOTALL)
 
 
@@ -271,17 +293,28 @@ def _parse_json_block(text: str) -> list[dict[str, Any]]:
 
 
 def _first_message_text(response: Any) -> str:
-    choices = getattr(response, "choices", None) or response.get("choices", [])
+    """Extract the first chat message text from a serving-endpoint response.
+
+    Handles both the SDK `QueryEndpointResponse` object (typed attributes,
+    no `.get`) and a plain-dict response shape, so test doubles and the
+    real SDK both flow through one path.
+    """
+    if isinstance(response, dict):
+        choices = response.get("choices") or []
+    else:
+        choices = getattr(response, "choices", None) or []
     if not choices:
         return ""
     first = choices[0]
-    message = getattr(first, "message", None) or first.get("message")
+    if isinstance(first, dict):
+        message = first.get("message")
+    else:
+        message = getattr(first, "message", None)
     if message is None:
         return ""
-    content = getattr(message, "content", None)
-    if content is None and isinstance(message, dict):
-        content = message.get("content", "")
-    return content or ""
+    if isinstance(message, dict):
+        return message.get("content") or ""
+    return getattr(message, "content", None) or ""
 
 
 def _validate_all(
@@ -333,24 +366,60 @@ def _validate_all(
     )
 
 
+_FORBIDDEN_SQL_RE = re.compile(
+    r"\b("
+    r"alter|call|copy|create|delete|drop|execute|grant|insert|merge|msck|"
+    r"optimize|refresh|repair|replace|revoke|truncate|update|use|vacuum"
+    r")\b",
+    re.IGNORECASE,
+)
+_TABLE_REF_RE = re.compile(r"\b(?:from|join)\s+([`A-Za-z0-9_.-]+)", re.IGNORECASE)
+
+
 def _sql_targets_only_catalog(sql: str, catalog: str) -> bool:
-    """Guard against generated SQL that references other catalogs."""
-    lowered = sql.lower()
-    if " information_schema" in lowered or " system." in lowered:
+    """Guard against generated SQL that is not a read-only query for catalog."""
+    normalized = sql.strip()
+    lowered = normalized.lower()
+    if not lowered.startswith("select"):
+        return False
+    if ";" in normalized.rstrip(";"):
+        return False
+    if _FORBIDDEN_SQL_RE.search(normalized):
+        return False
+    if "information_schema" in lowered or re.search(r"\bsystem\s*\.", lowered):
         return False
     target = f"`{catalog.lower()}`"
-    return target in lowered
+    if target not in lowered:
+        return False
+
+    for match in _TABLE_REF_RE.finditer(sql):
+        ref = match.group(1).strip()
+        if ref.startswith("`"):
+            if not ref.lower().startswith(target):
+                return False
+        elif "." in ref:
+            if not ref.lower().startswith(f"{catalog.lower()}."):
+                return False
+        else:
+            return False
+    return True
 
 
 def _format_questions(pairs: list[GeneratedPair]) -> list[dict[str, Any]]:
+    """Emit the dbxcarta client question format.
+
+    The reference arm needs `question_id` + `reference_sql`; the
+    schema/source/shape fields stay alongside so failure analysis can trace
+    a question back to its origin schema and shape.
+    """
     return [
         {
-            "id": f"sp_{i:04d}",
+            "question_id": f"sp_{i:04d}",
+            "question": pair.question,
+            "reference_sql": pair.sql,
             "schema": pair.uc_schema,
             "source_id": pair.source_id,
             "shape": pair.shape,
-            "question": pair.question,
-            "sql": pair.sql,
         }
         for i, pair in enumerate(pairs)
     ]

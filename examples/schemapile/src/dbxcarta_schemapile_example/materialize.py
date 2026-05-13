@@ -179,7 +179,7 @@ def materialize(
         _execute(
             ws, warehouse_id,
             f"CREATE SCHEMA IF NOT EXISTS {catalog_q}.{schema_q}"
-            f" COMMENT 'schemapile source: {source_id}'",
+            f" COMMENT 'schemapile source: {_sql_escape(source_id)}'",
         )
         stats.schemas_created += 1
 

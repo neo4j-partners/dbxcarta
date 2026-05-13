@@ -106,6 +106,18 @@ that pass the cardinality threshold no longer destabilize the prompt.
 
 ## How it helped
 
+### ELI5
+
+Imagine the model is a student taking an open-book test. We did two things.
+First, we stopped marking the student wrong for tiny differences that did not
+actually matter, like writing "High" instead of "high" or returning 20 rows
+when the answer key only asked for the top 10. Second, we made sure each
+column in the open book had its example values written right next to it,
+instead of dumping all the example values in one big pile at the back of the
+book. Now the student can see, on the same line as the column name, that
+the column stores the word "high" in lowercase, so the student writes the
+correct filter.
+
 ### Comparator changes lifted both schema_dump and graph_rag
 
 The comparator does not know which arm produced a row set. It applies
@@ -197,6 +209,19 @@ dimensions.
 
 ## Why graph_rag improved
 
+### ELI5
+
+Before, the graph route only showed example values for a few "favorite"
+columns that the search step picked first. The other columns came along for
+the ride but arrived without their example values. Now every column in the
+context shows its own example values, right on its own line. So when the
+question mentions "high-risk accounts" and the relevant column lives in a
+table that was pulled in through a relationship rather than the top search
+match, the model still sees that the column's values are "high", "medium",
+"low" and writes the right filter. The graph route is now the strongest
+arm because graph context plus per-column values beats a flat schema dump
+plus values.
+
 Three reasons, in priority order.
 
 First, value-sample retrieval now covers every retrieved column rather
@@ -227,24 +252,25 @@ changes are complementary rather than overlapping.
 
 ## What needs to be done next
 
+### ELI5
+
+Two of the twelve questions are still marked wrong, but the SQL the model
+wrote is a perfectly fine answer. One returns a percentage when the answer
+key wanted a decimal. The other reads the same number from a different but
+equally valid table. Our grader cannot tell that these are still good
+answers. We have three ways to fix this: accept that 83.3% is the honest
+score, add a small "expected answer" field to the harder questions, or
+rewrite the questions so they are less ambiguous. We also want to give the
+search step a better nose for which column matters (by adding short column
+descriptions on the Gold tables), and we still need to prove the pattern
+works in a project outside this repo.
+
 ### Comparator follow-up
 
-Two genuine remaining differences point at the same structural limit: a
-result-set comparator cannot grade an SQL answer that is semantically
-correct but shaped differently from the reference. Three options:
-
-- Accept the two cases. In early-demo mode, an 83.3% headline number is
-  more useful than a comparator that papers over real semantic ambiguity.
-- Add a per-question `expected_answer` field to `questions.json` for
-  questions whose answer is a single value or a small fixed row set.
-  This pins what counts as correct independent of SQL shape and would
-  resolve fg_q12 (the percentage-versus-decimal case) cleanly.
-- Tighten the questions themselves. "What share of accounts sits in
-  ring candidate communities by region, as a decimal between 0 and 1"
-  removes the percentage-versus-decimal ambiguity at the source.
-
-The trade-off: option two is the cleanest, option three is the cheapest,
-option one defers the decision.
+**Decision: accept the two remaining differences as semantic-ambiguity
+cases.** 83.3% is the honest headline; the comparator stays as-is. No
+code change. fg_q10 and fg_q12 remain marked as differences in the
+output and are not treated as comparator bugs.
 
 ### Retrieval follow-up
 
@@ -252,18 +278,58 @@ The retrieval change exposed a related question: should the column
 embeddings index be re-tuned to surface columns like `fraud_risk_tier`
 when the question contains "high-risk"? Today the embedding ranks
 `risk_score`, `community_risk_rank`, and similar score-named columns
-above `fraud_risk_tier`. Two options:
+above `fraud_risk_tier`. The all-columns value fetch made this less
+acute, but synonyms on column comments would shift the embedding
+similarity so the categorical column ranks higher when the question
+uses domain language.
 
-- Add column comments that include common synonyms. A comment on
-  `fraud_risk_tier` along the lines of "Categorical fraud risk tier:
-  high, medium, low" would shift its embedding similarity to questions
-  mentioning "high risk".
-- Leave the retrieval as is and rely on the all-columns value fetch.
-  This is the current state and is sufficient for the demo set.
+This is an LLM-per-column enrichment job. Several shape choices need
+to be settled before any code lands.
 
-Adding column comments on the Gold tables is the higher-leverage move
-either way: it helps both schema-dump and graph_rag, and it documents
-the schema for downstream consumers.
+**Scope.** Generating synonyms for every column across ~500 tables is
+several thousand LLM calls. The columns that move retrieval ranking are
+the ones with values (already filtered by
+`DBXCARTA_SAMPLE_CARDINALITY_THRESHOLD`) plus join-key columns.
+Targeting that subset cuts the call count by an order of magnitude and
+hits the columns where synonyms actually matter.
+
+**Persistence target.** Two options:
+
+- **UC column comments** via `ALTER TABLE ... ALTER COLUMN ... COMMENT
+  '...'`. Both arms benefit because schema_dump reads UC comments today.
+  The enrichment survives re-ingest because the comment lives on the
+  table. Touches user catalogs, so it needs an opt-in.
+- **Neo4j Column node property** like `c.synonyms` or an enriched
+  `c.comment`. Cheaper to write, no UC permission required, only
+  graph_rag benefits, gets re-derived on every full re-ingest unless
+  cached.
+
+UC comments are the higher-leverage option because they help
+schema_dump and document the schema for downstream consumers.
+
+**Trigger model.** One-time backfill is simpler than per-ingest. A
+`dbxcarta enrich-comments` subcommand reads existing column metadata,
+calls the LLM with `(table_name, column_name, data_type, sample
+values)`, and writes back. Re-runs stay idempotent if columns that
+already have synonyms are skipped.
+
+**Caller.** `ai_query()` in SQL is the cheapest path because it runs
+on Databricks-side compute against the chat endpoint and batches by
+selecting across rows of an "all columns" working table. Single-shot
+prompts from the Python client work too but cost more in roundtrips.
+
+**Quality guardrails.** Constrain the prompt to "five short synonyms
+or domain terms, comma-separated, no full sentences". Validate output
+before writing: reject empty strings, reject anything that contains
+the original column name verbatim, reject obviously over-long
+responses. Without guardrails the LLM will produce verbose
+descriptions that bloat the prompt at retrieval time.
+
+**Recommendation.** Targeted scope (columns with values plus join-key
+columns), persisted as UC comments via `ai_query()`, behind a one-time
+`dbxcarta enrich-comments` subcommand with a `--dry-run` flag for
+preview before the catalog write. Track this as a separate proposal
+because it is its own surface area.
 
 ### Model and prompt follow-up
 
