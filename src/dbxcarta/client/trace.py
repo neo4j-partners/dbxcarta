@@ -23,30 +23,43 @@ def schema_scores_from_seeds(
     tbl_seed_ids: list[str],
     tbl_seed_scores: list[float],
 ) -> dict[str, float]:
-    """Aggregate seed scores onto schemas, normalized to sum to 1."""
+    """Aggregate seed scores onto schemas, normalized per vector index first."""
     raw: dict[str, float] = {}
-    for node_id, score in zip(col_seed_ids, col_seed_scores):
-        schema = _schema_from_id(node_id)
-        if schema:
+    for scores in (
+        _normalized_schema_scores(col_seed_ids, col_seed_scores),
+        _normalized_schema_scores(tbl_seed_ids, tbl_seed_scores),
+    ):
+        for schema, score in scores.items():
             raw[schema] = raw.get(schema, 0.0) + score
-    for node_id, score in zip(tbl_seed_ids, tbl_seed_scores):
+    total = sum(raw.values()) or 1.0
+    return {k: v / total for k, v in raw.items()}
+
+
+def _normalized_schema_scores(
+    seed_ids: list[str],
+    seed_scores: list[float],
+) -> dict[str, float]:
+    raw: dict[str, float] = {}
+    for node_id, score in zip(seed_ids, seed_scores):
         schema = _schema_from_id(node_id)
         if schema:
             raw[schema] = raw.get(schema, 0.0) + score
     total = sum(raw.values()) or 1.0
-    return {k: v / total for k, v in raw.items()}
+    return {schema: score / total for schema, score in raw.items()}
 
 
 def chosen_schemas_from_columns(
     columns: list,
 ) -> list[str]:
     """Return deduplicated schemas present in the final column set, in order."""
-    seen: list[str] = []
+    seen: set[str] = set()
+    result: list[str] = []
     for col in columns:
         schema = _schema_from_id(col.table_fqn)
         if schema and schema not in seen:
-            seen.append(schema)
-    return seen
+            seen.add(schema)
+            result.append(schema)
+    return result
 
 
 @dataclass

@@ -5,7 +5,7 @@ from __future__ import annotations
 from neo4j import GraphDatabase
 
 from dbxcarta.client.neo4j_utils import neo4j_credentials
-from dbxcarta.client.retriever import ColumnEntry, ContextBundle, Retriever
+from dbxcarta.client.retriever import ColumnEntry, ContextBundle, JoinLine, Retriever
 from dbxcarta.client.settings import ClientSettings
 
 _COL_INDEX = "column_embedding"
@@ -28,15 +28,27 @@ _REFERENCES_TABLE_IDS_CYPHER = (
     "RETURN DISTINCT t.id AS tid"
 )
 
-# Fetch literal join predicates for retrieved neighbour tables so they can
-# be injected into the SQL-generation prompt. Gated by DBXCARTA_INJECT_CRITERIA.
+# Fetch join predicates (with source and confidence) for retrieved neighbour
+# tables. When ingest did not persist a literal criteria string, the retriever
+# renders one from the REFERENCES edge endpoints.
 _REFERENCES_CRITERIA_CYPHER = (
     "UNWIND $col_ids AS cid "
     "OPTIONAL MATCH (c:Column {id: cid})-[r:REFERENCES]-(:Column) "
     "WITH r WHERE r IS NOT NULL "
     "  AND COALESCE(r.confidence, 1.0) >= $threshold "
-    "  AND r.criteria IS NOT NULL "
-    "RETURN DISTINCT r.criteria AS crit"
+    "RETURN DISTINCT r.criteria AS crit, "
+    "       startNode(r).id AS source_col_id, "
+    "       endNode(r).id AS target_col_id, "
+    "       r.source AS source, r.confidence AS confidence"
+)
+
+# Return both endpoints of REFERENCES edges so their values can be fetched.
+_JOIN_COLUMN_IDS_CYPHER = (
+    "UNWIND $col_ids AS cid "
+    "OPTIONAL MATCH (c:Column {id: cid})-[r:REFERENCES]-(other:Column) "
+    "WITH other, r WHERE other IS NOT NULL "
+    "  AND COALESCE(r.confidence, 1.0) >= $threshold "
+    "RETURN DISTINCT other.id AS col_id"
 )
 
 
@@ -52,33 +64,52 @@ class GraphRetriever(Retriever):
     def retrieve(self, question: str, embedding: list[float]) -> ContextBundle:
         top_k = self._settings.dbxcarta_client_top_k
         catalog = self._settings.dbxcarta_catalog
-        schemas = self._settings.schemas_list
         threshold = self._settings.dbxcarta_confidence_threshold
         inject_criteria = self._settings.dbxcarta_inject_criteria
+        configured_schemas = self._settings.schemas_list
 
         with self._driver.session() as session:
-            col_seed_pairs = _query_vector_seeds(session, _COL_INDEX, embedding, top_k)
-            tbl_seed_pairs = _query_vector_seeds(session, _TABLE_INDEX, embedding, top_k)
+            raw_col_seed_pairs = _query_vector_seeds(session, _COL_INDEX, embedding, top_k)
+            raw_tbl_seed_pairs = _query_vector_seeds(session, _TABLE_INDEX, embedding, top_k)
+
+            col_seed_pairs = _filter_seed_pairs_to_schemas(
+                raw_col_seed_pairs, configured_schemas
+            )
+            tbl_seed_pairs = _filter_seed_pairs_to_schemas(
+                raw_tbl_seed_pairs, configured_schemas
+            )
+            selected_schemas = _select_schemas(col_seed_pairs, tbl_seed_pairs)
+            active_col_seed_pairs = (
+                _filter_seed_pairs_to_schemas(col_seed_pairs, selected_schemas)
+                if selected_schemas
+                else col_seed_pairs
+            )
+            active_tbl_seed_pairs = (
+                _filter_seed_pairs_to_schemas(tbl_seed_pairs, selected_schemas)
+                if selected_schemas
+                else tbl_seed_pairs
+            )
             col_seeds = [id_ for id_, _ in col_seed_pairs]
             tbl_seeds = [id_ for id_, _ in tbl_seed_pairs]
             col_seed_scores = [score for _, score in col_seed_pairs]
             tbl_seed_scores = [score for _, score in tbl_seed_pairs]
+            active_col_seeds = [id_ for id_, _ in active_col_seed_pairs]
+            active_tbl_seeds = [id_ for id_, _ in active_tbl_seed_pairs]
 
-            parent_tbl_ids = _parent_table_ids(session, col_seeds)
-            ref_tbl_ids = _references_table_ids(session, col_seeds, threshold)
+            parent_tbl_ids = _parent_table_ids(session, active_col_seeds)
+            ref_tbl_ids = _references_table_ids(session, active_col_seeds, threshold)
             expansion_tbl_ids = list(dict.fromkeys(parent_tbl_ids + ref_tbl_ids))
 
-            all_tbl_ids = list(dict.fromkeys(tbl_seeds + expansion_tbl_ids))
-            columns = _fetch_columns(session, all_tbl_ids, catalog, schemas)
-            # Fetch values for every retrieved column, not just col_seeds, so
-            # low-cardinality categorical/enum columns surface their values
-            # even when they were not the embedding's top-k pick. Ingest-side
-            # filtering by DBXCARTA_SAMPLE_CARDINALITY_THRESHOLD already caps
-            # which columns have Value nodes, bounding this fetch.
-            all_col_ids = [c.column_id for c in columns if c.column_id]
-            values = _fetch_values(session, all_col_ids)
-            criteria = (
-                _references_criteria(session, col_seeds, threshold)
+            all_tbl_ids = list(dict.fromkeys(active_tbl_seeds + expansion_tbl_ids))
+            fetch_schemas = selected_schemas or configured_schemas
+            columns = _fetch_columns(session, all_tbl_ids, catalog, fetch_schemas)
+
+            join_col_ids = _join_column_ids(session, active_col_seeds, threshold)
+            value_col_ids = list(dict.fromkeys(active_col_seeds + join_col_ids))
+            values = _fetch_values(session, value_col_ids)
+
+            join_lines = (
+                _references_criteria(session, active_col_seeds, threshold)
                 if inject_criteria
                 else []
             )
@@ -86,14 +117,69 @@ class GraphRetriever(Retriever):
         return ContextBundle(
             columns=columns,
             values=values,
-            seed_ids=col_seeds + tbl_seeds,
-            criteria=criteria,
             col_seed_ids=col_seeds,
             col_seed_scores=col_seed_scores,
             tbl_seed_ids=tbl_seeds,
             tbl_seed_scores=tbl_seed_scores,
             expansion_tbl_ids=expansion_tbl_ids,
+            selected_schemas=selected_schemas,
+            join_lines=join_lines,
         )
+
+
+def _select_schemas(
+    col_seed_pairs: list[tuple[str, float]],
+    tbl_seed_pairs: list[tuple[str, float]],
+    min_runner_up_score: float = 0.20,
+) -> list[str]:
+    """Pick the top schema by per-index normalized seed score."""
+    raw: dict[str, float] = {}
+    for scores in (
+        _normalized_schema_scores(col_seed_pairs),
+        _normalized_schema_scores(tbl_seed_pairs),
+    ):
+        for schema, score in scores.items():
+            raw[schema] = raw.get(schema, 0.0) + score
+    if not raw:
+        return []
+    total = sum(raw.values()) or 1.0
+    normalized = {k: v / total for k, v in raw.items()}
+    ranked = sorted(normalized, key=normalized.__getitem__, reverse=True)
+    selected = [ranked[0]]
+    if len(ranked) > 1 and normalized[ranked[1]] >= min_runner_up_score:
+        selected.append(ranked[1])
+    return selected
+
+
+def _schema_from_node_id(node_id: str) -> str | None:
+    parts = node_id.split(".")
+    return parts[1] if len(parts) >= 3 else None
+
+
+def _filter_seed_pairs_to_schemas(
+    seed_pairs: list[tuple[str, float]],
+    schemas: list[str],
+) -> list[tuple[str, float]]:
+    if not schemas:
+        return seed_pairs
+    allowed = set(schemas)
+    return [
+        (node_id, score)
+        for node_id, score in seed_pairs
+        if _schema_from_node_id(node_id) in allowed
+    ]
+
+
+def _normalized_schema_scores(
+    seed_pairs: list[tuple[str, float]],
+) -> dict[str, float]:
+    raw: dict[str, float] = {}
+    for node_id, score in seed_pairs:
+        schema = _schema_from_node_id(node_id)
+        if schema:
+            raw[schema] = raw.get(schema, 0.0) + score
+    total = sum(raw.values()) or 1.0
+    return {schema: score / total for schema, score in raw.items()}
 
 
 def _query_vector_seeds(
@@ -131,14 +217,38 @@ def _references_table_ids(session, col_ids: list[str], threshold: float) -> list
     return [row["tid"] for row in result]
 
 
-def _references_criteria(session, col_ids: list[str], threshold: float) -> list[str]:
-    """Pull literal join predicates off REFERENCES edges above the threshold."""
+def _references_criteria(
+    session, col_ids: list[str], threshold: float
+) -> list[JoinLine]:
+    """Pull join predicates (with source and confidence) off REFERENCES edges above the threshold."""
     if not col_ids:
         return []
     result = session.run(
         _REFERENCES_CRITERIA_CYPHER, col_ids=col_ids, threshold=threshold,
     )
-    return [row["crit"] for row in result if row["crit"] is not None]
+    return [
+        JoinLine(
+            predicate=(
+                row["crit"]
+                or f"{row['source_col_id']} = {row['target_col_id']}"
+            ),
+            source=row["source"],
+            confidence=row["confidence"],
+        )
+        for row in result
+        if row["crit"] is not None
+        or (row["source_col_id"] is not None and row["target_col_id"] is not None)
+    ]
+
+
+def _join_column_ids(session, col_ids: list[str], threshold: float) -> list[str]:
+    """Return the far-side column IDs of REFERENCES edges from seed columns."""
+    if not col_ids:
+        return []
+    result = session.run(
+        _JOIN_COLUMN_IDS_CYPHER, col_ids=col_ids, threshold=threshold,
+    )
+    return [row["col_id"] for row in result if row["col_id"] is not None]
 
 
 def _fetch_columns(

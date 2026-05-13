@@ -34,7 +34,7 @@ class ArmResult:
     correct: bool = False
     gradable: bool = False
     error: str | None = None
-    # Phase E retrieval diagnostics — only set for the graph_rag arm.
+    # Only set for the graph_rag arm.
     top1_schema_match: bool | None = None
     schema_in_context: bool | None = None
     context_purity: float | None = None
@@ -71,7 +71,7 @@ class ClientRunSummary:
     arm_execution_rate: dict[str, float] = field(default_factory=dict)
     arm_non_empty_rate: dict[str, float] = field(default_factory=dict)
     arm_correct_rate: dict[str, float] = field(default_factory=dict)
-    # Phase E retrieval metrics — only populated for graph_rag arm.
+    # Only populated for the graph_rag arm.
     arm_top1_schema_match_rate: dict[str, float] = field(default_factory=dict)
     arm_schema_in_context_rate: dict[str, float] = field(default_factory=dict)
     arm_mean_context_purity: dict[str, float] = field(default_factory=dict)
@@ -122,6 +122,7 @@ class ClientRunSummary:
 
     def _compute_aggregates(self) -> None:
         counts: dict[str, dict[str, int]] = {}
+        retrieval: dict[str, dict[str, list]] = {}
         for qr in self.question_results:
             for ar in qr.arm_results:
                 if ar.arm not in counts:
@@ -129,6 +130,7 @@ class ClientRunSummary:
                         "attempted": 0, "parsed": 0, "executed": 0,
                         "non_empty": 0, "correct": 0, "gradable": 0,
                     }
+                    retrieval[ar.arm] = {"top1": [], "recall": [], "purity": []}
                 counts[ar.arm]["attempted"] += 1
                 if ar.parsed:
                     counts[ar.arm]["parsed"] += 1
@@ -140,6 +142,12 @@ class ClientRunSummary:
                     counts[ar.arm]["correct"] += 1
                 if ar.gradable:
                     counts[ar.arm]["gradable"] += 1
+                if ar.top1_schema_match is not None:
+                    retrieval[ar.arm]["top1"].append(ar.top1_schema_match)
+                if ar.schema_in_context is not None:
+                    retrieval[ar.arm]["recall"].append(ar.schema_in_context)
+                if ar.context_purity is not None:
+                    retrieval[ar.arm]["purity"].append(ar.context_purity)
         for arm, c in counts.items():
             self.arm_attempted[arm] = c["attempted"]
             self.arm_parsed[arm] = c["parsed"]
@@ -153,24 +161,13 @@ class ClientRunSummary:
             self.arm_non_empty_rate[arm] = round(c["non_empty"] / attempted, 3)
             if c["gradable"] > 0:
                 self.arm_correct_rate[arm] = round(c["correct"] / c["gradable"], 3)
-
-        # Retrieval metrics — aggregate over questions that have a target schema.
-        for arm in counts:
-            arm_results = [
-                ar
-                for qr in self.question_results
-                for ar in qr.arm_results
-                if ar.arm == arm
-            ]
-            top1_vals = [ar.top1_schema_match for ar in arm_results if ar.top1_schema_match is not None]
-            recall_vals = [ar.schema_in_context for ar in arm_results if ar.schema_in_context is not None]
-            purity_vals = [ar.context_purity for ar in arm_results if ar.context_purity is not None]
-            if top1_vals:
-                self.arm_top1_schema_match_rate[arm] = round(sum(top1_vals) / len(top1_vals), 3)
-            if recall_vals:
-                self.arm_schema_in_context_rate[arm] = round(sum(recall_vals) / len(recall_vals), 3)
-            if purity_vals:
-                self.arm_mean_context_purity[arm] = round(sum(purity_vals) / len(purity_vals), 3)
+            rv = retrieval[arm]
+            if rv["top1"]:
+                self.arm_top1_schema_match_rate[arm] = round(sum(rv["top1"]) / len(rv["top1"]), 3)
+            if rv["recall"]:
+                self.arm_schema_in_context_rate[arm] = round(sum(rv["recall"]) / len(rv["recall"]), 3)
+            if rv["purity"]:
+                self.arm_mean_context_purity[arm] = round(sum(rv["purity"]) / len(rv["purity"]), 3)
 
     def finish(self, *, status: str, error: str | None = None) -> None:
         self.status = status

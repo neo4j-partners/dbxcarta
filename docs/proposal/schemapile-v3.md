@@ -1,6 +1,6 @@
 # SchemaPile Example, v3: Why `graph_rag` Underperformed and What to Do About It
 
-**Status: Phase E complete. Phase F in progress.**
+**Status: Phase F implementation complete. Phase F live rerun pending before Phase G.**
 
 The v2 plan landed end to end. Ingest produced a clean 20-schema graph,
 the three-arm client run completed, and the audit trail in `schemapile-v2.md`
@@ -207,7 +207,7 @@ graph retrieval in one pass. The clean sequence is:
 Three phases follow that order. Phase G should not start until Phase E
 and Phase F make clear which retrieval behavior still needs to be tested.
 
-### Phase E: Diagnostics first
+### Phase E: Diagnostics first — **Complete**
 
 Goal: make the next run explainable before changing retrieval behavior.
 
@@ -228,7 +228,7 @@ from a run and explain whether the failure came from schema selection,
 table/column retrieval, prompt rendering, SQL generation, or execution,
 without re-running the client.
 
-### Phase F: Current-fixture retrieval fix
+### Phase F: Current-fixture retrieval fix — **Implementation complete; rerun pending**
 
 Goal: fix the specific cross-schema retrieval problem observed in the
 20-schema SchemaPile fixture, then rerun the unchanged n=9 benchmark.
@@ -257,7 +257,7 @@ returns to within one question of `schema_dump`, or the Phase E audit
 trace identifies the next failing step precisely. We do not need
 `graph_rag` to win on this fixture to move on.
 
-### Phase G: Benchmark refresh
+### Phase G: Benchmark refresh — **Pending**
 
 Goal: replace or supplement the 20-disjoint-schema benchmark with one
 that can actually distinguish the arms.
@@ -312,18 +312,55 @@ records the reviewer, the date, links to job runs or query output,
 defects found and resolved, and an explicit sign-off line that the
 phase meets the quality bar.
 
-- **Phase E —** Complete. 2026-05-13. New `client_retrieval` Delta table
-  (one row per question per run) captures col/tbl seed IDs and scores,
-  schema aggregation scores, chosen schemas, expansion table IDs, final
-  column set, rendered context, generated SQL, reference SQL, parse/execute/
-  correct flags, and execution errors. `_query_vector_seeds` now returns
-  (id, score) pairs so schema score aggregation is based on actual similarity
-  scores rather than counts. Three retrieval-correctness metrics
-  (`top1_schema_match_rate`, `schema_in_context_rate`, `mean_context_purity`)
-  are added to the per-arm run summary and emitted to the `client_run_summary`
-  table. Unit tests cover trace utilities, empty trace emission, and incomplete
-  retrieval-metric stdout handling. Documentation added to
-  `docs/metadata-matching.md`. No change to retrieval logic or prompt
-  rendering.
-- **Phase F —** _pending_
+- **Phase E —** Complete. 2026-05-13.
+  - New `client_retrieval` Delta table (one row per question per run)
+    captures col/tbl seed IDs and scores, schema aggregation scores,
+    chosen schemas, expansion table IDs, final column set, rendered
+    context, generated SQL, reference SQL, parse/execute/correct flags,
+    and execution errors. Table name: `<cat>.<schema>.client_retrieval`.
+  - `_query_vector_seeds` now returns `(id, score)` pairs; schema score
+    aggregation uses actual cosine similarity rather than seed counts.
+  - Three retrieval-correctness metrics (`top1_schema_match_rate`,
+    `schema_in_context_rate`, `mean_context_purity`) added to the per-arm
+    summary — printed to stdout, emitted to `client_run_summary` Delta,
+    and persisted in `client_retrieval` per question.
+  - `ContextBundle.seed_ids` removed (was written but never read; replaced
+    by `col_seed_ids + tbl_seed_ids`). Retrieval-metric aggregation in
+    `_compute_aggregates` is a single pass over `question_results`.
+  - 22 unit tests pass covering all trace utilities and the empty-list
+    guard on `emit_retrieval_traces`.
+  - Failure triage query and table schema documented in
+    `docs/metadata-matching.md`.
+  - No change to retrieval logic, prompt rendering, or CLI shape.
+- **Phase F —** Implementation complete; live rerun pending. 2026-05-13.
+  - `_select_schemas()` aggregates col/tbl seed scores onto schemas (normalized),
+    picks top-1 always plus runner-up if normalized score >= 0.20. Column-index
+    and table-index scores are normalized separately before aggregation.
+  - Vector seeds are filtered to `settings.schemas_list` before schema selection,
+    and table/column expansion uses only the selected schema set.
+  - `_fetch_values()` now called with `col_seeds + join_col_ids` only (capped
+    from all-column fetch). New `_join_column_ids()` walks REFERENCES edges to
+    identify join-predicate columns.
+  - `_REFERENCES_CRITERIA_CYPHER` updated to return `source` and `confidence`
+    alongside `criteria`. When `criteria` is null, `_references_criteria()`
+    synthesizes a predicate from the REFERENCES endpoints. It now returns
+    `list[JoinLine]`. Bug fixed: criteria were computed but never passed to
+    `ContextBundle`.
+  - `ContextBundle` gains `selected_schemas` and `join_lines` fields; `criteria`
+    field removed. `to_text()` restructured into four sections: "Target schema",
+    "Tables:", "Joins:", "Sample values for seeds:".
+  - `graph_rag_prompt` adds: "Use only tables from the target schema shown in
+    the context. Do not join across unrelated schemas."
+  - `client.py`: `chosen_schemas` in `RetrievalTrace` now set from
+    `bundle.selected_schemas` (explicit selection) with fallback to
+    `chosen_schemas_from_columns`.
+  - Focused unit tests cover schema selection over a 3-schema synthetic
+    fixture, per-index score normalization, configured-schema seed filtering,
+    synthesized join predicates, join-line rendering with source/confidence,
+    value-fetch capping, and prompt shape. `test_context_bundle_criteria.py`
+    migrated from `criteria` to `join_lines` API. 211 tests pass, 1 skipped.
+  - Still pending for final Phase F sign-off: rerun the client against the
+    unchanged `schemapile_lakehouse` and compare retrieval metrics, execution
+    rate, attempted-question correctness, and gradable correctness to the v2
+    baseline.
 - **Phase G —** _pending_

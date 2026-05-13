@@ -10,7 +10,7 @@ Evaluation arms:
 
 from __future__ import annotations
 
-import json
+import logging
 import os
 import re
 import requests
@@ -19,10 +19,18 @@ from typing import Any
 
 from databricks.sdk import WorkspaceClient
 
+from dbxcarta.client.compare import compare_result_sets as _compare_result_sets
 from dbxcarta.client.executor import execute_sql, preflight_warehouse
+from dbxcarta.client.questions import (
+    Question,
+    is_table_ref as _is_table_ref,
+    load_questions as _load_questions,
+)
 from dbxcarta.client.settings import ClientSettings
 from dbxcarta.client.summary import ClientRunSummary
 from dbxcarta.databricks import build_workspace_client, quote_qualified_name, uc_volume_parent
+
+logger = logging.getLogger(__name__)
 
 _REFERENCE_ARM = "reference"
 _LLM_ARMS = {"no_context", "schema_dump"}
@@ -32,160 +40,9 @@ _STAGING_ARMS = _LLM_ARMS | {"graph_rag"}
 _FENCE_RE = re.compile(r"^```(?:sql)?\s*\n?(.*?)\n?```\s*$", re.DOTALL | re.IGNORECASE)
 _SQL_START_RE = re.compile(r"^\s*(SELECT|WITH|INSERT|UPDATE|DELETE|CREATE|EXPLAIN)\b", re.IGNORECASE)
 
-# Result-set comparison algorithm boundaries. Not runtime tunables.
-_COMPARE_ROW_THRESHOLD = 500      # rows below this → exact set equality; at or above → sampled
-_LARGE_COUNT_TOLERANCE = 0.10     # row count divergence above 10% → immediately False
-_LARGE_SAMPLE_MATCH_RATE = 0.80   # fraction of stride-sampled rows that must match exactly
-
-
 def _client_retrieval_table(settings: ClientSettings) -> str:
     parts = settings.dbxcarta_summary_table.split(".")
     return f"{parts[0]}.{parts[1]}.client_retrieval"
-
-
-def _is_table_ref(source: str) -> bool:
-    """Return True when source looks like a three-part catalog.schema.table name."""
-    return len(source.split(".")) == 3 and not source.startswith(("/", "."))
-
-
-def _load_questions(source: str, spark: Any = None) -> list[dict[str, Any]]:
-    if _is_table_ref(source):
-        if spark is None:
-            raise RuntimeError("spark is required to load questions from a Delta table")
-        return [row.asDict() for row in spark.table(source).collect()]
-    text = Path(source).read_text()
-    data = json.loads(text)
-    if not isinstance(data, list):
-        raise ValueError(f"questions file must be a JSON array, got {type(data)}")
-    return data
-
-
-def _stringify_cell(value: Any) -> str:
-    """Stringify a result-set cell, casefolding strings so the comparator is
-    case-insensitive on string values (does not affect numeric or NULL cells)."""
-    if value is None:
-        return "NULL"
-    return str(value).casefold()
-
-
-def _normalize_row(row: list, col_names: list[str]) -> tuple:
-    """Reorder row values by sorted column name, stringifying each value.
-
-    Normalises differences in column ordering between generated and reference SQL.
-    Falls back to value-sort when column names are unavailable or mismatched.
-    String values are casefolded so 'High' and 'high' compare equal.
-    """
-    if col_names and len(col_names) == len(row):
-        return tuple(_stringify_cell(v) for _, v in sorted(zip(col_names, row)))
-    return tuple(sorted(_stringify_cell(v) for v in row))
-
-
-def _normalize_result_set(col_names: list[str], rows: list[list]) -> list[tuple]:
-    normalized = [_normalize_row(row, col_names) for row in rows]
-    return sorted(normalized)
-
-
-def _project_to_ref_columns(
-    gen_cols: list[str],
-    gen_rows: list[list],
-    ref_cols: list[str],
-) -> tuple[list[str], list[list]]:
-    """If every ref column name exists in gen columns (case-insensitive),
-    project gen rows down to ref's columns. Otherwise return gen unchanged.
-
-    Handles cases like generated `SELECT *` against a reference that selects
-    a subset of columns: as long as the reference's columns are a subset of
-    what was generated, the extra generated columns are dropped before
-    comparison.
-    """
-    if not ref_cols or not gen_cols or len(ref_cols) >= len(gen_cols):
-        return gen_cols, gen_rows
-    gen_lower = [c.casefold() for c in gen_cols]
-    ref_lower = [c.casefold() for c in ref_cols]
-    if not set(ref_lower).issubset(set(gen_lower)):
-        return gen_cols, gen_rows
-    idx = [gen_lower.index(c) for c in ref_lower]
-    projected_rows = [[row[i] for i in idx] for row in gen_rows]
-    return list(ref_cols), projected_rows
-
-
-def _is_row_superset(ref_norm: list[tuple], gen_norm: list[tuple]) -> bool:
-    """True when every reference row appears in gen at least as many times.
-
-    Counter semantics so duplicate rows in reference must be matched by
-    duplicates in generated. Lets the comparator accept generated SQL that
-    returned a superset of the reference rows (e.g., a larger LIMIT) while
-    still rejecting generations that miss rows.
-    """
-    from collections import Counter
-
-    ref_counter = Counter(ref_norm)
-    gen_counter = Counter(gen_norm)
-    for row, count in ref_counter.items():
-        if gen_counter[row] < count:
-            return False
-    return True
-
-
-def _compare_result_sets(
-    gen_cols: list[str],
-    gen_rows: list[list],
-    ref_cols: list[str],
-    ref_rows: list[list],
-) -> tuple[bool, str | None]:
-    """Compare two result sets, ignoring column ordering and case.
-
-    Tolerances applied, in order:
-      1. Casefolded string comparison: 'High' == 'high'.
-      2. Reference-as-subset column projection: if ref's columns are a
-         subset of gen's, project gen down to ref's columns before comparing
-         (handles generated `SELECT *` vs reference that picks specific columns).
-      3. Row-superset semantics: if gen has more rows than ref but every ref
-         row appears in gen (Counter semantics), mark correct. Handles
-         generated `LIMIT 20` vs reference `LIMIT 10` and similar.
-
-    Small result sets (< _COMPARE_ROW_THRESHOLD): exact equality or
-    row-superset after normalization.
-    Large result sets: short-circuit on >10% row-count divergence below
-    reference count, then require 80% of stride-sampled sorted rows to match.
-    """
-    gen_cols, gen_rows = _project_to_ref_columns(gen_cols, gen_rows, ref_cols)
-
-    gen_count = len(gen_rows)
-    ref_count = len(ref_rows)
-
-    if gen_count >= _COMPARE_ROW_THRESHOLD or ref_count >= _COMPARE_ROW_THRESHOLD:
-        if gen_count < ref_count and ref_count > 0 and (ref_count - gen_count) / ref_count > _LARGE_COUNT_TOLERANCE:
-            return False, (
-                f"row count divergence >10% below reference: generated={gen_count} reference={ref_count}"
-            )
-        gen_sorted = _normalize_result_set(gen_cols, gen_rows)
-        ref_sorted = _normalize_result_set(ref_cols, ref_rows)
-        if gen_count > ref_count and _is_row_superset(ref_sorted, gen_sorted):
-            return True, None
-        sample_size = min(50, gen_count)
-        stride = max(1, gen_count // sample_size) if sample_size else 1
-        gen_sample = gen_sorted[::stride][:sample_size]
-        ref_sample = ref_sorted[::stride][:sample_size]
-        if not gen_sample:
-            return True, None
-        match_rate = sum(g == r for g, r in zip(gen_sample, ref_sample)) / len(gen_sample)
-        if match_rate < _LARGE_SAMPLE_MATCH_RATE:
-            return False, f"sampled match rate {match_rate:.1%} < {_LARGE_SAMPLE_MATCH_RATE:.0%}"
-        return True, None
-
-    gen_sorted = _normalize_result_set(gen_cols, gen_rows)
-    ref_sorted = _normalize_result_set(ref_cols, ref_rows)
-
-    if gen_count == ref_count:
-        if gen_sorted == ref_sorted:
-            return True, None
-        return False, "result set values differ"
-
-    if gen_count > ref_count and _is_row_superset(ref_sorted, gen_sorted):
-        return True, None
-
-    return False, f"row count mismatch: generated={gen_count} reference={ref_count}"
 
 
 def _grade_correct(
@@ -210,7 +67,7 @@ def _grade_correct(
     if ref_rows is None:
         return False, f"reference SQL failed: {ref_err}"
 
-    return _compare_result_sets(gen_cols, gen_rows, ref_cols, ref_rows)
+    return _compare_result_sets(gen_cols or [], gen_rows, ref_cols or [], ref_rows)
 
 
 def _parse_sql(text: str | None) -> tuple[str | None, bool]:
@@ -264,23 +121,23 @@ def _preflight(ws: WorkspaceClient, settings: ClientSettings) -> None:
 def _run_reference_arm(
     ws: WorkspaceClient,
     settings: ClientSettings,
-    questions: list[dict[str, Any]],
+    questions: list[Question],
     summary: ClientRunSummary,
 ) -> None:
     for q in questions:
-        if not q.get("reference_sql"):
+        if not q.reference_sql:
             continue
         executed, non_empty, error = execute_sql(
             ws,
             settings.databricks_warehouse_id,
-            q["reference_sql"],
+            q.reference_sql,
             settings.dbxcarta_client_timeout_sec,
         )
         summary.add_result(
-            question_id=q["question_id"],
-            question=q["question"],
+            question_id=q.question_id,
+            question=q.question,
             arm=_REFERENCE_ARM,
-            sql=q["reference_sql"],
+            sql=q.reference_sql,
             parsed=True,
             executed=executed,
             non_empty=non_empty,
@@ -292,7 +149,7 @@ def _run_llm_arm(
     spark: Any,
     ws: WorkspaceClient,
     settings: ClientSettings,
-    questions: list[dict[str, Any]],
+    questions: list[Question],
     summary: ClientRunSummary,
     arm: str,
     staging_path: str,
@@ -307,14 +164,14 @@ def _run_llm_arm(
     questions_with_prompts = []
     for q in questions:
         if arm == "no_context":
-            prompt = no_context_prompt(q["question"], catalog, schemas)
+            prompt = no_context_prompt(q.question, catalog, schemas)
         elif arm == "schema_dump":
             if schema_text is None:
                 raise RuntimeError("schema_text required for schema_dump arm")
-            prompt = schema_dump_prompt(q["question"], catalog, schemas, schema_text)
+            prompt = schema_dump_prompt(q.question, catalog, schemas, schema_text)
         else:
             raise ValueError(f"Unknown LLM arm: {arm!r}")
-        questions_with_prompts.append({"question_id": q["question_id"], "prompt": prompt})
+        questions_with_prompts.append({"question_id": q.question_id, "prompt": prompt})
 
     responses = generate_sql_batch(
         spark,
@@ -325,7 +182,7 @@ def _run_llm_arm(
     )
 
     for q in questions:
-        qid = q["question_id"]
+        qid = q.question_id
         raw_sql, ai_error = responses.get(qid, (None, "no response"))
 
         cleaned_sql, parse_ok = _parse_sql(raw_sql)
@@ -333,7 +190,7 @@ def _run_llm_arm(
         if not parse_ok:
             summary.add_result(
                 question_id=qid,
-                question=q["question"],
+                question=q.question,
                 arm=arm,
                 sql=raw_sql,
                 parsed=False,
@@ -343,16 +200,18 @@ def _run_llm_arm(
             )
             continue
 
+        assert cleaned_sql is not None
         executed, non_empty, exec_error = execute_sql(
             ws,
             settings.databricks_warehouse_id,
             cleaned_sql,
             settings.dbxcarta_client_timeout_sec,
         )
-        reference_sql = q.get("reference_sql")
+        reference_sql = q.reference_sql
         gradable = bool(reference_sql) and executed
         correct = False
         if gradable:
+            assert reference_sql is not None
             correct, _ = _grade_correct(
                 cleaned_sql,
                 reference_sql,
@@ -362,7 +221,7 @@ def _run_llm_arm(
             )
         summary.add_result(
             question_id=qid,
-            question=q["question"],
+            question=q.question,
             arm=arm,
             sql=cleaned_sql,
             parsed=True,
@@ -402,7 +261,7 @@ def _run_graph_rag_arm(
     spark: Any,
     ws: WorkspaceClient,
     settings: ClientSettings,
-    questions: list[dict[str, Any]],
+    questions: list[Question],
     summary: ClientRunSummary,
     staging_path: str,
 ) -> None:
@@ -420,13 +279,13 @@ def _run_graph_rag_arm(
     catalog = settings.dbxcarta_catalog
     schemas = settings.schemas_list
 
-    texts = [q["question"] for q in questions]
+    texts = [q.question for q in questions]
     embeddings, embed_error = _embed_questions(ws, settings.dbxcarta_embed_endpoint, texts)
     if embeddings is None:
         for q in questions:
             summary.add_result(
-                question_id=q["question_id"],
-                question=q["question"],
+                question_id=q.question_id,
+                question=q.question,
                 arm="graph_rag",
                 parsed=False,
                 executed=False,
@@ -440,10 +299,10 @@ def _run_graph_rag_arm(
         questions_with_prompts = []
         traces: dict[str, RetrievalTrace] = {}
         for q, emb in zip(questions, embeddings):
-            qid = q["question_id"]
-            bundle = retriever.retrieve(q["question"], emb)
+            qid = q.question_id
+            bundle = retriever.retrieve(q.question, emb)
             context_text = bundle.to_text()
-            prompt = graph_rag_prompt(q["question"], catalog, schemas, context_text)
+            prompt = graph_rag_prompt(q.question, catalog, schemas, context_text)
             questions_with_prompts.append({"question_id": qid, "prompt": prompt})
 
             final_col_ids = [c.column_id for c in bundle.columns if c.column_id]
@@ -456,18 +315,22 @@ def _run_graph_rag_arm(
             trace = RetrievalTrace(
                 run_id=summary.run_id,
                 question_id=qid,
-                question=q["question"],
-                target_schema=q.get("schema"),
+                question=q.question,
+                target_schema=q.schema_,
                 col_seed_ids=bundle.col_seed_ids,
                 col_seed_scores=bundle.col_seed_scores,
                 tbl_seed_ids=bundle.tbl_seed_ids,
                 tbl_seed_scores=bundle.tbl_seed_scores,
                 schema_scores=sch_scores,
-                chosen_schemas=chosen_schemas_from_columns(bundle.columns),
+                chosen_schemas=(
+                    bundle.selected_schemas
+                    if bundle.selected_schemas
+                    else chosen_schemas_from_columns(bundle.columns)
+                ),
                 expansion_tbl_ids=bundle.expansion_tbl_ids,
                 final_col_ids=final_col_ids,
                 rendered_context=context_text,
-                reference_sql=q.get("reference_sql"),
+                reference_sql=q.reference_sql,
             )
             compute_retrieval_metrics(trace)
             traces[qid] = trace
@@ -483,41 +346,42 @@ def _run_graph_rag_arm(
     )
 
     for q in questions:
-        qid = q["question_id"]
+        qid = q.question_id
         raw_sql, ai_error = responses.get(qid, (None, "no response"))
         cleaned_sql, parse_ok = _parse_sql(raw_sql)
-        trace = traces.get(qid)
+        trace = traces[qid]
 
         if not parse_ok:
-            if trace:
-                trace.generated_sql = raw_sql
-                trace.execution_error = ai_error or "response did not contain valid SQL"
+            trace.generated_sql = raw_sql
+            trace.execution_error = ai_error or "response did not contain valid SQL"
             summary.add_result(
                 question_id=qid,
-                question=q["question"],
+                question=q.question,
                 arm="graph_rag",
                 sql=raw_sql,
-                context_ids=traces[qid].col_seed_ids + traces[qid].tbl_seed_ids if trace else [],
+                context_ids=trace.col_seed_ids + trace.tbl_seed_ids,
                 parsed=False,
                 executed=False,
                 non_empty=False,
                 error=ai_error or "response did not contain valid SQL",
-                top1_schema_match=trace.top1_schema_match if trace else None,
-                schema_in_context=trace.schema_in_context if trace else None,
-                context_purity=trace.context_purity if trace else None,
+                top1_schema_match=trace.top1_schema_match,
+                schema_in_context=trace.schema_in_context,
+                context_purity=trace.context_purity,
             )
             continue
 
+        assert cleaned_sql is not None
         executed, non_empty, exec_error = execute_sql(
             ws,
             settings.databricks_warehouse_id,
             cleaned_sql,
             settings.dbxcarta_client_timeout_sec,
         )
-        reference_sql = q.get("reference_sql")
+        reference_sql = q.reference_sql
         gradable = bool(reference_sql) and executed
         correct = False
         if gradable:
+            assert reference_sql is not None
             correct, _ = _grade_correct(
                 cleaned_sql,
                 reference_sql,
@@ -526,28 +390,27 @@ def _run_graph_rag_arm(
                 settings.dbxcarta_client_timeout_sec,
             )
 
-        if trace:
-            trace.generated_sql = cleaned_sql
-            trace.parsed = True
-            trace.executed = executed
-            trace.correct = correct
-            trace.execution_error = exec_error
+        trace.generated_sql = cleaned_sql
+        trace.parsed = True
+        trace.executed = executed
+        trace.correct = correct
+        trace.execution_error = exec_error
 
         summary.add_result(
             question_id=qid,
-            question=q["question"],
+            question=q.question,
             arm="graph_rag",
             sql=cleaned_sql,
-            context_ids=trace.col_seed_ids + trace.tbl_seed_ids if trace else [],
+            context_ids=trace.col_seed_ids + trace.tbl_seed_ids,
             parsed=True,
             executed=executed,
             non_empty=non_empty,
             correct=correct,
             gradable=gradable,
             error=exec_error,
-            top1_schema_match=trace.top1_schema_match if trace else None,
-            schema_in_context=trace.schema_in_context if trace else None,
-            context_purity=trace.context_purity if trace else None,
+            top1_schema_match=trace.top1_schema_match,
+            schema_in_context=trace.schema_in_context,
+            context_purity=trace.context_purity,
         )
 
     emit_retrieval_traces(
@@ -556,7 +419,7 @@ def _run_graph_rag_arm(
 
 
 def run_client() -> None:
-    settings = ClientSettings()
+    settings = ClientSettings()  # type: ignore[call-arg]
 
     from pyspark.sql import SparkSession
 
@@ -586,6 +449,7 @@ def run_client() -> None:
         from dbxcarta.client.schema_dump import fetch_schema_dump
         schema_text = fetch_schema_dump(settings)
 
+    primary_error: BaseException | None = None
     try:
         for arm in active_arms:
             if arm == _REFERENCE_ARM:
@@ -605,11 +469,38 @@ def run_client() -> None:
         summary.finish(status="success")
 
     except Exception as exc:
+        primary_error = exc
         summary.finish(status="error", error=str(exc))
         raise
 
     finally:
-        summary.emit(spark, settings.dbxcarta_summary_volume, settings.dbxcarta_summary_table)
+        _emit_summary(
+            summary,
+            spark,
+            settings.dbxcarta_summary_volume,
+            settings.dbxcarta_summary_table,
+            primary_error=primary_error,
+        )
+
+
+def _emit_summary(
+    summary: ClientRunSummary,
+    spark: Any,
+    volume_path: str,
+    table_name: str,
+    *,
+    primary_error: BaseException | None,
+) -> None:
+    """Emit the summary without masking an existing client-run failure."""
+    try:
+        summary.emit(spark, volume_path, table_name)
+    except Exception:
+        if primary_error is not None:
+            logger.exception(
+                "[dbxcarta_client] failed to emit run summary after run failure"
+            )
+            return
+        raise
 
 
 def manage_questions(spark: Any, settings: ClientSettings, questions_path: str) -> None:
@@ -637,13 +528,15 @@ def manage_questions(spark: Any, settings: ClientSettings, questions_path: str) 
         StructField("question", StringType()),
         StructField("notes", StringType()),
         StructField("reference_sql", StringType()),
+        StructField("schema", StringType()),
     ])
     rows = [
         (
-            q.get("question_id"),
-            q.get("question"),
-            q.get("notes"),
-            q.get("reference_sql"),
+            q.question_id,
+            q.question,
+            q.notes,
+            q.reference_sql,
+            q.schema_,
         )
         for q in questions
     ]

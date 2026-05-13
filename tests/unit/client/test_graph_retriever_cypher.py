@@ -14,6 +14,7 @@ from __future__ import annotations
 import re
 
 from dbxcarta.client.graph_retriever import (
+    _JOIN_COLUMN_IDS_CYPHER,
     _REFERENCES_CRITERIA_CYPHER,
     _REFERENCES_TABLE_IDS_CYPHER,
 )
@@ -54,3 +55,9 @@ def test_criteria_cypher_does_not_trigger_warning_pattern() -> None:
     """
     assert _WARNING_PATTERN.search(_REFERENCES_CRITERIA_CYPHER) is None
     assert "OPTIONAL MATCH" in _REFERENCES_CRITERIA_CYPHER
+
+
+def test_join_column_ids_cypher_does_not_trigger_warning_pattern() -> None:
+    """_JOIN_COLUMN_IDS_CYPHER also traverses REFERENCES to find value-fetch targets."""
+    assert _WARNING_PATTERN.search(_JOIN_COLUMN_IDS_CYPHER) is None
+    assert "OPTIONAL MATCH" in _JOIN_COLUMN_IDS_CYPHER

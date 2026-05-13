@@ -70,6 +70,16 @@ def test_schema_scores_three_schemas() -> None:
     assert abs(scores["gamma"] - 0.5) < 1e-9
 
 
+def test_schema_scores_normalizes_column_and_table_indexes_first() -> None:
+    scores = schema_scores_from_seeds(
+        col_seed_ids=["cat.alpha.t.c"],
+        col_seed_scores=[10.0],
+        tbl_seed_ids=["cat.beta.t"],
+        tbl_seed_scores=[1.0],
+    )
+    assert scores == {"alpha": 0.5, "beta": 0.5}
+
+
 def test_schema_scores_empty_seeds() -> None:
     scores = schema_scores_from_seeds([], [], [], [])
     assert scores == {}

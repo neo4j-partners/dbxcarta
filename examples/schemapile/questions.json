@@ -34,7 +34,7 @@
   {
     "question_id": "sp_0004",
     "question": "Which shoes are available in size 10 and cost less than 100?",
-    "reference_sql": "SELECT `sid`, `name`, `brand`, `price`, `colour`, `stock` FROM `schemapile_lakehouse`.`sp_169810_init`.`Shoe` WHERE `size` = 10 AND `price` < 100",
+    "reference_sql": "SELECT `sid`, `name`, `brand`, `price`, `colour`, `stock` FROM `schemapile_lakehouse`.`sp_169810_init`.`shoe` WHERE `size` = 10 AND `price` < 100",
     "schema": "sp_169810_init",
     "source_id": "169810_init.sql",
     "shape": "single_table_filter"
@@ -70,5 +70,300 @@
     "schema": "sp_020891_v01__impl_usuario",
     "source_id": "020891_V01__impl_usuario.sql",
     "shape": "aggregation"
+  },
+  {
+    "question_id": "sp_0009",
+    "question": "List each tweet with the first and last name of the user who posted it.",
+    "reference_sql": "SELECT t.`tweetid`, t.`tweet_content`, t.`timestamp_t`, u.`firstname`, u.`lastname` FROM `schemapile_lakehouse`.`sp_266628_tables`.`tweet` t JOIN `schemapile_lakehouse`.`sp_266628_tables`.`users` u ON t.`username` = u.`username`",
+    "schema": "sp_266628_tables",
+    "source_id": "266628_tables.sql",
+    "shape": "two_table_join",
+    "join_keys": [
+      "sp_266628_tables.tweet.username -> sp_266628_tables.users.username"
+    ]
+  },
+  {
+    "question_id": "sp_0010",
+    "question": "Show each student with the group they belong to.",
+    "reference_sql": "SELECT s.`id`, s.`name` AS student_name, s.`course`, g.`name` AS group_name FROM `schemapile_lakehouse`.`sp_033815_schema`.`students` s JOIN `schemapile_lakehouse`.`sp_033815_schema`.`groups_table` g ON s.`group_id` = g.`id`",
+    "schema": "sp_033815_schema",
+    "source_id": "033815_schema.sql",
+    "shape": "two_table_join",
+    "join_keys": [
+      "sp_033815_schema.students.group_id -> sp_033815_schema.groups_table.id"
+    ]
+  },
+  {
+    "question_id": "sp_0011",
+    "question": "Show each project with the login of its owner.",
+    "reference_sql": "SELECT p.`id`, p.`name` AS project_name, p.`deleted`, u.`login` AS owner_login, u.`country_code` FROM `schemapile_lakehouse`.`sp_310630_schema`.`projects` p JOIN `schemapile_lakehouse`.`sp_310630_schema`.`users` u ON p.`owner_id` = u.`id`",
+    "schema": "sp_310630_schema",
+    "source_id": "310630_schema.sql",
+    "shape": "two_table_join",
+    "join_keys": [
+      "sp_310630_schema.users.id -> sp_310630_schema.projects.owner_id"
+    ]
+  },
+  {
+    "question_id": "sp_0012",
+    "question": "List appointments with the doctor's name for each appointment.",
+    "reference_sql": "SELECT a.`appoi_id`, a.`day`, a.`time_from`, a.`time_to`, d.`doctor_name` FROM `schemapile_lakehouse`.`sp_365427_schema`.`appointments` a JOIN `schemapile_lakehouse`.`sp_365427_schema`.`doctor` d ON a.`doc_id` = d.`doctor_id`",
+    "schema": "sp_365427_schema",
+    "source_id": "365427_schema.sql",
+    "shape": "two_table_join",
+    "join_keys": [
+      "sp_365427_schema.appointments.doc_id -> sp_365427_schema.doctor.doctor_id"
+    ]
+  },
+  {
+    "question_id": "sp_0013",
+    "question": "Show each journey with its destination spaceport.",
+    "reference_sql": "SELECT j.`id`, j.`journey_start`, j.`journey_end`, j.`purpose`, sp.`name` AS destination_spaceport FROM `schemapile_lakehouse`.`sp_413175_01_tabledesign_exam21oct2018`.`journeys` j JOIN `schemapile_lakehouse`.`sp_413175_01_tabledesign_exam21oct2018`.`spaceports` sp ON j.`destination_spaceport_id` = sp.`id`",
+    "schema": "sp_413175_01_tabledesign_exam21oct2018",
+    "source_id": "413175_01.TableDesign_Exam21Oct2018.sql",
+    "shape": "two_table_join",
+    "join_keys": [
+      "sp_413175_01_tabledesign_exam21oct2018.journeys.destination_spaceport_id -> sp_413175_01_tabledesign_exam21oct2018.spaceports.id"
+    ]
+  },
+  {
+    "question_id": "sp_0014",
+    "question": "List each order with the email address of the user who placed it.",
+    "reference_sql": "SELECT o.`id` AS order_id, o.`status`, o.`created_at`, u.`email` AS user_email FROM `schemapile_lakehouse`.`sp_435873_db`.`orders` o JOIN `schemapile_lakehouse`.`sp_435873_db`.`users` u ON o.`user_id` = u.`id`",
+    "schema": "sp_435873_db",
+    "source_id": "435873_db.sql",
+    "shape": "two_table_join",
+    "join_keys": [
+      "sp_435873_db.orders.user_id -> sp_435873_db.users.id"
+    ]
+  },
+  {
+    "question_id": "sp_0015",
+    "question": "For every group, show how many users are assigned to it, including groups with no users.",
+    "reference_sql": "SELECT g.`id_grupo`, g.`ds_nome` AS group_name, COUNT(ug.`id_usuario`) AS user_count FROM `schemapile_lakehouse`.`sp_020891_v01__impl_usuario`.`tb_grupo` g LEFT JOIN `schemapile_lakehouse`.`sp_020891_v01__impl_usuario`.`tb_usuario_x_grupo` ug ON g.`id_grupo` = ug.`id_grupo` GROUP BY g.`id_grupo`, g.`ds_nome` ORDER BY user_count DESC",
+    "schema": "sp_020891_v01__impl_usuario",
+    "source_id": "020891_V01__impl_usuario.sql",
+    "shape": "two_table_join",
+    "join_keys": [
+      "sp_020891_v01__impl_usuario.tb_usuario_x_grupo.id_grupo -> sp_020891_v01__impl_usuario.tb_grupo.id_grupo"
+    ]
+  },
+  {
+    "question_id": "sp_0016",
+    "question": "For every teacher, show how many books they have uploaded, including teachers with no books.",
+    "reference_sql": "SELECT t.`username`, t.`name`, COUNT(b.`name`) AS book_count FROM `schemapile_lakehouse`.`sp_535132_zhuanglang`.`teacher` t LEFT JOIN `schemapile_lakehouse`.`sp_535132_zhuanglang`.`book` b ON t.`username` = b.`upload` GROUP BY t.`username`, t.`name` ORDER BY book_count DESC",
+    "schema": "sp_535132_zhuanglang",
+    "source_id": "535132_zhuanglang.sql",
+    "shape": "two_table_join",
+    "join_keys": [
+      "sp_535132_zhuanglang.book.upload -> sp_535132_zhuanglang.teacher.username"
+    ]
+  },
+  {
+    "question_id": "sp_0017",
+    "question": "For each article, show how many material files are attached, including articles with no files.",
+    "reference_sql": "SELECT a.`articlesid`, a.`title`, COUNT(m.`materialid`) AS material_count FROM `schemapile_lakehouse`.`sp_289361_schema`.`articles` a LEFT JOIN `schemapile_lakehouse`.`sp_289361_schema`.`material` m ON a.`articlesid` = m.`articlesid` GROUP BY a.`articlesid`, a.`title` ORDER BY material_count DESC",
+    "schema": "sp_289361_schema",
+    "source_id": "289361_schema.sql",
+    "shape": "two_table_join",
+    "join_keys": [
+      "sp_289361_schema.material.articlesid -> sp_289361_schema.articles.articlesid"
+    ]
+  },
+  {
+    "question_id": "sp_0018",
+    "question": "Which members are assigned to each project, and what role does each member have?",
+    "reference_sql": "SELECT p.`id` AS project_id, p.`name` AS project_name, m.`id` AS member_id, m.`name` AS member_name, pm.`role` FROM `schemapile_lakehouse`.`sp_002489_project`.`projects` p JOIN `schemapile_lakehouse`.`sp_002489_project`.`project_members` pm ON p.`id` = pm.`project` JOIN `schemapile_lakehouse`.`sp_002489_project`.`members` m ON pm.`member` = m.`id`",
+    "schema": "sp_002489_project",
+    "source_id": "002489_project.sql",
+    "shape": "three_table_join",
+    "join_keys": [
+      "sp_002489_project.project_members.project -> sp_002489_project.projects.id",
+      "sp_002489_project.project_members.member -> sp_002489_project.members.id"
+    ]
+  },
+  {
+    "question_id": "sp_0019",
+    "question": "List each authenticated user with their username and granted authority.",
+    "reference_sql": "SELECT u.`id`, u.`uid`, up.`user_name`, u.`active`, a.`authority` FROM `schemapile_lakehouse`.`sp_008582_auth_services_schema_mysql`.`user_table` u JOIN `schemapile_lakehouse`.`sp_008582_auth_services_schema_mysql`.`username_password_table` up ON u.`uid` = up.`uid` JOIN `schemapile_lakehouse`.`sp_008582_auth_services_schema_mysql`.`authority_table` a ON u.`uid` = a.`uid`",
+    "schema": "sp_008582_auth_services_schema_mysql",
+    "source_id": "008582_auth-services-schema-mysql.sql",
+    "shape": "three_table_join",
+    "join_keys": [
+      "sp_008582_auth_services_schema_mysql.username_password_table.uid -> sp_008582_auth_services_schema_mysql.user_table.uid",
+      "sp_008582_auth_services_schema_mysql.authority_table.uid -> sp_008582_auth_services_schema_mysql.user_table.uid"
+    ]
+  },
+  {
+    "question_id": "sp_0020",
+    "question": "Show each employee with their department assignment.",
+    "reference_sql": "SELECT e.`emp_no`, e.`first_name`, e.`last_name`, d.`dept_no`, d.`dept_name` FROM `schemapile_lakehouse`.`sp_422245_tableschemata`.`employees` e JOIN `schemapile_lakehouse`.`sp_422245_tableschemata`.`dept_emp` de ON e.`emp_no` = de.`emp_no` JOIN `schemapile_lakehouse`.`sp_422245_tableschemata`.`departments` d ON de.`dept_no` = d.`dept_no`",
+    "schema": "sp_422245_tableschemata",
+    "source_id": "422245_tableschemata.sql",
+    "shape": "three_table_join",
+    "join_keys": [
+      "sp_422245_tableschemata.dept_emp.emp_no -> sp_422245_tableschemata.employees.emp_no",
+      "sp_422245_tableschemata.dept_emp.dept_no -> sp_422245_tableschemata.departments.dept_no"
+    ]
+  },
+  {
+    "question_id": "sp_0021",
+    "question": "What are total internet sales by sales territory group?",
+    "reference_sql": "SELECT st.`salesterritorygroup`, SUM(CAST(f.`salesamount` AS DOUBLE)) AS total_sales, SUM(CAST(f.`orderquantity` AS DOUBLE)) AS total_quantity FROM `schemapile_lakehouse`.`sp_492424_create_adventuresoverflow`.`sales_factinternetsales` f JOIN `schemapile_lakehouse`.`sp_492424_create_adventuresoverflow`.`sales_dimsalesterritory` st ON f.`salesterritorykey` = st.`salesterritorykey` GROUP BY st.`salesterritorygroup` ORDER BY total_sales DESC",
+    "schema": "sp_492424_create_adventuresoverflow",
+    "source_id": "492424_create-adventuresOverflow.sql",
+    "shape": "aggregation",
+    "join_keys": [
+      "sp_492424_create_adventuresoverflow.sales_factinternetsales.salesterritorykey -> sp_492424_create_adventuresoverflow.sales_dimsalesterritory.salesterritorykey"
+    ]
+  },
+  {
+    "question_id": "sp_0022",
+    "question": "How many classes are scheduled for each subject?",
+    "reference_sql": "SELECT s.`subject_code`, s.`subject_title`, COUNT(c.`class_id`) AS class_count FROM `schemapile_lakehouse`.`sp_352545_capstone`.`subject` s LEFT JOIN `schemapile_lakehouse`.`sp_352545_capstone`.`class` c ON s.`subject_code` = c.`subject_code` GROUP BY s.`subject_code`, s.`subject_title` ORDER BY class_count DESC",
+    "schema": "sp_352545_capstone",
+    "source_id": "352545_capstone.sql",
+    "shape": "aggregation",
+    "join_keys": [
+      "sp_352545_capstone.class.subject_code -> sp_352545_capstone.subject.subject_code"
+    ]
+  },
+  {
+    "question_id": "sp_0023",
+    "question": "How many permissions are attached to each role?",
+    "reference_sql": "SELECT r.`id`, r.`name` AS role_name, COUNT(rp.`permission_id`) AS permission_count FROM `schemapile_lakehouse`.`sp_178181_v4_026__create_unified_user`.`roles` r LEFT JOIN `schemapile_lakehouse`.`sp_178181_v4_026__create_unified_user`.`role_permissions` rp ON r.`id` = rp.`role_id` GROUP BY r.`id`, r.`name` ORDER BY permission_count DESC",
+    "schema": "sp_178181_v4_026__create_unified_user",
+    "source_id": "178181_V4.026__create_unified_user.sql",
+    "shape": "aggregation",
+    "join_keys": [
+      "sp_178181_v4_026__create_unified_user.role_permissions.role_id -> sp_178181_v4_026__create_unified_user.roles.id"
+    ]
+  },
+  {
+    "question_id": "sp_0024",
+    "question": "How many players belong to each team?",
+    "reference_sql": "SELECT e.`id_equipo`, e.`nombre` AS team_name, COUNT(j.`id_jugador`) AS player_count FROM `schemapile_lakehouse`.`sp_596038_ddl_proyecto`.`equipo` e LEFT JOIN `schemapile_lakehouse`.`sp_596038_ddl_proyecto`.`jugador` j ON e.`id_equipo` = j.`id_equipo` GROUP BY e.`id_equipo`, e.`nombre` ORDER BY player_count DESC",
+    "schema": "sp_596038_ddl_proyecto",
+    "source_id": "596038_DDL_Proyecto.sql",
+    "shape": "aggregation",
+    "join_keys": [
+      "sp_596038_ddl_proyecto.jugador.id_equipo -> sp_596038_ddl_proyecto.equipo.id_equipo"
+    ]
+  },
+  {
+    "question_id": "sp_0025",
+    "question": "For each takeout user order, how many dishes are included and what is the total item amount?",
+    "reference_sql": "SELECT uo.`username`, uo.`order_id`, uo.`state`, COUNT(oi.`dish_id`) AS dish_count, SUM(CAST(oi.`amount` AS DOUBLE)) AS total_amount FROM `schemapile_lakehouse`.`sp_594700_takeout`.`user_orders` uo JOIN `schemapile_lakehouse`.`sp_594700_takeout`.`orders` o ON uo.`order_id` = o.`order_id` LEFT JOIN `schemapile_lakehouse`.`sp_594700_takeout`.`order_include` oi ON o.`order_id` = oi.`order_id` GROUP BY uo.`username`, uo.`order_id`, uo.`state` ORDER BY dish_count DESC",
+    "schema": "sp_594700_takeout",
+    "source_id": "594700_takeout.sql",
+    "shape": "aggregation",
+    "join_keys": [
+      "sp_594700_takeout.order_include.order_id -> sp_594700_takeout.orders.order_id",
+      "sp_594700_takeout.user_orders.order_id -> sp_594700_takeout.orders.order_id"
+    ]
+  },
+  {
+    "question_id": "sp_0026",
+    "question": "What is the average shoe price by brand for brands with more than one shoe?",
+    "reference_sql": "SELECT `brand`, AVG(`price`) AS avg_price, COUNT(`sid`) AS shoe_count FROM `schemapile_lakehouse`.`sp_169810_init`.`shoe` GROUP BY `brand` HAVING COUNT(`sid`) > 1 ORDER BY avg_price DESC",
+    "schema": "sp_169810_init",
+    "source_id": "169810_init.sql",
+    "shape": "aggregation"
+  },
+  {
+    "question_id": "sp_0027",
+    "question": "How many result projects are there for each programming language?",
+    "reference_sql": "SELECT `language`, COUNT(*) AS project_count FROM `schemapile_lakehouse`.`sp_310630_schema`.`result_projects` GROUP BY `language` ORDER BY project_count DESC",
+    "schema": "sp_310630_schema",
+    "source_id": "310630_schema.sql",
+    "shape": "aggregation"
+  },
+  {
+    "question_id": "sp_0028",
+    "question": "How many tweets are there for each tweet type?",
+    "reference_sql": "SELECT `type`, COUNT(`tweetid`) AS tweet_count FROM `schemapile_lakehouse`.`sp_266628_tables`.`tweet` GROUP BY `type` ORDER BY tweet_count DESC",
+    "schema": "sp_266628_tables",
+    "source_id": "266628_tables.sql",
+    "shape": "aggregation"
+  },
+  {
+    "question_id": "sp_0029",
+    "question": "How many distinct tab_a and tab_b references appear in tab_no_action?",
+    "reference_sql": "SELECT COUNT(DISTINCT `tab_a_id`) AS distinct_tab_a_ids, COUNT(DISTINCT `tab_b_id`) AS distinct_tab_b_ids, COUNT(*) AS total_rows FROM `schemapile_lakehouse`.`sp_300813_erzeuge_zielzustand`.`tab_no_action`",
+    "schema": "sp_300813_erzeuge_zielzustand",
+    "source_id": "300813_erzeuge_zielzustand.sql",
+    "shape": "aggregation"
+  },
+  {
+    "question_id": "sp_0030",
+    "question": "Which shoes are black and have at least eight units in stock?",
+    "reference_sql": "SELECT `sid`, `name`, `brand`, `colour`, `stock`, `price` FROM `schemapile_lakehouse`.`sp_169810_init`.`shoe` WHERE `colour` = 'Black' AND `stock` >= 8",
+    "schema": "sp_169810_init",
+    "source_id": "169810_init.sql",
+    "shape": "single_table_filter"
+  },
+  {
+    "question_id": "sp_0031",
+    "question": "Which shoes are available in size 8 or size 10?",
+    "reference_sql": "SELECT `sid`, `name`, `brand`, `size`, `price`, `stock` FROM `schemapile_lakehouse`.`sp_169810_init`.`shoe` WHERE `size` IN (8, 10)",
+    "schema": "sp_169810_init",
+    "source_id": "169810_init.sql",
+    "shape": "single_table_filter"
+  },
+  {
+    "question_id": "sp_0032",
+    "question": "Which uploaded resources are videos?",
+    "reference_sql": "SELECT `id`, `name`, `path`, `upload`, `videoorslide` FROM `schemapile_lakehouse`.`sp_535132_zhuanglang`.`resources` WHERE `videoorslide` = 'VIDEO'",
+    "schema": "sp_535132_zhuanglang",
+    "source_id": "535132_zhuanglang.sql",
+    "shape": "single_table_filter"
+  },
+  {
+    "question_id": "sp_0033",
+    "question": "Which users are currently active?",
+    "reference_sql": "SELECT `id_usuario`, `ds_nome`, `ds_login` FROM `schemapile_lakehouse`.`sp_020891_v01__impl_usuario`.`tb_usuario` WHERE `fl_ativo` = TRUE",
+    "schema": "sp_020891_v01__impl_usuario",
+    "source_id": "020891_V01__impl_usuario.sql",
+    "shape": "single_table_filter"
+  },
+  {
+    "question_id": "sp_0034",
+    "question": "Which semesters started on or after June 1, 2015?",
+    "reference_sql": "SELECT `semester_id`, `semester`, `academic_year_id`, `start_date`, `end_date` FROM `schemapile_lakehouse`.`sp_352545_capstone`.`semester` WHERE `start_date` >= '2015-06-01'",
+    "schema": "sp_352545_capstone",
+    "source_id": "352545_capstone.sql",
+    "shape": "single_table_filter"
+  },
+  {
+    "question_id": "sp_0035",
+    "question": "Which profile rows are owner profiles?",
+    "reference_sql": "SELECT `id_perfil`, `nombre` FROM `schemapile_lakehouse`.`sp_596038_ddl_proyecto`.`perfil` WHERE `nombre` = 'Due\u00f1o'",
+    "schema": "sp_596038_ddl_proyecto",
+    "source_id": "596038_DDL_Proyecto.sql",
+    "shape": "single_table_filter"
+  },
+  {
+    "question_id": "sp_0036",
+    "question": "Rank shoes within each brand by price from highest to lowest.",
+    "reference_sql": "SELECT `brand`, `name`, `price`, RANK() OVER (PARTITION BY `brand` ORDER BY `price` DESC) AS price_rank FROM `schemapile_lakehouse`.`sp_169810_init`.`shoe`",
+    "schema": "sp_169810_init",
+    "source_id": "169810_init.sql",
+    "shape": "advanced"
+  },
+  {
+    "question_id": "sp_0037",
+    "question": "Which groups have at least one active user?",
+    "reference_sql": "SELECT g.`id_grupo`, g.`ds_nome` FROM `schemapile_lakehouse`.`sp_020891_v01__impl_usuario`.`tb_grupo` g WHERE EXISTS (SELECT 1 FROM `schemapile_lakehouse`.`sp_020891_v01__impl_usuario`.`tb_usuario_x_grupo` ug JOIN `schemapile_lakehouse`.`sp_020891_v01__impl_usuario`.`tb_usuario` u ON ug.`id_usuario` = u.`id_usuario` WHERE ug.`id_grupo` = g.`id_grupo` AND u.`fl_ativo` = TRUE)",
+    "schema": "sp_020891_v01__impl_usuario",
+    "source_id": "020891_V01__impl_usuario.sql",
+    "shape": "advanced"
+  },
+  {
+    "question_id": "sp_0038",
+    "question": "Using a CTE, list the classes that have at least one uploaded resource.",
+    "reference_sql": "WITH resource_counts AS (SELECT `belong` AS class_id, COUNT(`id`) AS resource_count FROM `schemapile_lakehouse`.`sp_535132_zhuanglang`.`resources` GROUP BY `belong`) SELECT c.`id`, c.`number`, c.`note`, rc.resource_count FROM `schemapile_lakehouse`.`sp_535132_zhuanglang`.`class` c JOIN resource_counts rc ON c.`id` = rc.class_id WHERE rc.resource_count > 0",
+    "schema": "sp_535132_zhuanglang",
+    "source_id": "535132_zhuanglang.sql",
+    "shape": "advanced"
   }
 ]

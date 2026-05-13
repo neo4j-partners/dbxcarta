@@ -22,8 +22,10 @@ dbxcarta-ingest = "dbxcarta.entrypoints.ingest:main"
 
 [project.optional-dependencies]
 test = [
+    "mypy",
     "pytest",
     "pyspark>=3.5",
+    "types-requests",
 ]
 
 [build-system]
@@ -31,7 +33,7 @@ requires = ["uv_build>=0.9.3,<0.10.0"]
 build-backend = "uv_build"
 
 [tool.pytest.ini_options]
-addopts = "-m 'not live'"
+addopts = "-m 'not live' --import-mode=importlib"
 markers = [
     "live: tests that require a live Databricks profile, Neo4j, and a previously-loaded catalog (default pytest skips these)",
 ]

@@ -241,7 +241,7 @@ wheels = [
 
 [[package]]
 name = "dbxcarta"
-version = "0.2.35"
+version = "0.2.38"
 source = { editable = "../../" }
 dependencies = [
     { name = "databricks-job-runner" },
@@ -256,12 +256,14 @@ dependencies = [
 requires-dist = [
     { name = "databricks-job-runner", specifier = ">=0.4.8" },
     { name = "databricks-sdk", specifier = ">=0.40" },
+    { name = "mypy", marker = "extra == 'test'" },
     { name = "neo4j", specifier = ">=5.0" },
     { name = "pydantic", specifier = ">=2" },
     { name = "pydantic-settings", specifier = ">=2" },
     { name = "pyspark", marker = "extra == 'test'", specifier = ">=3.5" },
     { name = "pytest", marker = "extra == 'test'" },
     { name = "python-dotenv" },
+    { name = "types-requests", marker = "extra == 'test'" },
 ]
 provides-extras = ["test"]
 

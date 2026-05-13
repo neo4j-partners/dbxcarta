@@ -98,7 +98,7 @@ def run_dbxcarta(
     is resolved lazily. Library consumers can pass explicit settings and, when
     they already own Spark setup, an existing Spark session.
     """
-    resolved_settings = settings if settings is not None else Settings()
+    resolved_settings = settings if settings is not None else Settings()  # type: ignore[call-arg]
 
     if spark is None:
         from pyspark.sql import SparkSession
@@ -112,11 +112,13 @@ def run_dbxcarta(
     ]
 
     summary = _build_summary(run_id, resolved_settings, schema_list)
+    primary_error: BaseException | None = None
 
     try:
         _run(spark, resolved_settings, schema_list, summary)
         summary.finish(status="success")
     except Exception as exc:
+        primary_error = exc
         # Top-level catch-all is deliberate: the purpose here is to record
         # _any_ failure into RunSummary.error (stdout + JSON + Delta) before
         # re-raising. Narrowing would silently lose novel failure modes. The
@@ -124,10 +126,12 @@ def run_dbxcarta(
         summary.finish(status="failure", error=str(exc))
         raise
     finally:
-        summary.emit(
+        _emit_summary(
+            summary,
             spark,
             resolved_settings.dbxcarta_summary_volume,
             resolved_settings.dbxcarta_summary_table,
+            primary_error=primary_error,
         )
 
 
@@ -159,6 +163,26 @@ def _build_summary(run_id: str, settings: Settings, schema_list: list[str]) -> R
     )
 
 
+def _emit_summary(
+    summary: RunSummary,
+    spark: "SparkSession",
+    volume_path: str,
+    table_name: str,
+    *,
+    primary_error: BaseException | None,
+) -> None:
+    """Emit the summary without masking an existing run failure."""
+    try:
+        summary.emit(spark, volume_path, table_name)
+    except Exception:
+        if primary_error is not None:
+            logger.exception(
+                "[dbxcarta] failed to emit run summary after run failure"
+            )
+            return
+        raise
+
+
 def _run(
     spark: "SparkSession",
     settings: Settings,
@@ -174,6 +198,7 @@ def _run(
     from databricks.sdk.runtime import dbutils
     from neo4j import GraphDatabase
 
+    extract_result: ExtractResult | None = None
     scope = settings.databricks_secret_scope
     neo4j = Neo4jConfig(
         uri=dbutils.secrets.get(scope=scope, key="NEO4J_URI"),
@@ -187,30 +212,44 @@ def _run(
     ledger_path = resolve_ledger_path(settings)
     truncate_staging_root(staging_path)
 
-    with GraphDatabase.driver(neo4j.uri, auth=(neo4j.username, neo4j.password)) as driver:
-        bootstrap_constraints(driver, settings)
+    run_error: BaseException | None = None
+    try:
+        with GraphDatabase.driver(neo4j.uri, auth=(neo4j.username, neo4j.password)) as driver:
+            bootstrap_constraints(driver, settings)
 
-        extract_result = extract(spark, settings, schema_list, summary)
-        _transform_embeddings(settings, extract_result, staging_path, ledger_path, summary)
-        values = _transform_sample_values(
-            spark, settings, schema_list, extract_result,
-            staging_path, ledger_path, summary,
-        )
-        _check_thresholds(settings, summary)
+            extract_result = extract(spark, settings, schema_list, summary)
+            _transform_embeddings(settings, extract_result, staging_path, ledger_path, summary)
+            values = _transform_sample_values(
+                spark, settings, schema_list, extract_result,
+                staging_path, ledger_path, summary,
+            )
+            _check_thresholds(settings, summary)
 
-        fk_result = run_fk_discovery(
-            spark, settings, schema_list, extract_result,
-            values.sample_stats if values else None,
-            values.value_node_df if values else None,
-            values.has_value_df if values else None,
-            summary,
-        )
+            fk_result = run_fk_discovery(
+                spark, settings, schema_list, extract_result,
+                values.sample_stats if values else None,
+                values.value_node_df if values else None,
+                values.has_value_df if values else None,
+                summary,
+            )
 
-        _load(neo4j, driver, extract_result, fk_result, values, summary)
-        summary.neo4j_counts = query_counts(driver)
-        _verify(driver, settings, summary)
-
-    extract_result.unpersist_cached()
+            _load(neo4j, driver, extract_result, fk_result, values, summary)
+            summary.neo4j_counts = query_counts(driver)
+            _verify(driver, settings, summary)
+    except Exception as exc:
+        run_error = exc
+        raise
+    finally:
+        if extract_result is not None:
+            try:
+                extract_result.unpersist_cached()
+            except Exception:
+                if run_error is not None:
+                    logger.exception(
+                        "[dbxcarta] failed to unpersist cached extraction DataFrames"
+                    )
+                else:
+                    raise
     logger.info("[dbxcarta] neo4j counts: %s", summary.neo4j_counts)
 
 

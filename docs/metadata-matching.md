@@ -311,7 +311,7 @@ and schema as `dbxcarta_summary_table`). One row per (run_id, question_id).
 | `tbl_seed_ids` | ARRAY\<STRING\> | Table-index vector seed IDs |
 | `tbl_seed_scores` | ARRAY\<DOUBLE\> | Cosine scores for each table seed |
 | `schema_scores` | MAP\<STRING, DOUBLE\> | Normalized aggregate score per schema |
-| `chosen_schemas` | ARRAY\<STRING\> | Schemas present in the final rendered context |
+| `chosen_schemas` | ARRAY\<STRING\> | Selected schema gate used for graph retrieval |
 | `expansion_tbl_ids` | ARRAY\<STRING\> | Tables added via HAS_COLUMN parent and REFERENCES expansion |
 | `final_col_ids` | ARRAY\<STRING\> | All column IDs in the rendered context |
 | `rendered_context` | STRING | Full text handed to the LLM prompt |

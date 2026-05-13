@@ -48,7 +48,8 @@ def graph_rag_prompt(
     )
     return (
         f"You are a SQL expert. Write a single SQL SELECT query to answer the following question.\n"
-        f"The data lives in Databricks Unity Catalog: catalog '{catalog}', {schema_hint}.\n\n"
+        f"The data lives in Databricks Unity Catalog: catalog '{catalog}', {schema_hint}.\n"
+        f"Use only tables from the target schema shown in the context. Do not join across unrelated schemas.\n\n"
         f"Relevant schema context retrieved from the knowledge graph:\n{context_text}\n\n"
         f"{_SQL_INSTRUCTION}\n\n"
         f"Question: {question}"
