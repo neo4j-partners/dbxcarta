@@ -10,7 +10,9 @@ from dbxcarta.client.settings import ClientSettings
 
 _COL_INDEX = "column_embedding"
 _TABLE_INDEX = "table_embedding"
-_MAX_VALUES = 30
+_MAX_VALUES_PER_COLUMN = 20
+_MAX_VALUE_CHARS = 80
+_MAX_VALUES_TOTAL = 2000
 
 # OPTIONAL MATCH so deployments with no REFERENCES edges don't trigger
 # Neo4j's 01N51 UnknownRelationshipTypeWarning. Exported as a constant so
@@ -62,7 +64,13 @@ class GraphRetriever(Retriever):
 
             all_tbl_ids = list(dict.fromkeys(tbl_seeds + parent_tbl_ids + ref_tbl_ids))
             columns = _fetch_columns(session, all_tbl_ids, catalog, schemas)
-            values = _fetch_values(session, col_seeds)
+            # Fetch values for every retrieved column, not just col_seeds, so
+            # low-cardinality categorical/enum columns surface their values
+            # even when they were not the embedding's top-k pick. Ingest-side
+            # filtering by DBXCARTA_SAMPLE_CARDINALITY_THRESHOLD already caps
+            # which columns have Value nodes, bounding this fetch.
+            all_col_ids = [c.column_id for c in columns if c.column_id]
+            values = _fetch_values(session, all_col_ids)
             criteria = (
                 _references_criteria(session, col_seeds, threshold)
                 if inject_criteria
@@ -131,7 +139,7 @@ def _fetch_columns(
         "MATCH (t)-[:HAS_COLUMN]->(c:Column) "
         "WHERE size($schemas) = 0 OR s.name IN $schemas "
         "RETURN s.name AS schema_name, t.name AS table_name, "
-        "       c.name AS col_name, c.data_type AS data_type, "
+        "       c.id AS col_id, c.name AS col_name, c.data_type AS data_type, "
         "       c.comment AS comment, c.ordinal_position AS pos "
         "ORDER BY schema_name, table_name, pos",
         tids=table_ids,
@@ -145,17 +153,36 @@ def _fetch_columns(
             column_name=row["col_name"],
             data_type=row["data_type"] or "",
             comment=row["comment"] or "",
+            column_id=row["col_id"] or "",
         ))
     return entries
 
 
-def _fetch_values(session, col_ids: list[str]) -> list[str]:
+def _fetch_values(session, col_ids: list[str]) -> dict[str, list[str]]:
+    """Return {col_id: [values]} for the given column IDs.
+
+    Three guards bound prompt growth: per-column cap (categorical columns
+    are useful at ~20 distinct values), per-value char cap (long-text columns
+    that pass the cardinality threshold can still have multi-KB values), and
+    a global cap on rows fetched from Neo4j (defense in depth against fan-out).
+    """
     if not col_ids:
-        return []
+        return {}
     result = session.run(
         "UNWIND $col_ids AS cid "
         "MATCH (c:Column {id: cid})-[:HAS_VALUE]->(v:Value) "
-        f"RETURN v.value AS val LIMIT {_MAX_VALUES}",
+        f"RETURN c.id AS col_id, v.value AS val LIMIT {_MAX_VALUES_TOTAL}",
         col_ids=col_ids,
     )
-    return [row["val"] for row in result if row["val"] is not None]
+    by_col: dict[str, list[str]] = {}
+    for row in result:
+        val = row["val"]
+        if val is None:
+            continue
+        text = str(val)
+        if len(text) > _MAX_VALUE_CHARS:
+            text = text[:_MAX_VALUE_CHARS] + "..."
+        bucket = by_col.setdefault(row["col_id"], [])
+        if len(bucket) < _MAX_VALUES_PER_COLUMN:
+            bucket.append(text)
+    return by_col

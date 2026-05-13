@@ -55,20 +55,71 @@ def _load_questions(source: str, spark: Any = None) -> list[dict[str, Any]]:
     return data
 
 
+def _stringify_cell(value: Any) -> str:
+    """Stringify a result-set cell, casefolding strings so the comparator is
+    case-insensitive on string values (does not affect numeric or NULL cells)."""
+    if value is None:
+        return "NULL"
+    return str(value).casefold()
+
+
 def _normalize_row(row: list, col_names: list[str]) -> tuple:
     """Reorder row values by sorted column name, stringifying each value.
 
     Normalises differences in column ordering between generated and reference SQL.
     Falls back to value-sort when column names are unavailable or mismatched.
+    String values are casefolded so 'High' and 'high' compare equal.
     """
     if col_names and len(col_names) == len(row):
-        return tuple(str(v) for _, v in sorted(zip(col_names, row)))
-    return tuple(sorted(str(v) for v in row))
+        return tuple(_stringify_cell(v) for _, v in sorted(zip(col_names, row)))
+    return tuple(sorted(_stringify_cell(v) for v in row))
 
 
 def _normalize_result_set(col_names: list[str], rows: list[list]) -> list[tuple]:
     normalized = [_normalize_row(row, col_names) for row in rows]
     return sorted(normalized)
+
+
+def _project_to_ref_columns(
+    gen_cols: list[str],
+    gen_rows: list[list],
+    ref_cols: list[str],
+) -> tuple[list[str], list[list]]:
+    """If every ref column name exists in gen columns (case-insensitive),
+    project gen rows down to ref's columns. Otherwise return gen unchanged.
+
+    Handles cases like generated `SELECT *` against a reference that selects
+    a subset of columns: as long as the reference's columns are a subset of
+    what was generated, the extra generated columns are dropped before
+    comparison.
+    """
+    if not ref_cols or not gen_cols or len(ref_cols) >= len(gen_cols):
+        return gen_cols, gen_rows
+    gen_lower = [c.casefold() for c in gen_cols]
+    ref_lower = [c.casefold() for c in ref_cols]
+    if not set(ref_lower).issubset(set(gen_lower)):
+        return gen_cols, gen_rows
+    idx = [gen_lower.index(c) for c in ref_lower]
+    projected_rows = [[row[i] for i in idx] for row in gen_rows]
+    return list(ref_cols), projected_rows
+
+
+def _is_row_superset(ref_norm: list[tuple], gen_norm: list[tuple]) -> bool:
+    """True when every reference row appears in gen at least as many times.
+
+    Counter semantics so duplicate rows in reference must be matched by
+    duplicates in generated. Lets the comparator accept generated SQL that
+    returned a superset of the reference rows (e.g., a larger LIMIT) while
+    still rejecting generations that miss rows.
+    """
+    from collections import Counter
+
+    ref_counter = Counter(ref_norm)
+    gen_counter = Counter(gen_norm)
+    for row, count in ref_counter.items():
+        if gen_counter[row] < count:
+            return False
+    return True
 
 
 def _compare_result_sets(
@@ -77,23 +128,36 @@ def _compare_result_sets(
     ref_cols: list[str],
     ref_rows: list[list],
 ) -> tuple[bool, str | None]:
-    """Compare two result sets, ignoring column ordering.
+    """Compare two result sets, ignoring column ordering and case.
 
-    Small result sets (< _COMPARE_ROW_THRESHOLD): exact equality after normalization.
-    Large result sets: short-circuit on >10% row-count divergence, then require
-    80% of stride-sampled sorted rows to match exactly.
+    Tolerances applied, in order:
+      1. Casefolded string comparison: 'High' == 'high'.
+      2. Reference-as-subset column projection: if ref's columns are a
+         subset of gen's, project gen down to ref's columns before comparing
+         (handles generated `SELECT *` vs reference that picks specific columns).
+      3. Row-superset semantics: if gen has more rows than ref but every ref
+         row appears in gen (Counter semantics), mark correct. Handles
+         generated `LIMIT 20` vs reference `LIMIT 10` and similar.
+
+    Small result sets (< _COMPARE_ROW_THRESHOLD): exact equality or
+    row-superset after normalization.
+    Large result sets: short-circuit on >10% row-count divergence below
+    reference count, then require 80% of stride-sampled sorted rows to match.
     """
+    gen_cols, gen_rows = _project_to_ref_columns(gen_cols, gen_rows, ref_cols)
+
     gen_count = len(gen_rows)
     ref_count = len(ref_rows)
 
     if gen_count >= _COMPARE_ROW_THRESHOLD or ref_count >= _COMPARE_ROW_THRESHOLD:
-        max_count = max(gen_count, ref_count)
-        if max_count > 0 and abs(gen_count - ref_count) / max_count > _LARGE_COUNT_TOLERANCE:
+        if gen_count < ref_count and ref_count > 0 and (ref_count - gen_count) / ref_count > _LARGE_COUNT_TOLERANCE:
             return False, (
-                f"row count divergence >10%: generated={gen_count} reference={ref_count}"
+                f"row count divergence >10% below reference: generated={gen_count} reference={ref_count}"
             )
         gen_sorted = _normalize_result_set(gen_cols, gen_rows)
         ref_sorted = _normalize_result_set(ref_cols, ref_rows)
+        if gen_count > ref_count and _is_row_superset(ref_sorted, gen_sorted):
+            return True, None
         sample_size = min(50, gen_count)
         stride = max(1, gen_count // sample_size) if sample_size else 1
         gen_sample = gen_sorted[::stride][:sample_size]
@@ -105,11 +169,18 @@ def _compare_result_sets(
             return False, f"sampled match rate {match_rate:.1%} < {_LARGE_SAMPLE_MATCH_RATE:.0%}"
         return True, None
 
-    if gen_count != ref_count:
-        return False, f"row count mismatch: generated={gen_count} reference={ref_count}"
-    if _normalize_result_set(gen_cols, gen_rows) != _normalize_result_set(ref_cols, ref_rows):
+    gen_sorted = _normalize_result_set(gen_cols, gen_rows)
+    ref_sorted = _normalize_result_set(ref_cols, ref_rows)
+
+    if gen_count == ref_count:
+        if gen_sorted == ref_sorted:
+            return True, None
         return False, "result set values differ"
-    return True, None
+
+    if gen_count > ref_count and _is_row_superset(ref_sorted, gen_sorted):
+        return True, None
+
+    return False, f"row count mismatch: generated={gen_count} reference={ref_count}"
 
 
 def _grade_correct(

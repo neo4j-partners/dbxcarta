@@ -217,18 +217,21 @@ def _materialize_table(
         return
 
     col_defs: list[str] = []
-    delta_types: dict[str, str] = {}
+    safe_col_names: list[str] = []
+    keep_col_mask: list[bool] = []
     for col in columns:
         col_name = col.get("name", "")
         safe_col = _sanitize_column_name(col_name)
         if not safe_col:
+            keep_col_mask.append(False)
             continue
         raw_type = str(col.get("type", "")).strip()
         delta_type, fellback = _coerce_type(raw_type)
         if fellback:
             stats.type_fallbacks += 1
         col_defs.append(f"{quote_identifier(safe_col)} {delta_type}")
-        delta_types[safe_col] = delta_type
+        safe_col_names.append(safe_col)
+        keep_col_mask.append(True)
 
     if not col_defs:
         stats.tables_skipped += 1
@@ -252,11 +255,24 @@ def _materialize_table(
     _execute(ws, warehouse_id, create_sql)
     stats.tables_created += 1
 
-    # No VALUES insertion in v1: schemapile values are typed by the source
-    # database's grammar and unreliable to coerce one-by-one. The materialized
-    # table is empty-but-typed and downstream evaluation reads metadata. A
-    # future enhancement can pull VALUES from the candidate JSON; the
-    # candidate selector already records `has_values` per table.
+    raw_rows = table.get("rows") or []
+    if raw_rows:
+        kept_rows = [
+            tuple(v for v, keep in zip(row, keep_col_mask) if keep)
+            for row in raw_rows
+        ]
+        kept_rows = [r for r in kept_rows if len(r) == len(safe_col_names)]
+        if kept_rows:
+            _execute(ws, warehouse_id, f"DELETE FROM {fq}")
+            insert_sql = _build_insert(fq, safe_col_names, kept_rows)
+            try:
+                _execute(ws, warehouse_id, insert_sql)
+                stats.rows_inserted += len(kept_rows)
+            except Exception as exc:
+                logger.warning(
+                    "[schemapile] insert failed for %s.%s.%s: %s",
+                    catalog_q, schema_q, table_q, exc,
+                )
 
 
 def _coerce_type(raw: str) -> tuple[str, bool]:
@@ -304,6 +320,35 @@ def _sanitize_column_name(name: str) -> str:
 
 def _sql_escape(value: str) -> str:
     return value.replace("\\", "\\\\").replace("'", "''")
+
+
+def _render_value(value: Any) -> str:
+    """Render a schemapile sample value as a SQL literal.
+
+    Strings are quoted and escaped. None becomes NULL. Bools, ints, and
+    floats are quoted as strings so Delta auto-casts on insert; columns
+    that fell back to STRING accept them verbatim, and typed columns
+    coerce as needed.
+    """
+    if value is None:
+        return "NULL"
+    return f"'{_sql_escape(str(value))}'"
+
+
+def _build_insert(
+    fq_table: str,
+    col_names: list[str],
+    rows: list[tuple[Any, ...]],
+) -> str:
+    columns_clause = ", ".join(quote_identifier(c) for c in col_names)
+    values_clauses = [
+        "(" + ", ".join(_render_value(v) for v in row) + ")"
+        for row in rows
+    ]
+    return (
+        f"INSERT INTO {fq_table} ({columns_clause}) VALUES\n  "
+        + ",\n  ".join(values_clauses)
+    )
 
 
 def _execute(ws: "WorkspaceClient", warehouse_id: str, statement: str) -> None:

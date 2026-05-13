@@ -5,6 +5,8 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 
+_PER_COLUMN_SAMPLE_LIMIT = 10
+
 
 @dataclass
 class ColumnEntry:
@@ -12,12 +14,13 @@ class ColumnEntry:
     column_name: str
     data_type: str
     comment: str = ""
+    column_id: str = ""
 
 
 @dataclass
 class ContextBundle:
     columns: list[ColumnEntry] = field(default_factory=list)
-    values: list[str] = field(default_factory=list)
+    values: dict[str, list[str]] = field(default_factory=dict)
     seed_ids: list[str] = field(default_factory=list)
     criteria: list[str] = field(default_factory=list)
 
@@ -32,11 +35,15 @@ class ContextBundle:
                     lines.append("")
                 lines.append(f"Table: {col.table_fqn}")
                 current_table = col.table_fqn
-            suffix = f" — {col.comment}" if col.comment else ""
+            parts: list[str] = []
+            if col.comment:
+                parts.append(col.comment)
+            samples = self.values.get(col.column_id, []) if col.column_id else []
+            if samples:
+                joined = ", ".join(samples[:_PER_COLUMN_SAMPLE_LIMIT])
+                parts.append(f"Sample values: {joined}")
+            suffix = " — " + ". ".join(parts) if parts else ""
             lines.append(f"  {col.column_name} ({col.data_type}){suffix}")
-        if self.values:
-            lines.append("")
-            lines.append("Sample values: " + ", ".join(self.values[:20]))
         if self.criteria:
             lines.append("")
             lines.append("Join predicates:")

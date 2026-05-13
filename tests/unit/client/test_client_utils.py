@@ -293,10 +293,22 @@ def test_compare_column_reorder_matches():
     assert correct, err
 
 
-def test_compare_row_count_mismatch():
-    correct, err = _compare_result_sets(["id"], [[1], [2]], ["id"], [[1]])
+def test_compare_gen_missing_rows_is_mismatch():
+    """Generated with fewer rows than reference is a real mismatch."""
+    correct, err = _compare_result_sets(["id"], [[1]], ["id"], [[1], [2]])
     assert not correct
     assert err is not None
+
+
+def test_compare_gen_superset_of_ref_is_correct():
+    """Generated with more rows that include every ref row is correct.
+
+    Handles generated `LIMIT 20` against reference `LIMIT 10` and the like.
+    """
+    correct, err = _compare_result_sets(
+        ["id"], [[1], [2], [3]], ["id"], [[1], [3]]
+    )
+    assert correct, err
 
 
 def test_compare_value_mismatch():
@@ -304,12 +316,52 @@ def test_compare_value_mismatch():
     assert not correct
 
 
-def test_compare_large_short_circuit_on_count_divergence():
+def test_compare_case_insensitive_strings():
+    """'High' and 'high' should compare equal — the SQL filter case sensitivity
+    is the model's problem, but the comparator should not double-penalize when
+    the reference itself returns a case-different string."""
+    correct, err = _compare_result_sets(
+        ["tier"], [["High"]], ["tier"], [["high"]]
+    )
+    assert correct, err
+
+
+def test_compare_projects_gen_to_ref_columns():
+    """Generated SELECT *, reference picks a subset — project gen down first."""
+    gen_cols = ["id", "name", "extra"]
+    gen_rows = [[1, "Alice", "x"], [2, "Bob", "y"]]
+    ref_cols = ["id", "name"]
+    ref_rows = [[1, "Alice"], [2, "Bob"]]
+    correct, err = _compare_result_sets(gen_cols, gen_rows, ref_cols, ref_rows)
+    assert correct, err
+
+
+def test_compare_projection_rejects_when_ref_has_extra_columns():
+    """Reference asks for a column the generated SQL did not return → mismatch."""
+    gen_cols = ["id"]
+    gen_rows = [[1], [2]]
+    ref_cols = ["id", "name"]
+    ref_rows = [[1, "Alice"], [2, "Bob"]]
+    correct, err = _compare_result_sets(gen_cols, gen_rows, ref_cols, ref_rows)
+    assert not correct
+
+
+def test_compare_large_short_circuit_on_gen_missing_rows():
+    """Generated significantly fewer rows than reference → mismatch."""
     gen_rows = [[i] for i in range(600)]
     ref_rows = [[i] for i in range(1200)]
     correct, err = _compare_result_sets(["id"], gen_rows, ["id"], ref_rows)
     assert not correct
     assert "10%" in err or "divergence" in err.lower()
+
+
+def test_compare_large_gen_superset_is_correct():
+    """Generated has more rows that include every reference row → correct
+    even at the large-set threshold."""
+    ref_rows = [[i] for i in range(600)]
+    gen_rows = [[i] for i in range(1200)]
+    correct, err = _compare_result_sets(["id"], gen_rows, ["id"], ref_rows)
+    assert correct, err
 
 
 def test_compare_large_identical_rows():

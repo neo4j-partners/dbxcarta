@@ -56,6 +56,49 @@ def _entry(tables):
     }
 
 
+def test_extract_rows_position_alignment():
+    from dbxcarta_schemapile_example.candidate_selector import _extract_rows
+
+    columns = {
+        "id": {"DATA_TYPE": "INT", "VALUES": [1, 2, 3]},
+        "name": {"DATA_TYPE": "STRING", "VALUES": ["a", "b", "c"]},
+    }
+    rows = _extract_rows(columns)
+    assert rows == ((1, "a"), (2, "b"), (3, "c"))
+
+
+def test_extract_rows_misaligned_returns_empty():
+    from dbxcarta_schemapile_example.candidate_selector import _extract_rows
+
+    columns = {
+        "id": {"DATA_TYPE": "INT", "VALUES": [1, 2, 3]},
+        "name": {"DATA_TYPE": "STRING", "VALUES": ["a", "b"]},
+    }
+    assert _extract_rows(columns) == ()
+
+
+def test_extract_rows_pads_missing_values_with_null():
+    """Columns without VALUES contribute NULL; only VALUES-having columns
+    must share a length."""
+    from dbxcarta_schemapile_example.candidate_selector import _extract_rows
+
+    columns = {
+        "id": {"DATA_TYPE": "INT"},
+        "name": {"DATA_TYPE": "STRING", "VALUES": ["a", "b"]},
+    }
+    assert _extract_rows(columns) == ((None, "a"), (None, "b"))
+
+
+def test_extract_rows_no_values_anywhere_returns_empty():
+    from dbxcarta_schemapile_example.candidate_selector import _extract_rows
+
+    columns = {
+        "id": {"DATA_TYPE": "INT"},
+        "name": {"DATA_TYPE": "STRING"},
+    }
+    assert _extract_rows(columns) == ()
+
+
 def test_select_candidates_keeps_schemas_with_fks():
     config = _config()
     slice_data = {

@@ -20,8 +20,9 @@ from typing import Any
 from dbxcarta_schemapile_example.config import SchemaPileConfig, load_config
 
 
-CANDIDATE_FORMAT_VERSION = 1
+CANDIDATE_FORMAT_VERSION = 2
 
+_ROW_CAP_PER_TABLE = 20
 _SANITIZE_INVALID = re.compile(r"[^a-z0-9_]+")
 _SANITIZE_LEADING_DIGIT = re.compile(r"^\d")
 
@@ -47,6 +48,7 @@ class TableSpec:
     primary_keys: tuple[str, ...]
     foreign_keys: tuple[ForeignKey, ...]
     has_values: bool
+    rows: tuple[tuple[Any, ...], ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -55,6 +57,7 @@ class TableSpec:
             "primary_keys": list(self.primary_keys),
             "foreign_keys": [fk.to_dict() for fk in self.foreign_keys],
             "has_values": self.has_values,
+            "rows": [list(r) for r in self.rows],
         }
 
 
@@ -186,7 +189,7 @@ def _build_tables(raw_tables: dict[str, Any]) -> tuple[TableSpec, ...]:
     for name, raw in raw_tables.items():
         columns = raw.get("COLUMNS") or {}
         cols = tuple(
-            (col_name, str(col_def.get("DATA_TYPE", "")).strip())
+            (col_name, str(col_def.get("DATA_TYPE") or "").strip())
             for col_name, col_def in columns.items()
         )
         pks = tuple(raw.get("PRIMARY_KEYS") or [])
@@ -199,18 +202,49 @@ def _build_tables(raw_tables: dict[str, Any]) -> tuple[TableSpec, ...]:
             for fk in (raw.get("FOREIGN_KEYS") or [])
             if fk.get("FOREIGN_TABLE")
         )
-        has_values = any(
-            (col_def.get("VALUES") not in (None, []))
-            for col_def in columns.values()
-        )
+        rows = _extract_rows(columns)
+        has_values = bool(rows)
         specs.append(TableSpec(
             name=name,
             columns=cols,
             primary_keys=pks,
             foreign_keys=fks,
             has_values=has_values,
+            rows=rows,
         ))
     return tuple(specs)
+
+
+def _extract_rows(columns: dict[str, Any]) -> tuple[tuple[Any, ...], ...]:
+    """Build position-aligned row tuples from per-column VALUES lists.
+
+    Columns without VALUES contribute NULL for every row. Only the
+    VALUES-having columns need to share a length; if they do not, the
+    schemapile entry's values are not row-aligned and no rows are
+    extracted.
+    """
+    if not columns:
+        return ()
+    columns_with_values: dict[str, list[Any]] = {}
+    for name, col_def in columns.items():
+        vals = col_def.get("VALUES")
+        if vals:
+            columns_with_values[name] = list(vals)
+    if not columns_with_values:
+        return ()
+    lengths = {len(v) for v in columns_with_values.values()}
+    if len(lengths) != 1:
+        return ()
+    n = min(lengths.pop(), _ROW_CAP_PER_TABLE)
+    column_order = list(columns.keys())
+    return tuple(
+        tuple(
+            columns_with_values[name][row_idx]
+            if name in columns_with_values else None
+            for name in column_order
+        )
+        for row_idx in range(n)
+    )
 
 
 def _sanitize_schema_name(source_id: str, *, used: set[str]) -> str:
