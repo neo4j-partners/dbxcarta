@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from dbxcarta.databricks import quote_qualified_name, validate_serving_endpoint_name
+
 if TYPE_CHECKING:
     from pyspark.sql import SparkSession
 
@@ -12,7 +14,7 @@ def generate_sql_batch(
     spark: SparkSession,
     endpoint: str,
     questions_with_prompts: list[dict],
-    staging_path: str,
+    staging_table: str,
     arm: str,
 ) -> dict[str, tuple[str | None, str | None]]:
     """Generate SQL for every question in one ai_query pass.
@@ -21,11 +23,16 @@ def generate_sql_batch(
     and ``prompt``.  Returns a mapping from question_id to
     ``(sql_text, error_message)``.
 
-    Materializes to Delta after ai_query (best-practices Spark §4) so the
-    downstream execute loop never re-triggers inference.
+    Materializes to a UC-managed Delta table after ai_query (best-practices
+    Spark §4) so the downstream execute loop never re-triggers inference.
     """
+    # Guard before interpolation: ai_query requires the endpoint as a string
+    # literal. validate_serving_endpoint_name rejects characters that would
+    # break the SQL expression.
+    validate_serving_endpoint_name(endpoint)
+
     from pyspark.sql import Row
-    from pyspark.sql.functions import col, expr
+    from pyspark.sql.functions import expr
 
     rows = [
         Row(question_id=q["question_id"], prompt=q["prompt"])
@@ -38,9 +45,14 @@ def generate_sql_batch(
         expr(f"ai_query('{endpoint}', prompt, failOnError => false)"),
     )
 
-    stage_table = f"{staging_path}/{arm}_generation"
-    enriched.write.format("delta").mode("overwrite").save(stage_table)
-    result_df = spark.read.format("delta").load(stage_table)
+    full_table = quote_qualified_name(f"{staging_table}_{arm}", expected_parts=3)
+    (
+        enriched.write.format("delta")
+        .mode("overwrite")
+        .option("overwriteSchema", "true")
+        .saveAsTable(full_table)
+    )
+    result_df = spark.table(full_table)
 
     results: dict[str, tuple[str | None, str | None]] = {}
     for row in result_df.collect():

@@ -16,6 +16,7 @@ import sys
 from pathlib import Path
 
 from dbxcarta_schemapile_example.config import SchemaPileConfig, load_config
+from dbxcarta_schemapile_example.utils import load_dotenv_file
 
 
 _UPSTREAM_REPO_URL = "https://github.com/amsterdata/schemapile"
@@ -39,7 +40,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    _load_dotenv(args.dotenv)
+    load_dotenv_file(args.dotenv)
     config = load_config()
     preflight(config)
 
@@ -145,16 +146,6 @@ def _run_slice(config: SchemaPileConfig) -> int:
         file=sys.stderr,
     )
     return 0
-
-
-def _load_dotenv(path: Path) -> None:
-    """Load .env into os.environ if present. Silent when missing."""
-    try:
-        from dotenv import load_dotenv
-    except ImportError:
-        return
-    if path.is_file():
-        load_dotenv(path, override=False)
 
 
 if __name__ == "__main__":

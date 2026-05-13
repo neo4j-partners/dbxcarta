@@ -4,12 +4,12 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
 from pathlib import Path
 
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.errors import ResourceAlreadyExists
+from dbxcarta.client.questions import load_questions
 from dotenv import load_dotenv
 
 
@@ -48,9 +48,8 @@ def parse_args() -> argparse.Namespace:
 def validate_source(path: Path) -> None:
     if not path.exists():
         raise FileNotFoundError(f"question source file not found: {path}")
-    with path.open("r", encoding="utf-8") as fh:
-        data = json.load(fh)
-    if not isinstance(data, list) or not data:
+    questions = load_questions(str(path))
+    if not questions:
         raise ValueError(f"question source must be a non-empty JSON array: {path}")
 
 

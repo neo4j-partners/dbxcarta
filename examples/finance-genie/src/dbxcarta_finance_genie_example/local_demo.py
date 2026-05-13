@@ -15,21 +15,19 @@ from typing import Any
 
 from dotenv import load_dotenv
 
-# Brittle dep: dbxcarta.client.client exposes these helpers under underscore
-# names. They are stable in practice (question loading, embedding, SQL parsing,
-# result-set comparison) and re-implementing them locally would duplicate the
-# core client harness. If they are renamed or removed, either promote them to a
-# documented dbxcarta.client public surface or re-implement the four functions
-# inline in this module.
+# Brittle dep: dbxcarta.client.client exposes embedding and SQL parsing helpers
+# under underscore names. They are stable in practice for this local harness; if
+# they are renamed or removed, promote them to a documented dbxcarta.client
+# public surface or re-implement the two functions inline in this module.
 from dbxcarta.client.client import (
-    _compare_result_sets,
     _embed_questions,
-    _load_questions,
     _parse_sql,
 )
+from dbxcarta.client.compare import compare_result_sets
 from dbxcarta.client.executor import fetch_rows, preflight_warehouse
 from dbxcarta.client.local_generation import generate_sql_local
 from dbxcarta.client.prompt import graph_rag_prompt
+from dbxcarta.client.questions import Question, load_questions
 from dbxcarta.client.schema_dump import fetch_schema_dump
 from dbxcarta.client.settings import ClientSettings
 from dbxcarta.databricks import build_workspace_client
@@ -148,14 +146,12 @@ def _build_parser() -> argparse.ArgumentParser:
 def _handle_questions(args: argparse.Namespace) -> int:
     questions = _load_local_questions(args.questions)
     for question in questions:
-        qid = question.get("question_id", "")
-        text = question.get("question", "")
-        print(f"{qid}\t{text}")
+        print(f"{question.question_id}\t{question.question}")
     return 0
 
 
 def _handle_preflight(args: argparse.Namespace) -> int:
-    settings = ClientSettings()
+    settings = _load_settings()
     questions = _load_local_questions(args.questions)
     ws = build_workspace_client()
 
@@ -174,7 +170,7 @@ def _handle_preflight(args: argparse.Namespace) -> int:
 
 
 def _handle_sql(args: argparse.Namespace) -> int:
-    settings = ClientSettings()
+    settings = _load_settings()
     _ensure_read_only_sql(args.statement)
     ws = build_workspace_client()
     cols, rows, error = fetch_rows(
@@ -191,14 +187,14 @@ def _handle_sql(args: argparse.Namespace) -> int:
 
 
 def _handle_ask(args: argparse.Namespace) -> int:
-    settings = ClientSettings()
+    settings = _load_settings()
     question_row = _resolve_question(args.question, args.question_id, args.questions)
     ws = build_workspace_client()
     result = run_graph_rag_question(
         ws=ws,
         settings=settings,
-        question=question_row["question"],
-        reference_sql=question_row.get("reference_sql"),
+        question=question_row.question,
+        reference_sql=question_row.reference_sql,
         compare_reference=not args.no_compare_reference,
         show_prompt=args.show_prompt,
     )
@@ -286,7 +282,7 @@ def run_graph_rag_question(
             correct = False
             comparison_error = f"reference SQL failed: {ref_error}"
         else:
-            correct, comparison_error = _compare_result_sets(
+            correct, comparison_error = compare_result_sets(
                 cols or [],
                 rows,
                 ref_cols or [],
@@ -306,27 +302,31 @@ def run_graph_rag_question(
     )
 
 
+def _load_settings() -> ClientSettings:
+    return ClientSettings()  # type: ignore[call-arg]
+
+
 def _resolve_question(
     question_text: str | None,
     question_id: str | None,
     questions_path: str,
-) -> dict[str, str]:
+) -> Question:
     if question_text and question_id:
         raise ValueError("Use either question text or --question-id, not both.")
     if question_text:
-        return {"question_id": "adhoc", "question": question_text}
+        return Question(question_id="adhoc", question=question_text)
     if not question_id:
         raise ValueError("Provide question text or --question-id.")
 
     questions = _load_local_questions(questions_path)
     for row in questions:
-        if row.get("question_id") == question_id:
+        if row.question_id == question_id:
             return row
     raise ValueError(f"Question id not found: {question_id}")
 
 
-def _load_local_questions(source: str) -> list[dict[str, str]]:
-    questions = _load_questions(source)
+def _load_local_questions(source: str) -> list[Question]:
+    questions = load_questions(source)
     if not questions:
         raise ValueError(f"questions file is empty: {source}")
     return questions

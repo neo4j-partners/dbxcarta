@@ -185,6 +185,8 @@ def _normalized_schema_scores(
 def _query_vector_seeds(
     session, index: str, embedding: list[float], k: int
 ) -> list[tuple[str, float]]:
+    # Neo4j's procedure API does not support parameterized index names.
+    # `index` is always one of the two module-level constants, never user-controlled.
     result = session.run(
         f"CALL db.index.vector.queryNodes('{index}', $k, $vec) "
         "YIELD node, score "

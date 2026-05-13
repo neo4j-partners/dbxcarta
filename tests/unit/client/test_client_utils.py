@@ -1,4 +1,4 @@
-"""Unit tests for client utilities: _parse_sql, _resolve_staging_path,
+"""Unit tests for client utilities: _parse_sql, _resolve_staging_table,
 _format_schema, and ClientRunSummary aggregates."""
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from dbxcarta.client.client import (
     _compare_result_sets,
     _is_table_ref,
     _parse_sql,
-    _resolve_staging_path,
+    _resolve_staging_table,
 )
 from dbxcarta.client.schema_dump import _format_schema
 from dbxcarta.client.settings import ClientSettings
@@ -69,31 +69,33 @@ def test_parse_sql_case_insensitive_fence():
 
 
 # ---------------------------------------------------------------------------
-# _resolve_staging_path
+# _resolve_staging_table
 # ---------------------------------------------------------------------------
 
-def _fake_settings(summary_volume: str):
-    return SimpleNamespace(dbxcarta_summary_volume=summary_volume)
+def _fake_settings(summary_table: str):
+    return SimpleNamespace(dbxcarta_summary_table=summary_table)
 
 
-def test_resolve_staging_path_standard():
-    path = _resolve_staging_path(_fake_settings("/Volumes/cat/schema/vol/runs"))
-    assert path == "/Volumes/cat/schema/vol/client_staging"
+def test_resolve_staging_table_standard():
+    table = _resolve_staging_table(_fake_settings("cat.schema.run_summary"))
+    assert table == "cat.schema.client_staging"
 
 
-def test_resolve_staging_path_trailing_slash():
-    path = _resolve_staging_path(_fake_settings("/Volumes/cat/schema/vol/runs/"))
-    assert path == "/Volumes/cat/schema/vol/client_staging"
+def test_resolve_staging_table_accepts_hyphenated_identifiers():
+    table = _resolve_staging_table(
+        _fake_settings("graph-enriched-lakehouse.graph-enriched-schema.run_summary")
+    )
+    assert table == "graph-enriched-lakehouse.graph-enriched-schema.client_staging"
 
 
-def test_resolve_staging_path_rejects_short_path():
-    with pytest.raises(RuntimeError):
-        _resolve_staging_path(_fake_settings("/short/path"))
+def test_resolve_staging_table_rejects_short_name():
+    with pytest.raises(ValueError):
+        _resolve_staging_table(_fake_settings("schema.run_summary"))
 
 
-def test_resolve_staging_path_rejects_non_volumes():
-    with pytest.raises(RuntimeError):
-        _resolve_staging_path(_fake_settings("/dbfs/cat/schema/vol/runs"))
+def test_resolve_staging_table_rejects_invalid_identifier():
+    with pytest.raises(ValueError):
+        _resolve_staging_table(_fake_settings("cat.bad schema.run_summary"))
 
 
 # ---------------------------------------------------------------------------

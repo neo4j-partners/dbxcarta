@@ -139,8 +139,7 @@ def test_select_candidates_keeps_schemas_with_fks():
 
 
 def test_select_candidates_drops_outside_size_window():
-    config = _config()
-    big_tables = {
+    big_tables: dict[str, dict[str, object]] = {
         f"t{i}": {"columns": [{"name": "id", "type": "INT"}], "fks": []}
         for i in range(50)
     }

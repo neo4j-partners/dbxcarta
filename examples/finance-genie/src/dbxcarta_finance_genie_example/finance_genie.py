@@ -10,7 +10,6 @@ dbxcarta_finance_genie_example:preset ...` resolves against.
 
 from __future__ import annotations
 
-import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -20,6 +19,7 @@ from dbxcarta import (
     ReadinessReport,
     validate_identifier,
 )
+from dbxcarta.client.questions import load_questions
 from dbxcarta.databricks import quote_identifier
 
 if TYPE_CHECKING:
@@ -157,9 +157,8 @@ def _fetch_table_names(
 def _validate_questions_file(path: Path) -> None:
     if not path.exists():
         raise FileNotFoundError(f"questions file not found: {path}")
-    with path.open("r", encoding="utf-8") as fh:
-        data = json.load(fh)
-    if not isinstance(data, list) or not data:
+    questions = load_questions(str(path))
+    if not questions:
         raise ValueError(f"questions file must be a non-empty JSON array: {path}")
 
 

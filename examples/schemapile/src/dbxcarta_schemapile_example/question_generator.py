@@ -36,6 +36,10 @@ from dbxcarta_schemapile_example.materialize import (
     _sanitize_column_name,
     _sanitize_table_name,
 )
+from dbxcarta_schemapile_example.utils import (
+    load_dotenv_file,
+    read_required_warehouse_id,
+)
 
 if TYPE_CHECKING:
     from databricks.sdk import WorkspaceClient
@@ -101,7 +105,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    _load_dotenv(args.dotenv)
+    load_dotenv_file(args.dotenv)
     config = load_config()
 
     if not config.candidate_cache.is_file():
@@ -110,12 +114,12 @@ def main() -> int:
             " Run dbxcarta-schemapile-select first."
         )
 
-    import os
-    warehouse_id = args.warehouse_id or os.environ.get("DATABRICKS_WAREHOUSE_ID", "")
-    if not warehouse_id and not args.skip_validate:
-        raise ValueError(
-            "DATABRICKS_WAREHOUSE_ID is required for SQL validation;"
-            " set it in .env, pass --warehouse-id, or use --skip-validate"
+    warehouse_id = ""
+    if not args.skip_validate:
+        warehouse_id = read_required_warehouse_id(
+            args.warehouse_id,
+            operation="SQL validation",
+            extra_hint="or use --skip-validate",
         )
 
     payload = json.loads(config.candidate_cache.read_text())
@@ -423,15 +427,6 @@ def _format_questions(pairs: list[GeneratedPair]) -> list[dict[str, Any]]:
         }
         for i, pair in enumerate(pairs)
     ]
-
-
-def _load_dotenv(path: Path) -> None:
-    try:
-        from dotenv import load_dotenv
-    except ImportError:
-        return
-    if path.is_file():
-        load_dotenv(path, override=False)
 
 
 if __name__ == "__main__":

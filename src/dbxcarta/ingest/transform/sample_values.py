@@ -250,7 +250,7 @@ def _cardinality_filter(
     chunk_size: int,
 ) -> tuple[list[TableCandidate], list[int], int]:
     """Return (filtered candidates, observed cardinalities, failed-table count)."""
-    from py4j.protocol import Py4JJavaError
+    from py4j.protocol import Py4JJavaError  # type: ignore[import-untyped]
     from pyspark.errors import AnalysisException
 
     kept: list[TableCandidate] = []

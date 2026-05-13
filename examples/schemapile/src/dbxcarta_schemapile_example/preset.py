@@ -12,13 +12,13 @@ Resolvable via:
 
 from __future__ import annotations
 
-import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from dbxcarta import ReadinessReport, validate_identifier
+from dbxcarta.client.questions import load_questions
 from dbxcarta.databricks import quote_identifier
 
 if TYPE_CHECKING:
@@ -191,17 +191,9 @@ def _validate_questions_file(path: Path) -> None:
             f"questions file not found at {path};"
             " run dbxcarta-schemapile-generate-questions first"
         )
-    with path.open("r", encoding="utf-8") as fh:
-        data = json.load(fh)
-    if not isinstance(data, list) or not data:
+    questions = load_questions(str(path))
+    if not questions:
         raise ValueError(f"questions file must be a non-empty JSON array: {path}")
-    for i, row in enumerate(data):
-        if not isinstance(row, dict):
-            raise ValueError(f"questions[{i}] must be an object: {path}")
-        if not row.get("question_id") or not row.get("question"):
-            raise ValueError(
-                f"questions[{i}] must include question_id and question: {path}"
-            )
 
 
 def _bool(value: bool) -> str:

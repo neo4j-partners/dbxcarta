@@ -9,6 +9,10 @@ from __future__ import annotations
 
 import hashlib
 from enum import StrEnum
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pyspark.sql import Column
 
 CONTRACT_VERSION = "1.0"
 
@@ -74,7 +78,7 @@ def generate_value_id(column_id: str, value: object) -> str:
     return f"{column_id}.{digest}"
 
 
-def id_expr(*column_names: str):
+def id_expr(*column_names: str) -> "Column":
     """Return a PySpark Column expression equivalent to generate_id().
 
     Spark-side builders use this to avoid collecting source ids to the driver
@@ -86,7 +90,7 @@ def id_expr(*column_names: str):
     return F.lower(F.translate(F.concat_ws(".", *parts), _TRANSLATE_FROM, _TRANSLATE_TO))
 
 
-def value_id_expr():
+def value_id_expr() -> "Column":
     """Return a PySpark Column expression equivalent to generate_value_id().
 
     Expects the input DataFrame to expose `col_id` and `val`, matching the

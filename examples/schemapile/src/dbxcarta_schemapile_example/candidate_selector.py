@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from dbxcarta_schemapile_example.config import SchemaPileConfig, load_config
+from dbxcarta_schemapile_example.utils import load_dotenv_file
 
 
 CANDIDATE_FORMAT_VERSION = 2
@@ -90,7 +91,7 @@ def main() -> int:
         help="Path to the .env file to load before reading variables (default: .env)",
     )
     args = parser.parse_args()
-    _load_dotenv(args.dotenv)
+    load_dotenv_file(args.dotenv)
     config = load_config()
 
     if not config.slice_cache.is_file():
@@ -271,15 +272,6 @@ def _load_slice(path: Path) -> dict[str, Any]:
         return orjson.loads(path.read_bytes())
     except ImportError:
         return json.loads(path.read_text())
-
-
-def _load_dotenv(path: Path) -> None:
-    try:
-        from dotenv import load_dotenv
-    except ImportError:
-        return
-    if path.is_file():
-        load_dotenv(path, override=False)
 
 
 if __name__ == "__main__":

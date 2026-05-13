@@ -6,7 +6,7 @@ import re
 from typing import TYPE_CHECKING, Any
 
 from dbxcarta.contract import NodeLabel, generate_value_id
-from dbxcarta.verify import Violation
+from dbxcarta.verify import Violation, single_value
 
 if TYPE_CHECKING:
     from neo4j import Driver
@@ -35,10 +35,10 @@ def _check_value_count(driver: "Driver", summary: dict[str, Any]) -> list[Violat
     catalog: str = summary.get("catalog") or ""
     prefix = catalog + "."
     with driver.session() as s:
-        actual = s.run(
+        actual = single_value(s.run(
             f"MATCH (n:{NodeLabel.VALUE}) WHERE n.id STARTS WITH $prefix RETURN count(n) AS cnt",
             prefix=prefix,
-        ).single()["cnt"]
+        ), "cnt")
     if actual != expected:
         return [Violation(
             code="values.count_mismatch",
@@ -72,11 +72,11 @@ def _check_sampling_accounting(summary: dict[str, Any]) -> list[Violation]:
 def _check_parent_column_type(driver: "Driver") -> list[Violation]:
     """Values only attach to STRING/BOOLEAN columns."""
     with driver.session() as s:
-        bad = s.run(
+        bad = single_value(s.run(
             "MATCH (c:Column)-[:HAS_VALUE]->(:Value) "
             "WHERE NOT c.data_type IN ['STRING', 'BOOLEAN'] "
             "RETURN count(DISTINCT c) AS cnt"
-        ).single()["cnt"]
+        ), "cnt")
     if bad:
         return [Violation(
             code="values.parent_column_wrong_type",
@@ -91,32 +91,32 @@ def _check_relationship_integrity(driver: "Driver", *, sample_limit: int) -> lis
     Column out-degree is bounded by `sample_limit` (the configured per-column cap)."""
     out: list[Violation] = []
     with driver.session() as s:
-        orphans = s.run(
+        orphans = single_value(s.run(
             "MATCH (v:Value) WHERE NOT ( (:Column)-[:HAS_VALUE]->(v) ) RETURN count(v) AS cnt"
-        ).single()["cnt"]
+        ), "cnt")
         if orphans:
             out.append(Violation(
                 code="values.orphan_value_node",
                 message=f"{orphans} Value node(s) have no incoming HAS_VALUE from a Column.",
                 details={"count": orphans},
             ))
-        bad_in = s.run(
+        bad_in = single_value(s.run(
             "MATCH (v:Value) "
             "WITH v, size([ (c:Column)-[:HAS_VALUE]->(v) | c ]) AS in_cnt "
             "WHERE in_cnt <> 1 RETURN count(v) AS cnt"
-        ).single()["cnt"]
+        ), "cnt")
         if bad_in:
             out.append(Violation(
                 code="values.value_multi_parent",
                 message=f"{bad_in} Value node(s) have incoming HAS_VALUE count != 1.",
                 details={"count": bad_in},
             ))
-        over = s.run(
+        over = single_value(s.run(
             "MATCH (c:Column)-[r:HAS_VALUE]->() "
             "WITH c, count(r) AS d WHERE d > $limit "
             "RETURN count(c) AS cnt",
             limit=sample_limit,
-        ).single()["cnt"]
+        ), "cnt")
         if over:
             out.append(Violation(
                 code="values.column_outdegree_exceeds_limit",

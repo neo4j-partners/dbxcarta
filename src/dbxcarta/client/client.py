@@ -13,7 +13,6 @@ from __future__ import annotations
 import logging
 import os
 import re
-import requests
 from pathlib import Path
 from typing import Any
 
@@ -28,7 +27,11 @@ from dbxcarta.client.questions import (
 )
 from dbxcarta.client.settings import ClientSettings
 from dbxcarta.client.summary import ClientRunSummary
-from dbxcarta.databricks import build_workspace_client, quote_qualified_name, uc_volume_parent
+from dbxcarta.databricks import (
+    build_workspace_client,
+    quote_qualified_name,
+    split_qualified_name,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +42,7 @@ _STAGING_ARMS = _LLM_ARMS | {"graph_rag"}
 # Matches optional ```sql ... ``` or ``` ... ``` fences.
 _FENCE_RE = re.compile(r"^```(?:sql)?\s*\n?(.*?)\n?```\s*$", re.DOTALL | re.IGNORECASE)
 _SQL_START_RE = re.compile(r"^\s*(SELECT|WITH|INSERT|UPDATE|DELETE|CREATE|EXPLAIN)\b", re.IGNORECASE)
+
 
 def _client_retrieval_table(settings: ClientSettings) -> str:
     parts = settings.dbxcarta_summary_table.split(".")
@@ -86,17 +90,13 @@ def _parse_sql(text: str | None) -> tuple[str | None, bool]:
     return cleaned, True
 
 
-def _resolve_staging_path(settings: ClientSettings) -> str:
-    summary_root = settings.dbxcarta_summary_volume.rstrip("/")
-    try:
-        parent = uc_volume_parent(summary_root)
-    except ValueError as exc:
-        raise RuntimeError(
-            "Cannot derive client staging path from "
-            f"DBXCARTA_SUMMARY_VOLUME={settings.dbxcarta_summary_volume!r}. "
-            "Expected /Volumes/<cat>/<schema>/<volume>/<subdir>."
-        ) from exc
-    return f"{parent}/client_staging"
+def _resolve_staging_table(settings: ClientSettings) -> str:
+    parts = split_qualified_name(
+        settings.dbxcarta_summary_table,
+        expected_parts=3,
+        label="summary table",
+    )
+    return f"{parts[0]}.{parts[1]}.client_staging"
 
 
 def _preflight(ws: WorkspaceClient, settings: ClientSettings) -> None:
@@ -152,7 +152,7 @@ def _run_llm_arm(
     questions: list[Question],
     summary: ClientRunSummary,
     arm: str,
-    staging_path: str,
+    staging_table: str,
     schema_text: str | None = None,
 ) -> None:
     from dbxcarta.client.generation import generate_sql_batch
@@ -177,7 +177,7 @@ def _run_llm_arm(
         spark,
         settings.dbxcarta_chat_endpoint,
         questions_with_prompts,
-        staging_path,
+        staging_table,
         arm,
     )
 
@@ -238,23 +238,20 @@ def _embed_questions(
 ) -> tuple[list[list[float]] | None, str | None]:
     """Embed all questions in a single batch call.
 
-    Returns (embeddings, error). On HTTP or network failure the first element
-    is None so callers can record a per-question warning without aborting the run.
+    Returns (embeddings, error). On failure the first element is None so
+    callers can record a per-question warning without aborting the run.
     """
-    headers = ws.config.authenticate()
     try:
-        resp = requests.post(
-            f"{ws.config.host.rstrip('/')}/serving-endpoints/{endpoint}/invocations",
-            headers=headers,
-            json={"input": texts},
-            timeout=60,
+        data = ws.api_client.do(
+            "POST",
+            f"/serving-endpoints/{endpoint}/invocations",
+            body={"input": texts},
         )
-        resp.raise_for_status()
-    except requests.RequestException as exc:
+        items: list[dict[str, Any]] = data["data"]
+        items.sort(key=lambda x: x["index"])
+        return [item["embedding"] for item in items], None
+    except Exception as exc:
         return None, str(exc)
-    data = resp.json()["data"]
-    data.sort(key=lambda x: x["index"])
-    return [item["embedding"] for item in data], None
 
 
 def _run_graph_rag_arm(
@@ -263,7 +260,7 @@ def _run_graph_rag_arm(
     settings: ClientSettings,
     questions: list[Question],
     summary: ClientRunSummary,
-    staging_path: str,
+    staging_table: str,
 ) -> None:
     from dbxcarta.client.generation import generate_sql_batch
     from dbxcarta.client.graph_retriever import GraphRetriever
@@ -341,7 +338,7 @@ def _run_graph_rag_arm(
         spark,
         settings.dbxcarta_chat_endpoint,
         questions_with_prompts,
-        staging_path,
+        staging_table,
         "graph_rag",
     )
 
@@ -431,7 +428,7 @@ def run_client() -> None:
 
     questions = _load_questions(settings.dbxcarta_client_questions, spark)
     active_arms = settings.arms
-    staging_path = _resolve_staging_path(settings) if any(
+    staging_table = _resolve_staging_table(settings) if any(
         a in _STAGING_ARMS for a in active_arms
     ) else ""
 
@@ -456,12 +453,12 @@ def run_client() -> None:
                 _run_reference_arm(ws, settings, questions, summary)
             elif arm in _LLM_ARMS:
                 _run_llm_arm(
-                    spark, ws, settings, questions, summary, arm, staging_path,
+                    spark, ws, settings, questions, summary, arm, staging_table,
                     schema_text=schema_text if arm == "schema_dump" else None,
                 )
             elif arm == "graph_rag":
                 _run_graph_rag_arm(
-                    spark, ws, settings, questions, summary, staging_path,
+                    spark, ws, settings, questions, summary, staging_table,
                 )
             else:
                 raise ValueError(f"Unknown arm: {arm!r}")

@@ -8,18 +8,26 @@ the connector-facing Cypher and graph maintenance details.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from dbxcarta.contract import NodeLabel, REFERENCES_PROPERTIES, RelType
 from dbxcarta.ingest.load.writer import write_nodes, write_relationship
 
 if TYPE_CHECKING:
     from neo4j import Driver
+    from pyspark.sql import DataFrame
 
     from dbxcarta.settings import Settings
     from dbxcarta.ingest.load.writer import Neo4jConfig
 
 logger = logging.getLogger(__name__)
+
+
+def _single_count(result: Any) -> int:
+    record = result.single()
+    if record is None:
+        raise RuntimeError("Neo4j count query returned no rows")
+    return int(record["cnt"])
 
 
 def bootstrap_constraints(driver: "Driver", settings: "Settings") -> None:
@@ -90,22 +98,22 @@ def query_counts(driver: "Driver") -> dict[str, int]:
     with driver.session() as session:
         for label in NodeLabel:
             result = session.run(f"MATCH (n:{label.value}) RETURN count(n) AS cnt")
-            counts[label.value] = result.single()["cnt"]
+            counts[label.value] = _single_count(result)
         for rel_type in RelType:
             result = session.run(
                 f"MATCH ()-[r:{rel_type.value}]->() RETURN count(r) AS cnt"
             )
-            counts[rel_type.value] = result.single()["cnt"]
+            counts[rel_type.value] = _single_count(result)
     return counts
 
 
-def write_node(df, neo4j: "Neo4jConfig", label: NodeLabel) -> None:
+def write_node(df: "DataFrame", neo4j: "Neo4jConfig", label: NodeLabel) -> None:
     """Thin enum-typed wrapper — all pipeline node writes go through here."""
     write_nodes(df, neo4j, label.value)
 
 
 def write_rel(
-    df,
+    df: "DataFrame",
     neo4j: "Neo4jConfig",
     rel_type: RelType,
     source_label: NodeLabel,

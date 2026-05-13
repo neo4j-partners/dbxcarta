@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from dbxcarta.contract import NodeLabel, RelType
-from dbxcarta.verify import Violation
+from dbxcarta.verify import Violation, single_value
 
 if TYPE_CHECKING:
     from neo4j import Driver
@@ -68,11 +68,11 @@ def _check_edge_count(driver: "Driver", summary: dict[str, Any]) -> list[Violati
     prefix = catalog + "."
     expected = _expected_edge_total(summary)
     with driver.session() as s:
-        edges = s.run(
+        edges = single_value(s.run(
             f"MATCH (src:{NodeLabel.COLUMN})-[r:{RelType.REFERENCES}]->()"
             f" WHERE src.id STARTS WITH $prefix RETURN count(r) AS cnt",
             prefix=prefix,
-        ).single()["cnt"]
+        ), "cnt")
     if edges != expected:
         return [Violation(
             code="references.edge_count_mismatch",

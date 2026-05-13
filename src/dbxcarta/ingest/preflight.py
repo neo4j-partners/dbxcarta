@@ -31,7 +31,7 @@ def preflight(spark: "SparkSession", settings: "Settings") -> None:
       3. When any embedding flag is on, the endpoint answers a trivial ai_query
          and returns a vector of the expected dimension.
     """
-    from py4j.protocol import Py4JJavaError
+    from py4j.protocol import Py4JJavaError  # type: ignore[import-untyped]
     from pyspark.errors import AnalysisException
 
     catalog = settings.dbxcarta_catalog

@@ -25,6 +25,14 @@ class Violation:
     details: dict[str, Any] = field(default_factory=dict)
 
 
+def single_value(result: Any, key: str) -> Any:
+    """Return one field from a Neo4j result that must contain one record."""
+    record = result.single()
+    if record is None:
+        raise RuntimeError(f"Neo4j query returned no rows for {key!r}")
+    return record[key]
+
+
 @dataclass
 class Report:
     run_id: str
@@ -87,4 +95,4 @@ def _check_summary_shape(summary: dict[str, Any]) -> list[Violation]:
     return out
 
 
-__all__ = ["Violation", "Report", "verify_run"]
+__all__ = ["Violation", "Report", "single_value", "verify_run"]

@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from dbxcarta.contract import CONTRACT_VERSION, NodeLabel
-from dbxcarta.verify import Violation
+from dbxcarta.verify import Violation, single_value
 
 if TYPE_CHECKING:
     from neo4j import Driver
@@ -62,7 +62,7 @@ def _check_node_counts(driver: "Driver", summary: dict[str, Any]) -> list[Violat
             if exp is None:
                 continue
             cypher, params = _cypher[label]
-            actual = s.run(cypher, **params).single()["cnt"]
+            actual = single_value(s.run(cypher, **params), "cnt")
             if actual != exp:
                 out.append(Violation(
                     code=f"graph.node_count_mismatch.{label.value}",
@@ -79,10 +79,10 @@ def _check_contract_version(driver: "Driver") -> list[Violation]:
     out: list[Violation] = []
     with driver.session() as s:
         for label in labels:
-            wrong = s.run(
+            wrong = single_value(s.run(
                 f"MATCH (n:{label}) WHERE n.contract_version <> $v RETURN count(n) AS cnt",
                 v=CONTRACT_VERSION,
-            ).single()["cnt"]
+            ), "cnt")
             if wrong:
                 out.append(Violation(
                     code=f"graph.wrong_contract_version.{label.value}",
@@ -113,7 +113,7 @@ def _check_relationship_integrity(driver: "Driver") -> list[Violation]:
     ]
     with driver.session() as s:
         for code, msg, query in queries:
-            cnt = s.run(query).single()["cnt"]
+            cnt = single_value(s.run(query), "cnt")
             if cnt:
                 out.append(Violation(code=code, message=f"{cnt} {msg}.", details={"count": cnt}))
     return out

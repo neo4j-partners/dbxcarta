@@ -81,7 +81,7 @@ def truncate_staging_root(staging_root: str) -> None:
     so the probe treats only known missing-path messages as non-existence.
     """
     from databricks.sdk.runtime import dbutils
-    from py4j.protocol import Py4JJavaError
+    from py4j.protocol import Py4JJavaError  # type: ignore[import-untyped]
 
     try:
         dbutils.fs.ls(staging_root)

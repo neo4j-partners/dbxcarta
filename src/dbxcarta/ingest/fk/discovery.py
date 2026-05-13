@@ -75,7 +75,9 @@ def run_fk_discovery(
     (DBXCARTA_SEMANTIC_MIN_TABLES). Column embeddings are required and
     already validated present by Settings' cross-field validator.
     """
-    column_metas = [ColumnMeta.from_row(r) for r in extract.columns_df.collect()]
+    column_metas = [
+        ColumnMeta.from_row(r.asDict()) for r in extract.columns_df.collect()
+    ]
     pk_index = _build_pk_index(spark, settings, schema_list)
 
     prior_pairs: frozenset[DeclaredPair] = frozenset()
@@ -185,7 +187,7 @@ def _build_pk_index(
     if schema_list:
         pk_rows_df = pk_rows_df.filter(col("table_schema").isin(schema_list))
 
-    constraint_rows = [ConstraintRow.from_row(r) for r in pk_rows_df.collect()]
+    constraint_rows = [ConstraintRow.from_row(r.asDict()) for r in pk_rows_df.collect()]
     return PKIndex.from_constraints(constraint_rows)
 
 

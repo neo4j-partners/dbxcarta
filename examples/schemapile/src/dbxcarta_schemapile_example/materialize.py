@@ -26,6 +26,10 @@ from typing import Any, TYPE_CHECKING
 
 from dbxcarta.databricks import build_workspace_client, quote_identifier
 from dbxcarta_schemapile_example.config import SchemaPileConfig, load_config
+from dbxcarta_schemapile_example.utils import (
+    load_dotenv_file,
+    read_required_warehouse_id,
+)
 
 if TYPE_CHECKING:
     from databricks.sdk import WorkspaceClient
@@ -122,7 +126,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    _load_dotenv(args.dotenv)
+    load_dotenv_file(args.dotenv)
     config = load_config()
 
     if not config.candidate_cache.is_file():
@@ -131,13 +135,10 @@ def main() -> int:
             " Run dbxcarta-schemapile-select first."
         )
 
-    import os
-    warehouse_id = args.warehouse_id or os.environ.get("DATABRICKS_WAREHOUSE_ID", "")
-    if not warehouse_id:
-        raise ValueError(
-            "DATABRICKS_WAREHOUSE_ID is required to materialize tables;"
-            " set it in .env or pass --warehouse-id"
-        )
+    warehouse_id = read_required_warehouse_id(
+        args.warehouse_id,
+        operation="materialize tables",
+    )
 
     payload = json.loads(config.candidate_cache.read_text())
     schemas = payload.get("schemas") or []
@@ -280,10 +281,10 @@ def _coerce_type(raw: str) -> tuple[str, bool]:
     if not raw:
         return "STRING", True
     normalized = raw.upper().strip().strip(";").strip()
-    if _DECIMAL_RE.match(normalized):
-        m = _DECIMAL_RE.match(normalized)
-        precision = int(m.group(1))
-        scale = int(m.group(2))
+    decimal_match = _DECIMAL_RE.match(normalized)
+    if decimal_match:
+        precision = int(decimal_match.group(1))
+        scale = int(decimal_match.group(2))
         precision = max(1, min(precision, 38))
         scale = max(0, min(scale, precision))
         return f"DECIMAL({precision},{scale})", False
@@ -360,15 +361,6 @@ def _execute(ws: "WorkspaceClient", warehouse_id: str, statement: str) -> None:
         wait_timeout="50s",
         on_wait_timeout=ExecuteStatementRequestOnWaitTimeout.CONTINUE,
     )
-
-
-def _load_dotenv(path: Path) -> None:
-    try:
-        from dotenv import load_dotenv
-    except ImportError:
-        return
-    if path.is_file():
-        load_dotenv(path, override=False)
 
 
 if __name__ == "__main__":

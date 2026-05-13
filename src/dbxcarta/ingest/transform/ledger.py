@@ -81,7 +81,7 @@ def upsert_ledger(staged_df: "DataFrame", ledger_root: str, label: NodeLabel) ->
     Schema: id STRING, embedding_text_hash STRING, embedding ARRAY<DOUBLE>,
     embedding_model STRING, embedded_at TIMESTAMP.
     """
-    from delta.tables import DeltaTable
+    from delta.tables import DeltaTable  # type: ignore[import-not-found]
     from pyspark.errors import AnalysisException
     from pyspark.sql.functions import col
 

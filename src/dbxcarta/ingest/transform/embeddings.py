@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from dbxcarta.databricks import validate_serving_endpoint_name
+
 if TYPE_CHECKING:
     from pyspark.sql import Column, DataFrame
 
@@ -60,6 +62,11 @@ def add_embedding_column(
     Neo4j node write (it lives only in the Delta staging table from Stage 2
     and the run-summary breakdown).
     """
+    # Guard before interpolation: ai_query requires the endpoint as a string
+    # literal. validate_serving_endpoint_name rejects characters that would
+    # break the SQL expression.
+    validate_serving_endpoint_name(endpoint, label="embedding endpoint")
+
     from pyspark.sql.functions import col, current_timestamp, expr, lit, sha2
 
     raw = expr(f"ai_query('{endpoint}', embedding_text, failOnError => false)")

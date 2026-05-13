@@ -14,7 +14,7 @@ import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from dbxcarta.contract import NodeLabel
 from dbxcarta.databricks import quote_qualified_name
@@ -54,28 +54,40 @@ def load_summary_from_volume(
     entries = list(ws.files.list_directory_contents(directory_path=volume_path))
     candidates = [
         e for e in entries
-        if e.name.startswith("dbxcarta_") and e.name.endswith(".json")
+        if e.name is not None
+        and e.name.startswith("dbxcarta_")
+        and e.name.endswith(".json")
     ]
     if not candidates:
         return None
 
     if run_id:
-        matched = [e for e in candidates if e.name.startswith(f"dbxcarta_{run_id}_")]
+        matched = [
+            e for e in candidates
+            if e.name is not None
+            and e.name.startswith(f"dbxcarta_{run_id}_")
+        ]
         if not matched:
             return None
         if len(matched) > 1:
-            names = sorted(e.name for e in matched)
+            names = sorted(e.name for e in matched if e.name is not None)
             raise LoadSummaryError(
                 f"--run-id={run_id!r} matched {len(matched)} files in {volume_path}: "
                 f"{names}. Disambiguate by removing duplicates or pass a more specific value."
             )
         target = matched[0]
-        content = ws.files.download(file_path=f"{volume_path}/{target.name}").contents.read()
-        return json.loads(content)
+        downloaded = ws.files.download(file_path=f"{volume_path}/{target.name}")
+        if downloaded.contents is None:
+            raise LoadSummaryError(f"summary file has no contents: {target.name}")
+        content = downloaded.contents.read()
+        return cast(dict[str, Any], json.loads(content))
 
-    for entry in sorted(candidates, key=lambda e: e.name, reverse=True):
-        content = ws.files.download(file_path=f"{volume_path}/{entry.name}").contents.read()
-        loaded = json.loads(content)
+    for entry in sorted(candidates, key=lambda e: e.name or "", reverse=True):
+        downloaded = ws.files.download(file_path=f"{volume_path}/{entry.name}")
+        if downloaded.contents is None:
+            raise LoadSummaryError(f"summary file has no contents: {entry.name}")
+        content = downloaded.contents.read()
+        loaded = cast(dict[str, Any], json.loads(content))
         if loaded.get("status") == "success":
             return loaded
     return None

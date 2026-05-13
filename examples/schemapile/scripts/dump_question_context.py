@@ -67,7 +67,8 @@ def _format_fk_list(rows: list[dict]) -> str:
     for row in rows:
         left = f"{row['s1']}.{row['t1']}.{row['c1']}"
         right = f"{row['s2']}.{row['t2']}.{row['c2']}"
-        key = tuple(sorted([left, right]))
+        first, second = sorted((left, right))
+        key = (first, second)
         if key in seen:
             continue
         seen.add(key)
@@ -165,7 +166,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    settings = ClientSettings()
+    settings = _load_settings()
     schemas = settings.schemas_list
 
     schema_text = fetch_schema_dump(settings)
@@ -200,6 +201,10 @@ def main(argv: list[str] | None = None) -> int:
         threshold=args.confidence,
     ))
     return 0
+
+
+def _load_settings() -> ClientSettings:
+    return ClientSettings()  # type: ignore[call-arg]
 
 
 if __name__ == "__main__":

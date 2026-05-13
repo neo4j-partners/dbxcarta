@@ -8,6 +8,7 @@ and validation errors fail loudly at one place.
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -75,7 +76,7 @@ class SchemaPileConfig:
         return f"/Volumes/{self.catalog}/{self.meta_schema}/{self.volume}"
 
 
-def load_config(env: dict[str, str] | None = None) -> SchemaPileConfig:
+def load_config(env: Mapping[str, str] | None = None) -> SchemaPileConfig:
     """Build a SchemaPileConfig from environment variables.
 
     Defaults match `.env.sample`. Missing required values raise ValueError
@@ -135,7 +136,7 @@ def load_config(env: dict[str, str] | None = None) -> SchemaPileConfig:
     )
 
 
-def _required(env: dict[str, str], key: str) -> str:
+def _required(env: Mapping[str, str], key: str) -> str:
     val = env.get(key, "").strip()
     if not val:
         raise ValueError(f"{key} is not set; check examples/schemapile/.env")

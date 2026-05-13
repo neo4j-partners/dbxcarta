@@ -2,8 +2,21 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from databricks.sdk import WorkspaceClient
-from databricks.sdk.service.sql import Disposition, Format, StatementState
+from databricks.sdk.service.sql import (
+    Disposition,
+    Format,
+    StatementState,
+    StatementStatus,
+)
+
+
+def _statement_error(status: StatementStatus | None, state: StatementState | None) -> str:
+    if status and status.error and status.error.message:
+        return status.error.message
+    return str(state)
 
 
 def execute_sql(
@@ -27,19 +40,15 @@ def execute_sql(
         format=Format.JSON_ARRAY,
     )
 
-    state = response.status.state
+    status = response.status
+    state = status.state if status else None
 
     if state == StatementState.SUCCEEDED:
         data = (response.result and response.result.data_array) or []
         return True, len(data) > 0, None
 
     if state in (StatementState.FAILED, StatementState.CANCELED):
-        msg = (
-            response.status.error.message
-            if response.status and response.status.error
-            else str(state)
-        )
-        return False, False, msg
+        return False, False, _statement_error(status, state)
 
     # PENDING or RUNNING means the timeout elapsed before completion.
     return False, False, f"statement did not complete within {timeout_sec}s (state={state})"
@@ -50,7 +59,7 @@ def fetch_rows(
     warehouse_id: str,
     sql: str,
     timeout_sec: int = 30,
-) -> tuple[list[str] | None, list[list] | None, str | None]:
+) -> tuple[list[str] | None, list[list[Any]] | None, str | None]:
     """Execute SQL and return (column_names, rows, error).
 
     Returns (None, None, error_message) on failure.
@@ -65,7 +74,8 @@ def fetch_rows(
         format=Format.JSON_ARRAY,
     )
 
-    state = response.status.state
+    status = response.status
+    state = status.state if status else None
 
     if state == StatementState.SUCCEEDED:
         columns: list[str] = []
@@ -74,17 +84,25 @@ def fetch_rows(
             and response.manifest.schema
             and response.manifest.schema.columns
         ):
-            columns = [col.name for col in response.manifest.schema.columns]
-        data = (response.result and response.result.data_array) or []
+            columns = [
+                col.name or f"col_{index + 1}"
+                for index, col in enumerate(response.manifest.schema.columns)
+            ]
+        chunk = response.result
+        data: list[list[Any]] = list(chunk.data_array or []) if chunk else []
+        statement_id = response.statement_id
+        while chunk and chunk.next_chunk_index is not None:
+            if statement_id is None:
+                return None, None, "statement id missing for paginated result"
+            chunk = ws.statement_execution.get_statement_result_chunk_n(
+                statement_id, chunk.next_chunk_index
+            )
+            if chunk:
+                data.extend(chunk.data_array or [])
         return columns, data, None
 
     if state in (StatementState.FAILED, StatementState.CANCELED):
-        msg = (
-            response.status.error.message
-            if response.status and response.status.error
-            else str(state)
-        )
-        return None, None, msg
+        return None, None, _statement_error(status, state)
 
     return None, None, f"statement did not complete within {timeout_sec}s (state={state})"
 
@@ -107,16 +125,12 @@ def execute_ddl(
         wait_timeout=f"{timeout_sec}s",
         catalog=catalog,
     )
-    state = response.status.state
+    status = response.status
+    state = status.state if status else None
     if state == StatementState.SUCCEEDED:
         return True, None
     if state in (StatementState.FAILED, StatementState.CANCELED):
-        msg = (
-            response.status.error.message
-            if response.status and response.status.error
-            else str(state)
-        )
-        return False, msg
+        return False, _statement_error(status, state)
     return False, f"statement did not complete within {timeout_sec}s (state={state})"
 
 
