@@ -45,7 +45,12 @@ def fetch_schema_dump(settings: ClientSettings) -> str:
             "Run the server pipeline first to populate the graph."
         )
 
-    return _format_schema(rows, settings.dbxcarta_catalog)
+    text = _format_schema(rows, settings.dbxcarta_catalog)
+    max_chars = settings.dbxcarta_schema_dump_max_chars
+    if max_chars > 0 and len(text) > max_chars:
+        cut = text.rfind("\n", 0, max_chars)
+        text = text[:cut] + f"\n[schema truncated at {max_chars} chars; {len(text)} total]"
+    return text
 
 
 def _format_schema(rows: list[dict], catalog: str) -> str:

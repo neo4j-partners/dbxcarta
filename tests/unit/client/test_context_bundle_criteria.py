@@ -125,6 +125,7 @@ def _retriever_with_stub(inject_criteria: bool, stub: _StubSession) -> GraphRetr
     settings.schemas_list = []
     settings.dbxcarta_confidence_threshold = 0.8
     settings.dbxcarta_inject_criteria = inject_criteria
+    settings.dbxcarta_client_max_expansion_tables = 0
 
     driver = MagicMock()
     driver.session.return_value = stub

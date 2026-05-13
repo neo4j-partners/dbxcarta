@@ -32,6 +32,10 @@ class ClientSettings(BaseSettings):
     dbxcarta_client_arms: str = "no_context,schema_dump,graph_rag"
     dbxcarta_client_top_k: int = 5
     dbxcarta_client_timeout_sec: int = 30
+    dbxcarta_schema_dump_max_chars: int = 0  # 0 = no limit
+    # 0 = no cap; set to 10-15 for dense single-schema fixtures to prevent
+    # REFERENCES expansion from returning dozens of neighbor tables
+    dbxcarta_client_max_expansion_tables: int = 0
 
     # REFERENCES-edge confidence filter. Inclusive `>=` comparison; edges with
     # no confidence property are treated as 1.0 via COALESCE so they are never

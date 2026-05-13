@@ -1,6 +1,6 @@
 # SchemaPile Example, v3: Why `graph_rag` Underperformed and What to Do About It
 
-**Status: Phase F implementation complete. Phase F live rerun pending before Phase G.**
+**Status: Phase F complete. Phase G pending.**
 
 The v2 plan landed end to end. Ingest produced a clean 20-schema graph,
 the three-arm client run completed, and the audit trail in `schemapile-v2.md`
@@ -262,26 +262,33 @@ trace identifies the next failing step precisely. We do not need
 Goal: replace or supplement the 20-disjoint-schema benchmark with one
 that can actually distinguish the arms.
 
-- Decide between the single-dense-schema option and the realistic
-  multi-schema option. The single-dense-schema option is recommended
-  because it matches DBxCarta's production target.
-- If choosing a single dense schema, add dense-schema retrieval work to
-  the plan: table/subgraph ranking by seed score, graph distance, FK
-  source/confidence, and join coverage.
-- Define the fair `schema_dump` baseline before running: full dump if it
-  fits, truncated dump, same-token-budget dump, or an explicitly omitted
-  arm.
-- Pick the source corpus (a large SchemaPile entry, a public demo
-  database, or a synthetic generator) and update the example's
-  materializer to load it.
-- Regenerate `questions.json` against the new catalog with the
-  generator tuned to produce at least 50 questions, weighted toward
-  joins.
-- Land the new fixture as a sibling example, not a replacement. Keep the
-  current 20-schema run for ingest regression.
+Use a single dense schema at two sizes: **500 tables** and **1000 tables**.
+500 tables forces real retrieval while remaining a schema practitioners
+encounter in production. 1000 tables puts the full dump clearly beyond any
+practical context window, making `schema_dump` a degraded baseline rather
+than an oracle. Running both sizes tests whether `graph_rag`'s advantage
+grows with catalog size, which is the core claim.
 
-Exit criterion for Phase G: a fresh client run on the new benchmark
-shows separation between the arms, in either direction, at a sample
+- Use a single dense schema with a real FK web. This matches DBxCarta's
+  production target and is the recommended benchmark shape.
+- Add dense-schema retrieval work: table/subgraph ranking by seed score,
+  graph distance, FK source/confidence, and join coverage.
+- Pick the source corpus (a large SchemaPile entry, a public demo database,
+  or a synthetic generator) and update the example's materializer to produce
+  both a 500-table and a 1000-table variant.
+- Set `DBXCARTA_SCHEMA_DUMP_MAX_CHARS=50000` for both runs. At 500 tables
+  the dump is roughly 88k chars so the arm is truncated to about 57% of the
+  full schema. At 1000 tables the dump is roughly 176k chars and the arm
+  sees roughly 28%. This gives `schema_dump` a bounded but real context at
+  each size.
+- Regenerate `questions.json` for each size with the generator tuned to
+  produce at least 50 questions per fixture, weighted toward multi-table
+  joins.
+- Land both fixtures as sibling examples, not replacements. Keep the current
+  20-schema run for ingest regression.
+
+Exit criterion for Phase G: client runs on both the 500-table and 1000-table
+fixtures show separation between the arms, in either direction, at a sample
 size where a one-question swing does not flip the verdict.
 
 ---
@@ -359,8 +366,33 @@ phase meets the quality bar.
     synthesized join predicates, join-line rendering with source/confidence,
     value-fetch capping, and prompt shape. `test_context_bundle_criteria.py`
     migrated from `criteria` to `join_lines` API. 211 tests pass, 1 skipped.
-  - Still pending for final Phase F sign-off: rerun the client against the
-    unchanged `schemapile_lakehouse` and compare retrieval metrics, execution
-    rate, attempted-question correctness, and gradable correctness to the v2
-    baseline.
+  - Live rerun complete 2026-05-13. Run ID 671692334458641. Results recorded
+    under Phase G below.
+  - Phase F exit criterion met: `graph_rag` execution rate 8/9 (0.889) is
+    within one question of `schema_dump` execution rate 9/9 (1.0).
 - **Phase G —** _pending_
+
+  **v3 arm scores (n=9, run 671692334458641, 2026-05-13):**
+
+  | Metric | no\_context | schema\_dump | graph\_rag |
+  |---|---|---|---|
+  | Attempted | 9 | 9 | 9 |
+  | Parsed | 9 | 9 | 9 |
+  | Executed | 0 | 9 | 8 |
+  | Non-empty | 0 | 8 | 5 |
+  | Correct | 0 | 5 | 2 |
+  | Gradable | 0 | 9 | 8 |
+  | Execution rate | 0.000 | 1.000 | 0.889 |
+  | Non-empty rate | 0.000 | 0.889 | 0.556 |
+  | Correct rate (of gradable) | n/a | 0.556 | 0.250 |
+  | Top-1 schema match rate | n/a | n/a | 0.333 |
+  | Schema in context rate | n/a | n/a | 0.667 |
+  | Mean context purity | n/a | n/a | 0.333 |
+
+  Comparison to v2 baseline: `schema_dump` improved from 4/9 (0.444) to 5/9
+  (0.556). `graph_rag` correct rate fell from ~0.43 to 0.25 on gradable
+  questions, though the execution-failure penalty shrank from the v2 22-point
+  gap to one missed question. The correct schema appeared in the `graph_rag`
+  context on 6/9 questions but translated to a top-1 match only 3/9 times,
+  pointing to context-purity and prompt-rendering as the next bottleneck
+  rather than schema recall.

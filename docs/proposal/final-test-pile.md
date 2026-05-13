@@ -10,8 +10,8 @@ the ingest step quickly.
 
 ## Pre-flight
 
-- [ ] Reset Neo4j: clear all nodes, relationships, and indexes in Aura.
-- [ ] Update root `.env` to point at the schemapile catalog (see section below).
+- [x] Reset Neo4j: clear all nodes, relationships, and indexes in Aura.
+- [x] Update root `.env` to point at the schemapile catalog (see section below).
 
 ### Root `.env` changes required
 
@@ -42,8 +42,8 @@ DBXCARTA_INCLUDE_EMBEDDINGS_DATABASES=false
 
 Run from the repo root.
 
-- [ ] `uv sync`
-- [ ] `uv pip install -e examples/schemapile/`
+- [x] `uv sync`
+- [x] `uv pip install -e examples/schemapile/`
 
 ---
 
@@ -53,8 +53,8 @@ Run from `examples/schemapile/`. All 20 schemas have cached LLM output in
 `.cache/questions/`, so this step reads from cache only and produces a fresh
 `questions.json` without making any model or warehouse calls.
 
-- [ ] `uv run dbxcarta-schemapile-generate-questions`
-- [ ] Confirm `questions.json` was written and is non-empty.
+- [x] `uv run dbxcarta-schemapile-generate-questions`
+- [x] Confirm `questions.json` was written and is non-empty.
 
 ---
 
@@ -62,8 +62,8 @@ Run from `examples/schemapile/`. All 20 schemas have cached LLM output in
 
 Still in `examples/schemapile/`.
 
-- [ ] `uv run dbxcarta preset dbxcarta_schemapile_example:preset --upload-questions`
-- [ ] Confirm upload succeeds with no validation errors.
+- [x] `uv run dbxcarta preset dbxcarta_schemapile_example:preset --upload-questions`
+- [x] Confirm upload succeeds with no validation errors.
 
 ---
 
@@ -71,9 +71,9 @@ Still in `examples/schemapile/`.
 
 Return to the repo root.
 
-- [ ] `uv run dbxcarta upload --wheel`
-- [ ] `uv run dbxcarta upload --all`
-- [ ] `uv run dbxcarta validate` to confirm the remote wheel and scripts landed. Skip if both uploads reported no errors.
+- [x] `uv run dbxcarta upload --wheel`
+- [x] `uv run dbxcarta upload --all`
+- [x] `uv run dbxcarta validate` to confirm the remote wheel and scripts landed. Skip if both uploads reported no errors.
 
 ---
 
@@ -81,8 +81,8 @@ Return to the repo root.
 
 Submits the ingest job against the 20 schemapile schemas.
 
-- [ ] `uv run dbxcarta submit-entrypoint ingest`
-- [ ] Confirm the job completes with status `SUCCESS`.
+- [x] `uv run dbxcarta submit-entrypoint ingest`
+- [x] Confirm the job completes with status `SUCCESS`.
 
 ---
 
@@ -90,8 +90,8 @@ Submits the ingest job against the 20 schemapile schemas.
 
 Runs graph and catalog verification against the completed ingest run.
 
-- [ ] `uv run dbxcarta verify`
-- [ ] Confirm all checks pass (node counts, FK edge counts, embedding counts).
+- [x] `uv run dbxcarta verify`
+- [x] Confirm all checks pass (node counts, FK edge counts, embedding counts).
 
 ---
 
@@ -99,9 +99,9 @@ Runs graph and catalog verification against the completed ingest run.
 
 Runs the three-arm evaluation: `no_context`, `schema_dump`, `graph_rag`.
 
-- [ ] `uv run dbxcarta submit-entrypoint client`
-- [ ] Confirm the job completes with status `SUCCESS`.
-- [ ] Pull results with `uv run dbxcarta download`, or query `DBXCARTA_SUMMARY_TABLE` directly.
+- [x] `uv run dbxcarta submit-entrypoint client`
+- [x] Confirm the job completes with status `SUCCESS`.
+- [x] Pull results with `uv run dbxcarta download`, or query `DBXCARTA_SUMMARY_TABLE` directly.
 
 ---
 

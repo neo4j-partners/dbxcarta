@@ -28,6 +28,19 @@ _REFERENCES_TABLE_IDS_CYPHER = (
     "RETURN DISTINCT t.id AS tid"
 )
 
+# Scored variant: score each expansion table by the max FK confidence among
+# edges connecting it to the seed columns. Used when max_expansion_tables > 0
+# to rank and cap expansion on dense single-schema fixtures.
+_REFERENCES_SCORED_TABLE_IDS_CYPHER = (
+    "UNWIND $col_ids AS cid "
+    "OPTIONAL MATCH (c:Column {id: cid})-[r:REFERENCES]-(other:Column)"
+    "<-[:HAS_COLUMN]-(t:Table) "
+    "WITH t.id AS tid, max(COALESCE(r.confidence, 1.0)) AS max_conf "
+    "WHERE tid IS NOT NULL AND max_conf >= $threshold "
+    "RETURN tid, max_conf "
+    "ORDER BY max_conf DESC"
+)
+
 # Fetch join predicates (with source and confidence) for retrieved neighbour
 # tables. When ingest did not persist a literal criteria string, the retriever
 # renders one from the REFERENCES edge endpoints.
@@ -67,6 +80,7 @@ class GraphRetriever(Retriever):
         threshold = self._settings.dbxcarta_confidence_threshold
         inject_criteria = self._settings.dbxcarta_inject_criteria
         configured_schemas = self._settings.schemas_list
+        max_expansion = self._settings.dbxcarta_client_max_expansion_tables
 
         with self._driver.session() as session:
             raw_col_seed_pairs = _query_vector_seeds(session, _COL_INDEX, embedding, top_k)
@@ -97,7 +111,9 @@ class GraphRetriever(Retriever):
             active_tbl_seeds = [id_ for id_, _ in active_tbl_seed_pairs]
 
             parent_tbl_ids = _parent_table_ids(session, active_col_seeds)
-            ref_tbl_ids = _references_table_ids(session, active_col_seeds, threshold)
+            ref_tbl_ids = _references_table_ids_capped(
+                session, active_col_seeds, threshold, max_expansion
+            )
             expansion_tbl_ids = list(dict.fromkeys(parent_tbl_ids + ref_tbl_ids))
 
             all_tbl_ids = list(dict.fromkeys(active_tbl_seeds + expansion_tbl_ids))
@@ -217,6 +233,27 @@ def _references_table_ids(session, col_ids: list[str], threshold: float) -> list
         _REFERENCES_TABLE_IDS_CYPHER, col_ids=col_ids, threshold=threshold,
     )
     return [row["tid"] for row in result]
+
+
+def _references_table_ids_capped(
+    session, col_ids: list[str], threshold: float, max_tables: int
+) -> list[str]:
+    """Like _references_table_ids but scored and capped at max_tables.
+
+    When max_tables == 0 the behaviour is identical to the uncapped version.
+    When max_tables > 0 tables are ranked by max FK confidence among edges
+    connecting them to seed columns and the top-max_tables are returned.
+    This prevents context explosion on dense single-schema fixtures.
+    """
+    if not col_ids:
+        return []
+    if max_tables <= 0:
+        return _references_table_ids(session, col_ids, threshold)
+    result = session.run(
+        _REFERENCES_SCORED_TABLE_IDS_CYPHER, col_ids=col_ids, threshold=threshold,
+    )
+    pairs = [(row["tid"], row["max_conf"]) for row in result if row["tid"]]
+    return [tid for tid, _ in pairs[:max_tables]]
 
 
 def _references_criteria(

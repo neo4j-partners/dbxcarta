@@ -1,0 +1,627 @@
+{
+  "run_id": "local",
+  "job_name": "dbxcarta_client",
+  "catalog": "schemapile_lakehouse",
+  "schemas": [
+    "sp_492424_create_adventuresoverflow",
+    "sp_310630_schema",
+    "sp_266628_tables",
+    "sp_535132_zhuanglang",
+    "sp_300813_erzeuge_zielzustand",
+    "sp_002489_project",
+    "sp_594700_takeout",
+    "sp_178181_v4_026__create_unified_user",
+    "sp_169810_init",
+    "sp_352545_capstone",
+    "sp_365427_schema",
+    "sp_435873_db",
+    "sp_596038_ddl_proyecto",
+    "sp_008582_auth_services_schema_mysql",
+    "sp_289361_schema",
+    "sp_413175_01_tabledesign_exam21oct2018",
+    "sp_422245_tableschemata",
+    "sp_020891_v01__impl_usuario",
+    "sp_359146_formasnormais",
+    "sp_033815_schema"
+  ],
+  "arms": [
+    "no_context",
+    "schema_dump",
+    "graph_rag"
+  ],
+  "started_at": "2026-05-13T22:52:02.157107+00:00",
+  "ended_at": "2026-05-13T22:53:01.797928+00:00",
+  "status": "success",
+  "error": null,
+  "arm_attempted": {
+    "no_context": 9,
+    "schema_dump": 9,
+    "graph_rag": 9
+  },
+  "arm_parsed": {
+    "no_context": 9,
+    "schema_dump": 9,
+    "graph_rag": 9
+  },
+  "arm_executed": {
+    "no_context": 0,
+    "schema_dump": 9,
+    "graph_rag": 8
+  },
+  "arm_non_empty": {
+    "no_context": 0,
+    "schema_dump": 8,
+    "graph_rag": 5
+  },
+  "arm_correct": {
+    "no_context": 0,
+    "schema_dump": 5,
+    "graph_rag": 2
+  },
+  "arm_gradable": {
+    "no_context": 0,
+    "schema_dump": 9,
+    "graph_rag": 8
+  },
+  "arm_parse_rate": {
+    "no_context": 1.0,
+    "schema_dump": 1.0,
+    "graph_rag": 1.0
+  },
+  "arm_execution_rate": {
+    "no_context": 0.0,
+    "schema_dump": 1.0,
+    "graph_rag": 0.889
+  },
+  "arm_non_empty_rate": {
+    "no_context": 0.0,
+    "schema_dump": 0.889,
+    "graph_rag": 0.556
+  },
+  "arm_correct_rate": {
+    "schema_dump": 0.556,
+    "graph_rag": 0.25
+  },
+  "arm_top1_schema_match_rate": {
+    "graph_rag": 0.333
+  },
+  "arm_schema_in_context_rate": {
+    "graph_rag": 0.667
+  },
+  "arm_mean_context_purity": {
+    "graph_rag": 0.333
+  },
+  "question_results": [
+    {
+      "question_id": "sp_0000",
+      "question": "List all books along with the name of the teacher who uploaded them.",
+      "arm_results": [
+        {
+          "arm": "no_context",
+          "sql": "SELECT b.*, t.name AS teacher_name\nFROM (\n    SELECT table_catalog, table_schema, table_name\n    FROM system.information_schema.tables\n    WHERE table_catalog = 'schemapile_lakehouse'\n    AND table_schema IN ('sp_492424_create_adventuresoverflow','sp_310630_schema','sp_266628_tables','sp_535132_zhuanglang','sp_300813_erzeuge_zielzustand','sp_002489_project','sp_594700_takeout','sp_178181_v4_026__create_unified_user','sp_169810_init','sp_352545_capstone','sp_365427_schema','sp_435873_db','sp_596038_ddl_proyecto','sp_008582_auth_services_schema_mysql','sp_289361_schema','sp_413175_01_tabledesign_exam21oct2018','sp_422245_tableschemata','sp_020891_v01__impl_usuario','sp_359146_formasnormais','sp_033815_schema')\n    AND LOWER(table_name) LIKE '%book%'\n) book_tables\n-- After inspecting, use the actual book and teacher tables\n-- Based on schema exploration, using sp_352545_capstone which likely has books and teachers\nCROSS JOIN (SELECT 1) dummy;\n\nSELECT b.title, b.book_id, t.name AS teacher_name\nFROM schemapile_lakehouse.sp_352545_capstone.books b\nJOIN schemapile_lakehouse.sp_352545_capstone.teachers t\n  ON b.teacher_id = t.teacher_id;",
+          "context_ids": [],
+          "parsed": true,
+          "executed": false,
+          "non_empty": false,
+          "correct": false,
+          "gradable": false,
+          "error": "\n[PARSE_SYNTAX_ERROR] Syntax error at or near 'SELECT': extra input 'SELECT'. SQLSTATE: 42601 (line 13, pos 0)\n\n== SQL ==\nSELECT b.*, t.name AS teacher_name\nFROM (\n    SELECT table_catalog, table_schema, table_name\n    FROM system.information_schema.tables\n    WHERE table_catalog = 'schemapile_lakehouse'\n    AND table_schema IN ('sp_492424_create_adventuresoverflow','sp_310630_schema','sp_266628_tables','sp_535132_zhuanglang','sp_300813_erzeuge_zielzustand','sp_002489_project','sp_594700_takeout','sp_178181_v4_026__create_unified_user','sp_169810_init','sp_352545_capstone','sp_365427_schema','sp_435873_db','sp_596038_ddl_proyecto','sp_008582_auth_services_schema_mysql','sp_289361_schema','sp_413175_01_tabledesign_exam21oct2018','sp_422245_tableschemata','sp_020891_v01__impl_usuario','sp_359146_formasnormais','sp_033815_schema')\n    AND LOWER(table_name) LIKE '%book%'\n) book_tables\n-- After inspecting, use the actual book and teacher tables\n-- Based on schema exploration, using sp_352545_capstone which likely has books and teachers\nCROSS JOIN (SELECT 1) dummy;\n\nSELECT b.title, b.book_id, t.name AS teacher_name\n^^^\nFROM schemapile_lakehouse.sp_352545_capstone.books b\nJOIN schemapile_lakehouse.sp_352545_capstone.teachers t\n  ON b.teacher_id = t.teacher_id;\n",
+          "top1_schema_match": null,
+          "schema_in_context": null,
+          "context_purity": null
+        },
+        {
+          "arm": "schema_dump",
+          "sql": "SELECT b.id, b.name AS book_name, b.upload, b.discipline, t.name AS teacher_name\nFROM schemapile_lakehouse.sp_535132_zhuanglang.book b\nLEFT JOIN schemapile_lakehouse.sp_535132_zhuanglang.teacher t\nON b.upload = t.username",
+          "context_ids": [],
+          "parsed": true,
+          "executed": true,
+          "non_empty": true,
+          "correct": true,
+          "gradable": true,
+          "error": null,
+          "top1_schema_match": null,
+          "schema_in_context": null,
+          "context_purity": null
+        },
+        {
+          "arm": "graph_rag",
+          "sql": "SELECT t.name AS teacher_name\nFROM schemapile_lakehouse.sp_535132_zhuanglang.teacher t",
+          "context_ids": [
+            "schemapile_lakehouse.sp_535132_zhuanglang.teacher.name",
+            "schemapile_lakehouse.sp_535132_zhuanglang.teacher.person_no",
+            "schemapile_lakehouse.sp_535132_zhuanglang.teacher.pwd",
+            "schemapile_lakehouse.sp_033815_schema.teachers.name",
+            "schemapile_lakehouse.sp_535132_zhuanglang.teacher.username",
+            "schemapile_lakehouse.sp_033815_schema.teachers",
+            "schemapile_lakehouse.sp_535132_zhuanglang.teacher",
+            "schemapile_lakehouse.sp_033815_schema.teacher_positions",
+            "schemapile_lakehouse.sp_352545_capstone.instructor",
+            "schemapile_lakehouse.sp_033815_schema.lesson_types"
+          ],
+          "parsed": true,
+          "executed": true,
+          "non_empty": true,
+          "correct": false,
+          "gradable": true,
+          "error": null,
+          "top1_schema_match": true,
+          "schema_in_context": true,
+          "context_purity": 0.4666666666666667
+        }
+      ]
+    },
+    {
+      "question_id": "sp_0001",
+      "question": "How many books has each teacher uploaded? Show the teacher's username and the count of books.",
+      "arm_results": [
+        {
+          "arm": "no_context",
+          "sql": "SELECT u.username, COUNT(b.book_id) as book_count\nFROM schemapile_lakehouse.sp_352545_capstone.users u\nLEFT JOIN schemapile_lakehouse.sp_352545_capstone.books b ON u.user_id = b.uploaded_by\nWHERE u.role = 'teacher'\nGROUP BY u.username\n\nUNION ALL\n\nSELECT u.username, COUNT(b.book_id) as book_count\nFROM schemapile_lakehouse.sp_365427_schema.users u\nLEFT JOIN schemapile_lakehouse.sp_365427_schema.books b ON u.user_id = b.uploaded_by\nWHERE u.role = 'teacher'\nGROUP BY u.username\n\nLIMIT 100",
+          "context_ids": [],
+          "parsed": true,
+          "executed": false,
+          "non_empty": false,
+          "correct": false,
+          "gradable": false,
+          "error": "[TABLE_OR_VIEW_NOT_FOUND] The table or view `schemapile_lakehouse`.`sp_352545_capstone`.`users` cannot be found. Verify the spelling and correctness of the schema and catalog.\nIf you did not qualify the name with a schema, verify the current_schema() output, or qualify the name with the correct schema and catalog.\nTo tolerate the error on drop use DROP VIEW IF EXISTS or DROP TABLE IF EXISTS. SQLSTATE: 42P01; line 2 pos 5",
+          "top1_schema_match": null,
+          "schema_in_context": null,
+          "context_purity": null
+        },
+        {
+          "arm": "schema_dump",
+          "sql": "SELECT t.username, COUNT(b.id) AS book_count\nFROM schemapile_lakehouse.sp_535132_zhuanglang.teacher t\nLEFT JOIN schemapile_lakehouse.sp_535132_zhuanglang.book b ON t.username = b.upload\nGROUP BY t.username",
+          "context_ids": [],
+          "parsed": true,
+          "executed": true,
+          "non_empty": true,
+          "correct": false,
+          "gradable": true,
+          "error": null,
+          "top1_schema_match": null,
+          "schema_in_context": null,
+          "context_purity": null
+        },
+        {
+          "arm": "graph_rag",
+          "sql": "SELECT t.username, COUNT(b.id) as book_count\nFROM schemapile_lakehouse.sp_535132_zhuanglang.teacher t\nLEFT JOIN schemapile_lakehouse.sp_535132_zhuanglang.book b ON t.username = b.teacher_username\nGROUP BY t.username",
+          "context_ids": [
+            "schemapile_lakehouse.sp_033815_schema.teachers.name",
+            "schemapile_lakehouse.sp_033815_schema.teachers.position",
+            "schemapile_lakehouse.sp_535132_zhuanglang.teacher.username",
+            "schemapile_lakehouse.sp_535132_zhuanglang.teacher.name",
+            "schemapile_lakehouse.sp_535132_zhuanglang.teacher.person_no",
+            "schemapile_lakehouse.sp_033815_schema.teachers",
+            "schemapile_lakehouse.sp_033815_schema.teacher_positions",
+            "schemapile_lakehouse.sp_535132_zhuanglang.teacher",
+            "schemapile_lakehouse.sp_435873_db.users",
+            "schemapile_lakehouse.sp_435873_db.spots_users"
+          ],
+          "parsed": true,
+          "executed": false,
+          "non_empty": false,
+          "correct": false,
+          "gradable": false,
+          "error": "[UNRESOLVED_COLUMN.WITH_SUGGESTION] A column, variable, or function parameter with name `b`.`teacher_username` cannot be resolved. Did you mean one of the following? [`t`.`username`, `t`.`name`, `t`.`person_no`, `b`.`name`, `t`.`salt`]. SQLSTATE: 42703; line 3 pos 75",
+          "top1_schema_match": false,
+          "schema_in_context": true,
+          "context_purity": 0.5384615384615384
+        }
+      ]
+    },
+    {
+      "question_id": "sp_0002",
+      "question": "For each book, how many sections does it contain? Return the book id, book name, and section count, ordered by section count descending.",
+      "arm_results": [
+        {
+          "arm": "no_context",
+          "sql": "SELECT b.book_id, b.book_name, COUNT(s.section_id) AS section_count\nFROM schemapile_lakehouse.sp_352545_capstone.books b\nLEFT JOIN schemapile_lakehouse.sp_352545_capstone.sections s ON b.book_id = s.book_id\nGROUP BY b.book_id, b.book_name\nORDER BY section_count DESC",
+          "context_ids": [],
+          "parsed": true,
+          "executed": false,
+          "non_empty": false,
+          "correct": false,
+          "gradable": false,
+          "error": "[TABLE_OR_VIEW_NOT_FOUND] The table or view `schemapile_lakehouse`.`sp_352545_capstone`.`books` cannot be found. Verify the spelling and correctness of the schema and catalog.\nIf you did not qualify the name with a schema, verify the current_schema() output, or qualify the name with the correct schema and catalog.\nTo tolerate the error on drop use DROP VIEW IF EXISTS or DROP TABLE IF EXISTS. SQLSTATE: 42P01; line 2 pos 5",
+          "top1_schema_match": null,
+          "schema_in_context": null,
+          "context_purity": null
+        },
+        {
+          "arm": "schema_dump",
+          "sql": "SELECT b.id AS book_id, b.name AS book_name, COUNT(s.id) AS section_count\nFROM schemapile_lakehouse.sp_535132_zhuanglang.book b\nLEFT JOIN schemapile_lakehouse.sp_535132_zhuanglang.section s ON s.belong = b.id\nGROUP BY b.id, b.name\nORDER BY section_count DESC",
+          "context_ids": [],
+          "parsed": true,
+          "executed": true,
+          "non_empty": true,
+          "correct": true,
+          "gradable": true,
+          "error": null,
+          "top1_schema_match": null,
+          "schema_in_context": null,
+          "context_purity": null
+        },
+        {
+          "arm": "graph_rag",
+          "sql": "SELECT b.id AS book_id, b.name AS book_name, COUNT(s.id) AS section_count\nFROM schemapile_lakehouse.sp_535132_zhuanglang.book b\nLEFT JOIN schemapile_lakehouse.sp_535132_zhuanglang.class c ON c.belong = b.id\nLEFT JOIN schemapile_lakehouse.sp_535132_zhuanglang.section s ON s.belong = c.id\nGROUP BY b.id, b.name\nORDER BY section_count DESC",
+          "context_ids": [
+            "schemapile_lakehouse.sp_535132_zhuanglang.book.id",
+            "schemapile_lakehouse.sp_535132_zhuanglang.book.name",
+            "schemapile_lakehouse.sp_492424_create_adventuresoverflow.sales_factinternetsales.ordersalesnumber",
+            "schemapile_lakehouse.sp_435873_db.orders.status",
+            "schemapile_lakehouse.sp_492424_create_adventuresoverflow.sales_factinternetsales.orderquantity",
+            "schemapile_lakehouse.sp_266628_tables.likes",
+            "schemapile_lakehouse.sp_422245_tableschemata.titles",
+            "schemapile_lakehouse.sp_435873_db.orders_items",
+            "schemapile_lakehouse.sp_266628_tables.follow",
+            "schemapile_lakehouse.sp_266628_tables.block"
+          ],
+          "parsed": true,
+          "executed": true,
+          "non_empty": true,
+          "correct": true,
+          "gradable": true,
+          "error": null,
+          "top1_schema_match": false,
+          "schema_in_context": true,
+          "context_purity": 0.7666666666666667
+        }
+      ]
+    },
+    {
+      "question_id": "sp_0003",
+      "question": "How many distinct tab_a_id values exist in tab_no_action, and what is the total number of rows?",
+      "arm_results": [
+        {
+          "arm": "no_context",
+          "sql": "SELECT COUNT(DISTINCT tab_a_id) AS distinct_tab_a_id_count, COUNT(*) AS total_rows\nFROM schemapile_lakehouse.sp_359146_formasnormais.tab_no_action",
+          "context_ids": [],
+          "parsed": true,
+          "executed": false,
+          "non_empty": false,
+          "correct": false,
+          "gradable": false,
+          "error": "[TABLE_OR_VIEW_NOT_FOUND] The table or view `schemapile_lakehouse`.`sp_359146_formasnormais`.`tab_no_action` cannot be found. Verify the spelling and correctness of the schema and catalog.\nIf you did not qualify the name with a schema, verify the current_schema() output, or qualify the name with the correct schema and catalog.\nTo tolerate the error on drop use DROP VIEW IF EXISTS or DROP TABLE IF EXISTS. SQLSTATE: 42P01; line 2 pos 5",
+          "top1_schema_match": null,
+          "schema_in_context": null,
+          "context_purity": null
+        },
+        {
+          "arm": "schema_dump",
+          "sql": "SELECT COUNT(DISTINCT tab_a_id) AS distinct_tab_a_id_count, COUNT(*) AS total_rows\nFROM schemapile_lakehouse.sp_300813_erzeuge_zielzustand.tab_no_action",
+          "context_ids": [],
+          "parsed": true,
+          "executed": true,
+          "non_empty": true,
+          "correct": true,
+          "gradable": true,
+          "error": null,
+          "top1_schema_match": null,
+          "schema_in_context": null,
+          "context_purity": null
+        },
+        {
+          "arm": "graph_rag",
+          "sql": "SELECT COUNT(DISTINCT tab_a_id) AS distinct_tab_a_id_count, COUNT(*) AS total_rows\nFROM schemapile_lakehouse.sp_300813_erzeuge_zielzustand.tab_no_action",
+          "context_ids": [
+            "schemapile_lakehouse.sp_300813_erzeuge_zielzustand.tab_no_action.tab_a_id",
+            "schemapile_lakehouse.sp_300813_erzeuge_zielzustand.tab_no_action.tab_d_id",
+            "schemapile_lakehouse.sp_300813_erzeuge_zielzustand.tab_no_action.tab_b_id",
+            "schemapile_lakehouse.sp_300813_erzeuge_zielzustand.tab_del_cas.tab_a_id",
+            "schemapile_lakehouse.sp_300813_erzeuge_zielzustand.tab_no_action.tab_c_id",
+            "schemapile_lakehouse.sp_266628_tables.likes",
+            "schemapile_lakehouse.sp_300813_erzeuge_zielzustand.tab_set_null",
+            "schemapile_lakehouse.sp_300813_erzeuge_zielzustand.tab_wrong_fk_column",
+            "schemapile_lakehouse.sp_300813_erzeuge_zielzustand.tab_del_cas",
+            "schemapile_lakehouse.sp_300813_erzeuge_zielzustand.tab_no_action"
+          ],
+          "parsed": true,
+          "executed": true,
+          "non_empty": true,
+          "correct": true,
+          "gradable": true,
+          "error": null,
+          "top1_schema_match": true,
+          "schema_in_context": true,
+          "context_purity": 1.0
+        }
+      ]
+    },
+    {
+      "question_id": "sp_0004",
+      "question": "Which shoes are available in size 10 and cost less than 100?",
+      "arm_results": [
+        {
+          "arm": "no_context",
+          "sql": "SELECT p.* \nFROM schemapile_lakehouse.sp_492424_create_adventuresoverflow.products p\nWHERE p.size = 10 \nAND p.price < 100\nAND LOWER(p.category) LIKE '%shoe%'\n\nUNION ALL\n\nSELECT p.*\nFROM schemapile_lakehouse.sp_310630_schema.products p\nWHERE p.size = 10\nAND p.price < 100\nAND LOWER(p.category) LIKE '%shoe%'\n\nLIMIT 100;",
+          "context_ids": [],
+          "parsed": true,
+          "executed": false,
+          "non_empty": false,
+          "correct": false,
+          "gradable": false,
+          "error": "[TABLE_OR_VIEW_NOT_FOUND] The table or view `schemapile_lakehouse`.`sp_492424_create_adventuresoverflow`.`products` cannot be found. Verify the spelling and correctness of the schema and catalog.\nIf you did not qualify the name with a schema, verify the current_schema() output, or qualify the name with the correct schema and catalog.\nTo tolerate the error on drop use DROP VIEW IF EXISTS or DROP TABLE IF EXISTS. SQLSTATE: 42P01; line 2 pos 5",
+          "top1_schema_match": null,
+          "schema_in_context": null,
+          "context_purity": null
+        },
+        {
+          "arm": "schema_dump",
+          "sql": "SELECT sid, name, brand, style, colour, size, price\nFROM schemapile_lakehouse.sp_169810_init.shoe\nWHERE size = '10'\nAND CAST(price AS DOUBLE) < 100",
+          "context_ids": [],
+          "parsed": true,
+          "executed": true,
+          "non_empty": true,
+          "correct": false,
+          "gradable": true,
+          "error": null,
+          "top1_schema_match": null,
+          "schema_in_context": null,
+          "context_purity": null
+        },
+        {
+          "arm": "graph_rag",
+          "sql": "SELECT sid, name, brand, style, size, price, stock\nFROM schemapile_lakehouse.sp_169810_init.shoe\nWHERE size = '10'\n  AND CAST(price AS DOUBLE) < 100;",
+          "context_ids": [
+            "schemapile_lakehouse.sp_169810_init.shoe.price",
+            "schemapile_lakehouse.sp_169810_init.shoe.stock",
+            "schemapile_lakehouse.sp_169810_init.shoe.brand",
+            "schemapile_lakehouse.sp_169810_init.shoe.image_url",
+            "schemapile_lakehouse.sp_169810_init.shoe.style",
+            "schemapile_lakehouse.sp_169810_init.shoe",
+            "schemapile_lakehouse.sp_492424_create_adventuresoverflow.sales_factposts",
+            "schemapile_lakehouse.sp_492424_create_adventuresoverflow.sales_dimcustomer",
+            "schemapile_lakehouse.sp_492424_create_adventuresoverflow.sales_dimdate",
+            "schemapile_lakehouse.sp_492424_create_adventuresoverflow.sales_dimdateholiday"
+          ],
+          "parsed": true,
+          "executed": true,
+          "non_empty": true,
+          "correct": false,
+          "gradable": true,
+          "error": null,
+          "top1_schema_match": true,
+          "schema_in_context": true,
+          "context_purity": 0.19607843137254902
+        }
+      ]
+    },
+    {
+      "question_id": "sp_0005",
+      "question": "Which users are currently active?",
+      "arm_results": [
+        {
+          "arm": "no_context",
+          "sql": "SELECT * FROM schemapile_lakehouse.sp_178181_v4_026__create_unified_user.users WHERE is_active = TRUE OR status = 'active' OR active = 1 OR enabled = TRUE",
+          "context_ids": [],
+          "parsed": true,
+          "executed": false,
+          "non_empty": false,
+          "correct": false,
+          "gradable": false,
+          "error": "[UNRESOLVED_COLUMN.WITH_SUGGESTION] A column, variable, or function parameter with name `is_active` cannot be resolved. Did you mean one of the following? [`email`, `id`, `name`, `is_blacklisted`, `is_disabled`]. SQLSTATE: 42703; line 1 pos 85",
+          "top1_schema_match": null,
+          "schema_in_context": null,
+          "context_purity": null
+        },
+        {
+          "arm": "schema_dump",
+          "sql": "SELECT uid, username\nFROM schemapile_lakehouse.sp_169810_init.customer\nWHERE uid IN (\n    SELECT uid FROM schemapile_lakehouse.sp_008582_auth_services_schema_mysql.user_table WHERE active = 'true'\n)\nUNION\nSELECT id AS uid, NULL AS username\nFROM schemapile_lakehouse.sp_008582_auth_services_schema_mysql.user_table\nWHERE active = 'true'",
+          "context_ids": [],
+          "parsed": true,
+          "executed": true,
+          "non_empty": false,
+          "correct": false,
+          "gradable": true,
+          "error": null,
+          "top1_schema_match": null,
+          "schema_in_context": null,
+          "context_purity": null
+        },
+        {
+          "arm": "graph_rag",
+          "sql": "SELECT * FROM schemapile_lakehouse.sp_435873_db.users;",
+          "context_ids": [
+            "schemapile_lakehouse.sp_266628_tables.users.following",
+            "schemapile_lakehouse.sp_352545_capstone.user.status",
+            "schemapile_lakehouse.sp_492424_create_adventuresoverflow.sales_factposts.lastactivitydatekey",
+            "schemapile_lakehouse.sp_492424_create_adventuresoverflow.sales_factposts.lastactivitydate",
+            "schemapile_lakehouse.sp_435873_db.spots_users.user_id",
+            "schemapile_lakehouse.sp_435873_db.spots_users",
+            "schemapile_lakehouse.sp_435873_db.users",
+            "schemapile_lakehouse.sp_266628_tables.users",
+            "schemapile_lakehouse.sp_310630_schema.users",
+            "schemapile_lakehouse.sp_289361_schema.users"
+          ],
+          "parsed": true,
+          "executed": true,
+          "non_empty": false,
+          "correct": false,
+          "gradable": true,
+          "error": null,
+          "top1_schema_match": false,
+          "schema_in_context": false,
+          "context_purity": 0.0
+        }
+      ]
+    },
+    {
+      "question_id": "sp_0006",
+      "question": "List all permissions that have a description containing the word 'admin'.",
+      "arm_results": [
+        {
+          "arm": "no_context",
+          "sql": "SELECT *\nFROM (\n  SELECT 'sp_492424_create_adventuresoverflow' AS schema_name, * FROM schemapile_lakehouse.sp_492424_create_adventuresoverflow.permissions\n  UNION ALL\n  SELECT 'sp_310630_schema', * FROM schemapile_lakehouse.sp_310630_schema.permissions\n  UNION ALL\n  SELECT 'sp_266628_tables', * FROM schemapile_lakehouse.sp_266628_tables.permissions\n  UNION ALL\n  SELECT 'sp_535132_zhuanglang', * FROM schemapile_lakehouse.sp_535132_zhuanglang.permissions\n  UNION ALL\n  SELECT 'sp_300813_erzeuge_zielzustand', * FROM schemapile_lakehouse.sp_300813_erzeuge_zielzustand.permissions\n  UNION ALL\n  SELECT 'sp_002489_project', * FROM schemapile_lakehouse.sp_002489_project.permissions\n  UNION ALL\n  SELECT 'sp_594700_takeout', * FROM schemapile_lakehouse.sp_594700_takeout.permissions\n  UNION ALL\n  SELECT 'sp_178181_v4_026__create_unified_user', * FROM schemapile_lakehouse.sp_178181_v4_026__create_unified_user.permissions\n  UNION ALL\n  SELECT 'sp_169810_init', * FROM schemapile_lakehouse.sp_169810_init.permissions\n  UNION ALL\n  SELECT 'sp_352545_capstone', * FROM schemapile_lakehouse.sp_352545_capstone.permissions\n  UNION ALL\n  SELECT 'sp_365427_schema', * FROM schemapile_lakehouse.sp_365427_schema.permissions\n  UNION ALL\n  SELECT 'sp_435873_db', * FROM schemapile_lakehouse.sp_435873_db.permissions\n  UNION ALL\n  SELECT 'sp_596038_ddl_proyecto', * FROM schemapile_lakehouse.sp_596038_ddl_proyecto.permissions\n  UNION ALL\n  SELECT 'sp_008582_auth_services_schema_mysql', * FROM schemapile_lakehouse.sp_008582_auth_services_schema_mysql.permissions\n  UNION ALL\n  SELECT 'sp_289361_schema', * FROM schemapile_lakehouse.sp_289361_schema.permissions\n  UNION ALL\n  SELECT 'sp_413175_01_tabledesign_exam21oct2018', * FROM schemapile_lakehouse.sp_413175_01_tabledesign_exam21oct2018.permissions\n  UNION ALL\n  SELECT 'sp_422245_tableschemata', * FROM schemapile_lakehouse.sp_422245_tableschemata.permissions\n  UNION ALL\n  SELECT 'sp_020891_v01__impl_usuario', * FROM schemapile_lakehouse.sp_020891_v01__impl_usuario.permissions\n  UNION ALL\n  SELECT 'sp_359146_formasnormais', * FROM schemapile_lakehouse.sp_359146_formasnormais.permissions\n  UNION ALL\n  SELECT 'sp_033815_schema', * FROM schemapile_lakehouse.sp_033815_schema.permissions\n) AS all_permissions\nWHERE LOWER(description) LIKE '%admin%'",
+          "context_ids": [],
+          "parsed": true,
+          "executed": false,
+          "non_empty": false,
+          "correct": false,
+          "gradable": false,
+          "error": "[TABLE_OR_VIEW_NOT_FOUND] The table or view `schemapile_lakehouse`.`sp_492424_create_adventuresoverflow`.`permissions` cannot be found. Verify the spelling and correctness of the schema and catalog.\nIf you did not qualify the name with a schema, verify the current_schema() output, or qualify the name with the correct schema and catalog.\nTo tolerate the error on drop use DROP VIEW IF EXISTS or DROP TABLE IF EXISTS. SQLSTATE: 42P01; line 3 pos 70",
+          "top1_schema_match": null,
+          "schema_in_context": null,
+          "context_purity": null
+        },
+        {
+          "arm": "schema_dump",
+          "sql": "SELECT id_permissao, ds_permissao, ds_descricao\nFROM schemapile_lakehouse.sp_020891_v01__impl_usuario.tb_permissao\nWHERE LOWER(ds_descricao) LIKE '%admin%'\n\nUNION ALL\n\nSELECT id, authority AS ds_permissao, NULL AS ds_descricao\nFROM schemapile_lakehouse.sp_008582_auth_services_schema_mysql.authority_table\nWHERE LOWER(authority) LIKE '%admin%'\n\nUNION ALL\n\nSELECT id, role_name AS ds_permissao, NULL AS ds_descricao\nFROM schemapile_lakehouse.sp_008582_auth_services_schema_mysql.role_table\nWHERE LOWER(role_name) LIKE '%admin%'\n\nUNION ALL\n\nSELECT id, frn AS ds_permissao, actions AS ds_descricao\nFROM schemapile_lakehouse.sp_178181_v4_026__create_unified_user.permissions\nWHERE LOWER(actions) LIKE '%admin%' OR LOWER(frn) LIKE '%admin%'",
+          "context_ids": [],
+          "parsed": true,
+          "executed": true,
+          "non_empty": true,
+          "correct": true,
+          "gradable": true,
+          "error": null,
+          "top1_schema_match": null,
+          "schema_in_context": null,
+          "context_purity": null
+        },
+        {
+          "arm": "graph_rag",
+          "sql": "SELECT p.*\nFROM schemapile_lakehouse.sp_178181_v4_026__create_unified_user.permissions p\nJOIN schemapile_lakehouse.sp_178181_v4_026__create_unified_user.resources r\n  ON p.resource_id = r.id\nWHERE LOWER(r.description) LIKE '%admin%'",
+          "context_ids": [
+            "schemapile_lakehouse.sp_178181_v4_026__create_unified_user.permissions.actions",
+            "schemapile_lakehouse.sp_178181_v4_026__create_unified_user.permissions.frn",
+            "schemapile_lakehouse.sp_178181_v4_026__create_unified_user.permissions.created_at",
+            "schemapile_lakehouse.sp_178181_v4_026__create_unified_user.role_permissions.permission_id",
+            "schemapile_lakehouse.sp_178181_v4_026__create_unified_user.permissions.updated_at",
+            "schemapile_lakehouse.sp_178181_v4_026__create_unified_user.role_permissions",
+            "schemapile_lakehouse.sp_178181_v4_026__create_unified_user.permissions",
+            "schemapile_lakehouse.sp_033815_schema.groups_table",
+            "schemapile_lakehouse.sp_033815_schema.teacher_positions",
+            "schemapile_lakehouse.sp_178181_v4_026__create_unified_user.roles"
+          ],
+          "parsed": true,
+          "executed": true,
+          "non_empty": false,
+          "correct": false,
+          "gradable": true,
+          "error": null,
+          "top1_schema_match": false,
+          "schema_in_context": false,
+          "context_purity": 0.0
+        }
+      ]
+    },
+    {
+      "question_id": "sp_0007",
+      "question": "How many users belong to each group?",
+      "arm_results": [
+        {
+          "arm": "no_context",
+          "sql": "SELECT g.group_name, COUNT(ug.user_id) AS user_count\nFROM (\n    SELECT table_schema, table_name\n    FROM schemapile_lakehouse.information_schema.tables\n    WHERE table_schema IN (\n        'sp_492424_create_adventuresoverflow', 'sp_310630_schema', 'sp_266628_tables',\n        'sp_535132_zhuanglang', 'sp_300813_erzeuge_zielzustand', 'sp_002489_project',\n        'sp_594700_takeout', 'sp_178181_v4_026__create_unified_user', 'sp_169810_init',\n        'sp_352545_capstone', 'sp_365427_schema', 'sp_435873_db', 'sp_596038_ddl_proyecto',\n        'sp_008582_auth_services_schema_mysql', 'sp_289361_schema',\n        'sp_413175_01_tabledesign_exam21oct2018', 'sp_422245_tableschemata',\n        'sp_020891_v01__impl_usuario', 'sp_359146_formasnormais', 'sp_033815_schema'\n    )\n) tables_info\nJOIN schemapile_lakehouse.sp_008582_auth_services_schema_mysql.groups g ON 1=1\nLEFT JOIN schemapile_lakehouse.sp_008582_auth_services_schema_mysql.user_groups ug ON g.id = ug.group_id\nGROUP BY g.group_name\n\nSELECT g.group_name, COUNT(ug.user_id) AS user_count\nFROM schemapile_lakehouse.sp_008582_auth_services_schema_mysql.groups g\nLEFT JOIN schemapile_lakehouse.sp_008582_auth_services_schema_mysql.user_groups ug ON g.id = ug.group_id\nGROUP BY g.group_name\n\nUNION ALL\n\nSELECT g.group_name, COUNT(ug.user_id) AS user_count\nFROM schemapile_lakehouse.sp_169810_init.groups g\nLEFT JOIN schemapile_lakehouse.sp_169810_init.user_groups ug ON g.id = ug.group_id\nGROUP BY g.group_name;",
+          "context_ids": [],
+          "parsed": true,
+          "executed": false,
+          "non_empty": false,
+          "correct": false,
+          "gradable": false,
+          "error": "\n[PARSE_SYNTAX_ERROR] Syntax error at or near 'SELECT'. SQLSTATE: 42601 (line 19, pos 0)\n\n== SQL ==\nSELECT g.group_name, COUNT(ug.user_id) AS user_count\nFROM (\n    SELECT table_schema, table_name\n    FROM schemapile_lakehouse.information_schema.tables\n    WHERE table_schema IN (\n        'sp_492424_create_adventuresoverflow', 'sp_310630_schema', 'sp_266628_tables',\n        'sp_535132_zhuanglang', 'sp_300813_erzeuge_zielzustand', 'sp_002489_project',\n        'sp_594700_takeout', 'sp_178181_v4_026__create_unified_user', 'sp_169810_init',\n        'sp_352545_capstone', 'sp_365427_schema', 'sp_435873_db', 'sp_596038_ddl_proyecto',\n        'sp_008582_auth_services_schema_mysql', 'sp_289361_schema',\n        'sp_413175_01_tabledesign_exam21oct2018', 'sp_422245_tableschemata',\n        'sp_020891_v01__impl_usuario', 'sp_359146_formasnormais', 'sp_033815_schema'\n    )\n) tables_info\nJOIN schemapile_lakehouse.sp_008582_auth_services_schema_mysql.groups g ON 1=1\nLEFT JOIN schemapile_lakehouse.sp_008582_auth_services_schema_mysql.user_groups ug ON g.id = ug.group_id\nGROUP BY g.group_name\n\nSELECT g.group_name, COUNT(ug.user_id) AS user_count\n^^^\nFROM schemapile_lakehouse.sp_008582_auth_services_schema_mysql.groups g\nLEFT JOIN schemapile_lakehouse.sp_008582_auth_services_schema_mysql.user_groups ug ON g.id = ug.group_id\nGROUP BY g.group_name\n\nUNION ALL\n\nSELECT g.group_name, COUNT(ug.user_id) AS user_count\nFROM schemapile_lakehouse.sp_169810_init.groups g\nLEFT JOIN schemapile_lakehouse.sp_169810_init.user_groups ug ON g.id = ug.group_id\nGROUP BY g.group_name;\n",
+          "top1_schema_match": null,
+          "schema_in_context": null,
+          "context_purity": null
+        },
+        {
+          "arm": "schema_dump",
+          "sql": "SELECT g.ds_nome AS group_name, COUNT(ug.id_usuario) AS user_count\nFROM schemapile_lakehouse.sp_020891_v01__impl_usuario.tb_grupo g\nLEFT JOIN schemapile_lakehouse.sp_020891_v01__impl_usuario.tb_usuario_x_grupo ug\n  ON g.id_grupo = ug.id_grupo\nGROUP BY g.id_grupo, g.ds_nome\nORDER BY user_count DESC",
+          "context_ids": [],
+          "parsed": true,
+          "executed": true,
+          "non_empty": true,
+          "correct": true,
+          "gradable": true,
+          "error": null,
+          "top1_schema_match": null,
+          "schema_in_context": null,
+          "context_purity": null
+        },
+        {
+          "arm": "graph_rag",
+          "sql": "SELECT name, students_number FROM schemapile_lakehouse.sp_033815_schema.groups_table",
+          "context_ids": [
+            "schemapile_lakehouse.sp_033815_schema.groups_table.name",
+            "schemapile_lakehouse.sp_033815_schema.groups_table.id",
+            "schemapile_lakehouse.sp_020891_v01__impl_usuario.tb_permissao_x_grupo.id_grupo",
+            "schemapile_lakehouse.sp_266628_tables.users.following",
+            "schemapile_lakehouse.sp_020891_v01__impl_usuario.tb_permissao_x_grupo.id_permissao",
+            "schemapile_lakehouse.sp_033815_schema.groups_table",
+            "schemapile_lakehouse.sp_266628_tables.users",
+            "schemapile_lakehouse.sp_435873_db.users",
+            "schemapile_lakehouse.sp_435873_db.spots_users",
+            "schemapile_lakehouse.sp_178181_v4_026__create_unified_user.organizations"
+          ],
+          "parsed": true,
+          "executed": true,
+          "non_empty": false,
+          "correct": false,
+          "gradable": true,
+          "error": null,
+          "top1_schema_match": false,
+          "schema_in_context": false,
+          "context_purity": 0.0
+        }
+      ]
+    },
+    {
+      "question_id": "sp_0008",
+      "question": "How many permissions are assigned to each group, ordered from most to fewest?",
+      "arm_results": [
+        {
+          "arm": "no_context",
+          "sql": "SELECT g.name AS group_name, COUNT(gp.permission_id) AS permission_count\nFROM schemapile_lakehouse.sp_008582_auth_services_schema_mysql.groups g\nLEFT JOIN schemapile_lakehouse.sp_008582_auth_services_schema_mysql.group_permissions gp ON g.id = gp.group_id\nGROUP BY g.name\nORDER BY permission_count DESC",
+          "context_ids": [],
+          "parsed": true,
+          "executed": false,
+          "non_empty": false,
+          "correct": false,
+          "gradable": false,
+          "error": "[TABLE_OR_VIEW_NOT_FOUND] The table or view `schemapile_lakehouse`.`sp_008582_auth_services_schema_mysql`.`groups` cannot be found. Verify the spelling and correctness of the schema and catalog.\nIf you did not qualify the name with a schema, verify the current_schema() output, or qualify the name with the correct schema and catalog.\nTo tolerate the error on drop use DROP VIEW IF EXISTS or DROP TABLE IF EXISTS. SQLSTATE: 42P01; line 2 pos 5",
+          "top1_schema_match": null,
+          "schema_in_context": null,
+          "context_purity": null
+        },
+        {
+          "arm": "schema_dump",
+          "sql": "SELECT g.id_grupo, g.ds_nome, COUNT(pg.id_permissao) AS permission_count\nFROM schemapile_lakehouse.sp_020891_v01__impl_usuario.tb_grupo g\nLEFT JOIN schemapile_lakehouse.sp_020891_v01__impl_usuario.tb_permissao_x_grupo pg\n  ON g.id_grupo = pg.id_grupo\nGROUP BY g.id_grupo, g.ds_nome\nORDER BY permission_count DESC",
+          "context_ids": [],
+          "parsed": true,
+          "executed": true,
+          "non_empty": true,
+          "correct": false,
+          "gradable": true,
+          "error": null,
+          "top1_schema_match": null,
+          "schema_in_context": null,
+          "context_purity": null
+        },
+        {
+          "arm": "graph_rag",
+          "sql": "SELECT id_grupo, COUNT(id_permissao) AS permission_count\nFROM schemapile_lakehouse.sp_020891_v01__impl_usuario.tb_permissao_x_grupo\nGROUP BY id_grupo\nORDER BY permission_count DESC",
+          "context_ids": [
+            "schemapile_lakehouse.sp_020891_v01__impl_usuario.tb_permissao_x_grupo.id_grupo",
+            "schemapile_lakehouse.sp_020891_v01__impl_usuario.tb_permissao_x_grupo.id_permissao",
+            "schemapile_lakehouse.sp_178181_v4_026__create_unified_user.permissions.frn",
+            "schemapile_lakehouse.sp_033815_schema.groups_table.name",
+            "schemapile_lakehouse.sp_178181_v4_026__create_unified_user.permissions.created_at",
+            "schemapile_lakehouse.sp_033815_schema.groups_table",
+            "schemapile_lakehouse.sp_020891_v01__impl_usuario.tb_permissao_x_grupo",
+            "schemapile_lakehouse.sp_178181_v4_026__create_unified_user.permissions",
+            "schemapile_lakehouse.sp_178181_v4_026__create_unified_user.role_permissions",
+            "schemapile_lakehouse.sp_178181_v4_026__create_unified_user.organizations"
+          ],
+          "parsed": true,
+          "executed": true,
+          "non_empty": true,
+          "correct": false,
+          "gradable": true,
+          "error": null,
+          "top1_schema_match": false,
+          "schema_in_context": true,
+          "context_purity": 0.02857142857142857
+        }
+      ]
+    }
+  ]
+}
