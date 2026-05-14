@@ -11,6 +11,7 @@ from __future__ import annotations
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from dbxcarta.core.contract import DEFAULT_EMBEDDING_ENDPOINT
 from dbxcarta.core.databricks import validate_identifier
 
 
@@ -19,8 +20,7 @@ class SemanticLayerConfig(BaseSettings):
 
     source_catalog: str
     source_schemas: str = ""
-    graph_store_uri: str = ""
-    embedding_endpoint: str = "databricks-gte-large-en"
+    embedding_endpoint: str = DEFAULT_EMBEDDING_ENDPOINT
 
     model_config = SettingsConfigDict(
         env_prefix="DBXCARTA_CORE_",

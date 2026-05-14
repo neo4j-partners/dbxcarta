@@ -5,9 +5,20 @@ from pathlib import Path
 
 from databricks_job_runner import Runner
 
+# Per-entrypoint distribution that owns the corresponding console script and
+# carries the runtime deps Databricks needs on the cluster. After the
+# split-package cutover, the `dbxcarta` CLI itself ships in `dbxcarta-presets`,
+# `dbxcarta-ingest` in `dbxcarta-spark`, and `dbxcarta-client` in
+# `dbxcarta-client`. Each PythonWheelTask must be configured with the matching
+# distribution name so Databricks installs the right wheel.
+_ENTRYPOINT_WHEEL_PACKAGE: dict[str, str] = {
+    "ingest": "dbxcarta-spark",
+    "client": "dbxcarta-client",
+}
+
 runner = Runner(
     run_name_prefix="dbxcarta",
-    wheel_package="dbxcarta",
+    wheel_package="dbxcarta-presets",
     scripts_dir="scripts",
     cli_command="uv run dbxcarta",
     # Excluded from cleartext env-param forwarding to job parameters. The
@@ -191,10 +202,10 @@ def _handle_preset(argv: list[str]) -> int:
         return 0
 
     if args.run:
-        for key, value in preset.env().items():
-            os.environ.setdefault(key, value)
+        from dbxcarta.core.env import apply_env_overlay
         from dbxcarta.spark.run import run_dbxcarta
 
+        apply_env_overlay(preset)
         run_dbxcarta()
         return 0
 
@@ -255,15 +266,19 @@ def _submit_wheel_entrypoint(
         SubmitTask,
     )
     from databricks_job_runner.errors import RunnerError
+    from databricks_job_runner.upload import find_latest_wheel
 
-    if not runner.wheel_package:
-        raise RunnerError("wheel_package not configured for this runner.")
-    wheel_name = runner.find_wheel()
-    if not wheel_name:
+    wheel_package = _ENTRYPOINT_WHEEL_PACKAGE.get(name)
+    if wheel_package is None:
+        raise RunnerError(f"unknown wheel entrypoint {name!r}")
+
+    wheel = find_latest_wheel(runner.project_dir / "dist", wheel_package)
+    if wheel is None:
         raise RunnerError(
-            "no dbxcarta wheel found in dist/. Run `uv run dbxcarta upload --wheel` first."
+            f"no {wheel_package} wheel found in dist/."
+            f" Run `uv build --package {wheel_package}` first."
         )
-    wheel_path = f"{runner.wheel_volume_dir}/{wheel_name}"
+    wheel_path = f"{runner.wheel_volume_dir}/{wheel.name}"
 
     params = runner.config.env_params(secret_keys=runner.secret_keys)
     run_name = f"{runner.run_name_prefix}: {name}"
@@ -292,7 +307,7 @@ def _submit_wheel_entrypoint(
     task = SubmitTask(
         task_key=f"run_{name}",
         python_wheel_task=PythonWheelTask(
-            package_name=runner.wheel_package,
+            package_name=wheel_package,
             entry_point=console_entrypoint,
             parameters=params if params else None,
         ),

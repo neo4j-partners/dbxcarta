@@ -90,8 +90,8 @@ def run_dbxcarta(
     *,
     settings: SparkIngestSettings | None = None,
     spark: "SparkSession | None" = None,
-) -> None:
-    """Run a complete ingest.
+) -> RunSummary:
+    """Run a complete ingest and return the finished RunSummary.
 
     When called with no arguments, this remains the Databricks wheel entrypoint:
     settings are loaded from environment variables and the active Spark session
@@ -133,6 +133,7 @@ def run_dbxcarta(
             resolved_settings.dbxcarta_summary_table,
             primary_error=primary_error,
         )
+    return summary
 
 
 def _build_summary(run_id: str, settings: SparkIngestSettings, schema_list: list[str]) -> RunSummary:

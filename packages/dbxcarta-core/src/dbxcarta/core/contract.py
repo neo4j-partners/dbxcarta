@@ -9,12 +9,10 @@ from __future__ import annotations
 
 import hashlib
 from enum import StrEnum
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from pyspark.sql import Column
 
 CONTRACT_VERSION = "1.0"
+
+DEFAULT_EMBEDDING_ENDPOINT = "databricks-gte-large-en"
 
 
 class NodeLabel(StrEnum):
@@ -53,17 +51,13 @@ class EdgeSource(StrEnum):
 # nullable; readers treat absence as (1.0, "declared", null) via COALESCE.
 REFERENCES_PROPERTIES: tuple[str, ...] = ("confidence", "source", "criteria")
 
-# Characters translated in normalization: space→_, hyphen→_
-# These constants are shared with the Spark SQL expression to prevent drift.
-_TRANSLATE_FROM = " -"
-_TRANSLATE_TO = "__"
-
 
 def generate_id(*parts: str) -> str:
     """Return a normalized dot-separated identifier.
 
     Lowercases each part and replaces spaces and hyphens with underscores,
-    then joins with dots. Must produce byte-identical output to id_expr().
+    then joins with dots. Must produce byte-identical output to the Spark
+    expression in `dbxcarta.spark.ingest.contract_expr.id_expr`.
     """
     return ".".join(p.lower().replace(" ", "_").replace("-", "_") for p in parts)
 
@@ -76,26 +70,3 @@ def generate_value_id(column_id: str, value: object) -> str:
     """
     digest = hashlib.md5(str(value).encode()).hexdigest()
     return f"{column_id}.{digest}"
-
-
-def id_expr(*column_names: str) -> "Column":
-    """Return a PySpark Column expression equivalent to generate_id().
-
-    Spark-side builders use this to avoid collecting source ids to the driver
-    or reimplementing normalization with ad hoc SQL strings.
-    """
-    from pyspark.sql import functions as F
-
-    parts = [F.col(c) for c in column_names]
-    return F.lower(F.translate(F.concat_ws(".", *parts), _TRANSLATE_FROM, _TRANSLATE_TO))
-
-
-def value_id_expr() -> "Column":
-    """Return a PySpark Column expression equivalent to generate_value_id().
-
-    Expects the input DataFrame to expose `col_id` and `val`, matching the
-    sample-value transform's intermediate schema.
-    """
-    from pyspark.sql import functions as F
-
-    return F.concat(F.col("col_id"), F.lit("."), F.md5(F.col("val")))

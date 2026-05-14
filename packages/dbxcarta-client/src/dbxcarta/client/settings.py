@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from pydantic import model_validator
-from pydantic import field_validator
-from pydantic_settings import BaseSettings
+from pydantic import field_validator, model_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from dbxcarta.core.databricks import (
     split_qualified_name,
@@ -13,6 +12,8 @@ from dbxcarta.core.databricks import (
 
 
 class ClientSettings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
     # Shared with server
     dbxcarta_catalog: str
     dbxcarta_schemas: str = ""
@@ -102,5 +103,3 @@ class ClientSettings(BaseSettings):
     @property
     def arms(self) -> list[str]:
         return [a.strip() for a in self.dbxcarta_client_arms.split(",") if a.strip()]
-
-    model_config = {"env_file": ".env", "extra": "ignore"}

@@ -12,7 +12,8 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from dbxcarta.core.contract import CONTRACT_VERSION, generate_id, value_id_expr
+from dbxcarta.core.contract import CONTRACT_VERSION, generate_id
+from dbxcarta.spark.ingest.contract_expr import value_id_expr
 
 if TYPE_CHECKING:
     from pyspark.sql import DataFrame, SparkSession

@@ -1,7 +1,7 @@
 """Pipeline self-verification: pure assertion functions over a run summary.
 
-The same functions run at the end of `run_dbxcarta` and from the
-`dbxcarta verify` CLI. Inputs are a `dict` summary matching
+The same functions run at the end of `dbxcarta.spark.run.run_dbxcarta` and from
+the `dbxcarta verify` CLI. Inputs are a `dict` summary matching
 `RunSummary.to_dict()`, a `neo4j.Driver`, and, for catalog-level checks, a
 `WorkspaceClient` plus warehouse id. Outputs are aggregated into a `Report`.
 Each check returns `list[Violation]`; an empty list means the check passed or

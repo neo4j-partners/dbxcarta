@@ -6,17 +6,16 @@ client evaluation arms, question upload helpers, readiness checks, Spark job
 orchestration, and synthetic materialization utilities.
 """
 
-from dbxcarta.core.builder import SemanticLayerBuilder
+from dbxcarta.core.builder import SemanticLayerBuilder, SemanticLayerResult
 from dbxcarta.core.contract import (
     CONTRACT_VERSION,
+    DEFAULT_EMBEDDING_ENDPOINT,
     REFERENCES_PROPERTIES,
     EdgeSource,
     NodeLabel,
     RelType,
     generate_id,
     generate_value_id,
-    id_expr,
-    value_id_expr,
 )
 from dbxcarta.core.databricks import (
     quote_identifier,
@@ -34,6 +33,7 @@ from dbxcarta.core.verify import Report, Violation, verify_run
 
 __all__ = [
     "CONTRACT_VERSION",
+    "DEFAULT_EMBEDDING_ENDPOINT",
     "EdgeSource",
     "EnvOverlay",
     "NodeLabel",
@@ -42,11 +42,11 @@ __all__ = [
     "Report",
     "SemanticLayerBuilder",
     "SemanticLayerConfig",
+    "SemanticLayerResult",
     "Violation",
     "apply_env_overlay",
     "generate_id",
     "generate_value_id",
-    "id_expr",
     "inject_params",
     "load_env_overlay",
     "quote_identifier",
@@ -57,6 +57,5 @@ __all__ = [
     "validate_identifier",
     "validate_serving_endpoint_name",
     "validate_uc_volume_subpath",
-    "value_id_expr",
     "verify_run",
 ]

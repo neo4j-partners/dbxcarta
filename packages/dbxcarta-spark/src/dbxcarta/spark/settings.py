@@ -12,6 +12,7 @@ from __future__ import annotations
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings
 
+from dbxcarta.core.contract import DEFAULT_EMBEDDING_ENDPOINT
 from dbxcarta.core.databricks import (
     split_qualified_name,
     validate_identifier,
@@ -53,7 +54,7 @@ class SparkIngestSettings(BaseSettings):
     dbxcarta_include_embeddings_schemas: bool = False
     dbxcarta_include_embeddings_databases: bool = False
     dbxcarta_embedding_failure_threshold: float = 0.05
-    dbxcarta_embedding_endpoint: str = "databricks-gte-large-en"
+    dbxcarta_embedding_endpoint: str = DEFAULT_EMBEDDING_ENDPOINT
     dbxcarta_embedding_dimension: int = 1024
     # Materialize-once between ai_query and downstream actions.
     dbxcarta_staging_path: str = ""

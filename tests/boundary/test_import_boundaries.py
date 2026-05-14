@@ -83,10 +83,17 @@ def test_client_root_does_not_load_spark_or_databricks_modules() -> None:
 
 def test_spark_root_does_not_load_client_eval_or_presets() -> None:
     forbidden = {
-        "dbxcarta.client.eval",
+        "dbxcarta.client",
         "dbxcarta.presets",
     }
 
     leaked = _matching_modules(_loaded_modules_after("import dbxcarta.spark"), forbidden)
 
     assert not leaked, f"Forbidden modules loaded by dbxcarta.spark: {sorted(leaked)}"
+
+
+# Note: dbxcarta.presets intentionally depends on dbxcarta.spark and
+# dbxcarta.client (Decision 2 in docs/proposal/clean-boundaries.md). It is
+# the operational umbrella that wires extensions together at the application
+# boundary, so a "presets must not import other extensions" check would
+# contradict the design.

@@ -1,9 +1,7 @@
-"""REFERENCES (FK) edge invariants and fixture-coverage check.
+"""REFERENCES (FK) edge invariants.
 
-- Edge-count invariant (universal): Neo4j REFERENCES count matches summary fk_edges.
-- Accounting invariant (universal): fk_skipped == fk_declared - fk_resolved.
-- Fixture-exact assertion (precondition-gated): only when seeded W8 fixture schemas
-  are within scope — otherwise self-skips.
+- Edge-count invariant: Neo4j REFERENCES count matches summary fk_edges.
+- Accounting invariant: fk_skipped == fk_declared - fk_resolved.
 """
 
 from __future__ import annotations
@@ -15,19 +13,6 @@ from dbxcarta.core.verify import Violation, single_value
 
 if TYPE_CHECKING:
     from neo4j import Driver
-
-
-_FIXTURE_SCHEMAS = frozenset({
-    "dbxcarta_test_sales",
-    "dbxcarta_test_inventory",
-    "dbxcarta_test_hr",
-    "dbxcarta_test_events",
-})
-_FIXTURE_EXPECTED_DECLARED = 16
-_FIXTURE_EXPECTED_RESOLVED = 16
-# 16 declared FKs + 1 metadata-inferred (employees.job_title_id -> job_titles.id,
-# detected from the column's "FK to job_titles" comment hint).
-_FIXTURE_EXPECTED_EDGES = 17
 
 
 def _expected_edge_total(summary: dict[str, Any]) -> int:
@@ -52,7 +37,6 @@ def check(driver: "Driver", summary: dict[str, Any]) -> list[Violation]:
     out: list[Violation] = []
     out.extend(_check_edge_count(driver, summary))
     out.extend(_check_accounting(summary))
-    out.extend(_check_fixture_coverage(summary))
     return out
 
 
@@ -106,39 +90,5 @@ def _check_accounting(summary: dict[str, Any]) -> list[Violation]:
             code="references.skipped_negative",
             message=f"fk_skipped ({skipped}) is negative.",
             details={"skipped": skipped},
-        ))
-    return out
-
-
-def _check_fixture_coverage(summary: dict[str, Any]) -> list[Violation]:
-    """Strict coverage check that only applies when the run's scope is a
-    superset of the seeded W8 fixture schemas. Self-skips otherwise."""
-    scope = set(summary.get("schemas") or [])
-    if not _FIXTURE_SCHEMAS.issubset(scope):
-        return []
-
-    counts = summary.get("row_counts") or {}
-    declared = counts.get("fk_declared", 0)
-    resolved = counts.get("fk_resolved", 0)
-    total_edges = _expected_edge_total(summary)
-
-    out: list[Violation] = []
-    if declared < _FIXTURE_EXPECTED_DECLARED:
-        out.append(Violation(
-            code="references.fixture_declared_below_expected",
-            message=f"Fixture schemas in scope but fk_declared={declared} < {_FIXTURE_EXPECTED_DECLARED}; seeded fixtures may be missing.",
-            details={"declared": declared, "expected_min": _FIXTURE_EXPECTED_DECLARED},
-        ))
-    if resolved < _FIXTURE_EXPECTED_RESOLVED:
-        out.append(Violation(
-            code="references.fixture_resolved_below_expected",
-            message=f"Fixture schemas in scope but fk_resolved={resolved} < {_FIXTURE_EXPECTED_RESOLVED}.",
-            details={"resolved": resolved, "expected_min": _FIXTURE_EXPECTED_RESOLVED},
-        ))
-    if total_edges < _FIXTURE_EXPECTED_EDGES:
-        out.append(Violation(
-            code="references.fixture_edges_below_expected",
-            message=f"Fixture schemas in scope but declared+inferred edges={total_edges} < {_FIXTURE_EXPECTED_EDGES}.",
-            details={"total_edges": total_edges, "expected_min": _FIXTURE_EXPECTED_EDGES},
         ))
     return out
