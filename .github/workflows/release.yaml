@@ -1,7 +1,17 @@
-name: Publish a new minor release
+name: Release
 
 on:
   workflow_dispatch:
+    inputs:
+      bump_type:
+        description: Version bump type
+        required: true
+        default: patch
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
 
 jobs:
   bump-version:
@@ -17,7 +27,7 @@ jobs:
         uses: astral-sh/setup-uv@v5
 
       - name: Bump version
-        run: uv version --bump minor --frozen
+        run: uv version --bump ${{ inputs.bump_type }} --frozen
 
       - name: Get version
         id: get-version

@@ -100,50 +100,28 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
 ```
 
-**Step C: Add version-bump workflows**
+**Step C: Add the release workflow**
 
-Add three workflows following the neo4j pattern exactly, substituting
-`patch`, `minor`, and `major` for the bump type. Example for patch:
-
-`.github/workflows/patch-release.yaml`:
+A single `.github/workflows/release.yaml` with a `workflow_dispatch` dropdown
+input replaces the three separate patch/minor/major files. One workflow to find,
+one place to maintain.
 
 ```yaml
-name: Publish a new patch release
+name: Release
 
 on:
   workflow_dispatch:
-
-jobs:
-  bump-version:
-    outputs:
-      version: ${{ steps.get-version.outputs.version }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GIT_PUSH_PAT }}
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
-
-      - name: Bump version
-        run: uv version --bump patch --frozen
-
-      - name: Get version
-        id: get-version
-        run: echo version=`uv version --short` >> "$GITHUB_OUTPUT"
-
-      - uses: EndBug/add-and-commit@v9
-        with:
-          author_name: dbxcarta GitHub Action
-          author_email: noreply@github.com
-          message: Bump version to ${{ steps.get-version.outputs.version }}
-          add: "['pyproject.toml']"
-          tag: ${{ steps.get-version.outputs.version }}
+    inputs:
+      bump_type:
+        description: Version bump type
+        required: true
+        default: patch
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
 ```
-
-`minor-release.yaml` and `major-release.yaml` are identical with `--bump minor`
-and `--bump major` respectively.
 
 **Step D: First manual publish (registers the project name on PyPI)**
 
@@ -427,15 +405,15 @@ Settings > Secrets and variables > Actions > New repository secret
 
 ### Releasing
 
-| Release type | Workflow to trigger | Example |
+Go to Actions > **Release** > Run workflow > choose the bump type:
+
+| Bump type | When to use | Example |
 |---|---|---|
-| Bug fix | "Publish a new patch release" | `0.2.38` to `0.2.39` |
-| New feature | "Publish a new minor release" | `0.2.38` to `0.3.0` |
-| Breaking change | "Publish a new major release" | `0.2.38` to `1.0.0` |
+| `patch` | Bug fixes | `0.2.38` to `0.2.39` |
+| `minor` | New features, backward compatible | `0.2.38` to `0.3.0` |
+| `major` | Breaking changes | `0.2.38` to `1.0.0` |
 
-Go to Actions > select the workflow > Run workflow. No inputs needed.
-
-Each workflow commits `pyproject.toml` with the bumped version and pushes a tag
+The workflow commits `pyproject.toml` with the bumped version and pushes a tag
 matching the version number. The tag triggers `publish.yaml`.
 
 ### Verifying a release
