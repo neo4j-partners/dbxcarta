@@ -420,6 +420,7 @@ def _validate_all(
     warehouse_id: str,
     catalog: str,
     pairs: list[GeneratedPair],
+    target: int | None = None,
 ) -> ValidationOutcome:
     from databricks.sdk.service.sql import (
         ExecuteStatementRequestOnWaitTimeout,
@@ -458,6 +459,8 @@ def _validate_all(
             trivial += 1
             continue
         accepted.append(pair)
+        if target is not None and len(accepted) >= target:
+            break
     return ValidationOutcome(accepted=accepted, errored=errored, empty=empty, trivial=trivial)
 
 

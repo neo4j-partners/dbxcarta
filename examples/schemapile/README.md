@@ -23,7 +23,7 @@ examples/schemapile/
 │   ├── materialize.py           # candidate JSON -> Delta tables
 │   └── question_generator.py    # LLM + SQL validation -> questions.json
 ├── scripts/                     # one-off utilities, see scripts/README.md
-│   └── dump_question_context.py # Neo4j -> docs/proposal/questions-schema.md
+│   └── dump_question_context.py # Neo4j -> docs/schemapile/questions-schema.md
 └── tests/
 ```
 
@@ -179,9 +179,8 @@ full list. The current entry:
 
 - `dump_question_context.py` — queries the live Neo4j graph and emits
   the three context blocks (schema dump, FK list, sample values) used
-  by the question-generation prompt in `docs/proposal/more-questions.md`.
-  Regenerate `docs/proposal/questions-schema.md` whenever the ingest
-  graph changes.
+  while iterating on SchemaPile question generation. Regenerate
+  `docs/schemapile/questions-schema.md` whenever the ingest graph changes.
 
 ## Phase dependencies and order
 
@@ -199,4 +198,4 @@ This example is built in phases that build on top of each other:
 7. **Phase 6 (end-to-end run)**. Runs the assembled example against a live
    workspace and compares evaluation arms.
 
-See `docs/proposal/schemapile.md` for the full phased plan and audit trail.
+This README is now the source of truth for the SchemaPile example flow.

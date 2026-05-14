@@ -104,15 +104,16 @@ Unit tests: `tests/unit/client/test_graph_retriever_ranking.py` (8 tests).
 
 ### Failure classification and bias analysis
 
-- `docs/proposal/phase_a_failures.md`: 7 Bucket 1 (missing table), 19 Bucket 2
-  (SQL/grader mismatch), 0 Bucket 3. Dominant pattern: extra ID column with
-  aliased aggregate (12 failures), now fixed by grader.
-- `docs/proposal/phase_b_bias.md`: truncation bias hypothesis rejected.
+- Phase A classified 7 failures as missing-table context, 19 failures as
+  SQL/grader mismatches, and 0 as suspect references. The dominant pattern was
+  an extra ID column with an aliased aggregate (12 failures), now fixed by the
+  grader.
+- Phase B rejected schema-dump truncation bias as the primary explanation.
   Schema_dump's advantage is not explained by alphabetical truncation.
-- `docs/proposal/phase_d_audit.md`: 42% single-table questions (threshold
-  <20%), 9 near-identical "active employees" duplicates, domain imbalance
-  (hr=14, sales=1). Question regeneration required before results are
-  meaningful.
+- Phase D found question-set quality problems: 42% single-table questions
+  (threshold <20%), 9 near-identical "active employees" duplicates, and domain
+  imbalance (hr=14, sales=1). Question regeneration is required before results
+  are meaningful.
 
 ---
 
@@ -120,7 +121,7 @@ Unit tests: `tests/unit/client/test_graph_retriever_ranking.py` (8 tests).
 
 **Goal:** Classify the 26 graph_rag failures before touching any code.
 
-Results: see `docs/proposal/phase_a_failures.md`.
+Result: most failures were grader artifacts, not retrieval failures.
 
 | Bucket | Count | % |
 |---|---|---|
@@ -135,7 +136,7 @@ Results: see `docs/proposal/phase_a_failures.md`.
 **Goal:** Determine whether schema_dump's accuracy advantage is a real
 context-quality win or an artifact of alphabetical truncation.
 
-Results: see `docs/proposal/phase_b_bias.md`. Hypothesis rejected — domain
+Result: hypothesis rejected — domain
 distribution of failures is roughly uniform (54% in covered domains, 46% in
 non-covered). Truncation is not the primary cause.
 
@@ -178,7 +179,8 @@ graph_rag correct rate >= schema_dump correct rate (0.698), or within 5 points
 **Goal:** Verify that the 59 questions represent genuine multi-table retrieval
 challenges and that the reference SQL is correct.
 
-Results: see `docs/proposal/phase_d_audit.md`.
+Result: the existing question set needs regeneration before the next dense
+benchmark run.
 
 | Check | Result | Status |
 |---|---|---|

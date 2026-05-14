@@ -227,9 +227,9 @@ uv run python scripts/run_demo.py --teardown
 
 ### Graph schema
 
-![dbxcarta Graph Schema](docs/graph-schema.png)
+![dbxcarta Graph Schema](docs/assets/graph-schema.png)
 
-Editable source: [`docs/graph-schema.excalidraw`](docs/graph-schema.excalidraw).
+Editable source: [`docs/assets/graph-schema.excalidraw`](docs/assets/graph-schema.excalidraw).
 
 ### Build time: pipeline writes the graph
 
@@ -304,7 +304,7 @@ Everything runs inside Databricks — no external orchestrators, no local execut
 - **Run observability**: every run emits a `RunSummary` to stdout, a timestamped JSON file in a UC Volume, and a row appended to a Delta table (`CREATE TABLE IF NOT EXISTS`, schema-merge on write) so history is queryable via SQL. The summary records per-label embedding attempts, successes, and failure rates alongside the threshold and the endpoint used.
 - **`databricks-job-runner`**: CLI wrapper around the Databricks SDK that handles upload, submit, and cleanup.
 
-See `docs/best-practices.md` for the design rules (Spark / Databricks, Neo4j Spark Connector, project-level principles) that shape the pipeline.
+See `docs/reference/best-practices.md` for the design rules (Spark / Databricks, Neo4j Spark Connector, project-level principles) that shape the pipeline.
 
 ## Configuration
 

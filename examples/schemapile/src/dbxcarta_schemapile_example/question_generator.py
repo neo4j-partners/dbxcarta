@@ -103,6 +103,16 @@ def main() -> int:
         action="store_true",
         help="Generate but skip the SQL execution step. Useful for offline iteration.",
     )
+    parser.add_argument(
+        "--exclude-shapes",
+        nargs="+",
+        metavar="SHAPE",
+        default=[],
+        help=(
+            "Shapes to drop after generation. "
+            "E.g. --exclude-shapes single_table_filter"
+        ),
+    )
     args = parser.parse_args()
 
     load_dotenv_file(args.dotenv)
@@ -130,15 +140,32 @@ def main() -> int:
 
     ws = build_workspace_client()
     pairs = _generate_all(ws, config, schemas, args.cache_dir)
+
+    # Shape filter: applied before validation to avoid executing unwanted questions.
+    exclude = set(args.exclude_shapes)
+    if exclude:
+        pairs = [p for p in pairs if p.shape not in exclude]
+
     if args.skip_validate:
         outcome = ValidationOutcome(accepted=pairs)
     else:
         outcome = _validate_all(ws, warehouse_id, config.catalog, pairs)
 
-    args.output.write_text(json.dumps(_format_questions(outcome.accepted), indent=2))
+    # Deduplicate by exact SQL, preserving order.
+    seen_sql: set[str] = set()
+    unique: list[GeneratedPair] = []
+    for pair in outcome.accepted:
+        if pair.sql not in seen_sql:
+            seen_sql.add(pair.sql)
+            unique.append(pair)
+    removed_dups = len(outcome.accepted) - len(unique)
+
+    args.output.write_text(json.dumps(_format_questions(unique), indent=2))
     print(
         f"[schemapile] generated={len(pairs)}"
         f" accepted={len(outcome.accepted)}"
+        f" deduped={removed_dups}"
+        f" written={len(unique)}"
         f" errored={outcome.errored} empty={outcome.empty} trivial={outcome.trivial}",
         file=sys.stderr,
     )

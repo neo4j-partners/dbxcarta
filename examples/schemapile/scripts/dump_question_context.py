@@ -1,13 +1,12 @@
-"""Dump the three context blocks the question-generation prompt expects.
+"""Dump the three context blocks used for SchemaPile question generation.
 
 Produces a Markdown document with three fenced sections: the schema dump,
-the foreign-key list, and the sample-value list. The output replaces the
-`<<<PASTE ... HERE>>>` placeholders in `docs/proposal/more-questions.md`.
+the foreign-key list, and the sample-value list.
 
 Run from the example directory so the .env overlay is picked up:
 
     uv run --directory examples/schemapile python scripts/dump_question_context.py \\
-        > ../../docs/proposal/questions-schema.md
+        > ../../docs/schemapile/questions-schema.md
 
 Configuration comes from the existing ClientSettings overlay
 (catalog, schemas, Neo4j credentials). Tune the confidence floor and
@@ -102,8 +101,8 @@ def _emit_doc(schema_text: str, fk_text: str, values_text: str, catalog: str,
     return f"""# Question-Generation Context (schemapile_lakehouse)
 
 Generated from the live Neo4j graph for catalog `{catalog}` across
-{schema_count} schemas. The three sections below fill the placeholder
-slots in `docs/proposal/more-questions.md`:
+{schema_count} schemas. The three sections below are intended for
+SchemaPile question-generation prompt iteration:
 
 - The **Schema dump** section replaces `<<<PASTE THE OUTPUT OF fetch_schema_dump HERE>>>`.
 - The **Foreign-key list** section replaces the `<<<PASTE THE FK LIST HERE ...>>>` block.
@@ -113,7 +112,7 @@ This file is reproducible; regenerate with:
 
 ```
 uv run --directory examples/schemapile python scripts/dump_question_context.py \\
-    > docs/proposal/questions-schema.md
+    > docs/schemapile/questions-schema.md
 ```
 
 FK confidence floor used for this dump: `>= {threshold:.2f}`.

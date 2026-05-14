@@ -7,14 +7,13 @@ up automatically.
 
 ## `dump_question_context.py`
 
-Dumps the three context blocks that the question-generation prompt in
-`docs/proposal/more-questions.md` expects: a schema dump, an FK list,
-and a sample-values list. The script queries the live Neo4j graph that
-the dbxcarta ingest job populated, so it always reflects the current
-state of `schemapile_lakehouse`.
+Dumps the three context blocks used when iterating on SchemaPile question
+generation: a schema dump, an FK list, and a sample-values list. The script
+queries the live Neo4j graph that the dbxcarta ingest job populated, so it
+always reflects the current state of `schemapile_lakehouse`.
 
 The output is a complete Markdown document that replaces
-`docs/proposal/questions-schema.md`.
+`docs/schemapile/questions-schema.md`.
 
 ### Run
 
@@ -22,14 +21,14 @@ From the example directory:
 
 ```bash
 uv run python scripts/dump_question_context.py \
-    > ../../docs/proposal/questions-schema.md
+    > ../../docs/schemapile/questions-schema.md
 ```
 
 Or from the repo root:
 
 ```bash
 uv run --directory examples/schemapile python scripts/dump_question_context.py \
-    > docs/proposal/questions-schema.md
+    > docs/schemapile/questions-schema.md
 ```
 
 ### What it queries
@@ -79,8 +78,7 @@ inside a Databricks job.
 The dumped block goes stale every time the ingest job runs. Regenerate
 before:
 
-- Re-prompting an LLM with the question-generation prompt from
-  `docs/proposal/more-questions.md`.
+- Re-prompting an LLM while iterating on SchemaPile question generation.
 - Diagnosing a `graph_rag` retrieval failure (the dump is what the
   retriever would see if it ignored its vector seeds and used the full
   catalog).
