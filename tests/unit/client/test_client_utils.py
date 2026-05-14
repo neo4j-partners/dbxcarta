@@ -323,15 +323,13 @@ def test_compare_gen_missing_rows_is_mismatch():
     assert err is not None
 
 
-def test_compare_gen_superset_of_ref_is_correct():
-    """Generated with more rows that include every ref row is correct.
-
-    Handles generated `LIMIT 20` against reference `LIMIT 10` and the like.
-    """
+def test_compare_gen_superset_of_ref_is_mismatch():
+    """Generated with extra rows is a mismatch for small result sets."""
     correct, err = compare_result_sets(
         ["id"], [[1], [2], [3]], ["id"], [[1], [3]]
     )
-    assert correct, err
+    assert not correct
+    assert err is not None
 
 
 def test_compare_value_mismatch():

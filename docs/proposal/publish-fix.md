@@ -4,6 +4,14 @@ Three independent problems block consumer deployment of `sql-semantics`. Each
 has a clear fix. They can be addressed in order since Problem 2 should land
 before Problem 1 (the public API is part of what gets published).
 
+## Current status
+
+| Problem | Status | Notes |
+|---------|--------|-------|
+| Problem 1: publish `dbxcarta` | In progress | `.github/workflows/publish.yaml` and `.github/workflows/release.yaml` are present. PyPI one-time setup, first manual publish, trusted publisher configuration, and the downstream `sql-semantics` dependency update still need to happen outside this repository. |
+| Problem 2: public client API | Implemented | `parse_sql`, `embed_questions`, `compare_result_sets`, and `load_questions` are exported from `dbxcarta.client`; the Finance Genie local demo now imports the public API. |
+| Problem 3: Databricks Jobs deployment path | Proposed | The recommended consumer path is a Declarative Automation Bundle in `sql-semantics`. Ingest must use classic single-user jobs compute because the Neo4j Spark Connector is not supported on serverless jobs compute. The local `dbxcarta submit-entrypoint ingest` helper now rejects serverless compute for the same reason. |
+
 ---
 
 ## Problem 1: `dbxcarta` is not on PyPI
@@ -142,7 +150,7 @@ is already correct:
 
 ```toml
 dependencies = [
-    "dbxcarta>=0.2.38",   # update floor to published version
+    "dbxcarta>=1.0.0",   # update floor to published version
     ...
 ]
 ```
@@ -167,14 +175,14 @@ from dbxcarta.client.client import (
 )
 ```
 
-Two of the four have already been extracted to public modules:
+All four utilities now have public import paths:
 
 | Symbol | Public location | Status |
 |--------|----------------|--------|
-| `_compare_result_sets` | `dbxcarta.client.compare.compare_result_sets` | Extracted, alias only in `client.py` |
-| `_load_questions` | `dbxcarta.client.questions.load_questions` | Extracted, alias only in `client.py` |
-| `_parse_sql` | `dbxcarta.client.client` | Still private, needs extraction |
-| `_embed_questions` | `dbxcarta.client.client` | Still private, needs extraction |
+| `_compare_result_sets` | `dbxcarta.client.compare.compare_result_sets` | Implemented, alias only in `client.py` for compatibility |
+| `_load_questions` | `dbxcarta.client.questions.load_questions` | Implemented, alias only in `client.py` for compatibility |
+| `_parse_sql` | `dbxcarta.client.sql.parse_sql` | Implemented, alias only in `client.py` for compatibility |
+| `_embed_questions` | `dbxcarta.client.embed.embed_questions` | Implemented, alias only in `client.py` for compatibility |
 
 ### Fix
 
@@ -257,16 +265,25 @@ local CLI. This works for dbxcarta's own development loop, but a consumer
 package like `sql-semantics` has no way to wire up a Databricks Job without
 duplicating that logic or shelling out to `dbxcarta` CLI commands.
 
-Databricks recommends Databricks Asset Bundles for defining and deploying jobs.
-The `python_wheel_task` job type is the right task type for a packaged
-entrypoint installed from PyPI.
+Databricks recommends Declarative Automation Bundles for defining and deploying
+jobs. The `python_wheel_task` job type is the right task type for a packaged
+entrypoint installed from PyPI, but this workload must run on classic jobs
+compute because dbxcarta writes graph data through the Neo4j Spark Connector.
+Neo4j's Databricks quickstart calls for a compute cluster with `Single user`
+access mode and notes that shared access modes are not supported. Databricks
+also documents classic jobs compute as a supported compute type for Python
+wheel tasks and recommends task-level libraries when jobs share compute.
 
 ### Fix
 
 Add a `databricks.yml` bundle to `sql-semantics` that defines two jobs:
 `sql-semantics-ingest` and `sql-semantics-client`. Each job uses a
 `python_wheel_task` that pulls `dbxcarta` (and `sql-semantics` itself) from
-PyPI and calls the existing CLI entrypoints.
+PyPI and calls the existing wheel entrypoints. The ingest job uses classic
+single-user jobs compute with the Neo4j Spark Connector installed as a Maven
+library. The client job can also use classic jobs compute for a uniform
+deployment path; if a consumer later proves it does not need the Spark
+connector, it can be moved to serverless with an explicit `environment_key`.
 
 **`sql-semantics/databricks.yml`**
 
@@ -275,8 +292,43 @@ bundle:
   name: sql-semantics
 
 variables:
+  dbxcarta_version:
+    description: "Published dbxcarta version to install"
+    default: "1.0.0"
+  sql_semantics_version:
+    description: "Published sql-semantics version to install"
+    default: "0.1.0"
+  spark_version:
+    description: "Classic Databricks Runtime with Scala version matching the Neo4j connector"
+    default: "14.3.x-scala2.12"
+  node_type_id:
+    description: "Classic jobs compute node type"
+    default: "i3.xlarge"
+  neo4j_connector_maven:
+    description: "Neo4j Spark Connector Maven coordinate matching Spark/Scala runtime"
+    default: "org.neo4j:neo4j-connector-apache-spark_2.12:5.3.6_for_spark_3"
   warehouse_id:
     description: "SQL warehouse ID for client evaluation runs"
+  catalog:
+    description: "Unity Catalog catalog to ingest"
+  schemas:
+    description: "Comma-separated schemas to ingest"
+    default: ""
+  summary_volume:
+    description: "UC Volume path for run summary JSON"
+  summary_table:
+    description: "catalog.schema.table for run summary history"
+  volume_path:
+    description: "UC Volume root used by the client job"
+  secret_scope:
+    description: "Databricks secret scope containing NEO4J_URI, NEO4J_USERNAME, NEO4J_PASSWORD"
+    default: "dbxcarta-neo4j"
+  chat_endpoint:
+    description: "Serving endpoint used by client generation"
+    default: ""
+  embedding_endpoint:
+    description: "Embedding endpoint used by ingest and client retrieval"
+    default: "databricks-gte-large-en"
 
 targets:
   dev:
@@ -291,46 +343,148 @@ resources:
       name: "[${bundle.target}] sql-semantics ingest"
       tasks:
         - task_key: ingest
+          new_cluster:
+            spark_version: ${var.spark_version}
+            node_type_id: ${var.node_type_id}
+            num_workers: 1
+            data_security_mode: SINGLE_USER
           python_wheel_task:
             package_name: dbxcarta
             entry_point: dbxcarta-ingest
+            parameters:
+              - "DBXCARTA_CATALOG={{job.parameters.dbxcarta_catalog}}"
+              - "DBXCARTA_SCHEMAS={{job.parameters.dbxcarta_schemas}}"
+              - "DBXCARTA_SUMMARY_VOLUME={{job.parameters.dbxcarta_summary_volume}}"
+              - "DBXCARTA_SUMMARY_TABLE={{job.parameters.dbxcarta_summary_table}}"
+              - "DATABRICKS_SECRET_SCOPE={{job.parameters.databricks_secret_scope}}"
+              - "DATABRICKS_WAREHOUSE_ID={{job.parameters.databricks_warehouse_id}}"
+              - "DBXCARTA_EMBEDDING_ENDPOINT={{job.parameters.dbxcarta_embedding_endpoint}}"
           libraries:
             - pypi:
-                package: "dbxcarta>=0.2.38"
+                package: "dbxcarta==${var.dbxcarta_version}"
             - pypi:
-                package: "sql-semantics>=0.1.0"
-          # No cluster config = serverless compute
+                package: "sql-semantics==${var.sql_semantics_version}"
+            - maven:
+                coordinates: ${var.neo4j_connector_maven}
+          timeout_seconds: 7200
+      parameters:
+        - name: dbxcarta_catalog
+          default: ${var.catalog}
+        - name: dbxcarta_schemas
+          default: ${var.schemas}
+        - name: dbxcarta_summary_volume
+          default: ${var.summary_volume}
+        - name: dbxcarta_summary_table
+          default: ${var.summary_table}
+        - name: databricks_secret_scope
+          default: ${var.secret_scope}
+        - name: databricks_warehouse_id
+          default: ${var.warehouse_id}
+        - name: dbxcarta_embedding_endpoint
+          default: ${var.embedding_endpoint}
 
     sql_semantics_client:
       name: "[${bundle.target}] sql-semantics client"
       tasks:
         - task_key: client
+          new_cluster:
+            spark_version: ${var.spark_version}
+            node_type_id: ${var.node_type_id}
+            num_workers: 1
+            data_security_mode: SINGLE_USER
           python_wheel_task:
             package_name: dbxcarta
             entry_point: dbxcarta-client
+            parameters:
+              - "DBXCARTA_CATALOG={{job.parameters.dbxcarta_catalog}}"
+              - "DBXCARTA_SCHEMAS={{job.parameters.dbxcarta_schemas}}"
+              - "DBXCARTA_SUMMARY_VOLUME={{job.parameters.dbxcarta_summary_volume}}"
+              - "DBXCARTA_SUMMARY_TABLE={{job.parameters.dbxcarta_summary_table}}"
+              - "DATABRICKS_VOLUME_PATH={{job.parameters.databricks_volume_path}}"
+              - "DATABRICKS_SECRET_SCOPE={{job.parameters.databricks_secret_scope}}"
+              - "DATABRICKS_WAREHOUSE_ID={{job.parameters.databricks_warehouse_id}}"
+              - "DBXCARTA_CHAT_ENDPOINT={{job.parameters.dbxcarta_chat_endpoint}}"
+              - "DBXCARTA_EMBEDDING_ENDPOINT={{job.parameters.dbxcarta_embedding_endpoint}}"
           libraries:
             - pypi:
-                package: "dbxcarta>=0.2.38"
+                package: "dbxcarta==${var.dbxcarta_version}"
             - pypi:
-                package: "sql-semantics>=0.1.0"
+                package: "sql-semantics==${var.sql_semantics_version}"
+          timeout_seconds: 3600
+      parameters:
+        - name: dbxcarta_catalog
+          default: ${var.catalog}
+        - name: dbxcarta_schemas
+          default: ${var.schemas}
+        - name: dbxcarta_summary_volume
+          default: ${var.summary_volume}
+        - name: dbxcarta_summary_table
+          default: ${var.summary_table}
+        - name: databricks_volume_path
+          default: ${var.volume_path}
+        - name: databricks_secret_scope
+          default: ${var.secret_scope}
+        - name: databricks_warehouse_id
+          default: ${var.warehouse_id}
+        - name: dbxcarta_chat_endpoint
+          default: ${var.chat_endpoint}
+        - name: dbxcarta_embedding_endpoint
+          default: ${var.embedding_endpoint}
 ```
 
-Environment variables (Neo4j URI, warehouse ID, embedding endpoint, etc.) are
-supplied via job environment variables or Databricks Secrets, not hardcoded in
-the bundle. The preset's `.env()` method produces the full key set; consumers
-paste those as job environment variables or reference secrets.
+Runtime configuration is passed as Databricks job parameters into
+`python_wheel_task.parameters`. The dbxcarta wheel entrypoints already parse
+`KEY=VALUE` positional parameters into `os.environ`, so consumers do not need
+wrapper scripts. Neo4j credentials stay in Databricks Secrets; the bundle passes
+only `DATABRICKS_SECRET_SCOPE`, and the job reads `NEO4J_URI`,
+`NEO4J_USERNAME`, and `NEO4J_PASSWORD` at runtime.
+
+Dependency versions are pinned in the job libraries. Databricks recommends
+specifying exact package versions for jobs so repeated runs do not silently pick
+up newly published package versions. The Neo4j connector Maven coordinate must
+match the cluster's Spark and Scala runtime.
+
+If the workspace enforces cluster policies, use a policy that allows classic
+jobs compute with `SINGLE_USER` access mode and the Neo4j connector Maven
+coordinate. Neo4j's quickstart names an unrestricted policy because the
+connector is not supported on shared access modes.
 
 **Consumer workflow after this fix**
 
 ```bash
 cd sql-semantics
-databricks bundle validate
+databricks bundle validate \
+  --var="catalog=<catalog>" \
+  --var="summary_volume=/Volumes/<catalog>/<schema>/<volume>/summaries" \
+  --var="summary_table=<catalog>.<schema>.dbxcarta_runs" \
+  --var="volume_path=/Volumes/<catalog>/<schema>/<volume>" \
+  --var="warehouse_id=<warehouse-id>"
 databricks bundle deploy
 databricks bundle run sql_semantics_ingest
 ```
 
 No local `submit-entrypoint` invocation needed. The job definition lives in
 version control alongside the preset code.
+
+### Databricks and Neo4j references
+
+- [Databricks Jobs compute guidance](https://docs.databricks.com/aws/en/jobs/compute):
+  Python wheel tasks support classic jobs compute, serverless jobs compute, and
+  all-purpose compute; all-purpose compute is not recommended for production
+  jobs.
+- [Databricks classic jobs compute guidance](https://docs.databricks.com/aws/en/jobs/compute#share-compute-across-tasks):
+  shared job clusters are scoped to a single job run, and libraries must be
+  declared in task settings rather than shared cluster settings.
+- [Databricks library guidance](https://docs.databricks.com/aws/en/libraries/package-repositories):
+  job libraries should pin package versions for reproducible runs, and Maven
+  coordinates are the right mechanism for Spark connectors.
+- [Databricks bundle task guidance](https://docs.databricks.com/aws/en/dev-tools/bundles/job-task-types#python-wheel-task):
+  `python_wheel_task` requires `package_name` and `entry_point`;
+  `parameters` is the supported positional-argument path.
+- [Neo4j Spark Connector Databricks quickstart](https://neo4j.com/docs/spark/current/databricks/):
+  use `Single user` access mode, install the connector from Maven or Spark
+  Packages, match the connector to the cluster Scala runtime, and use
+  Databricks Secrets instead of plaintext credentials.
 
 ---
 

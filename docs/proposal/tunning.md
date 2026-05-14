@@ -1,13 +1,20 @@
 # dense_500 Tuning Plan
 
-**Status: Phases A–D complete. Next: upload wheel, rerun client, validate results.**
+> **No grader workarounds.** When the model produces correct SQL that the
+> grader scores as wrong, fix the grader. Do not add prompt instructions
+> designed to make the model conform to grader limitations. Grader workarounds
+> produce misleading benchmark numbers and restrict model output for the wrong
+> reasons. If a prompt instruction exists to satisfy the grader rather than
+> to produce better SQL, remove it and fix the grader instead.
+
+**Status: Phases A–D complete. Grader fixed. Prompt audited. Next: regenerate
+question set per Phase D spec, upload wheel, rerun client, compare results.**
 
 The Phase G dense_500 benchmark run (2026-05-13) produced clear arm separation
 at n=59 but graph_rag trailed schema_dump on correctness: 55.9% (33/59) versus
 69.8% (37/53). graph_rag executes every query (100% exec rate), so the failure
-is not schema selection — it is either retrieval coverage, question bias, or
-prompt quality. This plan works through those hypotheses in diagnosis-first
-order before touching any retrieval code.
+is not schema selection. This plan works through the root causes in
+diagnosis-first order.
 
 ---
 
@@ -22,8 +29,90 @@ order before touching any retrieval code.
 | Correct rate | 1.000 | 0.698 | 0.559 |
 
 Gap to close: graph_rag needs roughly 5 more correct answers (38/59) to match
-schema_dump's 0.698. At n=59 that is a 9-point swing, achievable without a
-full retrieval rewrite if the root cause is narrow.
+schema_dump's 0.698.
+
+---
+
+## Changes Applied
+
+### Grader fix — `src/dbxcarta/client/compare.py`
+
+**Problem:** Phase A found that 73% of graph_rag failures were grader artifacts,
+not wrong SQL. Two mechanisms:
+
+1. **Same-count aliasing.** When the model returns the correct data but renames
+   a column (e.g. `amount` becomes `total_revenue`), `normalize_row` was
+   sorting by `(col_name, value)` pairs. Different alias names changed the sort
+   order, producing different tuples from identical data. The comparison failed
+   even though the values were correct.
+
+2. **Extra column with aliased aggregate.** The model added an ID column to
+   SELECT/GROUP BY (a common SQL style choice) AND aliased the aggregate
+   (e.g. `SUM(amount) AS total`). `project_to_ref_columns` can strip extra
+   columns by name, but when the aggregate name changed, the name check failed
+   and all columns were kept. The result shape mismatched the reference.
+
+**Fixes applied:**
+
+- `normalize_row`: changed from `sorted(zip(col_names, values))` key to
+  `sorted(values)` only. Column names are now irrelevant to normalization.
+  This fixes same-count aliasing entirely.
+
+- `_subset_matches`: new helper in `compare_result_sets`. When name projection
+  fails and `len(gen_cols) > len(ref_cols)` by at most 4 columns, tries all
+  `C(len_gen, len_ref)` column subsets. If any subset's normalized result
+  matches the reference, returns True. This fixes extra-column + alias cases.
+
+- Unit tests: `tests/unit/client/test_compare.py` (new file, 14 tests).
+
+### Prompt audit — `src/dbxcarta/client/prompt.py`
+
+Two instructions added in a prior session were grader workarounds, not
+real SQL guidance:
+
+- **Removed:** "Do not rename plain column references with AS aliases" — this
+  restricted valid SQL expressiveness to satisfy a grader that could not handle
+  aliases. The grader fix makes this unnecessary.
+
+- **Removed:** "GROUP BY the name or text column only, do not include the
+  primary key" — overly prescriptive. Grouping by `(id, name)` is equivalent
+  to grouping by `name` when IDs are unique per name, which is always true in
+  a well-designed schema. The grader fix handles the aliased aggregate case.
+
+**Kept (real SQL guidance):**
+
+- "SELECT only the columns the question explicitly asks for" — prevents scope
+  creep in SELECT list.
+- "Do not add ID columns to SELECT or GROUP BY unless the question asks for
+  IDs" — prevents semantic errors where grouping by `(id, name)` would split
+  aggregations incorrectly if IDs were not unique per name.
+- "Do not add ORDER BY unless the question asks for ordering" — reduces
+  unnecessary output.
+
+### Combined FK+cosine ranking — `src/dbxcarta/client/graph_retriever.py`
+
+Added `_rank_by_combined_score`, `_score_candidates_by_cosine`, and
+`_references_table_ids_ranked`. The retrieval expansion now scores candidate
+tables by `alpha * fk_confidence + (1 - alpha) * cosine_similarity` before
+applying the cap. Default alpha = 0.5, configurable via
+`DBXCARTA_CLIENT_EXPANSION_ALPHA` in `.env`.
+
+Also added `dbxcarta_client_expansion_alpha: float = 0.5` to `Settings` and
+raised `DBXCARTA_CLIENT_MAX_EXPANSION_TABLES` from 15 to 20.
+
+Unit tests: `tests/unit/client/test_graph_retriever_ranking.py` (8 tests).
+
+### Failure classification and bias analysis
+
+- `docs/proposal/phase_a_failures.md`: 7 Bucket 1 (missing table), 19 Bucket 2
+  (SQL/grader mismatch), 0 Bucket 3. Dominant pattern: extra ID column with
+  aliased aggregate (12 failures), now fixed by grader.
+- `docs/proposal/phase_b_bias.md`: truncation bias hypothesis rejected.
+  Schema_dump's advantage is not explained by alphabetical truncation.
+- `docs/proposal/phase_d_audit.md`: 42% single-table questions (threshold
+  <20%), 9 near-identical "active employees" duplicates, domain imbalance
+  (hr=14, sales=1). Question regeneration required before results are
+  meaningful.
 
 ---
 
@@ -31,57 +120,13 @@ full retrieval rewrite if the root cause is narrow.
 
 **Goal:** Classify the 26 graph_rag failures before touching any code.
 
-A failure is a question where graph_rag executed but returned the wrong answer.
-Each failure falls into one of three buckets:
+Results: see `docs/proposal/phase_a_failures.md`.
 
-1. **Missing table** — the table needed to answer the question was not in the
-   15-table expansion context. Retrieval gap; fixable by tuning the cap or
-   re-ranking.
-2. **Table present, SQL wrong** — the correct tables were in context but the
-   model wrote incorrect SQL. Prompt or reasoning gap; not a retrieval problem.
-3. **Bad reference** — the reference SQL itself is wrong or the grader
-   produced a false negative. Question quality issue; requires question
-   regeneration or grader fix.
-
-### Steps
-
-1. Query the `client_retrieval` Delta table for the Phase G client run
-   (run ID 52079308984308). Filter to `arm = 'graph_rag'` and `correct = false`.
-   For each row, inspect `expansion_table_ids` (the 15 tables graph_rag used)
-   versus the tables referenced in `reference_sql`.
-
-   ```sql
-   SELECT
-     question_id,
-     reference_sql,
-     generated_sql,
-     expansion_table_ids,
-     col_seed_ids
-   FROM schemapile_lakehouse._meta.client_retrieval
-   WHERE run_id = '52079308984308'
-     AND arm = 'graph_rag'
-     AND correct = false
-   ORDER BY question_id
-   ```
-
-2. For each row, extract the table names from `reference_sql` (parse the FROM
-   and JOIN clauses) and check whether each is in `expansion_table_ids`. Count:
-   - `missing_table_failures`: at least one needed table absent from context
-   - `present_table_failures`: all needed tables present, SQL still wrong
-   - `suspect_reference_failures`: reference SQL references a column or table
-     that doesn't exist in the schema, or the generated SQL is semantically
-     equivalent but the grader scored it wrong
-
-3. Build a per-question failure table and save to
-   `docs/proposal/phase_a_failures.md`.
-
-### Acceptance criterion
-
-A clear count of failures by bucket. If `missing_table_failures` is the majority,
-proceed to Phase C (retrieval re-scoring). If `present_table_failures` dominates,
-the problem is prompt or model reasoning, not retrieval; Phase C is low-value.
-If `suspect_reference_failures` is material, proceed to Phase D (question audit)
-before anything else.
+| Bucket | Count | % |
+|---|---|---|
+| B1: Missing table in context | 7 | 27% |
+| B2: Table present, SQL/grader mismatch | 19 | 73% |
+| B3: Suspect reference | 0 | 0% |
 
 ---
 
@@ -90,41 +135,9 @@ before anything else.
 **Goal:** Determine whether schema_dump's accuracy advantage is a real
 context-quality win or an artifact of alphabetical truncation.
 
-The synthetic schema has 10 domains: `crm`, `fin`, `hr`, `inv`, `log`, `mfg`,
-`proj`, `sales`, `svc`, `sys`. The schema dump is truncated at 50k chars
-(~57% coverage), which exposes the first ~285 tables alphabetically. That is
-roughly `crm_*`, `fin_*`, `hr_*`, `inv_*`, and part of `log_*` — five of ten
-domains in full.
-
-If the 16 questions schema_dump got right that graph_rag got wrong cluster in
-those five domains, the gap is an artifact of question distribution, not
-retrieval quality.
-
-### Steps
-
-1. Query `client_retrieval` for the same run, join on `question_id`, and pull
-   the schema/table references from `reference_sql` for questions where
-   `schema_dump.correct = true AND graph_rag.correct = false`.
-
-2. Extract the domain prefix from each table name (the part before the second
-   `_`, e.g. `crm_customers` → `crm`). Tally by domain.
-
-3. Check whether the truncation boundary in schema_dump covers the question's
-   needed tables. The dump order is the Unity Catalog listing order (typically
-   alphabetical by table name within the schema).
-
-4. Record the domain distribution in `docs/proposal/phase_b_bias.md`.
-
-### Acceptance criterion
-
-If >60% of the schema_dump-wins cluster in the first 5 alphabetical domains,
-the gap is substantially explained by truncation bias and the target for
-Phase C should be adjusted: equal coverage across all 10 domains is the fix,
-not retrieval re-ranking. In that case, revisit question generation (Phase D)
-before investing in retrieval changes.
-
-If the domain distribution is roughly uniform, the truncation is not the
-primary cause and Phase C (retrieval) is the right lever.
+Results: see `docs/proposal/phase_b_bias.md`. Hypothesis rejected — domain
+distribution of failures is roughly uniform (54% in covered domains, 46% in
+non-covered). Truncation is not the primary cause.
 
 ---
 
@@ -136,131 +149,92 @@ primary cause and Phase C (retrieval) is the right lever.
 combined score that weights the candidate table's own vector similarity to the
 question alongside FK confidence.
 
-### Current behavior
-
-`_references_table_ids_capped()` in `graph_retriever.py` runs a Cypher query
-that scores each candidate table by `max(r.confidence)` across its FK edges to
-the seed columns, then keeps the top-15 by that score. A neighbor table with a
-weak FK edge but a name that directly answers the question ranks below a
-confident-but-irrelevant neighbor.
-
-### Proposed change
-
-Add a second scoring pass: after collecting candidate table IDs via the FK walk,
-fetch each table's embedding vector and compute cosine similarity to the question
-embedding. Combine the two scores:
-
 ```
 combined_score = α × fk_confidence + (1 − α) × table_cosine_similarity
 ```
 
-Start with α = 0.5. Tables are ranked by `combined_score`; the cap stays at 15
-initially, then tuned after a client rerun.
+Start with α = 0.5. Tables are ranked by `combined_score`; the cap set to 20.
 
 ### Implementation checklist
 
-- [ ] Add a `_score_tables_by_query` helper in `graph_retriever.py` that takes
-      a list of candidate table IDs and the question embedding vector and returns
-      `(table_id, cosine_similarity)` pairs using the existing Neo4j vector index.
-- [ ] Update `_references_table_ids_capped()` (or extract a new
-      `_references_table_ids_ranked()`) to call `_score_tables_by_query` after
-      the FK walk and re-sort by combined score before slicing to `max_tables`.
-- [ ] Add `dbxcarta_client_expansion_alpha: float = 0.5` to `Settings` so the
-      mix ratio is configurable from the `.env` without a code change.
-- [ ] Update `DBXCARTA_CLIENT_MAX_EXPANSION_TABLES` in the dense-schema `.env`
-      to 20 as a first test (wider net + better ranking).
-- [ ] Write a unit test covering the combined-score ranking: a fixture where a
-      table with weak FK confidence but high cosine similarity ranks above a
-      table with strong FK confidence but zero cosine similarity.
-- [ ] Upload wheel, rerun ingest (needed to rebuild vector index references),
-      rerun client, compare correct rates.
+- [x] Add `_score_candidates_by_cosine` helper in `graph_retriever.py`
+- [x] Add `_rank_by_combined_score` pure function
+- [x] Add `_references_table_ids_ranked` using combined score
+- [x] Update `retrieve()` to call `_references_table_ids_ranked`
+- [x] Add `dbxcarta_client_expansion_alpha: float = 0.5` to `Settings`
+- [x] Raise `DBXCARTA_CLIENT_MAX_EXPANSION_TABLES` to 20 in `.env`
+- [x] Unit tests in `test_graph_retriever_ranking.py`
+- [ ] Upload wheel, rerun client, compare correct rates
 
 ### Acceptance criterion
 
 graph_rag correct rate >= schema_dump correct rate (0.698), or within 5 points
-(0.648) at n=59 with a clear upward trend. If the gap persists despite the
-re-ranking, the failure mode is predominantly bucket-2 (tables present, SQL
-still wrong) and Phase C is complete; move to Phase D.
+(0.648) at n=59 with a clear upward trend.
 
 ---
 
-## Phase D: Question audit and regeneration — _complete_
+## Phase D: Question audit and regeneration — _complete (audit); regeneration pending_
 
 **Goal:** Verify that the 59 questions represent genuine multi-table retrieval
 challenges and that the reference SQL is correct.
 
-### What to check
+Results: see `docs/proposal/phase_d_audit.md`.
 
-1. **Reference SQL correctness.** Run each reference SQL against the
-   `dense_500` tables and confirm it executes and returns non-empty results.
-   Any reference SQL that fails execution or returns empty is a bad question.
+| Check | Result | Status |
+|---|---|---|
+| Single-table questions | 42% (threshold <20%) | FAIL |
+| Three-table questions | 0% | FAIL |
+| Duplicate questions | 9 "active employees", 3 "active customers" | FAIL |
+| Domain imbalance | hr=14 (24%), sales=1 (2%) | FAIL |
 
-2. **Single-table questions.** If a question's reference SQL only touches one
-   table, it is testing basic column lookup, not retrieval. Count how many of
-   the 59 questions are single-table. If >20%, the question set is too easy
-   to differentiate the arms.
+**Regeneration required.** Rules:
+- Reject questions where reference SQL touches only one table.
+- Domain-stratify at 6 questions per domain (60-question target).
+- Deduplicate by normalized reference SQL before accepting.
+- Require at least 2 tables in reference SQL (post-generation validation).
+- Validate each reference SQL against the warehouse before accepting.
 
-3. **Domain coverage.** Tally which of the 10 domains appear in the reference
-   SQL. A flat distribution (5-6 questions per domain) is ideal. A skewed
-   distribution (>12 in one domain, <3 in another) makes the benchmark
-   sensitive to which domains the retriever happens to surface.
-
-4. **Out-of-subgraph references.** Check whether the reference SQL references
-   tables that were NOT in the BFS-sampled subgraph used to generate the
-   question. The LLM generator sometimes adds a plausible JOIN to a table it
-   hallucinated. If the added table doesn't exist or the JOIN is wrong, the
-   reference SQL is incorrect.
-
-### Steps
-
-1. Run all 59 reference SQL statements against the warehouse. Record
-   execute/non-empty status.
-2. Parse table references from each reference SQL. Classify as single-table,
-   two-table, or multi-table (>=3).
-3. Tally domain coverage.
-4. For any questions with bad reference SQL: mark as invalid and exclude from
-   the scoring denominator. If >10 are invalid, regenerate the full question
-   set with the fixes described below.
-
-### If regeneration is needed
-
-- Fix the subgraph sampler to require at least 2 tables in the generated SQL
-  (post-generation validation step in `question_generator.py`).
-- Add a domain-stratified sampler: ensure each domain contributes at least
-  4 questions to the 60-question target.
-- Validate each generated question's reference SQL against the warehouse before
-  accepting it (replace the current `errored/trivial` rejection logic with a
-  live execution check).
-- Re-upload the new `dense_questions.json` and rerun the client.
-
-### Acceptance criterion
-
->=50 of 59 reference SQL statements execute and return non-empty results. At
-least 35/59 questions touch 2 or more tables. Domain distribution has no domain
-with <3 questions and no domain with >10.
+Until the question set is regenerated, benchmark numbers are unreliable.
+A 42% single-table rate means schema selection does not matter for nearly
+half the questions; all three arms should score identically on those.
 
 ---
 
-## Phase E: Raise the cap and rerun at dense\_1000 — _pending_
+## Phase E: Raise the cap and rerun at dense\_1000 — _blocked on Phase D_
 
-**Prerequisite:** Phases A–D complete; graph_rag correct rate at dense_500
-meets or exceeds schema_dump.
+**Prerequisite:** Question set regenerated; graph_rag correct rate at
+dense_500 meets or exceeds schema_dump after the grader fix and combined
+scoring.
 
 **Goal:** Validate that the improvement holds at 1000 tables, where schema_dump
 is truncated to ~28% coverage and becomes a genuinely degraded baseline.
 
-- Set `DENSE_TABLE_COUNT=1000`, `DENSE_SCHEMA_NAME=dense_1000` in the
-  dense-schema `.env`.
+- Set `DENSE_TABLE_COUNT=1000`, `DENSE_SCHEMA_NAME=dense_1000`.
 - Generate candidates.json (already done: `.cache/candidates_1000.json`).
-- Materialize, generate questions (60 target), upload, ingest, client.
-- Expected: graph_rag advantage over schema_dump is larger at 1000 tables
-  because the truncation is more severe.
+- Materialize, generate questions (60 target, domain-stratified), upload,
+  ingest, client.
+- Expected: graph_rag advantage over schema_dump grows at 1000 tables.
 
 ### Acceptance criterion
 
 graph_rag correct rate > schema_dump correct rate at n>=50 with the gap
-growing relative to the dense_500 result. This is the core Phase G claim:
-graph_rag's advantage scales with catalog size.
+growing relative to the dense_500 result.
+
+---
+
+## Next steps (ordered)
+
+1. **Regenerate question set** per Phase D spec. This is the highest-leverage
+   step. Until the question set has <20% single-table questions and no
+   duplicates, benchmark numbers are dominated by noise.
+2. **Upload wheel** (`dbxcarta build && dbxcarta upload`). Ingest does NOT
+   need to rerun — the vector index is already built from Phase G.
+3. **Rerun client** (`dbxcarta submit-entrypoint client`).
+4. **Compare results** against Phase G baseline (graph_rag 55.9%,
+   schema_dump 69.8%). Expect graph_rag improvement from both the grader fix
+   and the combined ranking, and a better signal-to-noise ratio from the
+   cleaner question set.
+5. If dense_500 results validate, proceed to Phase E (dense_1000).
 
 ---
 
@@ -268,8 +242,9 @@ graph_rag's advantage scales with catalog size.
 
 | Question | Answered by |
 |---|---|
-| Are the 26 failures due to missing tables in context? | Phase A |
-| Is the gap explained by alphabetical truncation bias? | Phase B |
-| Does combined FK+cosine scoring close the gap? | Phase C |
-| Are the reference questions correct and multi-table? | Phase D |
-| Does the advantage grow at 1000 tables? | Phase E |
+| Are the 26 failures due to missing tables in context? | Phase A: 27% yes, 73% grader artifacts |
+| Is the gap explained by alphabetical truncation bias? | Phase B: No |
+| Does combined FK+cosine scoring close the gap? | Phase C: code complete, rerun pending |
+| Are the reference questions correct and multi-table? | Phase D: No — regeneration needed |
+| Does the advantage grow at 1000 tables? | Phase E: pending |
+| Was the grader accurately scoring correct SQL? | No — fixed in compare.py |

@@ -27,7 +27,7 @@ jobs:
         uses: astral-sh/setup-uv@v5
 
       - name: Bump version
-        run: uv version --bump ${{ inputs.bump_type }} --frozen
+        run: uv version --bump ${{ inputs.bump_type }}
 
       - name: Get version
         id: get-version
@@ -38,5 +38,5 @@ jobs:
           author_name: dbxcarta GitHub Action
           author_email: noreply@github.com
           message: Bump version to ${{ steps.get-version.outputs.version }}
-          add: "['pyproject.toml']"
+          add: "pyproject.toml"
           tag: ${{ steps.get-version.outputs.version }}

@@ -14,7 +14,10 @@ from dbxcarta_dense_schema_example.generator import (
     _DOMAIN_SPECS,
     _SUPPORTED_COUNTS,
 )
-from dbxcarta_dense_schema_example.question_generator import _default_cache_dir
+from dbxcarta_dense_schema_example.question_generator import (
+    _default_cache_dir,
+    _format_sample_rows,
+)
 from dbxcarta_dense_schema_example.utils import load_dotenv_file
 
 
@@ -165,3 +168,13 @@ def test_dotenv_does_not_override_explicit_env(tmp_path, monkeypatch):
     load_dotenv_file(dotenv)
 
     assert os.environ["DENSE_TABLE_COUNT"] == "1000"
+
+
+def test_question_prompt_includes_sample_rows():
+    sample = _format_sample_rows(
+        [("id", {"type": "INT"}), ("status", {"type": "STRING"})],
+        [[1, "approved"], [2, "pending"]],
+    )
+
+    assert '"status": "approved"' in sample
+    assert '"status": "pending"' in sample

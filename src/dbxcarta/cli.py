@@ -272,6 +272,13 @@ def _submit_wheel_entrypoint(
     # --compute override. If the runner renames or removes this, replace with a
     # local cluster/serverless resolver built from runner.config.
     compute = runner._compute(compute_mode)
+    if name == "ingest" and _is_serverless_compute(compute):
+        raise RunnerError(
+            "dbxcarta ingest uses the Neo4j Spark Connector, which is not "
+            "supported on Databricks serverless jobs compute. Use classic "
+            "compute with `--compute cluster` and a cluster configured for "
+            "single-user access."
+        )
 
     print("Submitting wheel entrypoint")
     print(f"  Entrypoint: {console_entrypoint}")
@@ -326,6 +333,10 @@ def _submit_wheel_entrypoint(
     if runner.config.databricks_volume_path:
         print(f"  List results:       {runner.cli_command} download --list results")
         print(f"  Download results:   {runner.cli_command} download results/<filename>")
+
+
+def _is_serverless_compute(compute: object) -> bool:
+    return compute.__class__.__name__ == "Serverless"
 
 
 def _build_workspace_client():

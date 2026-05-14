@@ -1,8 +1,4 @@
-"""Read-only local CLI demo for the Finance Genie semantic layer.
-
-Lives in the example package, not in dbxcarta core. The dependency on private
-helpers in `dbxcarta.client.client` is annotated inline at the import site.
-"""
+"""Read-only local CLI demo for the Finance Genie semantic layer."""
 
 from __future__ import annotations
 
@@ -15,14 +11,7 @@ from typing import Any
 
 from dotenv import load_dotenv
 
-# Brittle dep: dbxcarta.client.client exposes embedding and SQL parsing helpers
-# under underscore names. They are stable in practice for this local harness; if
-# they are renamed or removed, promote them to a documented dbxcarta.client
-# public surface or re-implement the two functions inline in this module.
-from dbxcarta.client.client import (
-    _embed_questions,
-    _parse_sql,
-)
+from dbxcarta.client import embed_questions, parse_sql
 from dbxcarta.client.compare import compare_result_sets
 from dbxcarta.client.executor import fetch_rows, preflight_warehouse
 from dbxcarta.client.local_generation import generate_sql_local
@@ -226,7 +215,7 @@ def run_graph_rag_question(
     """Run one graph_rag local demo question end to end."""
     preflight_warehouse(ws, settings.databricks_warehouse_id)
 
-    embeddings, embed_error = _embed_questions(
+    embeddings, embed_error = embed_questions(
         ws,
         settings.dbxcarta_embed_endpoint,
         [question],
@@ -255,7 +244,7 @@ def run_graph_rag_question(
         print()
 
     raw_sql = generate_sql_local(ws, settings.dbxcarta_chat_endpoint, prompt)
-    generated_sql, parse_ok = _parse_sql(raw_sql)
+    generated_sql, parse_ok = parse_sql(raw_sql)
     if not parse_ok or not generated_sql:
         raise RuntimeError(f"generated response was not valid SQL: {raw_sql!r}")
     _ensure_read_only_sql(generated_sql)

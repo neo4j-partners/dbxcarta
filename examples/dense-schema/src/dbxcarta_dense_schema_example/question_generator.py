@@ -41,6 +41,8 @@ _MAX_SUBGRAPH_TABLES = 8
 _MIN_SUBGRAPH_TABLES = 3
 _MAX_BFS_DEPTH = 2
 _MAX_ATTEMPTS_PER_BATCH = 5
+_CANDIDATE_MULTIPLIER = 4
+_PROMPT_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -105,14 +107,21 @@ def main() -> int:
     ws = build_workspace_client()
     pairs = _generate_all(ws, config, schema_entry, cache_dir)
     if args.skip_validate:
-        outcome = ValidationOutcome(accepted=pairs)
+        outcome = ValidationOutcome(accepted=pairs[: config.questions_target])
     else:
-        outcome = _validate_all(ws, warehouse_id, config.catalog, pairs)
+        outcome = _validate_all(
+            ws,
+            warehouse_id,
+            config.catalog,
+            pairs,
+            target=config.questions_target,
+        )
 
-    args.output.write_text(json.dumps(_format_questions(outcome.accepted), indent=2))
+    accepted = outcome.accepted[: config.questions_target]
+    args.output.write_text(json.dumps(_format_questions(accepted), indent=2))
     print(
         f"[dense] generated={len(pairs)}"
-        f" accepted={len(outcome.accepted)}"
+        f" accepted={len(accepted)}"
         f" errored={outcome.errored} empty={outcome.empty} trivial={outcome.trivial}",
         file=sys.stderr,
     )
@@ -144,9 +153,10 @@ def _generate_all(
 
     rng = random.Random(config.seed)
     batch_idx = 0
-    max_batches = config.questions_target * 3
+    candidate_target = config.questions_target * _CANDIDATE_MULTIPLIER
+    max_batches = config.questions_target * _CANDIDATE_MULTIPLIER
 
-    while len(pairs) < config.questions_target and batch_idx < max_batches:
+    while len(pairs) < candidate_target and batch_idx < max_batches:
         seed_table = rng.choice(table_names)
         subgraph_names = _expand_subgraph(seed_table, fk_graph, rng)
         if len(subgraph_names) < _MIN_SUBGRAPH_TABLES:
@@ -182,7 +192,7 @@ def _generate_all(
 
         batch_idx += 1
 
-    return pairs[: config.questions_target * 2]
+    return pairs[:candidate_target]
 
 
 def _build_fk_graph(tables: list[dict[str, Any]]) -> dict[str, set[str]]:
@@ -213,7 +223,7 @@ def _expand_subgraph(
             continue
         visited.add(node)
         if depth < _MAX_BFS_DEPTH:
-            neighbors = list(graph.get(node, set()))
+            neighbors = sorted(graph.get(node, set()))
             rng.shuffle(neighbors)
             for neighbor in neighbors:
                 if neighbor not in visited:
@@ -231,6 +241,7 @@ def _cache_key(
             "per_batch": config.questions_per_batch,
             "temperature": config.question_temperature,
             "batch": batch_idx,
+            "prompt_version": _PROMPT_VERSION,
         },
         sort_keys=True,
     ).encode()
@@ -327,7 +338,10 @@ def _build_prompt(
                     f"{', '.join(fk_cols)} -> {ref_table}({', '.join(ref_cols)})"
                 )
         fk_clause = f" FKs: {'; '.join(fk_parts)}" if fk_parts else ""
-        ddl_lines.append(f"- {table_name}({cols}){pk_clause}{fk_clause}")
+        sample_clause = _format_sample_rows(safe_cols, table.get("rows") or [])
+        ddl_lines.append(
+            f"- {table_name}({cols}){pk_clause}{fk_clause}{sample_clause}"
+        )
 
     schema_block = "\n".join(ddl_lines) if ddl_lines else "(no tables)"
     n = config.questions_per_batch
@@ -342,11 +356,30 @@ def _build_prompt(
         Produce exactly {n} question/SQL pairs as a JSON array. Distribute
         across the three shapes with at least {n_per_shape} of each shape.
         SQL must reference tables as `{catalog}`.`{uc_schema}`.`<table>`.
+        Use sample rows to choose filter literals that are likely to exist.
         Prefer business-readable columns over opaque id-only projections.
         Prefer multi-table JOINs using the FK relationships shown above.
         For aggregation questions, include meaningful GROUP BY dimensions and
         ORDER BY or HAVING clauses where appropriate.
     """)
+
+
+def _format_sample_rows(
+    safe_cols: list[tuple[str, dict[str, Any]]],
+    rows: list[list[Any]],
+) -> str:
+    if not safe_cols or not rows:
+        return ""
+    col_names = [name for name, _ in safe_cols]
+    samples = []
+    for row in rows[:2]:
+        sample = {
+            name: row[idx]
+            for idx, name in enumerate(col_names)
+            if idx < len(row)
+        }
+        samples.append(sample)
+    return f" Samples: {json.dumps(samples, default=str)}"
 
 
 _JSON_BLOCK_RE = re.compile(r"\[\s*\{.*?\}\s*\]", re.DOTALL)

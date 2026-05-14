@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from itertools import combinations
 from typing import Any
 
 
@@ -19,10 +20,8 @@ def stringify_cell(value: Any) -> str:
     return str(value).casefold()
 
 
-def normalize_row(row: list, col_names: list[str]) -> tuple:
-    """Reorder row values by sorted column name, stringifying each value."""
-    if col_names and len(col_names) == len(row):
-        return tuple(stringify_cell(v) for _, v in sorted(zip(col_names, row)))
+def normalize_row(row: list, col_names: list[str] = ()) -> tuple:
+    """Sort stringified cell values, making column order and aliases irrelevant."""
     return tuple(sorted(stringify_cell(v) for v in row))
 
 
@@ -36,7 +35,7 @@ def project_to_ref_columns(
     gen_rows: list[list],
     ref_cols: list[str],
 ) -> tuple[list[str], list[list]]:
-    """Project generated rows to reference columns when ref is a subset."""
+    """Project generated rows to reference columns when ref names are a subset."""
     if not ref_cols or not gen_cols or len(ref_cols) >= len(gen_cols):
         return gen_cols, gen_rows
     gen_lower = [c.casefold() for c in gen_cols]
@@ -46,6 +45,26 @@ def project_to_ref_columns(
     idx = [gen_lower.index(c) for c in ref_lower]
     projected_rows = [[row[i] for i in idx] for row in gen_rows]
     return list(ref_cols), projected_rows
+
+
+def _subset_matches(
+    gen_cols: list[str],
+    gen_rows: list[list],
+    ref_norm: list[tuple],
+    n: int,
+) -> bool:
+    """Return True if any n-column subset of gen_rows normalizes to ref_norm.
+
+    Fallback for when name projection fails because the model aliased columns
+    (e.g. SUM(amount) -> total_amount) while also adding extra columns.
+    Only called when len(gen_cols) - n <= 4 to keep combinations tractable.
+    """
+    for indices in combinations(range(len(gen_cols)), n):
+        proj_cols = [gen_cols[i] for i in indices]
+        proj_rows = [[row[i] for i in indices] for row in gen_rows]
+        if normalize_result_set(proj_cols, proj_rows) == ref_norm:
+            return True
+    return False
 
 
 def is_row_superset(ref_norm: list[tuple], gen_norm: list[tuple]) -> bool:
@@ -106,9 +125,15 @@ def compare_result_sets(
     if gen_count == ref_count:
         if gen_sorted == ref_sorted:
             return True, None
+        # Name projection failed due to column aliases on extra columns. Try
+        # all column subsets of size len(ref_cols). Guard: at most 4 extra
+        # columns so combinations stay tractable.
+        if (
+            len(gen_cols) > len(ref_cols)
+            and len(gen_cols) - len(ref_cols) <= 4
+            and _subset_matches(gen_cols, gen_rows, ref_sorted, len(ref_cols))
+        ):
+            return True, None
         return False, "result set values differ"
-
-    if gen_count > ref_count and is_row_superset(ref_sorted, gen_sorted):
-        return True, None
 
     return False, f"row count mismatch: generated={gen_count} reference={ref_count}"
