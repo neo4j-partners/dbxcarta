@@ -22,7 +22,7 @@ write to Neo4j.
 - **Keep in core:** core transitively depends on Spark, Databricks SDK, and the
   Neo4j connector. The boundary cleanup becomes namespace-deep but not
   dependency-deep. A consumer who only wants the graph contract still pulls
-  the full Spark stack. Phase 6's optional-extras goal fails.
+  the full Spark stack. The optional-extras goal fails.
 - **Move to spark extension:** core becomes genuinely small (contract, IDs,
   validators, Settings). Breaks `from dbxcarta import run_dbxcarta` for every
   existing consumer. Since the only consumers are internal sample consumers
@@ -218,7 +218,7 @@ ClientSettings`.
 
 ### 6. Is `run_client` "client runtime" or "evaluation harness"?
 
-Phase 4 names this ambiguity but does not resolve it. Today `run_client`
+The original proposal named this ambiguity but did not resolve it. Today `run_client`
 runs question fixtures through multiple retrieval arms and compares results.
 That is benchmark/evaluation behavior, not generic graph retrieval. The
 generic retriever, prompt helpers, and SQL guards are reusable client
@@ -261,7 +261,7 @@ external user base depending on import paths. Every boundary change can
 be a clean cutover, not a deprecation campaign.
 
 **Final Decision:** Clean cutover. No compatibility re-exports, no shims,
-no `DeprecationWarning` plumbing. For each phase that moves a symbol:
+no `DeprecationWarning` plumbing. For each symbol the cutover moves:
 
 - Enumerate every consumer that imports the symbol at its old path
   (internal tests, examples, scripts, and named external samples).
@@ -329,8 +329,8 @@ proof that extras are honest.
 
 ### 9. What is the exact form of the import-boundary test?
 
-Phase 1 says "add import-boundary tests" but does not specify the assertion
-form. The standard pattern is a subprocess that imports the core entry and
+The original proposal says "add import-boundary tests" but does not
+specify the assertion form. The standard pattern is a subprocess that imports the core entry and
 inspects `sys.modules` to confirm no forbidden modules loaded:
 
 ```python
@@ -399,7 +399,7 @@ gets its own subprocess test with its own forbidden set.
 consumed by `tests/`. The external `sql-semantics` package is a near-copy of
 the internal one. The proposal treats "examples" as one bucket; in practice
 some examples are demo fixtures and others are integration-test consumers
-that must keep working through every migration phase.
+that must keep working through the cutover.
 
 **Final Decision:** Distinguish two kinds explicitly in the directory
 layout and in the CI matrix.
@@ -409,8 +409,8 @@ layout and in the CI matrix.
   migration-blocking.
 - `examples/integration/` holds examples consumed by `tests/` or by
   external integration suites. These must keep working through every
-  migration phase. Phases that touch them list them as explicit acceptance
-  criteria.
+  cutover. They are listed by name as merge-gate consumers (see
+  [Sample Consumers](#sample-consumers)).
 
 `finance-genie` today is a hybrid. Split it. The walkthrough stays in
 `examples/demos/finance-genie/`. The tested fixtures and helpers move to
@@ -426,23 +426,22 @@ CI. Each demo has a README stating "demo only, not migration-blocking."
   core API. Treat changes to integration examples as breaking changes.
 - A demo example nobody runs is dead code. Either delete it or promote it
   to tested.
-- The migration plan lists every integration example by name as a phase
-  blocker, not as a footnote.
+- The migration plan lists every integration example by name as a
+  merge-gate consumer, not as a footnote.
 - External consumers (e.g. `sql-semantics`) get the same treatment as
-  internal integration examples: their CI is a phase gate (Question 11).
+  internal integration examples: their CI is the cutover merge gate
+  (Decision 11).
 
-### 11. Sequencing note: ship working downstream consumers before each phase
+### 11. How do sample consumers gate the cutover?
 
-Independent of the proposal's phasing, sample consumers (such as
-`sql-semantics`) keep landing fixes and depend on a stable preset surface.
-Two implications:
+Sample consumers (such as `sql-semantics`) keep landing fixes and depend
+on a stable preset surface. Two implications:
 
 - The preset protocol (`Preset`, `ReadinessCheckable`, `QuestionsUploadable`)
-  is the working contract today and should be locked before any migration
-  touches it.
-- Each phase should confirm that `sql-semantics` and other sample consumers
-  still build and validate against the post-phase library before the phase is
-  marked complete.
+  is the working contract today.
+- The cutover PR cannot merge unless `sql-semantics` and every other
+  named sample consumer still build and validate against the cutover
+  branch.
 
 **Final Decision:** Treat sample consumers as a CI merge gate on the
 cutover PR.
@@ -670,12 +669,12 @@ tests/
 
 ### Install patterns
 
-- `pip install dbxcarta-core` — bare semantic-graph contract; no Spark,
+- `pip install dbxcarta-core`: bare semantic-graph contract; no Spark,
   no client, no CLI.
-- `pip install dbxcarta-spark` — Databricks ingestion path; what a
+- `pip install dbxcarta-spark`: Databricks ingestion path; what a
   `python_wheel_task` uploads.
-- `pip install dbxcarta-client` — query-time retrieval and eval harness.
-- `pip install dbxcarta-presets` — operational umbrella; pulls every
+- `pip install dbxcarta-client`: query-time retrieval and eval harness.
+- `pip install dbxcarta-presets`: operational umbrella; pulls every
   layer and registers the `dbxcarta` CLI.
 
 ### Why this shape
@@ -759,12 +758,12 @@ Patterns to avoid copying:
 The cutover commit updates every named sample consumer in the same PR.
 These are the consumer set the CI merge gate validates against:
 
-- `examples/integration/finance-genie/` — Finance Genie tested example.
-- `examples/integration/schemapile/` — SchemaPile candidate selection
+- `examples/integration/finance-genie/`: Finance Genie tested example.
+- `examples/integration/schemapile/`: SchemaPile candidate selection
   and tests.
-- `examples/integration/dense-schema/` — dense-schema generation and
+- `examples/integration/dense-schema/`: dense-schema generation and
   tests.
-- `sql-semantics/` (external repo) — sample consumer of the preset
+- `sql-semantics/` (external repo): sample consumer of the preset
   protocol and the core public surface.
 
 A new consumer added in the future does not retroactively become a merge
