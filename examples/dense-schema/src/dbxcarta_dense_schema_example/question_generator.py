@@ -65,7 +65,13 @@ def main() -> int:
     parser.add_argument("--dotenv", type=Path, default=Path(".env"))
     parser.add_argument("--output", type=Path, default=Path("questions.json"))
     parser.add_argument(
-        "--cache-dir", type=Path, default=Path(".cache/questions")
+        "--cache-dir",
+        type=Path,
+        default=None,
+        help=(
+            "Directory for LLM batch cache"
+            " (default: .cache/questions_<DENSE_TABLE_COUNT>)."
+        ),
     )
     parser.add_argument("--warehouse-id", type=str, default=None)
     parser.add_argument(
@@ -94,9 +100,10 @@ def main() -> int:
 
     payload = json.loads(config.candidate_cache.read_text())
     schema_entry = (payload.get("schemas") or [{}])[0]
+    cache_dir = _default_cache_dir(config) if args.cache_dir is None else args.cache_dir
 
     ws = build_workspace_client()
-    pairs = _generate_all(ws, config, schema_entry, args.cache_dir)
+    pairs = _generate_all(ws, config, schema_entry, cache_dir)
     if args.skip_validate:
         outcome = ValidationOutcome(accepted=pairs)
     else:
@@ -111,6 +118,10 @@ def main() -> int:
     )
     print(f"[dense] wrote {args.output}", file=sys.stderr)
     return 0
+
+
+def _default_cache_dir(config: DenseSchemaConfig) -> Path:
+    return Path(f".cache/questions_{config.table_count}")
 
 
 def _generate_all(
@@ -249,13 +260,32 @@ def _call_model(
 
 
 _SYSTEM_PROMPT = textwrap.dedent("""\
-    You write evaluation questions for natural-language-to-SQL benchmarks.
-    Output strict JSON only: a list of objects each with the keys
-    "shape", "question", "sql". Valid "shape" values are
-    "single_table_filter", "two_table_join", "aggregation". Every "sql"
-    must be a syntactically valid Databricks SQL SELECT referencing only
-    tables shown in the user prompt. Use fully qualified table names with
-    backticks. Do not emit any prose outside the JSON array.
+    Create high-quality natural-language-to-SQL evaluation questions for a
+    large synthetic Databricks Unity Catalog schema.
+
+    Output strict JSON only: a list of objects. Each object must contain:
+    - "shape": one of "single_table_filter", "two_table_join", "aggregation"
+    - "question": a concise business-user question
+    - "sql": a read-only Databricks SQL SELECT
+
+    Prioritize realistic enterprise analytics questions. Avoid trivial
+    lookups, toy counts, and questions answerable by selecting only id
+    columns. Use business terms from table and column names. Prefer questions
+    that require filters on status, date, amount, category, region, or type
+    fields, meaningful joins through declared foreign keys, grouped
+    aggregations, and ordered or top-N results.
+
+    SQL requirements:
+    - Use only the catalog, schema, tables, columns, and FK relationships
+      shown in the user prompt.
+    - Use fully qualified backticked table names.
+    - Emit SELECT statements only.
+    - Make queries likely to return non-empty results from the sample data.
+    - Do not use information_schema, system tables, DDL, DML, or cross-schema
+      joins.
+    - Keep each query understandable enough for an evaluator to inspect.
+
+    Do not emit any prose outside the JSON array.
 """)
 
 
@@ -312,7 +342,10 @@ def _build_prompt(
         Produce exactly {n} question/SQL pairs as a JSON array. Distribute
         across the three shapes with at least {n_per_shape} of each shape.
         SQL must reference tables as `{catalog}`.`{uc_schema}`.`<table>`.
+        Prefer business-readable columns over opaque id-only projections.
         Prefer multi-table JOINs using the FK relationships shown above.
+        For aggregation questions, include meaningful GROUP BY dimensions and
+        ORDER BY or HAVING clauses where appropriate.
     """)
 
 

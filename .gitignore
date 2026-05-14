@@ -137,3 +137,4 @@ worklog/
 .codex/
 .mcp.json
 outputs/
+examples/**/.cache/

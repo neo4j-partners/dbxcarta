@@ -3,14 +3,19 @@
 from __future__ import annotations
 
 import json
+import os
+from pathlib import Path
 
 import pytest
 
+from dbxcarta_dense_schema_example.config import DenseSchemaConfig
 from dbxcarta_dense_schema_example.generator import (
     generate_candidates_json,
     _DOMAIN_SPECS,
     _SUPPORTED_COUNTS,
 )
+from dbxcarta_dense_schema_example.question_generator import _default_cache_dir
+from dbxcarta_dense_schema_example.utils import load_dotenv_file
 
 
 def test_generate_500_table_count():
@@ -93,6 +98,30 @@ def test_different_seed_different_rows():
     assert rows_a != rows_b
 
 
+def test_different_seed_changes_table_mix():
+    a = generate_candidates_json(500, "dense_500", seed=42)
+    b = generate_candidates_json(500, "dense_500", seed=99)
+    names_a = {t["name"] for t in a["schemas"][0]["tables"]}
+    names_b = {t["name"] for t in b["schemas"][0]["tables"]}
+
+    assert names_a != names_b
+    assert {"hr_employees", "crm_customers", "sales_sales_orders"} <= names_a
+    assert {"hr_employees", "crm_customers", "sales_sales_orders"} <= names_b
+
+
+def test_descriptive_values_use_faker_data():
+    result = generate_candidates_json(500, "dense_500", seed=42)
+    tables_by_name = {t["name"]: t for t in result["schemas"][0]["tables"]}
+    employees = tables_by_name["hr_employees"]
+    name_idx = [c["name"] for c in employees["columns"]].index("name")
+    description_idx = [c["name"] for c in employees["columns"]].index("description")
+
+    assert employees["rows"][0][name_idx] != "Name 1"
+    assert not employees["rows"][0][description_idx].startswith(
+        "Sample description row"
+    )
+
+
 def test_unsupported_table_count_raises():
     with pytest.raises(ValueError, match="table_count"):
         generate_candidates_json(300, "dense_300")
@@ -107,3 +136,32 @@ def test_unique_table_names():
 def test_format_version():
     result = generate_candidates_json(500, "dense_500")
     assert result["format_version"] == 2
+
+
+def test_question_cache_dir_defaults_to_table_count():
+    config = DenseSchemaConfig(
+        catalog="schemapile_lakehouse",
+        meta_schema="_meta",
+        volume="schemapile_volume",
+        table_count=1000,
+        uc_schema="dense_1000",
+        seed=42,
+        candidate_cache=Path(".cache/candidates_1000.json"),
+        questions_path="/Volumes/example/questions.json",
+        question_model="databricks-meta-llama-3-3-70b-instruct",
+        questions_target=60,
+        questions_per_batch=3,
+        question_temperature=0.2,
+    )
+
+    assert _default_cache_dir(config).as_posix() == ".cache/questions_1000"
+
+
+def test_dotenv_does_not_override_explicit_env(tmp_path, monkeypatch):
+    dotenv = tmp_path / ".env"
+    dotenv.write_text("DENSE_TABLE_COUNT=500\n")
+    monkeypatch.setenv("DENSE_TABLE_COUNT", "1000")
+
+    load_dotenv_file(dotenv)
+
+    assert os.environ["DENSE_TABLE_COUNT"] == "1000"

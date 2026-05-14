@@ -1,6 +1,6 @@
 # SchemaPile Example, v3: Why `graph_rag` Underperformed and What to Do About It
 
-**Status: Phase F complete. Phase G pending.**
+**Status: Phase G complete.**
 
 The v2 plan landed end to end. Ingest produced a clean 20-schema graph,
 the three-arm client run completed, and the audit trail in `schemapile-v2.md`
@@ -370,9 +370,9 @@ phase meets the quality bar.
     under Phase G below.
   - Phase F exit criterion met: `graph_rag` execution rate 8/9 (0.889) is
     within one question of `schema_dump` execution rate 9/9 (1.0).
-- **Phase G —** _in progress_
+- **Phase G —** _complete_
 
-  **v3 arm scores (n=9, run 671692334458641, 2026-05-13):**
+  **v3 arm scores (n=9, run 671692334458641, 2026-05-13, schemapile 20-schema baseline):**
 
   | Metric | no\_context | schema\_dump | graph\_rag |
   |---|---|---|---|
@@ -396,3 +396,49 @@ phase meets the quality bar.
   context on 6/9 questions but translated to a top-1 match only 3/9 times,
   pointing to context-purity and prompt-rendering as the next bottleneck
   rather than schema recall.
+
+  **dense\_500 arm scores (n=59, ingest run 826046660277194, client run 52079308984308, 2026-05-13):**
+
+  Fixture: `schemapile_lakehouse.dense_500`, 500 tables, 904 FK edges (synthetic
+  10-domain generator, seed=42). Schema dump truncated at 50k chars (~57% of full
+  schema). `DBXCARTA_CLIENT_MAX_EXPANSION_TABLES=15`, `DBXCARTA_INJECT_CRITERIA=true`.
+  Wheel v0.2.41. 59 questions accepted from subgraph-sampled generation (60 target, 1 errored).
+
+  | Metric | no\_context | schema\_dump | graph\_rag |
+  |---|---|---|---|
+  | Attempted | 59 | 59 | 59 |
+  | Parsed | 59 | 59 | 59 |
+  | Executed | 2 | 53 | 59 |
+  | Non-empty | 2 | 52 | 59 |
+  | Correct (of executed) | 2 | 37 | 33 |
+  | Execution rate | 0.034 | 0.898 | 1.000 |
+  | Non-empty rate | 0.034 | 0.881 | 1.000 |
+  | Correct rate (of executed) | 1.000 | 0.698 | 0.559 |
+  | Top-1 schema match rate | n/a | n/a | 1.000 |
+  | Schema in context rate | n/a | n/a | 1.000 |
+  | Mean context purity | n/a | n/a | 1.000 |
+
+  Key findings from the dense\_500 run:
+
+  - `graph_rag` reaches 100% execution rate on the dense schema, resolving the
+    primary failure mode from the 20-schema benchmark (schema mis-selection).
+    Retrieval is trivially correct here since only one schema exists; the
+    context purity is 1.0 throughout.
+  - Despite perfect retrieval, `graph_rag` correct rate (55.9%) trails
+    `schema_dump` (69.8%) by 14 points. The 15-table expansion cap
+    (`DBXCARTA_CLIENT_MAX_EXPANSION_TABLES=15`) is the primary suspect: questions
+    generated from 3-8 table subgraphs may require tables not in the top-15
+    REFERENCES neighbors of the seed columns.
+  - `schema_dump` at 50k chars (57% of the full 500-table schema) executes 89.8%
+    of queries and answers 37/53 correctly. The truncation removes roughly 215
+    tables from the context but the model still outperforms targeted retrieval,
+    likely because table definitions near the front of the dump coincidentally
+    cover more question-relevant tables than the FK-neighbor expansion does.
+  - `no_context` executes 2/59 (3.4%), confirming the dense schema is effectively
+    opaque without context.
+
+  Exit criterion assessment: the dense\_500 run produces clear arm separation
+  at n=59 (a one-question swing cannot flip the verdict). `graph_rag` executes
+  all queries but does not yet beat the truncated `schema_dump` on correctness.
+  Phase G exit criterion is met for separation; the correctness gap identifies
+  the expansion cap as the next tuning target before the 1000-table run.

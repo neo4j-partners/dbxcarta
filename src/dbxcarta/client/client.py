@@ -12,13 +12,13 @@ from __future__ import annotations
 
 import logging
 import os
-import re
 from pathlib import Path
 from typing import Any
 
 from databricks.sdk import WorkspaceClient
 
 from dbxcarta.client.compare import compare_result_sets as _compare_result_sets
+from dbxcarta.client.embed import embed_questions as _embed_questions
 from dbxcarta.client.executor import execute_sql, preflight_warehouse
 from dbxcarta.client.questions import (
     Question,
@@ -26,6 +26,7 @@ from dbxcarta.client.questions import (
     load_questions as _load_questions,
 )
 from dbxcarta.client.settings import ClientSettings
+from dbxcarta.client.sql import parse_sql as _parse_sql
 from dbxcarta.client.summary import ClientRunSummary
 from dbxcarta.databricks import (
     build_workspace_client,
@@ -38,10 +39,6 @@ logger = logging.getLogger(__name__)
 _REFERENCE_ARM = "reference"
 _LLM_ARMS = {"no_context", "schema_dump"}
 _STAGING_ARMS = _LLM_ARMS | {"graph_rag"}
-
-# Matches optional ```sql ... ``` or ``` ... ``` fences.
-_FENCE_RE = re.compile(r"^```(?:sql)?\s*\n?(.*?)\n?```\s*$", re.DOTALL | re.IGNORECASE)
-_SQL_START_RE = re.compile(r"^\s*(SELECT|WITH|INSERT|UPDATE|DELETE|CREATE|EXPLAIN)\b", re.IGNORECASE)
 
 
 def _client_retrieval_table(settings: ClientSettings) -> str:
@@ -72,22 +69,6 @@ def _grade_correct(
         return False, f"reference SQL failed: {ref_err}"
 
     return _compare_result_sets(gen_cols or [], gen_rows, ref_cols or [], ref_rows)
-
-
-def _parse_sql(text: str | None) -> tuple[str | None, bool]:
-    """Strip markdown fences and check for a SQL keyword.
-
-    Returns (cleaned_sql, is_valid).
-    """
-    if not text:
-        return None, False
-    cleaned = text.strip()
-    m = _FENCE_RE.match(cleaned)
-    if m:
-        cleaned = m.group(1).strip()
-    if not _SQL_START_RE.match(cleaned):
-        return cleaned or None, False
-    return cleaned, True
 
 
 def _resolve_staging_table(settings: ClientSettings) -> str:
@@ -231,27 +212,6 @@ def _run_llm_arm(
             gradable=gradable,
             error=exec_error,
         )
-
-
-def _embed_questions(
-    ws: WorkspaceClient, endpoint: str, texts: list[str]
-) -> tuple[list[list[float]] | None, str | None]:
-    """Embed all questions in a single batch call.
-
-    Returns (embeddings, error). On failure the first element is None so
-    callers can record a per-question warning without aborting the run.
-    """
-    try:
-        data = ws.api_client.do(
-            "POST",
-            f"/serving-endpoints/{endpoint}/invocations",
-            body={"input": texts},
-        )
-        items: list[dict[str, Any]] = data["data"]
-        items.sort(key=lambda x: x["index"])
-        return [item["embedding"] for item in items], None
-    except Exception as exc:
-        return None, str(exc)
 
 
 def _run_graph_rag_arm(

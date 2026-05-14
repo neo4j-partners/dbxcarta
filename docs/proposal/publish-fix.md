@@ -364,3 +364,91 @@ version control alongside the preset code.
    `sql-semantics` dep.
 3. Problem 3 (DABs bundle) last -- depends on the package being on PyPI so the
    `libraries:` block can resolve it.
+
+---
+
+## Publishing setup
+
+Releases use OIDC trusted publishing. No `PYPI_API_TOKEN` is stored in CI.
+GitHub Actions exchanges an OIDC token with PyPI when a version tag is pushed.
+
+Release flow:
+1. Trigger a version-bump workflow from the GitHub Actions UI.
+2. The workflow runs `uv version --bump`, commits `pyproject.toml`, and pushes a
+   version tag via the `GIT_PUSH_PAT` secret.
+3. The tag triggers `publish.yaml`, which builds a wheel and sdist, then
+   publishes to PyPI using OIDC.
+
+### Step 1: First manual publish
+
+PyPI requires the project to exist before trusted publishing can be configured.
+Run this once locally with a temporary API token to register the project name:
+
+```bash
+uv build --sdist --wheel
+uv publish --token <your-pypi-api-token>
+```
+
+After this, all future releases are token-free.
+
+### Step 2: Configure the PyPI trusted publisher
+
+Navigate to:
+`https://pypi.org/manage/project/dbxcarta/settings/publishing/`
+
+Add a new trusted publisher with these values:
+
+| Field | Value |
+|-------|-------|
+| Owner | your GitHub user or org name |
+| Repository | `dbxcarta` |
+| Workflow filename | `publish.yaml` |
+| Environment name | `pypi` |
+
+### Step 3: Create the GitHub `pypi` environment
+
+In the GitHub repository: Settings > Environments > New environment.
+
+Name it `pypi`. This must match `environment: name: pypi` in `publish.yaml`.
+Optionally add a required reviewer to gate production publishes.
+
+### Step 4: Add the `GIT_PUSH_PAT` secret
+
+The version-bump workflows commit and push a tag. The default `GITHUB_TOKEN`
+cannot trigger downstream workflow runs, so a PAT is required (same constraint
+as neo4j-graphrag-python).
+
+Create a GitHub Personal Access Token with `contents: write` scope, then add it
+as a repository secret:
+
+Settings > Secrets and variables > Actions > New repository secret
+- Name: `GIT_PUSH_PAT`
+- Value: the PAT
+
+### Releasing
+
+| Release type | Workflow to trigger | Example |
+|---|---|---|
+| Bug fix | "Publish a new patch release" | `0.2.38` to `0.2.39` |
+| New feature | "Publish a new minor release" | `0.2.38` to `0.3.0` |
+| Breaking change | "Publish a new major release" | `0.2.38` to `1.0.0` |
+
+Go to Actions > select the workflow > Run workflow. No inputs needed.
+
+Each workflow commits `pyproject.toml` with the bumped version and pushes a tag
+matching the version number. The tag triggers `publish.yaml`.
+
+### Verifying a release
+
+Check the published package on PyPI:
+
+```
+https://pypi.org/p/dbxcarta
+```
+
+Install and verify locally:
+
+```bash
+pip install dbxcarta==<version>
+python -c "import dbxcarta; print('ok')"
+```

@@ -11,7 +11,7 @@ def load_dotenv_file(path: Path) -> None:
     except ImportError:
         return
     if path.is_file():
-        load_dotenv(path, override=True)
+        load_dotenv(path, override=False)
 
 
 def read_required_warehouse_id(

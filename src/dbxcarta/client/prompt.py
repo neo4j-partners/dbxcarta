@@ -3,7 +3,15 @@
 from __future__ import annotations
 
 _SQL_INSTRUCTION = (
-    "Return ONLY the SQL query — no explanation, no markdown code fences, no preamble."
+    "Return ONLY the SQL query — no explanation, no markdown code fences, no preamble.\n"
+    "Output format rules:\n"
+    "- SELECT only the columns and aggregations the question explicitly asks for.\n"
+    "- Do not rename plain column references with AS aliases "
+    "(e.g. write `name`, not `name AS project_name`).\n"
+    "- Do not add ID columns to SELECT or GROUP BY unless the question asks for IDs.\n"
+    "- GROUP BY the name or text column only — do not include the primary key "
+    "alongside the name (e.g. GROUP BY name, not GROUP BY id, name).\n"
+    "- Do not add ORDER BY unless the question asks for ordering."
 )
 
 

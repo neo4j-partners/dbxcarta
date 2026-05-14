@@ -1,0 +1,306 @@
+[
+  {
+    "question_id": "ds_0000",
+    "question": "What are the names and codes of active employees?",
+    "reference_sql": "SELECT `name`, `code` FROM `schemapile_lakehouse`.`dense_1000`.`hr_employees` WHERE `is_active` = TRUE",
+    "schema": "dense_1000",
+    "source_id": "synthetic_1000",
+    "shape": "single_table_filter"
+  },
+  {
+    "question_id": "ds_0001",
+    "question": "What is the total amount of change requests by project, ordered by total amount in descending order?",
+    "reference_sql": "SELECT `p`.`name` AS `project_name`, SUM(`cr`.`amount`) AS `total_amount` FROM `schemapile_lakehouse`.`dense_1000`.`proj_projects` `p` JOIN `schemapile_lakehouse`.`dense_1000`.`proj_change_requests` `cr` ON `p`.`id` = `cr`.`projects_id` GROUP BY `p`.`name` ORDER BY `total_amount` DESC",
+    "schema": "dense_1000",
+    "source_id": "synthetic_1000",
+    "shape": "aggregation"
+  },
+  {
+    "question_id": "ds_0002",
+    "question": "What are the milestone names and corresponding issue ticket line quantities for active milestones?",
+    "reference_sql": "SELECT `m`.`name`, `i`.`quantity` FROM `schemapile_lakehouse`.`dense_1000`.`proj_milestones` `m` JOIN `schemapile_lakehouse`.`dense_1000`.`proj_issue_tickets_lines` `i` ON `m`.`id` = `i`.`milestones_id` WHERE `m`.`is_active` = TRUE",
+    "schema": "dense_1000",
+    "source_id": "synthetic_1000",
+    "shape": "two_table_join"
+  },
+  {
+    "question_id": "ds_0003",
+    "question": "What are the names and descriptions of active SLA definitions?",
+    "reference_sql": "SELECT `name`, `description` FROM `schemapile_lakehouse`.`dense_1000`.`svc_sla_definitions` WHERE `is_active` = TRUE",
+    "schema": "dense_1000",
+    "source_id": "synthetic_1000",
+    "shape": "single_table_filter"
+  },
+  {
+    "question_id": "ds_0004",
+    "question": "What are the names of SLA definitions and their corresponding breach line quantities?",
+    "reference_sql": "SELECT `schemapile_lakehouse`.`dense_1000`.`svc_sla_definitions`.`name`, `schemapile_lakehouse`.`dense_1000`.`svc_sla_breaches_lines`.`quantity` FROM `schemapile_lakehouse`.`dense_1000`.`svc_sla_definitions` JOIN `schemapile_lakehouse`.`dense_1000`.`svc_sla_breaches_lines` ON `schemapile_lakehouse`.`dense_1000`.`svc_sla_definitions`.`id` = `schemapile_lakehouse`.`dense_1000`.`svc_sla_breaches_lines`.`sla_definitions_id`",
+    "schema": "dense_1000",
+    "source_id": "synthetic_1000",
+    "shape": "two_table_join"
+  },
+  {
+    "question_id": "ds_0005",
+    "question": "What are the total amounts of SLA breaches by SLA definition name, ordered by total amount in descending order?",
+    "reference_sql": "SELECT `schemapile_lakehouse`.`dense_1000`.`svc_sla_definitions`.`name`, SUM(`schemapile_lakehouse`.`dense_1000`.`svc_sla_breaches_lines`.`total_amount`) AS `total_amount` FROM `schemapile_lakehouse`.`dense_1000`.`svc_sla_definitions` JOIN `schemapile_lakehouse`.`dense_1000`.`svc_sla_breaches_lines` ON `schemapile_lakehouse`.`dense_1000`.`svc_sla_definitions`.`id` = `schemapile_lakehouse`.`dense_1000`.`svc_sla_breaches_lines`.`sla_definitions_id` GROUP BY `schemapile_lakehouse`.`dense_1000`.`svc_sla_definitions`.`name` ORDER BY `total_amount` DESC",
+    "schema": "dense_1000",
+    "source_id": "synthetic_1000",
+    "shape": "aggregation"
+  },
+  {
+    "question_id": "ds_0006",
+    "question": "What are the names and descriptions of active services?",
+    "reference_sql": "SELECT `name`, `description` FROM `schemapile_lakehouse`.`dense_1000`.`svc_services` WHERE `is_active` = TRUE",
+    "schema": "dense_1000",
+    "source_id": "synthetic_1000",
+    "shape": "single_table_filter"
+  },
+  {
+    "question_id": "ds_0007",
+    "question": "What are the total amounts of warranty claims by service name, ordered by total amount in descending order?",
+    "reference_sql": "SELECT `s1`.`name`, SUM(`s2`.`amount`) AS `total_amount` FROM `schemapile_lakehouse`.`dense_1000`.`svc_services` `s1` INNER JOIN `schemapile_lakehouse`.`dense_1000`.`svc_warranty_claims` `s2` ON `s1`.`id` = `s2`.`services_id` GROUP BY `s1`.`name` ORDER BY `total_amount` DESC",
+    "schema": "dense_1000",
+    "source_id": "synthetic_1000",
+    "shape": "aggregation"
+  },
+  {
+    "question_id": "ds_0008",
+    "question": "What are the active project types with a parent?",
+    "reference_sql": "SELECT `name`, `code`, `description` FROM `schemapile_lakehouse`.`dense_1000`.`proj_project_types` WHERE `is_active` = TRUE AND `parent_id` IS NOT NULL",
+    "schema": "dense_1000",
+    "source_id": "synthetic_1000",
+    "shape": "single_table_filter"
+  },
+  {
+    "question_id": "ds_0009",
+    "question": "What are the names of active carriers with a sort order greater than 5?",
+    "reference_sql": "SELECT `name` FROM `schemapile_lakehouse`.`dense_1000`.`log_carriers` WHERE `is_active` = TRUE AND `sort_order` > 5",
+    "schema": "dense_1000",
+    "source_id": "synthetic_1000",
+    "shape": "single_table_filter"
+  },
+  {
+    "question_id": "ds_0010",
+    "question": "What is the total amount of dependency reviews by risk category, sorted in descending order by total amount?",
+    "reference_sql": "SELECT `rc`.`name` AS `risk_category`, SUM(`dl`.`total_amount`) AS `total_amount` FROM `schemapile_lakehouse`.`dense_1000`.`proj_dependency_reviews_lines` `dl` JOIN `schemapile_lakehouse`.`dense_1000`.`proj_risk_categories` `rc` ON `dl`.`risk_categories_id` = `rc`.`id` GROUP BY `rc`.`name` ORDER BY `total_amount` DESC",
+    "schema": "dense_1000",
+    "source_id": "synthetic_1000",
+    "shape": "aggregation"
+  },
+  {
+    "question_id": "ds_0011",
+    "question": "What are the names of active employees in the HR department?",
+    "reference_sql": "SELECT `name` FROM `schemapile_lakehouse`.`dense_1000`.`hr_employees` WHERE `is_active` = TRUE",
+    "schema": "dense_1000",
+    "source_id": "synthetic_1000",
+    "shape": "single_table_filter"
+  },
+  {
+    "question_id": "ds_0012",
+    "question": "What are the total sales amounts for each sales contract, along with the corresponding employee names?",
+    "reference_sql": "SELECT `schemapile_lakehouse`.`dense_1000`.`hr_employees`.`name`, SUM(`schemapile_lakehouse`.`dense_1000`.`sales_sales_contracts`.`amount`) AS `total_amount` FROM `schemapile_lakehouse`.`dense_1000`.`hr_employees` JOIN `schemapile_lakehouse`.`dense_1000`.`sales_sales_contracts` ON `schemapile_lakehouse`.`dense_1000`.`hr_employees`.`id` = `schemapile_lakehouse`.`dense_1000`.`sales_sales_contracts`.`approved_by_id` GROUP BY `schemapile_lakehouse`.`dense_1000`.`hr_employees`.`name` ORDER BY `total_amount` DESC",
+    "schema": "dense_1000",
+    "source_id": "synthetic_1000",
+    "shape": "two_table_join"
+  },
+  {
+    "question_id": "ds_0013",
+    "question": "What are the top 5 sales price lists by total sales amount, grouped by price list name?",
+    "reference_sql": "SELECT `schemapile_lakehouse`.`dense_1000`.`sales_price_lists`.`name`, SUM(`schemapile_lakehouse`.`dense_1000`.`sales_sales_contracts`.`amount`) AS `total_amount` FROM `schemapile_lakehouse`.`dense_1000`.`sales_price_lists` JOIN `schemapile_lakehouse`.`dense_1000`.`sales_sales_contracts` ON `schemapile_lakehouse`.`dense_1000`.`sales_price_lists`.`id` = `schemapile_lakehouse`.`dense_1000`.`sales_sales_contracts`.`price_lists_id` GROUP BY `schemapile_lakehouse`.`dense_1000`.`sales_price_lists`.`name` ORDER BY `total_amount` DESC LIMIT 5",
+    "schema": "dense_1000",
+    "source_id": "synthetic_1000",
+    "shape": "aggregation"
+  },
+  {
+    "question_id": "ds_0014",
+    "question": "What are the names of active log carriers?",
+    "reference_sql": "SELECT `name` FROM `schemapile_lakehouse`.`dense_1000`.`log_carriers` WHERE `is_active` = TRUE",
+    "schema": "dense_1000",
+    "source_id": "synthetic_1000",
+    "shape": "single_table_filter"
+  },
+  {
+    "question_id": "ds_0015",
+    "question": "What are the names of active log carriers?",
+    "reference_sql": "SELECT `name` FROM `schemapile_lakehouse`.`dense_1000`.`log_carriers` WHERE `is_active` = TRUE",
+    "schema": "dense_1000",
+    "source_id": "synthetic_1000",
+    "shape": "single_table_filter"
+  },
+  {
+    "question_id": "ds_0016",
+    "question": "What are the names of active sales price lists with a sort order greater than 5?",
+    "reference_sql": "SELECT `name` FROM `schemapile_lakehouse`.`dense_1000`.`sales_price_lists` WHERE `is_active` = TRUE AND `sort_order` > 5",
+    "schema": "dense_1000",
+    "source_id": "synthetic_1000",
+    "shape": "single_table_filter"
+  },
+  {
+    "question_id": "ds_0017",
+    "question": "What are the names of active quality checkpoints?",
+    "reference_sql": "SELECT `name` FROM `schemapile_lakehouse`.`dense_1000`.`mfg_quality_checkpoints` WHERE `is_active` = TRUE",
+    "schema": "dense_1000",
+    "source_id": "synthetic_1000",
+    "shape": "single_table_filter"
+  },
+  {
+    "question_id": "ds_0018",
+    "question": "What are the names and codes of active sys_users with a sort order greater than 5?",
+    "reference_sql": "SELECT `name`, `code` FROM `schemapile_lakehouse`.`dense_1000`.`sys_users` WHERE `is_active` = TRUE AND `sort_order` > 5",
+    "schema": "dense_1000",
+    "source_id": "synthetic_1000",
+    "shape": "single_table_filter"
+  },
+  {
+    "question_id": "ds_0019",
+    "question": "What are the names of projects with their corresponding change request status?",
+    "reference_sql": "SELECT `p`.`name`, `c`.`status` FROM `schemapile_lakehouse`.`dense_1000`.`proj_projects` `p` JOIN `schemapile_lakehouse`.`dense_1000`.`proj_change_requests` `c` ON `p`.`id` = `c`.`projects_id`",
+    "schema": "dense_1000",
+    "source_id": "synthetic_1000",
+    "shape": "two_table_join"
+  },
+  {
+    "question_id": "ds_0020",
+    "question": "What is the total amount of change requests by project name, ordered by the total amount in descending order?",
+    "reference_sql": "SELECT `p`.`name`, SUM(`c`.`amount`) AS `total_amount` FROM `schemapile_lakehouse`.`dense_1000`.`proj_projects` `p` JOIN `schemapile_lakehouse`.`dense_1000`.`proj_change_requests` `c` ON `p`.`id` = `c`.`projects_id` GROUP BY `p`.`name` ORDER BY `total_amount` DESC",
+    "schema": "dense_1000",
+    "source_id": "synthetic_1000",
+    "shape": "aggregation"
+  },
+  {
+    "question_id": "ds_0021",
+    "question": "What are the names of active employees in the hr_employees table?",
+    "reference_sql": "SELECT `name` FROM `schemapile_lakehouse`.`dense_1000`.`hr_employees` WHERE `is_active` = TRUE",
+    "schema": "dense_1000",
+    "source_id": "synthetic_1000",
+    "shape": "single_table_filter"
+  },
+  {
+    "question_id": "ds_0022",
+    "question": "What are the names of active skill categories with a sort order greater than 5?",
+    "reference_sql": "SELECT `name` FROM `schemapile_lakehouse`.`dense_1000`.`hr_skill_categories` WHERE `is_active` = TRUE AND `sort_order` > 5",
+    "schema": "dense_1000",
+    "source_id": "synthetic_1000",
+    "shape": "single_table_filter"
+  },
+  {
+    "question_id": "ds_0023",
+    "question": "What are the names and descriptions of active products?",
+    "reference_sql": "SELECT `name`, `description` FROM `schemapile_lakehouse`.`dense_1000`.`inv_products` WHERE `is_active` = TRUE",
+    "schema": "dense_1000",
+    "source_id": "synthetic_1000",
+    "shape": "single_table_filter"
+  },
+  {
+    "question_id": "ds_0024",
+    "question": "What are the names of sys_users who created svc_escalations with status 'approved'?",
+    "reference_sql": "SELECT `su`.`name` FROM `schemapile_lakehouse`.`dense_1000`.`svc_escalations` `se` JOIN `schemapile_lakehouse`.`dense_1000`.`sys_users` `su` ON `se`.`created_by_id` = `su`.`id` WHERE `se`.`status` = 'approved'",
+    "schema": "dense_1000",
+    "source_id": "synthetic_1000",
+    "shape": "two_table_join"
+  },
+  {
+    "question_id": "ds_0025",
+    "question": "What is the total amount of svc_escalations by currency, ordered by total amount in descending order?",
+    "reference_sql": "SELECT `currency`, SUM(`amount`) AS `total_amount` FROM `schemapile_lakehouse`.`dense_1000`.`svc_escalations` GROUP BY `currency` ORDER BY `total_amount` DESC",
+    "schema": "dense_1000",
+    "source_id": "synthetic_1000",
+    "shape": "aggregation"
+  },
+  {
+    "question_id": "ds_0026",
+    "question": "What are the names of employees and their corresponding pay bands for employee transfers with a status of 'approved'?",
+    "reference_sql": "SELECT `e`.`name`, `p`.`name` AS `pay_band_name` FROM `schemapile_lakehouse`.`dense_1000`.`hr_employees` `e` JOIN `schemapile_lakehouse`.`dense_1000`.`hr_employee_transfers` `et` ON `e`.`id` = `et`.`employees_id` JOIN `schemapile_lakehouse`.`dense_1000`.`hr_employee_transfers_lines` `etl` ON `et`.`id` = `etl`.`employee_transfers_id` JOIN `schemapile_lakehouse`.`dense_1000`.`hr_pay_bands` `p` ON `etl`.`pay_bands_id` = `p`.`id` WHERE `et`.`status` = 'approved'",
+    "schema": "dense_1000",
+    "source_id": "synthetic_1000",
+    "shape": "two_table_join"
+  },
+  {
+    "question_id": "ds_0027",
+    "question": "What is the total amount of employee transfers by pay band and status, ordered by total amount in descending order?",
+    "reference_sql": "SELECT `p`.`name` AS `pay_band_name`, `et`.`status`, SUM(`etl`.`total_amount`) AS `total_amount` FROM `schemapile_lakehouse`.`dense_1000`.`hr_employees` `e` JOIN `schemapile_lakehouse`.`dense_1000`.`hr_employee_transfers` `et` ON `e`.`id` = `et`.`employees_id` JOIN `schemapile_lakehouse`.`dense_1000`.`hr_employee_transfers_lines` `etl` ON `et`.`id` = `etl`.`employee_transfers_id` JOIN `schemapile_lakehouse`.`dense_1000`.`hr_pay_bands` `p` ON `etl`.`pay_bands_id` = `p`.`id` GROUP BY `p`.`name`, `et`.`status` ORDER BY `total_amount` DESC",
+    "schema": "dense_1000",
+    "source_id": "synthetic_1000",
+    "shape": "aggregation"
+  },
+  {
+    "question_id": "ds_0028",
+    "question": "What are the names of active sys_users with a sort order greater than 5?",
+    "reference_sql": "SELECT `name` FROM `schemapile_lakehouse`.`dense_1000`.`sys_users` WHERE `is_active` = TRUE AND `sort_order` > 5",
+    "schema": "dense_1000",
+    "source_id": "synthetic_1000",
+    "shape": "single_table_filter"
+  },
+  {
+    "question_id": "ds_0029",
+    "question": "What are the names and descriptions of active sys_modules?",
+    "reference_sql": "SELECT `name`, `description` FROM `schemapile_lakehouse`.`dense_1000`.`sys_modules` WHERE `is_active` = TRUE",
+    "schema": "dense_1000",
+    "source_id": "synthetic_1000",
+    "shape": "single_table_filter"
+  },
+  {
+    "question_id": "ds_0030",
+    "question": "What are the names of users who created warranty claims with a status of 'approved' and the corresponding claim amounts?",
+    "reference_sql": "SELECT `su`.`name`, `swc`.`amount` FROM `schemapile_lakehouse`.`dense_1000`.`svc_warranty_claims` `swc` JOIN `schemapile_lakehouse`.`dense_1000`.`sys_users` `su` ON `swc`.`created_by_id` = `su`.`id` WHERE `swc`.`status` = 'approved'",
+    "schema": "dense_1000",
+    "source_id": "synthetic_1000",
+    "shape": "two_table_join"
+  },
+  {
+    "question_id": "ds_0031",
+    "question": "What are the names and codes of active financial accounts?",
+    "reference_sql": "SELECT `name`, `code` FROM `schemapile_lakehouse`.`dense_1000`.`fin_accounts` WHERE `is_active` = TRUE",
+    "schema": "dense_1000",
+    "source_id": "synthetic_1000",
+    "shape": "single_table_filter"
+  },
+  {
+    "question_id": "ds_0032",
+    "question": "What are the names and codes of active sys_users?",
+    "reference_sql": "SELECT `name`, `code` FROM `schemapile_lakehouse`.`dense_1000`.`sys_users` WHERE `is_active` = TRUE",
+    "schema": "dense_1000",
+    "source_id": "synthetic_1000",
+    "shape": "single_table_filter"
+  },
+  {
+    "question_id": "ds_0033",
+    "question": "What are the names of active sales price lists?",
+    "reference_sql": "SELECT `name` FROM `schemapile_lakehouse`.`dense_1000`.`sales_price_lists` WHERE `is_active` = TRUE",
+    "schema": "dense_1000",
+    "source_id": "synthetic_1000",
+    "shape": "single_table_filter"
+  },
+  {
+    "question_id": "ds_0034",
+    "question": "What are the names of employees who have approved sales deal approvals?",
+    "reference_sql": "SELECT DISTINCT `e`.`name` FROM `schemapile_lakehouse`.`dense_1000`.`sales_deal_approvals` `sda` JOIN `schemapile_lakehouse`.`dense_1000`.`hr_employees` `e` ON `sda`.`approved_by_id` = `e`.`id`",
+    "schema": "dense_1000",
+    "source_id": "synthetic_1000",
+    "shape": "two_table_join"
+  },
+  {
+    "question_id": "ds_0035",
+    "question": "What is the total amount of sales deal approvals by currency, ordered by total amount in descending order?",
+    "reference_sql": "SELECT `currency`, SUM(`amount`) AS `total_amount` FROM `schemapile_lakehouse`.`dense_1000`.`sales_deal_approvals` GROUP BY `currency` ORDER BY `total_amount` DESC",
+    "schema": "dense_1000",
+    "source_id": "synthetic_1000",
+    "shape": "aggregation"
+  },
+  {
+    "question_id": "ds_0036",
+    "question": "What are the names of active suppliers with a sort order greater than 5?",
+    "reference_sql": "SELECT `name` FROM `schemapile_lakehouse`.`dense_1000`.`inv_suppliers` WHERE `is_active` = TRUE AND `sort_order` > 5",
+    "schema": "dense_1000",
+    "source_id": "synthetic_1000",
+    "shape": "single_table_filter"
+  },
+  {
+    "question_id": "ds_0037",
+    "question": "What are the names of active financial accounts?",
+    "reference_sql": "SELECT `name` FROM `schemapile_lakehouse`.`dense_1000`.`fin_accounts` WHERE `is_active` = TRUE",
+    "schema": "dense_1000",
+    "source_id": "synthetic_1000",
+    "shape": "single_table_filter"
+  }
+]

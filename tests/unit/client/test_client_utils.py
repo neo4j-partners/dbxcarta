@@ -1,4 +1,4 @@
-"""Unit tests for client utilities: _parse_sql, _resolve_staging_table,
+"""Unit tests for client utilities: parse_sql, _resolve_staging_table,
 _format_schema, and ClientRunSummary aggregates."""
 
 from __future__ import annotations
@@ -7,10 +7,9 @@ from types import SimpleNamespace
 
 import pytest
 
+from dbxcarta.client import compare_result_sets, parse_sql
 from dbxcarta.client.client import (
-    _compare_result_sets,
     _is_table_ref,
-    _parse_sql,
     _resolve_staging_table,
 )
 from dbxcarta.client.schema_dump import _format_schema
@@ -23,47 +22,47 @@ from dbxcarta.client.summary import ClientRunSummary
 # ---------------------------------------------------------------------------
 
 def test_parse_sql_plain_select():
-    sql, ok = _parse_sql("SELECT * FROM t")
+    sql, ok = parse_sql("SELECT * FROM t")
     assert ok
     assert sql == "SELECT * FROM t"
 
 
 def test_parse_sql_with_keyword():
-    sql, ok = _parse_sql("WITH cte AS (SELECT 1) SELECT * FROM cte")
+    sql, ok = parse_sql("WITH cte AS (SELECT 1) SELECT * FROM cte")
     assert ok
     assert "WITH" in sql
 
 
 def test_parse_sql_strips_sql_fence():
-    sql, ok = _parse_sql("```sql\nSELECT 1\n```")
+    sql, ok = parse_sql("```sql\nSELECT 1\n```")
     assert ok
     assert sql == "SELECT 1"
 
 
 def test_parse_sql_strips_plain_fence():
-    sql, ok = _parse_sql("```\nSELECT 1\n```")
+    sql, ok = parse_sql("```\nSELECT 1\n```")
     assert ok
     assert sql == "SELECT 1"
 
 
 def test_parse_sql_rejects_prose():
-    _, ok = _parse_sql("I cannot write that query.")
+    _, ok = parse_sql("I cannot write that query.")
     assert not ok
 
 
 def test_parse_sql_none_returns_false():
-    sql, ok = _parse_sql(None)
+    sql, ok = parse_sql(None)
     assert not ok
     assert sql is None
 
 
 def test_parse_sql_empty_string_returns_false():
-    _, ok = _parse_sql("")
+    _, ok = parse_sql("")
     assert not ok
 
 
 def test_parse_sql_case_insensitive_fence():
-    sql, ok = _parse_sql("```SQL\nSELECT 1\n```")
+    sql, ok = parse_sql("```SQL\nSELECT 1\n```")
     assert ok
     assert sql == "SELECT 1"
 
@@ -303,7 +302,7 @@ def test_client_settings_rejects_unsafe_chat_endpoint() -> None:
 def test_compare_exact_match():
     cols = ["id", "name"]
     rows = [[1, "Alice"], [2, "Bob"]]
-    correct, err = _compare_result_sets(cols, rows, cols, [row[:] for row in rows])
+    correct, err = compare_result_sets(cols, rows, cols, [row[:] for row in rows])
     assert correct
     assert err is None
 
@@ -313,13 +312,13 @@ def test_compare_column_reorder_matches():
     gen_rows = [["Alice", 1], ["Bob", 2]]
     ref_cols = ["id", "name"]
     ref_rows = [[1, "Alice"], [2, "Bob"]]
-    correct, err = _compare_result_sets(gen_cols, gen_rows, ref_cols, ref_rows)
+    correct, err = compare_result_sets(gen_cols, gen_rows, ref_cols, ref_rows)
     assert correct, err
 
 
 def test_compare_gen_missing_rows_is_mismatch():
     """Generated with fewer rows than reference is a real mismatch."""
-    correct, err = _compare_result_sets(["id"], [[1]], ["id"], [[1], [2]])
+    correct, err = compare_result_sets(["id"], [[1]], ["id"], [[1], [2]])
     assert not correct
     assert err is not None
 
@@ -329,14 +328,14 @@ def test_compare_gen_superset_of_ref_is_correct():
 
     Handles generated `LIMIT 20` against reference `LIMIT 10` and the like.
     """
-    correct, err = _compare_result_sets(
+    correct, err = compare_result_sets(
         ["id"], [[1], [2], [3]], ["id"], [[1], [3]]
     )
     assert correct, err
 
 
 def test_compare_value_mismatch():
-    correct, err = _compare_result_sets(["id"], [[1], [2]], ["id"], [[1], [3]])
+    correct, err = compare_result_sets(["id"], [[1], [2]], ["id"], [[1], [3]])
     assert not correct
 
 
@@ -344,7 +343,7 @@ def test_compare_case_insensitive_strings():
     """'High' and 'high' should compare equal — the SQL filter case sensitivity
     is the model's problem, but the comparator should not double-penalize when
     the reference itself returns a case-different string."""
-    correct, err = _compare_result_sets(
+    correct, err = compare_result_sets(
         ["tier"], [["High"]], ["tier"], [["high"]]
     )
     assert correct, err
@@ -356,7 +355,7 @@ def test_compare_projects_gen_to_ref_columns():
     gen_rows = [[1, "Alice", "x"], [2, "Bob", "y"]]
     ref_cols = ["id", "name"]
     ref_rows = [[1, "Alice"], [2, "Bob"]]
-    correct, err = _compare_result_sets(gen_cols, gen_rows, ref_cols, ref_rows)
+    correct, err = compare_result_sets(gen_cols, gen_rows, ref_cols, ref_rows)
     assert correct, err
 
 
@@ -366,7 +365,7 @@ def test_compare_projection_rejects_when_ref_has_extra_columns():
     gen_rows = [[1], [2]]
     ref_cols = ["id", "name"]
     ref_rows = [[1, "Alice"], [2, "Bob"]]
-    correct, err = _compare_result_sets(gen_cols, gen_rows, ref_cols, ref_rows)
+    correct, err = compare_result_sets(gen_cols, gen_rows, ref_cols, ref_rows)
     assert not correct
 
 
@@ -374,7 +373,7 @@ def test_compare_large_short_circuit_on_gen_missing_rows():
     """Generated significantly fewer rows than reference → mismatch."""
     gen_rows = [[i] for i in range(600)]
     ref_rows = [[i] for i in range(1200)]
-    correct, err = _compare_result_sets(["id"], gen_rows, ["id"], ref_rows)
+    correct, err = compare_result_sets(["id"], gen_rows, ["id"], ref_rows)
     assert not correct
     assert "10%" in err or "divergence" in err.lower()
 
@@ -384,18 +383,18 @@ def test_compare_large_gen_superset_is_correct():
     even at the large-set threshold."""
     ref_rows = [[i] for i in range(600)]
     gen_rows = [[i] for i in range(1200)]
-    correct, err = _compare_result_sets(["id"], gen_rows, ["id"], ref_rows)
+    correct, err = compare_result_sets(["id"], gen_rows, ["id"], ref_rows)
     assert correct, err
 
 
 def test_compare_large_identical_rows():
     rows = [[i, f"name_{i}"] for i in range(600)]
-    correct, err = _compare_result_sets(["id", "name"], rows, ["id", "name"], [r[:] for r in rows])
+    correct, err = compare_result_sets(["id", "name"], rows, ["id", "name"], [r[:] for r in rows])
     assert correct, err
 
 
 def test_compare_large_sample_mismatch():
     gen_rows = [[i, "gen"] for i in range(600)]
     ref_rows = [[i, "ref"] for i in range(600)]
-    correct, err = _compare_result_sets(["id", "label"], gen_rows, ["id", "label"], ref_rows)
+    correct, err = compare_result_sets(["id", "label"], gen_rows, ["id", "label"], ref_rows)
     assert not correct

@@ -31,6 +31,7 @@ _REFERENCES_TABLE_IDS_CYPHER = (
 # Scored variant: score each expansion table by the max FK confidence among
 # edges connecting it to the seed columns. Used when max_expansion_tables > 0
 # to rank and cap expansion on dense single-schema fixtures.
+# Also used as the first pass in combined FK+cosine re-ranking.
 _REFERENCES_SCORED_TABLE_IDS_CYPHER = (
     "UNWIND $col_ids AS cid "
     "OPTIONAL MATCH (c:Column {id: cid})-[r:REFERENCES]-(other:Column)"
@@ -82,6 +83,8 @@ class GraphRetriever(Retriever):
         configured_schemas = self._settings.schemas_list
         max_expansion = self._settings.dbxcarta_client_max_expansion_tables
 
+        alpha = self._settings.dbxcarta_client_expansion_alpha
+
         with self._driver.session() as session:
             raw_col_seed_pairs = _query_vector_seeds(session, _COL_INDEX, embedding, top_k)
             raw_tbl_seed_pairs = _query_vector_seeds(session, _TABLE_INDEX, embedding, top_k)
@@ -111,8 +114,8 @@ class GraphRetriever(Retriever):
             active_tbl_seeds = [id_ for id_, _ in active_tbl_seed_pairs]
 
             parent_tbl_ids = _parent_table_ids(session, active_col_seeds)
-            ref_tbl_ids = _references_table_ids_capped(
-                session, active_col_seeds, threshold, max_expansion
+            ref_tbl_ids = _references_table_ids_ranked(
+                session, active_col_seeds, threshold, max_expansion, embedding, alpha
             )
             expansion_tbl_ids = list(dict.fromkeys(parent_tbl_ids + ref_tbl_ids))
 
@@ -235,6 +238,50 @@ def _references_table_ids(session, col_ids: list[str], threshold: float) -> list
     return [row["tid"] for row in result]
 
 
+def _rank_by_combined_score(
+    fk_pairs: list[tuple[str, float]],
+    cosine_scores: dict[str, float],
+    alpha: float,
+    max_tables: int,
+) -> list[str]:
+    """Rank table IDs by alpha*FK_confidence + (1-alpha)*cosine_similarity.
+
+    Pure function — no I/O. Tables absent from cosine_scores receive 0.0
+    cosine similarity so they can still rank via FK confidence alone.
+    """
+    def _score(pair: tuple[str, float]) -> float:
+        tid, fk = pair
+        return alpha * fk + (1.0 - alpha) * cosine_scores.get(tid, 0.0)
+
+    ranked = sorted(fk_pairs, key=_score, reverse=True)
+    return [tid for tid, _ in ranked[:max_tables]]
+
+
+def _score_candidates_by_cosine(
+    session,
+    table_ids: list[str],
+    embedding: list[float],
+) -> dict[str, float]:
+    """Return cosine similarity scores for a candidate set of table IDs.
+
+    Queries the table vector index with a generous k so that all candidate
+    tables are covered even if they rank outside the top-k by default.
+    Tables not returned by the vector query receive 0.0 implicitly.
+    """
+    if not table_ids or not embedding:
+        return {}
+    k = max(len(table_ids) * 10, 100)
+    tid_set = set(table_ids)
+    result = session.run(
+        f"CALL db.index.vector.queryNodes('{_TABLE_INDEX}', $k, $vec) "
+        "YIELD node, score "
+        "RETURN node.id AS tid, score",
+        k=k,
+        vec=list(embedding),
+    )
+    return {row["tid"]: row["score"] for row in result if row["tid"] in tid_set}
+
+
 def _references_table_ids_capped(
     session, col_ids: list[str], threshold: float, max_tables: int
 ) -> list[str]:
@@ -254,6 +301,38 @@ def _references_table_ids_capped(
     )
     pairs = [(row["tid"], row["max_conf"]) for row in result if row["tid"]]
     return [tid for tid, _ in pairs[:max_tables]]
+
+
+def _references_table_ids_ranked(
+    session,
+    col_ids: list[str],
+    threshold: float,
+    max_tables: int,
+    embedding: list[float],
+    alpha: float,
+) -> list[str]:
+    """FK walk + combined FK-confidence/cosine-similarity re-ranking.
+
+    When max_tables == 0 falls through to the uncapped FK-only expansion.
+    When max_tables > 0, candidates from the FK walk are scored by:
+        combined = alpha * fk_confidence + (1 - alpha) * cosine_similarity
+    and the top-max_tables are returned. This surfaces cross-domain join
+    targets (e.g. sys_users) that have low FK confidence but high semantic
+    relevance to the question.
+    """
+    if not col_ids:
+        return []
+    if max_tables <= 0:
+        return _references_table_ids(session, col_ids, threshold)
+    result = session.run(
+        _REFERENCES_SCORED_TABLE_IDS_CYPHER, col_ids=col_ids, threshold=threshold,
+    )
+    fk_pairs = [(row["tid"], row["max_conf"]) for row in result if row["tid"]]
+    if not fk_pairs:
+        return []
+    tids = [tid for tid, _ in fk_pairs]
+    cosine_scores = _score_candidates_by_cosine(session, tids, embedding)
+    return _rank_by_combined_score(fk_pairs, cosine_scores, alpha, max_tables)
 
 
 def _references_criteria(

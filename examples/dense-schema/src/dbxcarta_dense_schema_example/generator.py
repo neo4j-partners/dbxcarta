@@ -20,10 +20,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from faker import Faker
+
 
 _SUPPORTED_COUNTS = (500, 1000)
 _ROWS_PER_TABLE = 10
 _CANDIDATE_FORMAT_VERSION = 2
+_TERMS_PER_DOMAIN = 10
 
 _ANALYTICS_SUFFIXES = [
     "daily_metrics", "weekly_stats", "monthly_kpis", "quarterly_reports",
@@ -31,43 +34,51 @@ _ANALYTICS_SUFFIXES = [
     "anomaly_flags", "performance_index",
 ]
 
-# 10 domains, each with 10 entity names and 10 event names.
+# 10 domains with larger entity/event pools. Each generated fixture samples
+# 10 entities and 10 events per domain, preserving required FK anchor terms.
 _DOMAIN_SPECS: dict[str, dict[str, list[str]]] = {
     "hr": {
         "entities": [
             "employees", "departments", "positions", "locations", "cost_centers",
             "job_grades", "employment_types", "work_schedules", "skill_categories",
-            "benefit_plans",
+            "benefit_plans", "pay_bands", "certifications", "office_sites",
+            "manager_groups", "recruiting_sources", "onboarding_tracks",
         ],
         "events": [
             "payroll_runs", "leave_requests", "performance_reviews",
             "training_sessions", "job_applications", "disciplinary_actions",
             "expense_reports", "time_entries", "employee_transfers",
-            "exit_interviews",
+            "exit_interviews", "offer_approvals", "compensation_changes",
+            "succession_reviews", "workplace_incidents", "policy_acknowledgements",
         ],
     },
     "crm": {
         "entities": [
             "customers", "contacts", "companies", "industries", "territories",
             "segments", "channels", "personas", "contact_sources",
-            "relationship_types",
+            "relationship_types", "account_tiers", "buying_committees",
+            "lead_sources", "market_verticals", "engagement_models",
         ],
         "events": [
             "opportunities", "campaigns", "activities", "customer_agreements",
             "customer_interactions", "campaign_responses", "win_loss_analyses",
             "referral_submissions", "churn_events", "renewal_proposals",
+            "lead_qualifications", "account_reviews", "contact_updates",
+            "customer_health_snapshots",
         ],
     },
     "fin": {
         "entities": [
             "accounts", "ledgers", "currencies", "tax_codes", "payment_methods",
             "payment_terms", "fiscal_periods", "exchange_rates", "account_types",
-            "fiscal_years",
+            "fiscal_years", "cost_allocations", "profit_centers",
+            "bank_accounts", "billing_entities", "revenue_streams",
         ],
         "events": [
             "journal_entries", "invoices", "payments", "expense_claims",
             "budget_revisions", "bank_statements", "asset_depreciation_runs",
             "period_closings", "tax_filings", "audit_reports",
+            "revenue_recognition_runs", "collections_cases", "refund_batches",
         ],
     },
     "inv": {
@@ -75,12 +86,15 @@ _DOMAIN_SPECS: dict[str, dict[str, list[str]]] = {
             "products", "categories", "warehouses", "suppliers",
             "units_of_measure", "supplier_contracts", "stock_locations",
             "quality_standards", "product_variants", "barcodes",
+            "demand_classes", "lot_attributes", "storage_zones",
+            "procurement_groups",
         ],
         "events": [
             "purchase_orders", "inventory_movements", "stock_adjustments",
             "receiving_logs", "quality_inspections", "supplier_evaluations",
             "replenishment_orders", "cycle_counts", "product_returns",
-            "inventory_write_offs",
+            "inventory_write_offs", "lot_reclassifications", "transfer_orders",
+            "reservation_requests", "demand_forecasts",
         ],
     },
     "mfg": {
@@ -88,12 +102,15 @@ _DOMAIN_SPECS: dict[str, dict[str, list[str]]] = {
             "production_lines", "machines", "bill_of_materials", "operations",
             "routings", "maintenance_schedules", "bom_versions",
             "quality_checkpoints", "operators", "shift_patterns",
+            "tooling_assets", "inspection_plans", "work_centers",
+            "material_specs",
         ],
         "events": [
             "work_orders", "production_runs", "quality_checks",
             "maintenance_events", "machine_downtimes", "setup_events",
             "changeover_records", "scrap_events", "rework_orders",
-            "yield_calculations",
+            "yield_calculations", "material_issues", "labor_bookings",
+            "calibration_events", "capacity_reviews",
         ],
     },
     "sales": {
@@ -101,12 +118,15 @@ _DOMAIN_SPECS: dict[str, dict[str, list[str]]] = {
             "price_lists", "discount_rules", "sales_regions", "sales_channels",
             "revenue_categories", "contract_types", "rebate_programs",
             "commission_plans", "sales_quotas", "product_bundles",
+            "order_types", "fulfillment_rules", "sales_teams",
+            "promotion_groups",
         ],
         "events": [
             "sales_orders", "quotations", "sales_contracts", "order_deliveries",
             "sales_returns", "credit_notes", "rebate_accruals",
             "commission_calculations", "forecast_submissions",
-            "territory_reviews",
+            "territory_reviews", "pipeline_snapshots", "pricing_overrides",
+            "deal_approvals", "shipment_requests",
         ],
     },
     "proj": {
@@ -114,12 +134,15 @@ _DOMAIN_SPECS: dict[str, dict[str, list[str]]] = {
             "projects", "project_types", "milestones", "deliverables",
             "resource_pools", "skill_requirements", "project_phases",
             "risk_categories", "budget_categories", "project_templates",
+            "portfolio_groups", "funding_sources", "dependency_types",
+            "governance_boards",
         ],
         "events": [
             "tasks", "proj_time_entries", "resource_bookings",
             "risk_assessments", "issue_tickets", "change_requests",
             "sprint_sessions", "retrospectives", "stakeholder_reviews",
-            "project_closings",
+            "project_closings", "scope_reviews", "status_updates",
+            "budget_forecasts", "dependency_reviews",
         ],
     },
     "log": {
@@ -127,11 +150,15 @@ _DOMAIN_SPECS: dict[str, dict[str, list[str]]] = {
             "carriers", "shipping_methods", "routes", "freight_classes",
             "packaging_types", "customs_codes", "delivery_zones",
             "log_warehouses", "tracking_providers", "incoterms",
+            "fleet_assets", "terminal_locations", "service_lanes",
+            "rate_cards",
         ],
         "events": [
             "shipments", "deliveries", "pick_lists", "packing_events",
             "customs_declarations", "freight_bookings", "carrier_bookings",
             "return_shipments", "last_mile_events", "proof_of_deliveries",
+            "route_exceptions", "dock_appointments", "freight_audits",
+            "delivery_attempts",
         ],
     },
     "svc": {
@@ -139,24 +166,73 @@ _DOMAIN_SPECS: dict[str, dict[str, list[str]]] = {
             "services", "service_levels", "support_tiers", "asset_types",
             "warranty_types", "knowledge_categories", "escalation_paths",
             "resolution_types", "sla_definitions", "service_contracts",
+            "case_origins", "entitlement_rules", "service_regions",
+            "agent_groups",
         ],
         "events": [
             "service_cases", "field_visits", "escalations",
             "knowledge_articles", "customer_surveys", "asset_registrations",
             "warranty_claims", "case_resolutions", "agent_activities",
-            "service_training_events",
+            "service_training_events", "sla_breaches", "dispatch_requests",
+            "service_renewals", "triage_reviews",
         ],
     },
     "sys": {
         "entities": [
             "users", "roles", "permissions", "modules", "features", "tenants",
             "api_keys", "webhook_configs", "integrations", "system_parameters",
+            "identity_providers", "access_policies", "data_retention_rules",
+            "notification_templates",
         ],
         "events": [
             "user_sessions", "audit_events", "api_calls", "job_executions",
             "error_events", "data_exports", "batch_jobs", "sync_events",
-            "feature_flags", "health_checks",
+            "feature_flags", "health_checks", "permission_changes",
+            "login_attempts", "webhook_deliveries", "backup_runs",
         ],
+    },
+}
+
+_REQUIRED_DOMAIN_TERMS: dict[str, dict[str, list[str]]] = {
+    "hr": {
+        "entities": ["employees"],
+        "events": [],
+    },
+    "crm": {
+        "entities": ["customers", "contacts"],
+        "events": ["opportunities"],
+    },
+    "fin": {
+        "entities": ["accounts"],
+        "events": ["invoices", "payments"],
+    },
+    "inv": {
+        "entities": ["products", "warehouses", "suppliers"],
+        "events": ["purchase_orders"],
+    },
+    "mfg": {
+        "entities": ["production_lines"],
+        "events": ["work_orders", "production_runs"],
+    },
+    "sales": {
+        "entities": ["price_lists"],
+        "events": ["sales_orders"],
+    },
+    "proj": {
+        "entities": ["projects"],
+        "events": ["tasks", "resource_bookings"],
+    },
+    "log": {
+        "entities": ["carriers"],
+        "events": ["shipments"],
+    },
+    "svc": {
+        "entities": ["services"],
+        "events": ["service_cases", "asset_registrations"],
+    },
+    "sys": {
+        "entities": ["users"],
+        "events": [],
     },
 }
 
@@ -256,66 +332,96 @@ def _generate_all_tables(sub_module_count: int, seed: int) -> list[TableSpec]:
     """
     tables: list[TableSpec] = []
     rng = random.Random(seed)
+    fake = Faker("en_US", use_weighting=False)
+    fake.seed_instance(seed)
 
     for domain, spec in _DOMAIN_SPECS.items():
-        entities = spec["entities"]
-        events = spec["events"]
+        required = _REQUIRED_DOMAIN_TERMS.get(domain, {})
+        entities = _select_domain_terms(
+            spec["entities"],
+            required.get("entities", []),
+            rng,
+        )
+        events = _select_domain_terms(
+            spec["events"],
+            required.get("events", []),
+            rng,
+        )
         anchor = entities[0]
 
         for i, entity in enumerate(entities):
-            t = _entity_table(domain, entity, rng)
+            t = _entity_table(domain, entity, rng, fake)
             tables.append(t)
 
         for i, event in enumerate(events):
             secondary_entity = entities[min(i + 1, len(entities) - 1)]
-            t = _event_table(domain, event, anchor, rng)
+            t = _event_table(domain, event, anchor, rng, fake)
             tables.append(t)
 
         if sub_module_count >= 3:
             for i, event in enumerate(events):
                 entity = entities[min(i, len(entities) - 1)]
-                t = _item_table(domain, event, entity, rng)
+                t = _item_table(domain, event, entity, rng, fake)
                 tables.append(t)
 
         if sub_module_count >= 4:
             for i, entity in enumerate(entities):
-                t = _config_table(domain, entity, rng)
+                t = _config_table(domain, entity, rng, fake)
                 tables.append(t)
 
         if sub_module_count >= 5:
             for suffix in _ANALYTICS_SUFFIXES:
-                t = _analytics_table(domain, anchor, suffix, rng)
+                t = _analytics_table(domain, anchor, suffix, rng, fake)
                 tables.append(t)
 
         if sub_module_count >= 6:
             for i, event in enumerate(events):
-                t = _approval_table(domain, event, rng)
+                t = _approval_table(domain, event, rng, fake)
                 tables.append(t)
 
         if sub_module_count >= 7:
             for i, entity in enumerate(entities):
-                t = _notification_table(domain, entity, rng)
+                t = _notification_table(domain, entity, rng, fake)
                 tables.append(t)
 
         if sub_module_count >= 8:
             for i, event in enumerate(events):
-                t = _integration_table(domain, event, rng)
+                t = _integration_table(domain, event, rng, fake)
                 tables.append(t)
 
         if sub_module_count >= 9:
             for i, entity in enumerate(entities):
-                t = _schedule_table(domain, entity, rng)
+                t = _schedule_table(domain, entity, rng, fake)
                 tables.append(t)
 
         if sub_module_count >= 10:
             for i, entity in enumerate(entities):
-                t = _archive_table(domain, entity, rng)
+                t = _archive_table(domain, entity, rng, fake)
                 tables.append(t)
 
     return tables
 
 
-def _entity_table(domain: str, entity: str, rng: random.Random) -> TableSpec:
+def _select_domain_terms(
+    terms: list[str],
+    required: list[str],
+    rng: random.Random,
+) -> list[str]:
+    """Select a deterministic but seed-varied subset of domain terms."""
+    if len(required) > _TERMS_PER_DOMAIN:
+        raise ValueError("required domain terms exceed the per-domain term budget")
+    missing = [term for term in required if term not in terms]
+    if missing:
+        raise ValueError(f"required domain terms missing from pool: {missing}")
+
+    available = [term for term in terms if term not in set(required)]
+    rng.shuffle(available)
+    return [*required, *available[: _TERMS_PER_DOMAIN - len(required)]]
+
+
+def _entity_table(
+    domain: str, entity: str, rng: random.Random, fake: Faker
+) -> TableSpec:
     name = f"{domain}_{entity}"
     cols: list[tuple[str, str]] = [
         ("id", "INT"),
@@ -339,12 +445,12 @@ def _entity_table(domain: str, entity: str, rng: random.Random) -> TableSpec:
         primary_keys=["id"],
         foreign_keys=fks,
         has_values=True,
-        rows=_gen_rows(name, cols, rng),
+        rows=_gen_rows(name, cols, rng, fake),
     )
 
 
 def _event_table(
-    domain: str, event: str, anchor_entity: str, rng: random.Random
+    domain: str, event: str, anchor_entity: str, rng: random.Random, fake: Faker
 ) -> TableSpec:
     name = f"{domain}_{event}"
     anchor_fk_col = f"{anchor_entity}_id"
@@ -377,12 +483,12 @@ def _event_table(
         primary_keys=["id"],
         foreign_keys=fks,
         has_values=True,
-        rows=_gen_rows(name, cols, rng),
+        rows=_gen_rows(name, cols, rng, fake),
     )
 
 
 def _item_table(
-    domain: str, event: str, entity: str, rng: random.Random
+    domain: str, event: str, entity: str, rng: random.Random, fake: Faker
 ) -> TableSpec:
     name = f"{domain}_{event}_lines"
     event_fk_col = f"{event}_id"
@@ -410,11 +516,13 @@ def _item_table(
         primary_keys=["id"],
         foreign_keys=fks,
         has_values=True,
-        rows=_gen_rows(name, cols, rng),
+        rows=_gen_rows(name, cols, rng, fake),
     )
 
 
-def _config_table(domain: str, entity: str, rng: random.Random) -> TableSpec:
+def _config_table(
+    domain: str, entity: str, rng: random.Random, fake: Faker
+) -> TableSpec:
     name = f"{domain}_{entity}_config"
     entity_fk_col = f"{entity}_id"
     cols: list[tuple[str, str]] = [
@@ -436,12 +544,12 @@ def _config_table(domain: str, entity: str, rng: random.Random) -> TableSpec:
         primary_keys=["id"],
         foreign_keys=fks,
         has_values=True,
-        rows=_gen_rows(name, cols, rng),
+        rows=_gen_rows(name, cols, rng, fake),
     )
 
 
 def _analytics_table(
-    domain: str, anchor_entity: str, suffix: str, rng: random.Random
+    domain: str, anchor_entity: str, suffix: str, rng: random.Random, fake: Faker
 ) -> TableSpec:
     name = f"{domain}_{suffix}"
     entity_fk_col = f"{anchor_entity}_id"
@@ -464,11 +572,13 @@ def _analytics_table(
         primary_keys=["id"],
         foreign_keys=fks,
         has_values=True,
-        rows=_gen_rows(name, cols, rng),
+        rows=_gen_rows(name, cols, rng, fake),
     )
 
 
-def _approval_table(domain: str, event: str, rng: random.Random) -> TableSpec:
+def _approval_table(
+    domain: str, event: str, rng: random.Random, fake: Faker
+) -> TableSpec:
     name = f"{domain}_{event}_approvals"
     event_fk_col = f"{event}_id"
     cols: list[tuple[str, str]] = [
@@ -493,11 +603,13 @@ def _approval_table(domain: str, event: str, rng: random.Random) -> TableSpec:
         primary_keys=["id"],
         foreign_keys=fks,
         has_values=True,
-        rows=_gen_rows(name, cols, rng),
+        rows=_gen_rows(name, cols, rng, fake),
     )
 
 
-def _notification_table(domain: str, entity: str, rng: random.Random) -> TableSpec:
+def _notification_table(
+    domain: str, entity: str, rng: random.Random, fake: Faker
+) -> TableSpec:
     name = f"{domain}_{entity}_alerts"
     entity_fk_col = f"{entity}_id"
     cols: list[tuple[str, str]] = [
@@ -522,11 +634,13 @@ def _notification_table(domain: str, entity: str, rng: random.Random) -> TableSp
         primary_keys=["id"],
         foreign_keys=fks,
         has_values=True,
-        rows=_gen_rows(name, cols, rng),
+        rows=_gen_rows(name, cols, rng, fake),
     )
 
 
-def _integration_table(domain: str, event: str, rng: random.Random) -> TableSpec:
+def _integration_table(
+    domain: str, event: str, rng: random.Random, fake: Faker
+) -> TableSpec:
     name = f"{domain}_{event}_sync_logs"
     event_fk_col = f"{event}_id"
     cols: list[tuple[str, str]] = [
@@ -548,11 +662,13 @@ def _integration_table(domain: str, event: str, rng: random.Random) -> TableSpec
         primary_keys=["id"],
         foreign_keys=fks,
         has_values=True,
-        rows=_gen_rows(name, cols, rng),
+        rows=_gen_rows(name, cols, rng, fake),
     )
 
 
-def _schedule_table(domain: str, entity: str, rng: random.Random) -> TableSpec:
+def _schedule_table(
+    domain: str, entity: str, rng: random.Random, fake: Faker
+) -> TableSpec:
     name = f"{domain}_{entity}_schedules"
     entity_fk_col = f"{entity}_id"
     cols: list[tuple[str, str]] = [
@@ -574,11 +690,13 @@ def _schedule_table(domain: str, entity: str, rng: random.Random) -> TableSpec:
         primary_keys=["id"],
         foreign_keys=fks,
         has_values=True,
-        rows=_gen_rows(name, cols, rng),
+        rows=_gen_rows(name, cols, rng, fake),
     )
 
 
-def _archive_table(domain: str, entity: str, rng: random.Random) -> TableSpec:
+def _archive_table(
+    domain: str, entity: str, rng: random.Random, fake: Faker
+) -> TableSpec:
     name = f"{domain}_{entity}_history"
     entity_fk_col = f"{entity}_id"
     cols: list[tuple[str, str]] = [
@@ -603,7 +721,7 @@ def _archive_table(domain: str, entity: str, rng: random.Random) -> TableSpec:
         primary_keys=["id"],
         foreign_keys=fks,
         has_values=True,
-        rows=_gen_rows(name, cols, rng),
+        rows=_gen_rows(name, cols, rng, fake),
     )
 
 
@@ -620,19 +738,25 @@ def _gen_rows(
     table_name: str,
     columns: list[tuple[str, str]],
     rng: random.Random,
+    fake: Faker,
     n: int = _ROWS_PER_TABLE,
 ) -> list[list[Any]]:
     rows = []
     for row_idx in range(1, n + 1):
         row = []
         for col_name, col_type in columns:
-            row.append(_gen_value(col_name, col_type, row_idx, rng))
+            row.append(_gen_value(table_name, col_name, col_type, row_idx, rng, fake))
         rows.append(row)
     return rows
 
 
 def _gen_value(
-    col_name: str, col_type: str, row_idx: int, rng: random.Random
+    table_name: str,
+    col_name: str,
+    col_type: str,
+    row_idx: int,
+    rng: random.Random,
+    fake: Faker,
 ) -> Any:
     if col_name == "id":
         return row_idx
@@ -685,32 +809,62 @@ def _gen_value(
         return rng.choice(["salesforce", "sap", "netsuite", "workday"])
     if "code" in col_name:
         prefix = col_name.replace("_code", "").replace("_", "").upper()[:4]
-        return f"{prefix}{row_idx:03d}"
+        return fake.bothify(text=f"{prefix}-####")
     if "reference_number" in col_name:
-        return f"REF-{row_idx:06d}"
+        return fake.bothify(text="REF-????-####").upper()
     if "external_id" in col_name:
-        return f"EXT-{row_idx:08d}"
+        return fake.uuid4()
     if "payload_hash" in col_name:
         return f"sha256_{row_idx:032d}"
     if "name" in col_name:
-        return f"Name {row_idx}"
+        return _fake_name(table_name, fake)
     if "description" in col_name or "notes" in col_name or "snapshot" in col_name:
-        return f"Sample {col_name} row {row_idx}"
+        return fake.sentence(nb_words=10)
     if "subject" in col_name:
-        return f"Notification subject {row_idx}"
+        return fake.sentence(nb_words=5).rstrip(".")
     if "message_body" in col_name:
-        return f"Message body for row {row_idx}"
+        return fake.paragraph(nb_sentences=2)
     if "location" in col_name:
-        return rng.choice(["Building A", "Building B", "Remote", "Conference Room 1"])
+        return rng.choice([
+            fake.city(),
+            fake.street_address(),
+            "Remote",
+            "Conference Room 1",
+        ])
     if "archive_reason" in col_name or "decision_notes" in col_name:
-        return f"Reason {row_idx}"
+        return fake.sentence(nb_words=8)
     if "error_message" in col_name:
-        return None if rng.random() > 0.2 else f"Error detail {row_idx}"
+        return None if rng.random() > 0.2 else fake.sentence(nb_words=8)
     if "config_key" in col_name:
         return f"setting.{row_idx}"
     if "config_value" in col_name or "default_value" in col_name:
         return str(rng.randint(0, 100))
     return f"value_{row_idx}"
+
+
+def _fake_name(table_name: str, fake: Faker) -> str:
+    if any(token in table_name for token in (
+        "employees",
+        "contacts",
+        "operators",
+        "users",
+    )):
+        return fake.name()
+    if any(token in table_name for token in (
+        "companies",
+        "customers",
+        "suppliers",
+        "carriers",
+        "tenants",
+    )):
+        return fake.company()
+    if "products" in table_name or "product_" in table_name:
+        return f"{fake.color_name()} {fake.word().title()}"
+    if "projects" in table_name:
+        return f"{fake.bs().title()} Initiative"
+    if "services" in table_name:
+        return f"{fake.catch_phrase()} Service"
+    return fake.catch_phrase()
 
 
 def main() -> int:
