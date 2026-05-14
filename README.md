@@ -20,18 +20,26 @@ Each node carries a stable dotted `id` such as `catalog.schema.table.column`, a 
 
 ## Use dbxcarta as a library
 
-Core dbxcarta does not create Lakehouse tables. It builds a semantic layer over
-an existing Unity Catalog scope configured by `DBXCARTA_CATALOG` and
-`DBXCARTA_SCHEMAS`.
+dbxcarta is split into a small core contract and opt-in extension packages.
+There is no top-level `dbxcarta` import surface; consumers import the layer
+they need.
 
-Outside applications can depend on dbxcarta as a normal Python package, build
-their own `Settings`, and call the ingest function directly from code running
-with Databricks Spark access:
+| Capability | Distribution | Import path | Console script |
+|------------|--------------|-------------|----------------|
+| Graph contract, IDs, validators, verification | `dbxcarta-core` | `dbxcarta.core` | none |
+| Databricks Spark ingest implementation | `dbxcarta-spark` | `dbxcarta.spark` | `dbxcarta-ingest` |
+| Retrieval runtime and Text2SQL eval harness | `dbxcarta-client` | `dbxcarta.client` | `dbxcarta-client` |
+| Operational presets and umbrella CLI | `dbxcarta-presets` | `dbxcarta.presets` | `dbxcarta` |
+
+Core describes the semantic layer without importing Spark, the Databricks SDK,
+or client evaluation code. The Spark package owns the concrete Unity Catalog
+ingest implementation. Code running with Databricks Spark access can construct
+`SparkIngestSettings` and call the ingest implementation directly:
 
 ```python
-from dbxcarta import Settings, run_dbxcarta
+from dbxcarta.spark import SparkIngestSettings, run_dbxcarta
 
-settings = Settings(
+settings = SparkIngestSettings(
     dbxcarta_catalog="analytics",
     dbxcarta_schemas="finance,customer_success",
     dbxcarta_summary_volume="/Volumes/analytics/ops/dbxcarta/summaries",
@@ -44,27 +52,30 @@ run_dbxcarta(settings=settings)
 ```
 
 The no-argument form, `run_dbxcarta()`, is the Databricks wheel entrypoint used
-by the CLI. It loads the same `Settings` model from environment variables and
-then runs the same pipeline.
+by the CLI. It loads `SparkIngestSettings` from environment variables and then
+runs the same pipeline.
 
 ## Examples and presets
 
 Companion examples show how to package reusable configuration and demo data for
 known upstream projects. Each example is its own Python package that depends on
-dbxcarta as a normal pip dependency and exposes a module-level `preset` object.
-dbxcarta core does not ship any preset implementations or preset registry.
+the relevant dbxcarta distributions as normal pip dependencies and exposes a
+module-level `preset` object. `dbxcarta-core` does not ship preset
+implementations or a preset registry.
 
-- `examples/finance-genie/` pairs dbxcarta with
+- `examples/integration/finance-genie/` pairs dbxcarta with
   `/Users/ryanknight/projects/databricks/graph-on-databricks/finance-genie`.
   Finance Genie creates the finance Lakehouse tables and Gold graph-enriched
   features; dbxcarta creates the Neo4j semantic layer over those tables.
-- `examples/schemapile/` materializes a reproducible SchemaPile slice as Delta
-  tables, writes the generated UC schema list to `.env.generated`, generates a
-  SQL-validated question set, and exposes
+- `examples/integration/schemapile/` materializes a reproducible SchemaPile
+  slice as Delta tables, writes the generated UC schema list to
+  `.env.generated`, generates a SQL-validated question set, and exposes
   `dbxcarta_schemapile_example:preset`.
-- `examples/dense-schema/` generates a synthetic 500- or 1000-table single
-  schema for stress testing schema-context retrieval. It shares the same preset
-  pattern and exposes `dbxcarta_dense_schema_example:preset`.
+- `examples/integration/dense-schema/` generates a synthetic 500- or 1000-table
+  single schema for stress testing schema-context retrieval. It shares the same
+  preset pattern and exposes `dbxcarta_dense_schema_example:preset`.
+- `examples/demos/` is reserved for walkthroughs that are not migration-gate
+  consumers.
 
 ### Preset workflow
 
@@ -80,7 +91,7 @@ path to the CLI when you want repeatable environment overlays or demo
 automation:
 
 ```bash
-uv pip install -e examples/finance-genie/
+uv pip install -e examples/integration/finance-genie/
 uv run dbxcarta preset dbxcarta_finance_genie_example:preset --print-env
 ```
 
@@ -88,11 +99,11 @@ The same flow applies to the generated examples after their source data has
 been materialized:
 
 ```bash
-uv pip install -e examples/schemapile/
-# Source or copy examples/schemapile/.env.generated first so DBXCARTA_SCHEMAS is set.
+uv pip install -e examples/integration/schemapile/
+# Source or copy examples/integration/schemapile/.env.generated first so DBXCARTA_SCHEMAS is set.
 uv run dbxcarta preset dbxcarta_schemapile_example:preset --print-env
 
-uv pip install -e examples/dense-schema/
+uv pip install -e examples/integration/dense-schema/
 # Set DBXCARTA_SCHEMAS to the generated dense schema, e.g. dense_500.
 uv run dbxcarta preset dbxcarta_dense_schema_example:preset --print-env
 ```
@@ -116,36 +127,56 @@ environment, or copy its `DBXCARTA_SCHEMAS=...` line into `.env`, before running
 
 See the example READMEs for the full setup flows:
 
-- [`examples/finance-genie/README.md`](examples/finance-genie/README.md)
-- [`examples/schemapile/README.md`](examples/schemapile/README.md)
+- [`examples/integration/finance-genie/README.md`](examples/integration/finance-genie/README.md)
+- [`examples/integration/schemapile/README.md`](examples/integration/schemapile/README.md)
+
+## Migration notes
+
+This repository uses a clean boundary cutover. Old top-level imports are
+deleted instead of re-exported.
+
+| Old path | New path |
+|----------|----------|
+| `from dbxcarta import run_dbxcarta` | `from dbxcarta.spark import run_dbxcarta` |
+| `from dbxcarta import Settings` | `from dbxcarta.spark import SparkIngestSettings` |
+| `from dbxcarta import run_client` | `from dbxcarta.client.eval import run_client` |
+| `dbxcarta.contract` | `dbxcarta.core.contract` |
+| `dbxcarta.databricks` | `dbxcarta.core.databricks` for validators; `dbxcarta.client.databricks` for `WorkspaceClient` construction |
+| `dbxcarta.verify` | `dbxcarta.core.verify` |
+| `dbxcarta.ingest.*` | `dbxcarta.spark.ingest.*` |
+| `dbxcarta.ingest.pipeline` | `dbxcarta.spark.run` |
+| `dbxcarta.client.client` | `dbxcarta.client.eval.run` |
+| `dbxcarta.entrypoints.ingest` | `dbxcarta.spark.entrypoint` |
+| `dbxcarta.entrypoints.client` | `dbxcarta.client.eval.entrypoint` |
+| `dbxcarta.presets` module file | `dbxcarta.presets` package |
+
+The CLI command remains `dbxcarta` when `dbxcarta-presets` is installed. The
+Databricks wheel entrypoints are registered by the package that owns the code:
+`dbxcarta-ingest` by `dbxcarta-spark`, and `dbxcarta-client` by
+`dbxcarta-client`.
 
 ## Public API and version contract
 
-External projects depend on dbxcarta as a normal pip package. The primary
-public surface is whatever `dbxcarta/__init__.py` re-exports today:
+External projects depend on the distribution that matches the capability they
+use. The public surfaces are:
 
-- Pipeline entrypoints: `run_dbxcarta`, `run_client`, plus the installed
-  wheel entrypoints `dbxcarta-ingest` and `dbxcarta-client`, submitted through
-  `uv run dbxcarta submit-entrypoint {ingest|client}`.
-- Settings: `Settings` (pydantic-settings model). Pass explicit field values
-  from code, or let the no-argument CLI/job path load the same fields from env
-  vars.
-- Preset protocol: `Preset`, `ReadinessReport`, `load_preset`, `format_env`.
-  A preset is a small configuration adapter published by an external package
-  and referenced by an import-path spec like `your_pkg.module:preset`. Optional
-  readiness and question-upload hooks live in `dbxcarta.presets` for CLI and
-  demo integrations; they are not required for library consumption.
-- Verification: `verify_run`, `Report`, `Violation`.
-- Contract enums and constants: `NodeLabel`, `RelType`, `EdgeSource`,
-  `CONTRACT_VERSION`, `REFERENCES_PROPERTIES`.
-- Databricks helpers used by external presets: `validate_identifier`,
-  `validate_uc_volume_subpath`, `build_workspace_client`.
+- Core: `SemanticLayerConfig`, `SemanticLayerBuilder`, graph contract enums and
+  constants, Databricks identifier/path validators, and `verify_run`.
+- Spark: `SparkIngestSettings`, `run_dbxcarta`, and the `dbxcarta-ingest`
+  wheel entrypoint.
+- Client: retrieval primitives, SQL parsing and read-only guards, result
+  comparison, `ClientSettings`, and the `dbxcarta.client.eval` harness.
+- Presets: `Preset`, `ReadinessReport`, `load_preset`, `format_env`, and the
+  `dbxcarta` operational CLI.
 
-Anything not in `__init__.py` is internal even if importable. Removing or
-renaming any name in the list above is a breaking change and rolls the
-major version. Adding new names is additive and rolls the minor version. The
-exception is `dbxcarta.presets`, which also exposes optional CLI/demo extension
-protocols for preset packages.
+A preset is a small configuration adapter published by an external package
+and referenced by an import-path spec like `your_pkg.module:preset`. Optional
+readiness and question-upload hooks live in `dbxcarta.presets` for CLI and
+demo integrations; they are not required for core library consumption.
+
+Removing or renaming a public name above is a breaking change. Adding a new
+name is additive. Implementation modules below a layer remain internal unless
+documented here.
 
 ## Quickstart
 
@@ -410,10 +441,10 @@ Databricks:
 
 ```bash
 uv lock --check
-uv sync --frozen --extra test
+uv sync --frozen --group test --all-packages
 uv run pytest
 rm -rf dist
-uv build --sdist --wheel
+uv build --all-packages
 uv run python scripts/security/artifact_audit.py inspect dist
 uv run python scripts/security/artifact_audit.py provenance dist \
   --output dist/supply-chain-provenance.json
@@ -424,7 +455,7 @@ and SHA256 hashes for built artifacts. Treat it as audit evidence for the
 reviewed artifacts.
 
 **`upload`**
-- `--wheel` — builds the package, bumps the patch version, and uploads the wheel to `DATABRICKS_VOLUME_PATH/wheels/`. Re-run whenever `src/dbxcarta/` changes.
+- `--wheel` — builds the relevant dbxcarta wheel, bumps the patch version, and uploads the wheel to `DATABRICKS_VOLUME_PATH/wheels/`. Re-run whenever `packages/dbxcarta-*/src/` changes.
 - `--all` — copies every `scripts/*.py` to the workspace. Re-run whenever `scripts/` changes.
 
 **`submit <script>`**

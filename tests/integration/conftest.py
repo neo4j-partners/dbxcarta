@@ -21,7 +21,7 @@ load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 @pytest.fixture(scope="session")
 def ws():
-    from dbxcarta.databricks import build_workspace_client
+    from dbxcarta.client.databricks import build_workspace_client
 
     return build_workspace_client()
 
@@ -46,7 +46,7 @@ def neo4j_driver(ws) -> Iterator:
 @pytest.fixture(scope="session")
 def run_summary(ws) -> dict:
     """Load the most recent successful run-summary JSON from the UC Volume."""
-    from dbxcarta.ingest.summary import LoadSummaryError, load_summary_from_volume
+    from dbxcarta.spark.ingest.summary import LoadSummaryError, load_summary_from_volume
 
     volume_path = os.environ["DBXCARTA_SUMMARY_VOLUME"]
     try:

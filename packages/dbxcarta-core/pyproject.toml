@@ -1,0 +1,23 @@
+[project]
+name = "dbxcarta-core"
+version = "1.0.0"
+description = "Core semantic graph contract for dbxcarta"
+authors = [
+    { name = "Ryan Knight" },
+]
+requires-python = ">=3.12"
+dependencies = [
+    "neo4j>=5.0",
+    "pydantic>=2",
+    "pydantic-settings>=2",
+]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[build-system]
+requires = ["uv_build>=0.11.0,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "dbxcarta.core"

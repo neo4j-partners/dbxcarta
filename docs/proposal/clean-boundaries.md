@@ -1,11 +1,31 @@
 # Clean Boundaries Proposal
 
-**Status: Accepted**
+**Status: Implemented locally; ready for split-package publish**
 
 **Migration mode: single atomic cutover.** The entire plan ships as one PR
 and one commit. The work areas in the execution plan are decomposition for
 review, not separate landings. Sample consumers (Finance Genie, SchemaPile,
 dense-schema, `sql-semantics`) are updated inside the same PR.
+
+**Progress snapshot (2026-05-14):**
+
+- dbxcarta has been split into four published distributions:
+  `dbxcarta-core`, `dbxcarta-spark`, `dbxcarta-client`, and
+  `dbxcarta-presets`.
+- The old top-level `dbxcarta` package surface is removed. There is no
+  compatibility shim for `from dbxcarta import run_dbxcarta`, `Settings`, or
+  `run_client`.
+- Internal examples now live under `examples/integration/`; tests mirror the
+  layer layout under `tests/core`, `tests/spark`, `tests/client`,
+  `tests/presets`, `tests/examples`, and `tests/boundary`.
+- Local validation is green: `uv sync --frozen --group test --all-packages`,
+  `uv run pytest`, `uv build --all-packages --clear`, artifact inspection,
+  and isolated console-script checks all pass.
+- The external `sql-semantics` checkout has been updated to depend on the
+  split dbxcarta distributions. Its stale local environment still had
+  `dbxcarta==0.2.41` installed during the last attempted test run, so rerun
+  `uv sync`/`uv run pytest` there after publishing or after clearing that
+  environment.
 
 ## Design Decisions
 
@@ -789,16 +809,16 @@ library and a concrete `dbxcarta.core` skeleton.
 
 Checklist:
 
-- [ ] List the symbols that belong in the core public API.
-- [ ] Define the `SemanticLayerBuilder` protocol (or
+- [x] List the symbols that belong in the core public API.
+- [x] Define the `SemanticLayerBuilder` protocol (or
   `build_semantic_layer(config)` abstract entrypoint) in `dbxcarta.core`.
-- [ ] Define `SemanticLayerConfig` Settings model in `dbxcarta.core`
+- [x] Define `SemanticLayerConfig` Settings model in `dbxcarta.core`
   (Decision 5).
-- [ ] Define the `EnvOverlay` protocol in `dbxcarta.core` so presets can
+- [x] Define the `EnvOverlay` protocol in `dbxcarta.core` so presets can
   implement it (Decision 4).
-- [ ] Document that client questions, arms, question upload, and synthetic
+- [x] Document that client questions, arms, question upload, and synthetic
   materialization are non-core.
-- [ ] Land the import-boundary test from Decision 9 against the empty
+- [x] Land the import-boundary test from Decision 9 against the empty
   `dbxcarta.core` package so the guard is wired before code moves.
 
 ### Work Area 2: Layer Move And `_bootstrap` Lift
@@ -808,16 +828,16 @@ import is removed.
 
 Checklist:
 
-- [ ] Move Spark pipeline code into `dbxcarta.spark`. Move `run_dbxcarta`
+- [x] Move Spark pipeline code into `dbxcarta.spark`. Move `run_dbxcarta`
   to `dbxcarta.spark.run` (Decision 1).
-- [ ] Move client retrieval into `dbxcarta.client`; move `run_client` and
+- [x] Move client retrieval into `dbxcarta.client`; move `run_client` and
   question fixtures into `dbxcarta.client.eval` (Decision 6).
-- [ ] Move preset helpers into `dbxcarta.presets`.
-- [ ] Lift `apply_preset_env_overlay` from `dbxcarta/entrypoints/_bootstrap.py`
+- [x] Move preset helpers into `dbxcarta.presets`.
+- [x] Lift `apply_preset_env_overlay` from `dbxcarta/entrypoints/_bootstrap.py`
   into `dbxcarta.core` as the `EnvOverlay` protocol; have presets
   implement it; rewire the spark entry point to call through the core
   protocol. Remove the `spark→preset` import (Decision 4).
-- [ ] Update every internal call site to the new import paths. No
+- [x] Update every internal call site to the new import paths. No
   compatibility shims, no re-exports.
 
 Validation:
@@ -833,12 +853,12 @@ checks are core semantic-layer capabilities.
 
 Checklist:
 
-- [ ] Reduce the core preset concept to configuration only. The full
+- [x] Reduce the core preset concept to configuration only. The full
   preset concept lives in `dbxcarta.presets`.
-- [ ] Move question upload helper behavior out of core-facing
+- [x] Move question upload helper behavior out of core-facing
   documentation.
-- [ ] Move readiness helpers into `dbxcarta.presets` or `examples/`.
-- [ ] Update Finance Genie, SchemaPile, and dense-schema examples to
+- [x] Move readiness helpers into `dbxcarta.presets` or `examples/`.
+- [x] Update Finance Genie, SchemaPile, and dense-schema examples to
   consume preset helpers from `dbxcarta.presets`.
 
 ### Work Area 4: Client Runtime / Evaluation Split
@@ -848,13 +868,13 @@ Text2SQL evaluation workflows.
 
 Checklist:
 
-- [ ] Keep retriever, context rendering, prompt helpers, SQL parsing,
+- [x] Keep retriever, context rendering, prompt helpers, SQL parsing,
   and result comparison in `dbxcarta.client`.
-- [ ] Move arms, comparison orchestration, and `run_client` into
+- [x] Move arms, comparison orchestration, and `run_client` into
   `dbxcarta.client.eval`.
-- [ ] Remove `run_client` from any top-level public surface; update every
+- [x] Remove `run_client` from any top-level public surface; update every
   caller.
-- [ ] Question fixtures leave the library: move into
+- [x] Question fixtures leave the library: move into
   `examples/integration/` or consumer-owned packages.
 
 ### Work Area 5: Synthetic Materialization Out Of Product API
@@ -864,12 +884,12 @@ Checklist:
 
 Checklist:
 
-- [ ] Move synthetic type coercion, name sanitization, SQL literal
+- [x] Move synthetic type coercion, name sanitization, SQL literal
   rendering, and insert generation under `examples/integration/`.
-- [ ] If duplication remains between dense-schema and SchemaPile, share
+- [x] If duplication remains between dense-schema and SchemaPile, share
   via a directory-local module inside `examples/`, not via a published
   distribution.
-- [ ] Confirm no library distribution imports synthetic materialization
+- [x] Confirm no library distribution imports synthetic materialization
   utilities.
 
 ### Work Area 6: Multi-Distribution Packaging
@@ -879,33 +899,41 @@ build, install, and register the right console scripts.
 
 Checklist:
 
-- [ ] Create `packages/dbxcarta-core/pyproject.toml`,
+- [x] Create `packages/dbxcarta-core/pyproject.toml`,
   `packages/dbxcarta-spark/pyproject.toml`,
   `packages/dbxcarta-client/pyproject.toml`,
   `packages/dbxcarta-presets/pyproject.toml`.
-- [ ] Register `dbxcarta-ingest` console script in `dbxcarta-spark`.
-- [ ] Register `dbxcarta-client` console script in `dbxcarta-client`.
-- [ ] Register the `dbxcarta` CLI console script in `dbxcarta-presets`.
-- [ ] Verify each distribution builds with `uv build` and installs in
+- [x] Register `dbxcarta-ingest` console script in `dbxcarta-spark`.
+- [x] Register `dbxcarta-client` console script in `dbxcarta-client`.
+- [x] Register the `dbxcarta` CLI console script in `dbxcarta-presets`.
+- [x] Verify each distribution builds with `uv build` and installs in
   isolation.
-- [ ] Verify `pip install dbxcarta-core` registers zero console scripts.
-- [ ] Add the per-layer pytest matrix (Decision 8) to CI.
+- [x] Verify `pip install dbxcarta-core` registers zero console scripts.
+- [x] Add the per-layer pytest matrix (Decision 8) to CI.
 
 ### Work Area 7: Sample Consumer Updates
 
-**Outcome:** Every named sample consumer imports from the new paths and
-passes its tests against the cutover branch.
+**Outcome:** Every named sample consumer imports from the new paths. Internal
+sample consumers pass in this repo; the external `sql-semantics` checkout has
+been updated and should be retested from a fresh environment after the split
+packages are published.
 
 Checklist:
 
-- [ ] Update `examples/integration/finance-genie/` to import from
+- [x] Update `examples/integration/finance-genie/` to import from
   `dbxcarta.core`, `dbxcarta.spark`, and `dbxcarta.presets`.
-- [ ] Update `examples/integration/schemapile/` likewise.
-- [ ] Update `examples/integration/dense-schema/` likewise.
-- [ ] Update the `sql-semantics` external repo on a coordinated branch
+- [x] Update `examples/integration/schemapile/` likewise.
+- [x] Update `examples/integration/dense-schema/` likewise.
+- [x] Update the `sql-semantics` external repo on a coordinated branch
   that is merged in lockstep with the cutover PR.
-- [ ] Wire the sample-consumer CI job as the cutover PR's merge gate
+- [x] Wire the sample-consumer CI job as the cutover PR's merge gate
   (Decision 11).
+
+Status note: `tests/examples/finance-genie`,
+`tests/examples/schemapile`, and `tests/examples/dense-schema` pass locally.
+The external `sql-semantics` checkout was updated, but its last local test
+attempt loaded a stale `dbxcarta==0.2.41` install from its `.venv`; clear or
+resync that environment before using it as the final consumer signal.
 
 ### Work Area 8: Documentation
 
@@ -913,11 +941,11 @@ Checklist:
 
 Checklist:
 
-- [ ] Update README to present core first and extensions second.
-- [ ] Add a boundary diagram or table that maps capabilities to layers.
-- [ ] Add migration notes that map old imports and CLI commands to their
+- [x] Update README to present core first and extensions second.
+- [x] Add a boundary diagram or table that maps capabilities to layers.
+- [x] Add migration notes that map old imports and CLI commands to their
   new locations, for anyone updating local checkouts of sample consumers.
-- [ ] Update example READMEs to state which distributions they require.
+- [x] Update example READMEs to state which distributions they require.
 
 ---
 
@@ -937,3 +965,18 @@ the cutover branch:
   `dbxcarta` CLI appears only after `pip install dbxcarta-presets`.
 - README and example READMEs describe the same architecture the code
   enforces.
+
+Current local status (2026-05-14):
+
+- [x] `uv sync --frozen --group test --all-packages`
+- [x] `uv run pytest` (`352 passed`, `1 skipped`, `3 deselected`)
+- [x] `uv build --all-packages --clear`
+- [x] `uv run python scripts/security/artifact_audit.py inspect dist`
+- [x] isolated script ownership check:
+  `dbxcarta-core` registers no `dbxcarta*` scripts,
+  `dbxcarta-spark` registers `dbxcarta-ingest`,
+  `dbxcarta-client` registers `dbxcarta-client`, and
+  `dbxcarta-presets` registers `dbxcarta`
+- [x] old import-path scan is clean outside the README migration table
+- [ ] final external `sql-semantics` pytest from a fresh environment after
+  publishing or after removing the stale monolithic `dbxcarta` install

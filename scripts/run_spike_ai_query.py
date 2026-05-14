@@ -12,7 +12,7 @@ Confirms:
 Submit:
     dbxcarta submit run_spike_ai_query.py
 """
-from dbxcarta.entrypoints._bootstrap import inject_params
+from dbxcarta.core.env import inject_params
 
 inject_params()
 
@@ -21,7 +21,7 @@ import os
 from pyspark.sql import Row, SparkSession
 from pyspark.sql.functions import expr
 
-from dbxcarta.databricks import validate_serving_endpoint_name
+from dbxcarta.core.databricks import validate_serving_endpoint_name
 
 ENDPOINT = validate_serving_endpoint_name(
     os.environ.get("DBXCARTA_EMBEDDING_ENDPOINT", "databricks-gte-large-en")

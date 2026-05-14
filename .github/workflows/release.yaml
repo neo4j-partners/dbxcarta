@@ -27,7 +27,14 @@ jobs:
         uses: astral-sh/setup-uv@v5
 
       - name: Bump version
-        run: uv version --bump ${{ inputs.bump_type }}
+        run: |
+          uv version --bump ${{ inputs.bump_type }} --frozen
+          version=$(uv version --short)
+          uv version --package dbxcarta-core "$version" --frozen
+          uv version --package dbxcarta-spark "$version" --frozen
+          uv version --package dbxcarta-client "$version" --frozen
+          uv version --package dbxcarta-presets "$version" --frozen
+          uv lock
 
       - name: Get version
         id: get-version
@@ -38,5 +45,5 @@ jobs:
           author_name: dbxcarta GitHub Action
           author_email: noreply@github.com
           message: Bump version to ${{ steps.get-version.outputs.version }}
-          add: "pyproject.toml"
+          add: "pyproject.toml packages/*/pyproject.toml uv.lock"
           tag: ${{ steps.get-version.outputs.version }}

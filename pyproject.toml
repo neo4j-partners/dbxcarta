@@ -1,26 +1,22 @@
 [project]
-name = "dbxcarta"
+name = "dbxcarta-workspace"
 version = "1.0.0"
-description = "Unity Catalog to Neo4j ingestion pipeline via Databricks Spark jobs"
+description = "Workspace for dbxcarta core and extension distributions"
 authors = [
-    { name = "Ryan Knight"}
+    { name = "Ryan Knight" },
 ]
 requires-python = ">=3.12"
 dependencies = [
-    "databricks-job-runner>=0.4.8",
-    "databricks-sdk>=0.40",
-    "neo4j>=5.0",
-    "pydantic>=2",
-    "pydantic-settings>=2",
-    "python-dotenv",
+    "dbxcarta-client",
+    "dbxcarta-core",
+    "dbxcarta-dense-schema-example",
+    "dbxcarta-finance-genie-example",
+    "dbxcarta-presets",
+    "dbxcarta-schemapile-example",
+    "dbxcarta-spark",
 ]
 
-[project.scripts]
-dbxcarta = "dbxcarta.cli:main"
-dbxcarta-client = "dbxcarta.entrypoints.client:main"
-dbxcarta-ingest = "dbxcarta.entrypoints.ingest:main"
-
-[project.optional-dependencies]
+[dependency-groups]
 test = [
     "mypy",
     "pytest",
@@ -28,9 +24,28 @@ test = [
     "types-requests",
 ]
 
-[build-system]
-requires = ["uv_build>=0.9.3,<0.10.0"]
-build-backend = "uv_build"
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+dbxcarta-client = { workspace = true }
+dbxcarta-core = { workspace = true }
+dbxcarta-presets = { workspace = true }
+dbxcarta-spark = { workspace = true }
+dbxcarta-dense-schema-example = { workspace = true }
+dbxcarta-finance-genie-example = { workspace = true }
+dbxcarta-schemapile-example = { workspace = true }
+
+[tool.uv.workspace]
+members = [
+    "packages/dbxcarta-client",
+    "packages/dbxcarta-core",
+    "packages/dbxcarta-presets",
+    "packages/dbxcarta-spark",
+    "examples/integration/dense-schema",
+    "examples/integration/finance-genie",
+    "examples/integration/schemapile",
+]
 
 [tool.pytest.ini_options]
 addopts = "-m 'not live' --import-mode=importlib"
@@ -45,19 +60,19 @@ python_version = "3.12"
 
 [[tool.mypy.overrides]]
 module = [
-    "dbxcarta.contract",
-    "dbxcarta.ingest.fk.common",
-    "dbxcarta.ingest.fk.declared",
-    "dbxcarta.ingest.fk.metadata",
-    "dbxcarta.ingest.fk.semantic",
-    "dbxcarta.ingest.extract",
-    "dbxcarta.ingest.fk.discovery",
-    "dbxcarta.settings",
-    "dbxcarta.ingest.summary",
-    "dbxcarta.ingest.transform.staging",
-    "dbxcarta.ingest.transform.ledger",
-    "dbxcarta.ingest.load.neo4j_io",
-    "dbxcarta.ingest.preflight",
+    "dbxcarta.core.contract",
+    "dbxcarta.spark.ingest.fk.common",
+    "dbxcarta.spark.ingest.fk.declared",
+    "dbxcarta.spark.ingest.fk.metadata",
+    "dbxcarta.spark.ingest.fk.semantic",
+    "dbxcarta.spark.ingest.extract",
+    "dbxcarta.spark.ingest.fk.discovery",
+    "dbxcarta.spark.settings",
+    "dbxcarta.spark.ingest.summary",
+    "dbxcarta.spark.ingest.transform.staging",
+    "dbxcarta.spark.ingest.transform.ledger",
+    "dbxcarta.spark.ingest.load.neo4j_io",
+    "dbxcarta.spark.ingest.preflight",
 ]
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
