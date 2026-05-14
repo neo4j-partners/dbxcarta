@@ -49,31 +49,52 @@ then runs the same pipeline.
 
 ## Examples and presets
 
-Companion examples show how to package reusable configuration for a known
-upstream project:
+Companion examples show how to package reusable configuration and demo data for
+known upstream projects. Each example is its own Python package that depends on
+dbxcarta as a normal pip dependency and exposes a module-level `preset` object.
+dbxcarta core does not ship any preset implementations or preset registry.
 
 - `examples/finance-genie/` pairs dbxcarta with
   `/Users/ryanknight/projects/databricks/graph-on-databricks/finance-genie`.
   Finance Genie creates the finance Lakehouse tables and Gold graph-enriched
   features; dbxcarta creates the Neo4j semantic layer over those tables.
+- `examples/schemapile/` materializes a reproducible SchemaPile slice as Delta
+  tables, writes the generated UC schema list to `.env.generated`, generates a
+  SQL-validated question set, and exposes
+  `dbxcarta_schemapile_example:preset`.
+- `examples/dense-schema/` generates a synthetic 500- or 1000-table single
+  schema for stress testing schema-context retrieval. It shares the same preset
+  pattern and exposes `dbxcarta_dense_schema_example:preset`.
 
-### Example preset: Finance Genie
+### Preset workflow
 
-The Finance Genie preset is the maintained example of dbxcarta CLI automation.
-It lives in `examples/finance-genie/` as its own Python package
-(`dbxcarta-finance-genie-example`) that depends on dbxcarta as a normal pip
-dependency. dbxcarta core itself ships no preset implementations.
+A preset is a small object resolved by import path, for example
+`your_pkg.module:preset`. Its required method is `env()`, which returns a
+dbxcarta environment overlay. It can also implement optional hooks:
 
-See [`examples/finance-genie/README.md`](examples/finance-genie/README.md) for
-the complete setup, validation flow, and the template a new preset package
-should follow.
+- `readiness(ws, warehouse_id)` for `dbxcarta preset ... --check-ready`
+- `upload_questions(ws)` for `dbxcarta preset ... --upload-questions`
 
-Install the example package alongside dbxcarta, then pass its import path to the
-CLI when you want repeatable environment overlays or demo automation:
+Install the relevant example package alongside dbxcarta, then pass its import
+path to the CLI when you want repeatable environment overlays or demo
+automation:
 
 ```bash
 uv pip install -e examples/finance-genie/
 uv run dbxcarta preset dbxcarta_finance_genie_example:preset --print-env
+```
+
+The same flow applies to the generated examples after their source data has
+been materialized:
+
+```bash
+uv pip install -e examples/schemapile/
+# Source or copy examples/schemapile/.env.generated first so DBXCARTA_SCHEMAS is set.
+uv run dbxcarta preset dbxcarta_schemapile_example:preset --print-env
+
+uv pip install -e examples/dense-schema/
+# Set DBXCARTA_SCHEMAS to the generated dense schema, e.g. dense_500.
+uv run dbxcarta preset dbxcarta_dense_schema_example:preset --print-env
 ```
 
 Check whether the expected Finance Genie tables are present:
@@ -87,6 +108,16 @@ Upload the preset's demo question set to the configured UC Volume:
 ```bash
 uv run dbxcarta preset dbxcarta_finance_genie_example:preset --upload-questions
 ```
+
+For generated examples, the materializer owns the source schemas and the preset
+reads `DBXCARTA_SCHEMAS` at command runtime. Keep the generated overlay in the
+environment, or copy its `DBXCARTA_SCHEMAS=...` line into `.env`, before running
+`--print-env`, `--check-ready`, `--upload-questions`, ingest, or client jobs.
+
+See the example READMEs for the full setup flows:
+
+- [`examples/finance-genie/README.md`](examples/finance-genie/README.md)
+- [`examples/schemapile/README.md`](examples/schemapile/README.md)
 
 ## Public API and version contract
 
