@@ -1,0 +1,17 @@
+[
+  {
+    "shape": "single_table_filter",
+    "question": "Find all active employees in the hr_employees table",
+    "sql": "SELECT * FROM `schemapile_lakehouse`.`dense_500`.`hr_employees` WHERE `is_active` = TRUE"
+  },
+  {
+    "shape": "two_table_join",
+    "question": "Find the names of employees and their corresponding monthly KPIs",
+    "sql": "SELECT `schemapile_lakehouse`.`dense_500`.`hr_employees`.`name`, `schemapile_lakehouse`.`dense_500`.`hr_monthly_kpis`.* FROM `schemapile_lakehouse`.`dense_500`.`hr_employees` JOIN `schemapile_lakehouse`.`dense_500`.`hr_monthly_kpis` ON `schemapile_lakehouse`.`dense_500`.`hr_employees`.`id` = `schemapile_lakehouse`.`dense_500`.`hr_monthly_kpis`.`employees_id`"
+  },
+  {
+    "shape": "aggregation",
+    "question": "Find the total amount of all approved sys_data_exports",
+    "sql": "SELECT SUM(`amount`) AS total_amount FROM `schemapile_lakehouse`.`dense_500`.`sys_data_exports` WHERE `status` = 'approved'"
+  }
+]

@@ -21,24 +21,155 @@ dbxcarta = { path = "/Users/ryanknight/projects/databricks/dbxcarta", editable =
 This path does not exist on Databricks. Any environment that installs
 `sql-semantics` from a wheel will fail to resolve its `dbxcarta` dependency.
 
-### Fix
+### Fix: mirror the neo4j-graphrag-python publishing pattern
 
-1. Publish `dbxcarta` to PyPI using `uv publish`.
-2. In `sql-semantics/pyproject.toml`, remove the `[tool.uv.sources]` section
-   entirely. The `dependencies` line already has the correct form:
-   `dbxcarta>=0.2.35` -- update the floor to the published version.
-3. Run `uv sync` in `sql-semantics` to confirm the dependency resolves from
-   PyPI with no local-path override.
+The neo4j-graphrag-python project uses OIDC trusted publishing (no API tokens)
+with a two-workflow pattern: a version-bump workflow triggers a git tag, and the
+tag triggers a publish workflow. dbxcarta should follow the same pattern using
+`uv build` in place of `python3 -m build`.
 
-### Pre-publish checklist
+**Step A: One-time PyPI setup**
 
-- Confirm `pyproject.toml` `description`, `authors`, and `requires-python` are
-  accurate.
-- Add `license`, `homepage`, and `classifiers` fields if this is intended as a
-  public package. If it is internal-only, a private index (Azure Artifacts,
-  Nexus) is the better target and the same `uv publish` command applies.
-- The `dist/` directory already has `dbxcarta-0.2.38-py3-none-any.whl`. Run
-  `uv build` to regenerate after any changes, then `uv publish`.
+1. Create the `dbxcarta` project on PyPI (first publish must be manual to
+   register the project name).
+2. Register a trusted publisher on PyPI under the project settings:
+   - Owner: `<github-org-or-user>`
+   - Repository: `dbxcarta`
+   - Workflow: `publish.yaml`
+   - Environment: `pypi`
+3. Add a `pypi` environment in the GitHub repo settings (Settings > Environments).
+4. Add a `GIT_PUSH_PAT` repository secret: a GitHub personal access token with
+   `contents: write` permission. The version-bump workflows push a commit and
+   tag; the default `GITHUB_TOKEN` cannot trigger downstream workflow runs, so
+   a PAT is required (same approach as neo4j-graphrag).
+
+**Step B: Add `.github/workflows/publish.yaml`**
+
+Builds the wheel on every push. Publishes to PyPI only when a version tag is
+pushed. Uses OIDC; no `PYPI_API_TOKEN` secret needed.
+
+```yaml
+name: Publish Python distribution
+
+on: push
+
+jobs:
+  build:
+    name: Build distribution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+
+      - name: Build wheel and sdist
+        run: uv build --sdist --wheel
+
+      - name: Store distribution packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+
+  publish-to-pypi:
+    name: PyPI
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/dbxcarta
+    permissions:
+      id-token: write
+    steps:
+      - name: Download distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+```
+
+**Step C: Add version-bump workflows**
+
+Add three workflows following the neo4j pattern exactly, substituting
+`patch`, `minor`, and `major` for the bump type. Example for patch:
+
+`.github/workflows/patch-release.yaml`:
+
+```yaml
+name: Publish a new patch release
+
+on:
+  workflow_dispatch:
+
+jobs:
+  bump-version:
+    outputs:
+      version: ${{ steps.get-version.outputs.version }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GIT_PUSH_PAT }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Bump version
+        run: uv version --bump patch --frozen
+
+      - name: Get version
+        id: get-version
+        run: echo version=`uv version --short` >> "$GITHUB_OUTPUT"
+
+      - uses: EndBug/add-and-commit@v9
+        with:
+          author_name: dbxcarta GitHub Action
+          author_email: noreply@github.com
+          message: Bump version to ${{ steps.get-version.outputs.version }}
+          add: "['pyproject.toml']"
+          tag: ${{ steps.get-version.outputs.version }}
+```
+
+`minor-release.yaml` and `major-release.yaml` are identical with `--bump minor`
+and `--bump major` respectively.
+
+**Step D: First manual publish (registers the project name on PyPI)**
+
+Before trusted publishing works, PyPI needs to know the project exists:
+
+```bash
+uv build --sdist --wheel
+uv publish --token $PYPI_API_TOKEN
+```
+
+After the project is registered, subsequent releases use the GitHub Actions
+workflows and no token is needed locally.
+
+**Step E: Update `sql-semantics/pyproject.toml`**
+
+Remove the `[tool.uv.sources]` section entirely. The dependency declaration
+is already correct:
+
+```toml
+dependencies = [
+    "dbxcarta>=0.2.38",   # update floor to published version
+    ...
+]
+```
+
+Run `uv sync` to confirm it resolves from PyPI.
 
 ---
 

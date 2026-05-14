@@ -1,0 +1,17 @@
+[
+  {
+    "shape": "single_table_filter",
+    "question": "What are the names of active products in the inv_products table?",
+    "sql": "SELECT `name` FROM `schemapile_lakehouse`.`dense_500`.`inv_products` WHERE `is_active` = TRUE"
+  },
+  {
+    "shape": "two_table_join",
+    "question": "What are the names of products that have a purchase order with a status of 'pending'?",
+    "sql": "SELECT DISTINCT `inv_products`.`name` FROM `schemapile_lakehouse`.`dense_500`.`inv_products` JOIN `schemapile_lakehouse`.`dense_500`.`inv_purchase_orders` ON `inv_products`.`id` = `inv_purchase_orders`.`products_id` WHERE `inv_purchase_orders`.`status` = 'pending'"
+  },
+  {
+    "shape": "aggregation",
+    "question": "What is the total amount of all purchase orders for each product?",
+    "sql": "SELECT `inv_products`.`name`, SUM(`inv_purchase_orders`.`amount`) AS `total_amount` FROM `schemapile_lakehouse`.`dense_500`.`inv_products` JOIN `schemapile_lakehouse`.`dense_500`.`inv_purchase_orders` ON `inv_products`.`id` = `inv_purchase_orders`.`products_id` GROUP BY `inv_products`.`name`"
+  }
+]

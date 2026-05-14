@@ -1,0 +1,17 @@
+[
+  {
+    "shape": "single_table_filter",
+    "question": "What are the names of active financial accounts?",
+    "sql": "SELECT `name` FROM `schemapile_lakehouse`.`dense_500`.`fin_accounts` WHERE `is_active` = TRUE"
+  },
+  {
+    "shape": "two_table_join",
+    "question": "What are the names of users who created financial invoices?",
+    "sql": "SELECT `u`.`name` FROM `schemapile_lakehouse`.`dense_500`.`fin_invoices` `i` JOIN `schemapile_lakehouse`.`dense_500`.`sys_users` `u` ON `i`.`created_by_id` = `u`.`id`"
+  },
+  {
+    "shape": "aggregation",
+    "question": "What is the total amount of all financial invoices grouped by currency?",
+    "sql": "SELECT `currency`, SUM(`amount`) AS `total_amount` FROM `schemapile_lakehouse`.`dense_500`.`fin_invoices` GROUP BY `currency`"
+  }
+]

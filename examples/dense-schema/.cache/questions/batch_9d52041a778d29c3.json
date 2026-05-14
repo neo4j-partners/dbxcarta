@@ -1,0 +1,17 @@
+[
+  {
+    "shape": "single_table_filter",
+    "question": "What are the names of active sales commission plans?",
+    "sql": "SELECT `name` FROM `schemapile_lakehouse`.`dense_500`.`sales_commission_plans` WHERE `is_active` = TRUE"
+  },
+  {
+    "shape": "two_table_join",
+    "question": "What are the names of users who created log carrier bookings?",
+    "sql": "SELECT `schemapile_lakehouse`.`dense_500`.`sys_users`.`name` FROM `schemapile_lakehouse`.`dense_500`.`log_carrier_bookings` INNER JOIN `schemapile_lakehouse`.`dense_500`.`sys_users` ON `schemapile_lakehouse`.`dense_500`.`log_carrier_bookings`.`created_by_id` = `schemapile_lakehouse`.`dense_500`.`sys_users`.`id`"
+  },
+  {
+    "shape": "aggregation",
+    "question": "What is the total amount of all svc case resolutions?",
+    "sql": "SELECT SUM(`amount`) FROM `schemapile_lakehouse`.`dense_500`.`svc_case_resolutions`"
+  }
+]

@@ -1,0 +1,17 @@
+[
+  {
+    "shape": "single_table_filter",
+    "question": "What are the names of active employees?",
+    "sql": "SELECT `name` FROM `schemapile_lakehouse`.`dense_500`.`hr_employees` WHERE `is_active` = TRUE"
+  },
+  {
+    "shape": "two_table_join",
+    "question": "What are the names of customers who have responded to a campaign?",
+    "sql": "SELECT DISTINCT `c`.`name` FROM `schemapile_lakehouse`.`dense_500`.`crm_customers` `c` JOIN `schemapile_lakehouse`.`dense_500`.`crm_campaign_responses` `r` ON `c`.`id` = `r`.`customers_id`"
+  },
+  {
+    "shape": "aggregation",
+    "question": "What is the total amount of all service cases?",
+    "sql": "SELECT SUM(`amount`) FROM `schemapile_lakehouse`.`dense_500`.`svc_service_cases`"
+  }
+]

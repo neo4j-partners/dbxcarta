@@ -1,0 +1,17 @@
+[
+  {
+    "shape": "single_table_filter",
+    "question": "What are the names of active shipping methods?",
+    "sql": "SELECT `name` FROM `schemapile_lakehouse`.`dense_500`.`log_shipping_methods` WHERE `is_active` = TRUE"
+  },
+  {
+    "shape": "two_table_join",
+    "question": "What are the names of users who created active shipping methods?",
+    "sql": "SELECT `u`.`name` FROM `schemapile_lakehouse`.`dense_500`.`log_shipping_methods` `s` JOIN `schemapile_lakehouse`.`dense_500`.`sys_users` `u` ON `s`.`created_by_id` = `u`.`id` WHERE `s`.`is_active` = TRUE"
+  },
+  {
+    "shape": "aggregation",
+    "question": "What is the total amount of all delivery lines for each shipping method?",
+    "sql": "SELECT `s`.`name`, SUM(`d`.`total_amount`) AS `total_amount` FROM `schemapile_lakehouse`.`dense_500`.`log_shipping_methods` `s` JOIN `schemapile_lakehouse`.`dense_500`.`log_deliveries_lines` `d` ON `s`.`id` = `d`.`shipping_methods_id` GROUP BY `s`.`name`"
+  }
+]

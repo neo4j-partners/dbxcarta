@@ -1,0 +1,17 @@
+[
+  {
+    "shape": "single_table_filter",
+    "question": "What are the names of active employees in the hr_employees table?",
+    "sql": "SELECT `name` FROM `schemapile_lakehouse`.`dense_500`.`hr_employees` WHERE `is_active` = TRUE"
+  },
+  {
+    "shape": "two_table_join",
+    "question": "What are the names of employees who approved invoices and the corresponding invoice amounts?",
+    "sql": "SELECT `schemapile_lakehouse`.`dense_500`.`hr_employees`.`name`, `schemapile_lakehouse`.`dense_500`.`fin_invoices`.`amount` FROM `schemapile_lakehouse`.`dense_500`.`hr_employees` INNER JOIN `schemapile_lakehouse`.`dense_500`.`fin_invoices` ON `schemapile_lakehouse`.`dense_500`.`hr_employees`.`id` = `schemapile_lakehouse`.`dense_500`.`fin_invoices`.`approved_by_id`"
+  },
+  {
+    "shape": "aggregation",
+    "question": "What is the total amount of invoices grouped by the currency of the invoice?",
+    "sql": "SELECT `currency`, SUM(`amount`) AS `total_amount` FROM `schemapile_lakehouse`.`dense_500`.`fin_invoices` GROUP BY `currency`"
+  }
+]

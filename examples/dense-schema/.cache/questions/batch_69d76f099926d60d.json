@@ -1,0 +1,17 @@
+[
+  {
+    "shape": "single_table_filter",
+    "question": "Find the names of active employees in the hr_employees table",
+    "sql": "SELECT `name` FROM `schemapile_lakehouse`.`dense_500`.`hr_employees` WHERE `is_active` = TRUE"
+  },
+  {
+    "shape": "two_table_join",
+    "question": "Find the names of employees who have attended training sessions",
+    "sql": "SELECT DISTINCT `e`.`name` FROM `schemapile_lakehouse`.`dense_500`.`hr_employees` `e` JOIN `schemapile_lakehouse`.`dense_500`.`hr_training_sessions` `ts` ON `e`.`id` = `ts`.`employees_id`"
+  },
+  {
+    "shape": "aggregation",
+    "question": "Find the total amount spent on training sessions for each employee",
+    "sql": "SELECT `e`.`name`, SUM(`ts`.`amount`) AS `total_amount` FROM `schemapile_lakehouse`.`dense_500`.`hr_employees` `e` JOIN `schemapile_lakehouse`.`dense_500`.`hr_training_sessions` `ts` ON `e`.`id` = `ts`.`employees_id` GROUP BY `e`.`name`"
+  }
+]

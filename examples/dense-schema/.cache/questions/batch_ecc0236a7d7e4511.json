@@ -1,0 +1,17 @@
+[
+  {
+    "shape": "single_table_filter",
+    "question": "What are the names of active project types?",
+    "sql": "SELECT `name` FROM `schemapile_lakehouse`.`dense_500`.`proj_project_types` WHERE `is_active` = TRUE"
+  },
+  {
+    "shape": "two_table_join",
+    "question": "What are the names of users who created active project types?",
+    "sql": "SELECT `u`.`name` FROM `schemapile_lakehouse`.`dense_500`.`proj_project_types` `p` JOIN `schemapile_lakehouse`.`dense_500`.`sys_users` `u` ON `p`.`created_by_id` = `u`.`id` WHERE `p`.`is_active` = TRUE"
+  },
+  {
+    "shape": "aggregation",
+    "question": "What is the total amount of all time entries for each project type?",
+    "sql": "SELECT `p`.`name`, SUM(`t`.`total_amount`) AS `total_amount` FROM `schemapile_lakehouse`.`dense_500`.`proj_proj_time_entries_lines` `t` JOIN `schemapile_lakehouse`.`dense_500`.`proj_project_types` `p` ON `t`.`project_types_id` = `p`.`id` GROUP BY `p`.`name`"
+  }
+]

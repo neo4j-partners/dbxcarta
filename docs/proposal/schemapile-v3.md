@@ -370,7 +370,7 @@ phase meets the quality bar.
     under Phase G below.
   - Phase F exit criterion met: `graph_rag` execution rate 8/9 (0.889) is
     within one question of `schema_dump` execution rate 9/9 (1.0).
-- **Phase G —** _pending_
+- **Phase G —** _in progress_
 
   **v3 arm scores (n=9, run 671692334458641, 2026-05-13):**
 

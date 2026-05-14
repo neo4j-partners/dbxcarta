@@ -1,0 +1,474 @@
+[
+  {
+    "question_id": "ds_0000",
+    "question": "What are the names of active employees in the hr_employees table?",
+    "reference_sql": "SELECT `name` FROM `schemapile_lakehouse`.`dense_500`.`hr_employees` WHERE `is_active` = TRUE",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "single_table_filter"
+  },
+  {
+    "question_id": "ds_0001",
+    "question": "What are the names of projects and their corresponding retrospective event dates?",
+    "reference_sql": "SELECT `schemapile_lakehouse`.`dense_500`.`proj_projects`.`name`, `schemapile_lakehouse`.`dense_500`.`proj_retrospectives`.`event_date` FROM `schemapile_lakehouse`.`dense_500`.`proj_projects` JOIN `schemapile_lakehouse`.`dense_500`.`proj_retrospectives` ON `schemapile_lakehouse`.`dense_500`.`proj_projects`.`id` = `schemapile_lakehouse`.`dense_500`.`proj_retrospectives`.`projects_id`",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "two_table_join"
+  },
+  {
+    "question_id": "ds_0002",
+    "question": "What is the total amount of all retrospectives for each project?",
+    "reference_sql": "SELECT `schemapile_lakehouse`.`dense_500`.`proj_projects`.`name`, SUM(`schemapile_lakehouse`.`dense_500`.`proj_retrospectives`.`amount`) AS total_amount FROM `schemapile_lakehouse`.`dense_500`.`proj_projects` JOIN `schemapile_lakehouse`.`dense_500`.`proj_retrospectives` ON `schemapile_lakehouse`.`dense_500`.`proj_projects`.`id` = `schemapile_lakehouse`.`dense_500`.`proj_retrospectives`.`projects_id` GROUP BY `schemapile_lakehouse`.`dense_500`.`proj_projects`.`name`",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "aggregation"
+  },
+  {
+    "question_id": "ds_0003",
+    "question": "What are the names of active crm customers?",
+    "reference_sql": "SELECT `name` FROM `schemapile_lakehouse`.`dense_500`.`crm_customers` WHERE `is_active` = TRUE",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "single_table_filter"
+  },
+  {
+    "question_id": "ds_0004",
+    "question": "What is the total amount of crm campaigns for each customer?",
+    "reference_sql": "SELECT `schemapile_lakehouse`.`dense_500`.`crm_customers`.`name`, SUM(`schemapile_lakehouse`.`dense_500`.`crm_campaigns`.`amount`) AS total_amount FROM `schemapile_lakehouse`.`dense_500`.`crm_campaigns` INNER JOIN `schemapile_lakehouse`.`dense_500`.`crm_customers` ON `schemapile_lakehouse`.`dense_500`.`crm_campaigns`.`customers_id` = `schemapile_lakehouse`.`dense_500`.`crm_customers`.`id` GROUP BY `schemapile_lakehouse`.`dense_500`.`crm_customers`.`name`",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "aggregation"
+  },
+  {
+    "question_id": "ds_0005",
+    "question": "What are the names of active employees in the hr_employees table?",
+    "reference_sql": "SELECT `name` FROM `schemapile_lakehouse`.`dense_500`.`hr_employees` WHERE `is_active` = TRUE",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "single_table_filter"
+  },
+  {
+    "question_id": "ds_0006",
+    "question": "What are the names of employees who approved invoices and the corresponding invoice amounts?",
+    "reference_sql": "SELECT `schemapile_lakehouse`.`dense_500`.`hr_employees`.`name`, `schemapile_lakehouse`.`dense_500`.`fin_invoices`.`amount` FROM `schemapile_lakehouse`.`dense_500`.`hr_employees` INNER JOIN `schemapile_lakehouse`.`dense_500`.`fin_invoices` ON `schemapile_lakehouse`.`dense_500`.`hr_employees`.`id` = `schemapile_lakehouse`.`dense_500`.`fin_invoices`.`approved_by_id`",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "two_table_join"
+  },
+  {
+    "question_id": "ds_0007",
+    "question": "What is the total amount of invoices grouped by the currency of the invoice?",
+    "reference_sql": "SELECT `currency`, SUM(`amount`) AS `total_amount` FROM `schemapile_lakehouse`.`dense_500`.`fin_invoices` GROUP BY `currency`",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "aggregation"
+  },
+  {
+    "question_id": "ds_0008",
+    "question": "What are the names of active crm relationship types?",
+    "reference_sql": "SELECT `name` FROM `schemapile_lakehouse`.`dense_500`.`crm_relationship_types` WHERE `is_active` = TRUE",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "single_table_filter"
+  },
+  {
+    "question_id": "ds_0009",
+    "question": "What are the names of sys users who created crm renewal proposals?",
+    "reference_sql": "SELECT DISTINCT `schemapile_lakehouse`.`dense_500`.`sys_users`.`name` FROM `schemapile_lakehouse`.`dense_500`.`sys_users` JOIN `schemapile_lakehouse`.`dense_500`.`crm_renewal_proposals` ON `schemapile_lakehouse`.`dense_500`.`sys_users`.`id` = `schemapile_lakehouse`.`dense_500`.`crm_renewal_proposals`.`created_by_id`",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "two_table_join"
+  },
+  {
+    "question_id": "ds_0010",
+    "question": "What is the total amount of crm renewal proposals lines for each relationship type?",
+    "reference_sql": "SELECT `schemapile_lakehouse`.`dense_500`.`crm_relationship_types`.`name`, SUM(`schemapile_lakehouse`.`dense_500`.`crm_renewal_proposals_lines`.`total_amount`) AS total_amount FROM `schemapile_lakehouse`.`dense_500`.`crm_relationship_types` JOIN `schemapile_lakehouse`.`dense_500`.`crm_renewal_proposals_lines` ON `schemapile_lakehouse`.`dense_500`.`crm_relationship_types`.`id` = `schemapile_lakehouse`.`dense_500`.`crm_renewal_proposals_lines`.`relationship_types_id` GROUP BY `schemapile_lakehouse`.`dense_500`.`crm_relationship_types`.`name`",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "aggregation"
+  },
+  {
+    "question_id": "ds_0011",
+    "question": "What are the names of active employees?",
+    "reference_sql": "SELECT `name` FROM `schemapile_lakehouse`.`dense_500`.`hr_employees` WHERE `is_active` = TRUE",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "single_table_filter"
+  },
+  {
+    "question_id": "ds_0012",
+    "question": "What are the names of customers who have responded to a campaign?",
+    "reference_sql": "SELECT DISTINCT `c`.`name` FROM `schemapile_lakehouse`.`dense_500`.`crm_customers` `c` JOIN `schemapile_lakehouse`.`dense_500`.`crm_campaign_responses` `r` ON `c`.`id` = `r`.`customers_id`",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "two_table_join"
+  },
+  {
+    "question_id": "ds_0013",
+    "question": "What is the total amount of all service cases?",
+    "reference_sql": "SELECT SUM(`amount`) FROM `schemapile_lakehouse`.`dense_500`.`svc_service_cases`",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "aggregation"
+  },
+  {
+    "question_id": "ds_0014",
+    "question": "What are the names of active users in the sys_users table?",
+    "reference_sql": "SELECT `name` FROM `schemapile_lakehouse`.`dense_500`.`sys_users` WHERE `is_active` = TRUE",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "single_table_filter"
+  },
+  {
+    "question_id": "ds_0015",
+    "question": "What are the names of users who created permissions in the sys_permissions table?",
+    "reference_sql": "SELECT `schemapile_lakehouse`.`dense_500`.`sys_users`.`name` FROM `schemapile_lakehouse`.`dense_500`.`sys_users` INNER JOIN `schemapile_lakehouse`.`dense_500`.`sys_permissions` ON `schemapile_lakehouse`.`dense_500`.`sys_users`.`id` = `schemapile_lakehouse`.`dense_500`.`sys_permissions`.`created_by_id`",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "two_table_join"
+  },
+  {
+    "question_id": "ds_0016",
+    "question": "What is the total amount of all api calls lines for each permission?",
+    "reference_sql": "SELECT `schemapile_lakehouse`.`dense_500`.`sys_permissions`.`name`, SUM(`schemapile_lakehouse`.`dense_500`.`sys_api_calls_lines`.`total_amount`) AS total_amount FROM `schemapile_lakehouse`.`dense_500`.`sys_api_calls_lines` INNER JOIN `schemapile_lakehouse`.`dense_500`.`sys_permissions` ON `schemapile_lakehouse`.`dense_500`.`sys_api_calls_lines`.`permissions_id` = `schemapile_lakehouse`.`dense_500`.`sys_permissions`.`id` GROUP BY `schemapile_lakehouse`.`dense_500`.`sys_permissions`.`name`",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "aggregation"
+  },
+  {
+    "question_id": "ds_0017",
+    "question": "What are the names of active employees in the hr_employees table?",
+    "reference_sql": "SELECT name FROM `schemapile_lakehouse`.`dense_500`.`hr_employees` WHERE is_active = TRUE",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "single_table_filter"
+  },
+  {
+    "question_id": "ds_0018",
+    "question": "What are the names of production lines and their corresponding machine downtimes?",
+    "reference_sql": "SELECT `schemapile_lakehouse`.`dense_500`.`mfg_production_lines`.name, `schemapile_lakehouse`.`dense_500`.`mfg_machine_downtimes`.event_date FROM `schemapile_lakehouse`.`dense_500`.`mfg_production_lines` JOIN `schemapile_lakehouse`.`dense_500`.`mfg_machine_downtimes` ON `schemapile_lakehouse`.`dense_500`.`mfg_production_lines`.id = `schemapile_lakehouse`.`dense_500`.`mfg_machine_downtimes`.production_lines_id",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "two_table_join"
+  },
+  {
+    "question_id": "ds_0019",
+    "question": "What is the total amount of machine downtimes for each production line?",
+    "reference_sql": "SELECT `schemapile_lakehouse`.`dense_500`.`mfg_production_lines`.name, SUM(`schemapile_lakehouse`.`dense_500`.`mfg_machine_downtimes`.amount) AS total_amount FROM `schemapile_lakehouse`.`dense_500`.`mfg_production_lines` JOIN `schemapile_lakehouse`.`dense_500`.`mfg_machine_downtimes` ON `schemapile_lakehouse`.`dense_500`.`mfg_production_lines`.id = `schemapile_lakehouse`.`dense_500`.`mfg_machine_downtimes`.production_lines_id GROUP BY `schemapile_lakehouse`.`dense_500`.`mfg_production_lines`.name",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "aggregation"
+  },
+  {
+    "question_id": "ds_0020",
+    "question": "Find the names of active employees in the hr_employees table",
+    "reference_sql": "SELECT `name` FROM `schemapile_lakehouse`.`dense_500`.`hr_employees` WHERE `is_active` = TRUE",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "single_table_filter"
+  },
+  {
+    "question_id": "ds_0021",
+    "question": "Find the names of employees who have attended training sessions",
+    "reference_sql": "SELECT DISTINCT `e`.`name` FROM `schemapile_lakehouse`.`dense_500`.`hr_employees` `e` JOIN `schemapile_lakehouse`.`dense_500`.`hr_training_sessions` `ts` ON `e`.`id` = `ts`.`employees_id`",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "two_table_join"
+  },
+  {
+    "question_id": "ds_0022",
+    "question": "Find the total amount spent on training sessions for each employee",
+    "reference_sql": "SELECT `e`.`name`, SUM(`ts`.`amount`) AS `total_amount` FROM `schemapile_lakehouse`.`dense_500`.`hr_employees` `e` JOIN `schemapile_lakehouse`.`dense_500`.`hr_training_sessions` `ts` ON `e`.`id` = `ts`.`employees_id` GROUP BY `e`.`name`",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "aggregation"
+  },
+  {
+    "question_id": "ds_0023",
+    "question": "What are the names of active project types?",
+    "reference_sql": "SELECT `name` FROM `schemapile_lakehouse`.`dense_500`.`proj_project_types` WHERE `is_active` = TRUE",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "single_table_filter"
+  },
+  {
+    "question_id": "ds_0024",
+    "question": "What are the names of users who created active project types?",
+    "reference_sql": "SELECT `u`.`name` FROM `schemapile_lakehouse`.`dense_500`.`proj_project_types` `p` JOIN `schemapile_lakehouse`.`dense_500`.`sys_users` `u` ON `p`.`created_by_id` = `u`.`id` WHERE `p`.`is_active` = TRUE",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "two_table_join"
+  },
+  {
+    "question_id": "ds_0025",
+    "question": "What is the total amount of all time entries for each project type?",
+    "reference_sql": "SELECT `p`.`name`, SUM(`t`.`total_amount`) AS `total_amount` FROM `schemapile_lakehouse`.`dense_500`.`proj_proj_time_entries_lines` `t` JOIN `schemapile_lakehouse`.`dense_500`.`proj_project_types` `p` ON `t`.`project_types_id` = `p`.`id` GROUP BY `p`.`name`",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "aggregation"
+  },
+  {
+    "question_id": "ds_0026",
+    "question": "Find all active employees in the hr_employees table",
+    "reference_sql": "SELECT * FROM `schemapile_lakehouse`.`dense_500`.`hr_employees` WHERE `is_active` = TRUE",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "single_table_filter"
+  },
+  {
+    "question_id": "ds_0027",
+    "question": "Find the names of employees and their corresponding monthly KPIs",
+    "reference_sql": "SELECT `schemapile_lakehouse`.`dense_500`.`hr_employees`.`name`, `schemapile_lakehouse`.`dense_500`.`hr_monthly_kpis`.* FROM `schemapile_lakehouse`.`dense_500`.`hr_employees` JOIN `schemapile_lakehouse`.`dense_500`.`hr_monthly_kpis` ON `schemapile_lakehouse`.`dense_500`.`hr_employees`.`id` = `schemapile_lakehouse`.`dense_500`.`hr_monthly_kpis`.`employees_id`",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "two_table_join"
+  },
+  {
+    "question_id": "ds_0028",
+    "question": "Find the total amount of all approved sys_data_exports",
+    "reference_sql": "SELECT SUM(`amount`) AS total_amount FROM `schemapile_lakehouse`.`dense_500`.`sys_data_exports` WHERE `status` = 'approved'",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "aggregation"
+  },
+  {
+    "question_id": "ds_0029",
+    "question": "What are the names of active shipping methods?",
+    "reference_sql": "SELECT `name` FROM `schemapile_lakehouse`.`dense_500`.`log_shipping_methods` WHERE `is_active` = TRUE",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "single_table_filter"
+  },
+  {
+    "question_id": "ds_0030",
+    "question": "What are the names of users who created active shipping methods?",
+    "reference_sql": "SELECT `u`.`name` FROM `schemapile_lakehouse`.`dense_500`.`log_shipping_methods` `s` JOIN `schemapile_lakehouse`.`dense_500`.`sys_users` `u` ON `s`.`created_by_id` = `u`.`id` WHERE `s`.`is_active` = TRUE",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "two_table_join"
+  },
+  {
+    "question_id": "ds_0031",
+    "question": "What is the total amount of all delivery lines for each shipping method?",
+    "reference_sql": "SELECT `s`.`name`, SUM(`d`.`total_amount`) AS `total_amount` FROM `schemapile_lakehouse`.`dense_500`.`log_shipping_methods` `s` JOIN `schemapile_lakehouse`.`dense_500`.`log_deliveries_lines` `d` ON `s`.`id` = `d`.`shipping_methods_id` GROUP BY `s`.`name`",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "aggregation"
+  },
+  {
+    "question_id": "ds_0032",
+    "question": "What are the names of active products in the inv_products table?",
+    "reference_sql": "SELECT `name` FROM `schemapile_lakehouse`.`dense_500`.`inv_products` WHERE `is_active` = TRUE",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "single_table_filter"
+  },
+  {
+    "question_id": "ds_0033",
+    "question": "What are the names of products that have a purchase order with a status of 'pending'?",
+    "reference_sql": "SELECT DISTINCT `inv_products`.`name` FROM `schemapile_lakehouse`.`dense_500`.`inv_products` JOIN `schemapile_lakehouse`.`dense_500`.`inv_purchase_orders` ON `inv_products`.`id` = `inv_purchase_orders`.`products_id` WHERE `inv_purchase_orders`.`status` = 'pending'",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "two_table_join"
+  },
+  {
+    "question_id": "ds_0034",
+    "question": "What is the total amount of all purchase orders for each product?",
+    "reference_sql": "SELECT `inv_products`.`name`, SUM(`inv_purchase_orders`.`amount`) AS `total_amount` FROM `schemapile_lakehouse`.`dense_500`.`inv_products` JOIN `schemapile_lakehouse`.`dense_500`.`inv_purchase_orders` ON `inv_products`.`id` = `inv_purchase_orders`.`products_id` GROUP BY `inv_products`.`name`",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "aggregation"
+  },
+  {
+    "question_id": "ds_0035",
+    "question": "What are the names of active crm_customers?",
+    "reference_sql": "SELECT `name` FROM `schemapile_lakehouse`.`dense_500`.`crm_customers` WHERE `is_active` = TRUE",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "single_table_filter"
+  },
+  {
+    "question_id": "ds_0036",
+    "question": "What are the names of crm_customers and their corresponding crm_referral_submissions event dates?",
+    "reference_sql": "SELECT `schemapile_lakehouse`.`dense_500`.`crm_customers`.`name`, `schemapile_lakehouse`.`dense_500`.`crm_referral_submissions`.`event_date` FROM `schemapile_lakehouse`.`dense_500`.`crm_customers` INNER JOIN `schemapile_lakehouse`.`dense_500`.`crm_referral_submissions` ON `schemapile_lakehouse`.`dense_500`.`crm_customers`.`id` = `schemapile_lakehouse`.`dense_500`.`crm_referral_submissions`.`customers_id`",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "two_table_join"
+  },
+  {
+    "question_id": "ds_0037",
+    "question": "What is the total amount of crm_referral_submissions_lines for each crm_personas?",
+    "reference_sql": "SELECT `schemapile_lakehouse`.`dense_500`.`crm_personas`.`name`, SUM(`schemapile_lakehouse`.`dense_500`.`crm_referral_submissions_lines`.`total_amount`) AS total_amount FROM `schemapile_lakehouse`.`dense_500`.`crm_personas` INNER JOIN `schemapile_lakehouse`.`dense_500`.`crm_referral_submissions_lines` ON `schemapile_lakehouse`.`dense_500`.`crm_personas`.`id` = `schemapile_lakehouse`.`dense_500`.`crm_referral_submissions_lines`.`personas_id` GROUP BY `schemapile_lakehouse`.`dense_500`.`crm_personas`.`name`",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "aggregation"
+  },
+  {
+    "question_id": "ds_0038",
+    "question": "What are the names of active sales commission plans?",
+    "reference_sql": "SELECT `name` FROM `schemapile_lakehouse`.`dense_500`.`sales_commission_plans` WHERE `is_active` = TRUE",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "single_table_filter"
+  },
+  {
+    "question_id": "ds_0039",
+    "question": "What are the names of users who created log carrier bookings?",
+    "reference_sql": "SELECT `schemapile_lakehouse`.`dense_500`.`sys_users`.`name` FROM `schemapile_lakehouse`.`dense_500`.`log_carrier_bookings` INNER JOIN `schemapile_lakehouse`.`dense_500`.`sys_users` ON `schemapile_lakehouse`.`dense_500`.`log_carrier_bookings`.`created_by_id` = `schemapile_lakehouse`.`dense_500`.`sys_users`.`id`",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "two_table_join"
+  },
+  {
+    "question_id": "ds_0040",
+    "question": "What is the total amount of all svc case resolutions?",
+    "reference_sql": "SELECT SUM(`amount`) FROM `schemapile_lakehouse`.`dense_500`.`svc_case_resolutions`",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "aggregation"
+  },
+  {
+    "question_id": "ds_0041",
+    "question": "What are the names of active employees in the hr_employees table?",
+    "reference_sql": "SELECT `name` FROM `schemapile_lakehouse`.`dense_500`.`hr_employees` WHERE `is_active` = TRUE",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "single_table_filter"
+  },
+  {
+    "question_id": "ds_0042",
+    "question": "What are the names of employees who approved invoices?",
+    "reference_sql": "SELECT DISTINCT `e`.`name` FROM `schemapile_lakehouse`.`dense_500`.`hr_employees` `e` JOIN `schemapile_lakehouse`.`dense_500`.`fin_invoices` `i` ON `e`.`id` = `i`.`approved_by_id`",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "two_table_join"
+  },
+  {
+    "question_id": "ds_0043",
+    "question": "What is the total amount of all invoices for each account?",
+    "reference_sql": "SELECT `a`.`name`, SUM(`i`.`amount`) AS `total_amount` FROM `schemapile_lakehouse`.`dense_500`.`fin_accounts` `a` JOIN `schemapile_lakehouse`.`dense_500`.`fin_invoices` `i` ON `a`.`id` = `i`.`accounts_id` GROUP BY `a`.`name`",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "aggregation"
+  },
+  {
+    "question_id": "ds_0044",
+    "question": "What are the names of active employees in the hr_employees table?",
+    "reference_sql": "SELECT `name` FROM `schemapile_lakehouse`.`dense_500`.`hr_employees` WHERE `is_active` = TRUE",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "single_table_filter"
+  },
+  {
+    "question_id": "ds_0045",
+    "question": "What are the names of services and their corresponding agent activities?",
+    "reference_sql": "SELECT `schemapile_lakehouse`.`dense_500`.`svc_services`.`name`, `schemapile_lakehouse`.`dense_500`.`svc_agent_activities`.`status` FROM `schemapile_lakehouse`.`dense_500`.`svc_services` JOIN `schemapile_lakehouse`.`dense_500`.`svc_agent_activities` ON `schemapile_lakehouse`.`dense_500`.`svc_services`.`id` = `schemapile_lakehouse`.`dense_500`.`svc_agent_activities`.`services_id`",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "two_table_join"
+  },
+  {
+    "question_id": "ds_0046",
+    "question": "What is the total amount of all agent activities for each service?",
+    "reference_sql": "SELECT `schemapile_lakehouse`.`dense_500`.`svc_services`.`name`, SUM(`schemapile_lakehouse`.`dense_500`.`svc_agent_activities`.`amount`) AS total_amount FROM `schemapile_lakehouse`.`dense_500`.`svc_services` JOIN `schemapile_lakehouse`.`dense_500`.`svc_agent_activities` ON `schemapile_lakehouse`.`dense_500`.`svc_services`.`id` = `schemapile_lakehouse`.`dense_500`.`svc_agent_activities`.`services_id` GROUP BY `schemapile_lakehouse`.`dense_500`.`svc_services`.`name`",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "aggregation"
+  },
+  {
+    "question_id": "ds_0047",
+    "question": "What are the names of active financial accounts?",
+    "reference_sql": "SELECT `name` FROM `schemapile_lakehouse`.`dense_500`.`fin_accounts` WHERE `is_active` = TRUE",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "single_table_filter"
+  },
+  {
+    "question_id": "ds_0048",
+    "question": "What are the names of users who created financial invoices?",
+    "reference_sql": "SELECT `u`.`name` FROM `schemapile_lakehouse`.`dense_500`.`fin_invoices` `i` JOIN `schemapile_lakehouse`.`dense_500`.`sys_users` `u` ON `i`.`created_by_id` = `u`.`id`",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "two_table_join"
+  },
+  {
+    "question_id": "ds_0049",
+    "question": "What is the total amount of all financial invoices grouped by currency?",
+    "reference_sql": "SELECT `currency`, SUM(`amount`) AS `total_amount` FROM `schemapile_lakehouse`.`dense_500`.`fin_invoices` GROUP BY `currency`",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "aggregation"
+  },
+  {
+    "question_id": "ds_0050",
+    "question": "What are the names of active routes?",
+    "reference_sql": "SELECT `name` FROM `schemapile_lakehouse`.`dense_500`.`log_routes` WHERE `is_active` = TRUE",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "single_table_filter"
+  },
+  {
+    "question_id": "ds_0051",
+    "question": "What are the names of users who created active routes?",
+    "reference_sql": "SELECT `u`.`name` FROM `schemapile_lakehouse`.`dense_500`.`log_routes` `r` JOIN `schemapile_lakehouse`.`dense_500`.`sys_users` `u` ON `r`.`created_by_id` = `u`.`id` WHERE `r`.`is_active` = TRUE",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "two_table_join"
+  },
+  {
+    "question_id": "ds_0052",
+    "question": "What is the total amount of all pick list lines for each route?",
+    "reference_sql": "SELECT `r`.`name`, SUM(`pll`.`total_amount`) AS `total_amount` FROM `schemapile_lakehouse`.`dense_500`.`log_routes` `r` JOIN `schemapile_lakehouse`.`dense_500`.`log_pick_lists_lines` `pll` ON `r`.`id` = `pll`.`routes_id` GROUP BY `r`.`name`",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "aggregation"
+  },
+  {
+    "question_id": "ds_0053",
+    "question": "What are the names of active customers?",
+    "reference_sql": "SELECT `name` FROM `schemapile_lakehouse`.`dense_500`.`crm_customers` WHERE `is_active` = TRUE",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "single_table_filter"
+  },
+  {
+    "question_id": "ds_0054",
+    "question": "What are the names of customers who created budget revisions?",
+    "reference_sql": "SELECT DISTINCT `c`.`name` FROM `schemapile_lakehouse`.`dense_500`.`crm_customers` `c` JOIN `schemapile_lakehouse`.`dense_500`.`fin_budget_revisions` `b` ON `c`.`id` = `b`.`created_by_id`",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "two_table_join"
+  },
+  {
+    "question_id": "ds_0055",
+    "question": "What is the total amount of all warranty claims for each service?",
+    "reference_sql": "SELECT `s`.`id`, SUM(`w`.`amount`) AS `total_amount` FROM `schemapile_lakehouse`.`dense_500`.`svc_services` `s` JOIN `schemapile_lakehouse`.`dense_500`.`svc_warranty_claims` `w` ON `s`.`id` = `w`.`services_id` GROUP BY `s`.`id`",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "aggregation"
+  },
+  {
+    "question_id": "ds_0056",
+    "question": "What are the names of active employees in the hr_employees table?",
+    "reference_sql": "SELECT `name` FROM `schemapile_lakehouse`.`dense_500`.`hr_employees` WHERE `is_active` = TRUE",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "single_table_filter"
+  },
+  {
+    "question_id": "ds_0057",
+    "question": "What are the names of production lines and their corresponding work orders?",
+    "reference_sql": "SELECT `schemapile_lakehouse`.`dense_500`.`mfg_production_lines`.`name`, `schemapile_lakehouse`.`dense_500`.`mfg_work_orders`.`reference_number` FROM `schemapile_lakehouse`.`dense_500`.`mfg_production_lines` JOIN `schemapile_lakehouse`.`dense_500`.`mfg_work_orders` ON `schemapile_lakehouse`.`dense_500`.`mfg_production_lines`.`id` = `schemapile_lakehouse`.`dense_500`.`mfg_work_orders`.`production_lines_id`",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "two_table_join"
+  },
+  {
+    "question_id": "ds_0058",
+    "question": "What is the total amount of all work orders for each production line?",
+    "reference_sql": "SELECT `schemapile_lakehouse`.`dense_500`.`mfg_production_lines`.`name`, SUM(`schemapile_lakehouse`.`dense_500`.`mfg_work_orders`.`amount`) AS total_amount FROM `schemapile_lakehouse`.`dense_500`.`mfg_production_lines` JOIN `schemapile_lakehouse`.`dense_500`.`mfg_work_orders` ON `schemapile_lakehouse`.`dense_500`.`mfg_production_lines`.`id` = `schemapile_lakehouse`.`dense_500`.`mfg_work_orders`.`production_lines_id` GROUP BY `schemapile_lakehouse`.`dense_500`.`mfg_production_lines`.`name`",
+    "schema": "dense_500",
+    "source_id": "synthetic_500",
+    "shape": "aggregation"
+  }
+]
