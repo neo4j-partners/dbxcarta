@@ -19,12 +19,24 @@ _TRANSLATE_FROM = " -"
 _TRANSLATE_TO = "__"
 
 
+def id_expr_from_columns(*parts: "Column") -> "Column":
+    """Return a PySpark Column expression equivalent to generate_id().
+
+    Accepts arbitrary Column expressions, including literals. Use this when an
+    identifier combines Python-known values with Spark row values.
+    """
+    from pyspark.sql import functions as F
+
+    return F.lower(
+        F.translate(F.concat_ws(".", *parts), _TRANSLATE_FROM, _TRANSLATE_TO)
+    )
+
+
 def id_expr(*column_names: str) -> "Column":
     """Return a PySpark Column expression equivalent to generate_id()."""
     from pyspark.sql import functions as F
 
-    parts = [F.col(c) for c in column_names]
-    return F.lower(F.translate(F.concat_ws(".", *parts), _TRANSLATE_FROM, _TRANSLATE_TO))
+    return id_expr_from_columns(*(F.col(c) for c in column_names))
 
 
 def value_id_expr() -> "Column":

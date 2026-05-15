@@ -19,6 +19,7 @@ from dbxcarta.core.databricks import (
     validate_serving_endpoint_name,
     validate_uc_volume_subpath,
 )
+from dbxcarta.core.settings import SemanticLayerConfig
 
 
 class SparkIngestSettings(BaseSettings):
@@ -75,6 +76,28 @@ class SparkIngestSettings(BaseSettings):
     # completes with status='success'. When True, any violation raises and the
     # task fails. Flip after two consecutive zero-violation warn-only runs.
     dbxcarta_verify_gate: bool = False
+
+    @classmethod
+    def from_semantic_config(
+        cls, config: SemanticLayerConfig
+    ) -> "SparkIngestSettings":
+        """Compose core semantic-layer config with Spark-specific env settings.
+
+        `SemanticLayerConfig` owns backend-neutral semantic scope. This factory
+        applies that scope before `SparkIngestSettings` validates required
+        fields, so callers can provide catalog/schema/embedding values through
+        core without also setting the legacy Spark env names.
+        """
+        if config.source_schemas:
+            return cls(  # type: ignore[call-arg]
+                dbxcarta_catalog=config.source_catalog,
+                dbxcarta_schemas=config.source_schemas,
+                dbxcarta_embedding_endpoint=config.embedding_endpoint,
+            )
+        return cls(  # type: ignore[call-arg]
+            dbxcarta_catalog=config.source_catalog,
+            dbxcarta_embedding_endpoint=config.embedding_endpoint,
+        )
 
     @field_validator("dbxcarta_catalog")
     @classmethod

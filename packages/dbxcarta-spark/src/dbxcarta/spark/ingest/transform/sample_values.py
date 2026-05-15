@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from dbxcarta.core.contract import CONTRACT_VERSION, generate_id
-from dbxcarta.spark.ingest.contract_expr import value_id_expr
+from dbxcarta.spark.ingest.contract_expr import id_expr_from_columns, value_id_expr
 
 if TYPE_CHECKING:
     from pyspark.sql import DataFrame, SparkSession
@@ -306,19 +306,22 @@ def _sample_values(
     """
     from py4j.protocol import Py4JJavaError
     from pyspark.errors import AnalysisException
-    from pyspark.sql.functions import col, concat, lit, lower, row_number, translate
+    from pyspark.sql.functions import col, lit, row_number
     from pyspark.sql.window import Window
 
     dfs = []
     for cand in candidates:
-        # Compute the catalog.schema.table prefix in Python; only col_name varies in Spark.
-        col_id_prefix = generate_id(cand.catalog, cand.schema_name, cand.table_name) + "."
         for chunk_index, chunk_cols in enumerate(_chunk(cand.column_names, chunk_size)):
             try:
                 query = _sample_query(cand.fq(), chunk_cols)
                 chunk_df = spark.sql(query).withColumn(
                     "col_id",
-                    concat(lit(col_id_prefix), lower(translate(col("col_name"), " -", "__"))),
+                    id_expr_from_columns(
+                        lit(cand.catalog),
+                        lit(cand.schema_name),
+                        lit(cand.table_name),
+                        col("col_name"),
+                    ),
                 )
                 dfs.append(chunk_df)
             except (AnalysisException, Py4JJavaError) as exc:

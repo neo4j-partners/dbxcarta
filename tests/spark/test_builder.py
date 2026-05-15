@@ -28,6 +28,17 @@ def _baseline_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DBXCARTA_SUMMARY_TABLE", "main.default.dbxcarta_runs")
 
 
+def _spark_only_env(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    """Provide Spark operational fields without semantic-layer scope fields."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("DBXCARTA_CATALOG", raising=False)
+    monkeypatch.delenv("DBXCARTA_SCHEMAS", raising=False)
+    monkeypatch.setenv(
+        "DBXCARTA_SUMMARY_VOLUME", "/Volumes/main/default/dbxcarta/summaries"
+    )
+    monkeypatch.setenv("DBXCARTA_SUMMARY_TABLE", "main.default.dbxcarta_runs")
+
+
 def test_spark_builder_satisfies_protocol() -> None:
     assert isinstance(SparkSemanticLayerBuilder(), SemanticLayerBuilder)
 
@@ -65,6 +76,35 @@ def test_build_overrides_catalog_and_schemas_from_config(
     assert result.run_id == "r1"
     assert result.catalog == "from_config"
     assert result.schemas == ("alpha", "beta")
+
+
+def test_build_uses_core_config_before_spark_settings_validation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    _spark_only_env(monkeypatch, tmp_path)
+    captured: dict[str, SparkIngestSettings] = {}
+
+    def fake_run(*, settings: SparkIngestSettings, spark: object | None) -> RunSummary:
+        captured["settings"] = settings
+        return RunSummary(
+            run_id="r1",
+            job_name="dbxcarta",
+            contract_version="1.0",
+            catalog=settings.dbxcarta_catalog,
+            schemas=[s for s in settings.dbxcarta_schemas.split(",") if s],
+        )
+
+    monkeypatch.setattr(builder_module, "run_dbxcarta", fake_run)
+
+    result = SparkSemanticLayerBuilder().build_semantic_layer(
+        SemanticLayerConfig(source_catalog="core_catalog", source_schemas="core_schema")
+    )
+
+    assert captured["settings"].dbxcarta_catalog == "core_catalog"
+    assert captured["settings"].dbxcarta_schemas == "core_schema"
+    assert result.catalog == "core_catalog"
+    assert result.schemas == ("core_schema",)
 
 
 def test_blank_config_schemas_falls_back_to_env(

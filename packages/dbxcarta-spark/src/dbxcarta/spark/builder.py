@@ -3,7 +3,7 @@
 Adapts a backend-neutral `SemanticLayerConfig` to the Spark-specific
 `SparkIngestSettings` and invokes `run_dbxcarta`. Settings the neutral config
 does not expose (summary sinks, secret scope, feature flags) come from the
-process environment via `SparkIngestSettings()`.
+process environment via `SparkIngestSettings.from_semantic_config()`.
 """
 
 from __future__ import annotations
@@ -29,17 +29,8 @@ class SparkSemanticLayerBuilder:
         self._spark = spark
 
     def build_semantic_layer(self, config: SemanticLayerConfig) -> SemanticLayerResult:
-        env_settings = SparkIngestSettings()  # type: ignore[call-arg]
-        merged = env_settings.model_copy(
-            update={
-                "dbxcarta_catalog": config.source_catalog,
-                "dbxcarta_schemas": config.source_schemas or env_settings.dbxcarta_schemas,
-                "dbxcarta_embedding_endpoint": (
-                    config.embedding_endpoint or env_settings.dbxcarta_embedding_endpoint
-                ),
-            }
-        )
-        summary = run_dbxcarta(settings=merged, spark=self._spark)
+        settings = SparkIngestSettings.from_semantic_config(config)
+        summary = run_dbxcarta(settings=settings, spark=self._spark)
         return _result_from_summary(summary)
 
 

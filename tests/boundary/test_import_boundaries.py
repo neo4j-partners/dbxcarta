@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import ast
 import subprocess
 import sys
+from pathlib import Path
+
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _loaded_modules_after(import_statement: str) -> set[str]:
@@ -25,6 +30,35 @@ def _matching_modules(loaded: set[str], forbidden: set[str]) -> set[str]:
         for prefix in forbidden
         if module == prefix or module.startswith(f"{prefix}.")
     }
+
+
+def _imported_modules(path: Path) -> set[str]:
+    tree = ast.parse(path.read_text(), filename=str(path))
+    modules: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            modules.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            modules.add(node.module)
+    return modules
+
+
+def _layer_source_files(layer: str) -> list[Path]:
+    package_root = (
+        _REPO_ROOT
+        / "packages"
+        / f"dbxcarta-{layer}"
+        / "src"
+        / "dbxcarta"
+        / layer
+    )
+    return sorted(package_root.rglob("*.py"))
+
+
+def _matches_forbidden(module: str, forbidden: tuple[str, ...]) -> bool:
+    return any(
+        module == prefix or module.startswith(f"{prefix}.") for prefix in forbidden
+    )
 
 
 def test_top_level_namespace_has_no_compatibility_reexports() -> None:
@@ -90,6 +124,24 @@ def test_spark_root_does_not_load_client_eval_or_presets() -> None:
     leaked = _matching_modules(_loaded_modules_after("import dbxcarta.spark"), forbidden)
 
     assert not leaked, f"Forbidden modules loaded by dbxcarta.spark: {sorted(leaked)}"
+
+
+def test_source_imports_preserve_core_and_extension_boundaries() -> None:
+    forbidden_by_layer = {
+        "core": ("dbxcarta.spark", "dbxcarta.client", "dbxcarta.presets"),
+        "spark": ("dbxcarta.client", "dbxcarta.presets"),
+        "client": ("dbxcarta.spark", "dbxcarta.presets"),
+    }
+    violations: list[str] = []
+
+    for layer, forbidden in forbidden_by_layer.items():
+        for path in _layer_source_files(layer):
+            for module in sorted(_imported_modules(path)):
+                if _matches_forbidden(module, forbidden):
+                    rel = path.relative_to(_REPO_ROOT)
+                    violations.append(f"{rel}: imports {module}")
+
+    assert not violations, "Forbidden cross-layer imports:\n" + "\n".join(violations)
 
 
 # Note: dbxcarta.presets intentionally depends on dbxcarta.spark and
