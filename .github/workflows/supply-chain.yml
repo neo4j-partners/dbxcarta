@@ -106,10 +106,7 @@ jobs:
         run: uv sync --frozen --group test --all-packages
 
       - name: Verify integration tests importable
-        run: |
-          uv run pytest tests/integration --collect-only -q
-          rc=$?
-          [ $rc -eq 0 ] || [ $rc -eq 5 ] || exit $rc
+        run: uv run pytest tests/integration --collect-only -q || [ $? -eq 5 ]
 
       - name: Run all tests
         run: uv run pytest
