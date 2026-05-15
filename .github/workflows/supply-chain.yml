@@ -131,8 +131,9 @@ jobs:
 
       - name: Generate SBOM
         run: |
-          uv export --frozen --all-packages --no-hashes -o /tmp/requirements.txt
-          uvx --from cyclonedx-bom cyclonedx-py requirements /tmp/requirements.txt --outfile dist/sbom.cdx.json
+          uv export --frozen --all-packages --no-hashes -o /tmp/all-requirements.txt
+          grep -v "^-e " /tmp/all-requirements.txt > /tmp/sbom-requirements.txt
+          uvx --from cyclonedx-bom cyclonedx-py requirements /tmp/sbom-requirements.txt --outfile dist/sbom.cdx.json
 
       - name: Inspect package artifacts
         run: uv run python scripts/security/artifact_audit.py inspect dist
