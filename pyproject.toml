@@ -62,6 +62,7 @@ module = [
     "dbxcarta.spark.ingest.fk.discovery",
     "dbxcarta.spark.settings",
     "dbxcarta.spark.ingest.summary",
+    "dbxcarta.spark.ingest.summary_io",
     "dbxcarta.spark.ingest.transform.staging",
     "dbxcarta.spark.ingest.transform.ledger",
     "dbxcarta.spark.ingest.load.neo4j_io",

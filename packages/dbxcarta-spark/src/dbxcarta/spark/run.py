@@ -16,15 +16,12 @@ from __future__ import annotations
 
 import logging
 import os
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-import dbxcarta.spark.ingest.transform.embeddings as emb
 import dbxcarta.spark.ingest.transform.sample_values as sv
 from dbxcarta.spark.contract import CONTRACT_VERSION, NodeLabel, REFERENCES_PROPERTIES, RelType
 from dbxcarta.spark.ingest.extract import ExtractResult, extract
 from dbxcarta.spark.ingest.fk.discovery import FKDiscoveryResult, run_fk_discovery
-from dbxcarta.spark.ingest.transform.ledger import read_ledger, split_by_ledger, upsert_ledger
 from dbxcarta.spark.ingest.load.neo4j_io import (
     bootstrap_constraints,
     purge_stale_values,
@@ -34,13 +31,21 @@ from dbxcarta.spark.ingest.load.neo4j_io import (
 )
 from dbxcarta.spark.ingest.preflight import preflight
 from dbxcarta.spark.settings import SparkIngestSettings
+from dbxcarta.spark.ingest.transform.embed_stage import (
+    check_thresholds,
+    transform_embeddings,
+)
 from dbxcarta.spark.ingest.transform.staging import (
     resolve_ledger_path,
     resolve_staging_path,
-    stage_embedded_nodes,
     truncate_staging_root,
 )
-from dbxcarta.spark.ingest.summary import EmbeddingCounts, RunSummary, SampleValueCounts
+from dbxcarta.spark.ingest.transform.value_stage import (
+    ValueResult,
+    transform_sample_values,
+)
+import dbxcarta.spark.ingest.summary_io as summary_io
+from dbxcarta.spark.ingest.summary import EmbeddingCounts, RunSummary
 from dbxcarta.spark.ingest.load.writer import Neo4jConfig
 
 if TYPE_CHECKING:
@@ -48,42 +53,6 @@ if TYPE_CHECKING:
     from pyspark.sql import DataFrame, SparkSession
 
 logger = logging.getLogger(__name__)
-
-
-_TABLE_EMBEDDING_TEXT_EXPR = (
-    "concat_ws(' | ', concat_ws('.', table_schema, name), nullif(trim(comment), ''))"
-)
-_COLUMN_EMBEDDING_TEXT_EXPR = (
-    "concat_ws(' | ', concat_ws('.', table_schema, table_name, name),"
-    " data_type, nullif(trim(comment), ''))"
-)
-_SCHEMA_EMBEDDING_TEXT_EXPR = (
-    "concat_ws(' | ', concat_ws('.', catalog_name, name), nullif(trim(comment), ''))"
-)
-_DATABASE_EMBEDDING_TEXT_EXPR = "name"
-_VALUE_EMBEDDING_TEXT_EXPR = "value"
-
-_EMBEDDING_TEXT_EXPRS: dict[NodeLabel, str] = {
-    NodeLabel.TABLE: _TABLE_EMBEDDING_TEXT_EXPR,
-    NodeLabel.COLUMN: _COLUMN_EMBEDDING_TEXT_EXPR,
-    NodeLabel.SCHEMA: _SCHEMA_EMBEDDING_TEXT_EXPR,
-    NodeLabel.DATABASE: _DATABASE_EMBEDDING_TEXT_EXPR,
-    NodeLabel.VALUE: _VALUE_EMBEDDING_TEXT_EXPR,
-}
-
-
-@dataclass
-class ValueResult:
-    """Sample-values output passed from transform into FK discovery and load.
-
-    The pipeline uses `None` instead of an empty ValueResult when sampling is
-    disabled, so downstream branches can cleanly skip Value nodes and HAS_VALUE
-    relationships without inspecting Spark DataFrames.
-    """
-
-    value_node_df: "DataFrame"
-    has_value_df: "DataFrame"
-    sample_stats: sv.SampleStats
 
 
 def run_dbxcarta(
@@ -173,7 +142,7 @@ def _emit_summary(
 ) -> None:
     """Emit the summary without masking an existing run failure."""
     try:
-        summary.emit(spark, volume_path, table_name)
+        summary_io.emit(summary, spark, volume_path, table_name)
     except Exception:
         if primary_error is not None:
             logger.exception(
@@ -218,12 +187,12 @@ def _run(
             bootstrap_constraints(driver, settings)
 
             extract_result = extract(spark, settings, schema_list, summary)
-            _transform_embeddings(settings, extract_result, staging_path, ledger_path, summary)
-            values = _transform_sample_values(
+            transform_embeddings(settings, extract_result, staging_path, ledger_path, summary)
+            values = transform_sample_values(
                 spark, settings, schema_list, extract_result,
                 staging_path, ledger_path, summary,
             )
-            _check_thresholds(settings, summary)
+            check_thresholds(settings, summary)
 
             fk_result = run_fk_discovery(
                 spark, settings, schema_list, extract_result,
@@ -295,111 +264,6 @@ def _verify(driver: "Driver", settings: SparkIngestSettings, summary: RunSummary
         " DBXCARTA_VERIFY_GATE=true to gate):\n%s",
         len(report.violations), report.format(),
     )
-
-
-def _transform_embeddings(
-    settings: SparkIngestSettings, extract_result: ExtractResult,
-    staging_path: str, ledger_path: str, summary: RunSummary,
-) -> None:
-    """Enrich node DataFrames with embeddings in-place on `extract_result`.
-
-    Materialize-once: each enabled label is written to a Delta staging table
-    so failure-rate aggregation and the Neo4j write consume the staged data —
-    ai_query is invoked exactly once. Threshold is checked after all labels.
-    """
-    enabled: dict[NodeLabel, bool] = {
-        NodeLabel.TABLE: settings.dbxcarta_include_embeddings_tables,
-        NodeLabel.COLUMN: settings.dbxcarta_include_embeddings_columns,
-        NodeLabel.SCHEMA: settings.dbxcarta_include_embeddings_schemas,
-        NodeLabel.DATABASE: settings.dbxcarta_include_embeddings_databases,
-    }
-    node_dfs: dict[NodeLabel, "DataFrame"] = {
-        NodeLabel.TABLE: extract_result.table_node_df,
-        NodeLabel.COLUMN: extract_result.column_node_df,
-        NodeLabel.SCHEMA: extract_result.schema_node_df,
-        NodeLabel.DATABASE: extract_result.database_df,
-    }
-
-    for label in (NodeLabel.TABLE, NodeLabel.COLUMN, NodeLabel.SCHEMA, NodeLabel.DATABASE):
-        if not enabled[label]:
-            continue
-        node_dfs[label] = _embed_and_stage(
-            node_dfs[label], _EMBEDDING_TEXT_EXPRS[label], label,
-            settings, staging_path, ledger_path, summary,
-        )
-
-    extract_result.table_node_df = node_dfs[NodeLabel.TABLE]
-    extract_result.column_node_df = node_dfs[NodeLabel.COLUMN]
-    extract_result.schema_node_df = node_dfs[NodeLabel.SCHEMA]
-    extract_result.database_df = node_dfs[NodeLabel.DATABASE]
-
-
-def _transform_sample_values(
-    spark: "SparkSession", settings: SparkIngestSettings, schema_list: list[str],
-    extract_result: ExtractResult, staging_path: str, ledger_path: str,
-    summary: RunSummary,
-) -> ValueResult | None:
-    """Sample distinct values and optionally embed the Value nodes.
-
-    Returns None when DBXCARTA_INCLUDE_VALUES is off; the Settings
-    cross-field validator already rejects the embedding-values-without-
-    include-values incoherence, so no warning branch is needed here.
-    """
-    if not settings.dbxcarta_include_values:
-        return None
-
-    value_node_df, has_value_df, sample_stats = sv.sample(
-        spark, extract_result.columns_df, settings.dbxcarta_catalog, schema_list,
-        settings.dbxcarta_sample_limit,
-        settings.dbxcarta_sample_cardinality_threshold,
-        settings.dbxcarta_stack_chunk_size,
-    )
-    summary.sample_values = SampleValueCounts.from_sample_stats(sample_stats)
-    logger.info(
-        "[dbxcarta] sample values: candidates=%d sampled=%d value_nodes=%d",
-        sample_stats.candidate_columns,
-        sample_stats.sampled_columns,
-        sample_stats.value_nodes,
-    )
-
-    if settings.dbxcarta_include_embeddings_values and sample_stats.value_nodes > 0:
-        value_node_df = _embed_and_stage(
-            value_node_df, _EMBEDDING_TEXT_EXPRS[NodeLabel.VALUE], NodeLabel.VALUE,
-            settings, staging_path, ledger_path, summary,
-        )
-
-    return ValueResult(
-        value_node_df=value_node_df,
-        has_value_df=has_value_df,
-        sample_stats=sample_stats,
-    )
-
-
-def _check_thresholds(settings: SparkIngestSettings, summary: RunSummary) -> None:
-    """Raise RuntimeError if any per-label or aggregate embedding failure
-    rate exceeds the configured threshold.
-
-    Called after embedding transforms but before Neo4j writes so a bad
-    endpoint run does not partially refresh the graph with missing vectors.
-    """
-    threshold = settings.dbxcarta_embedding_failure_threshold
-    for label, rate in summary.embeddings.failure_rate_per_label.items():
-        if rate > threshold:
-            raise RuntimeError(
-                f"[dbxcarta] {label.value} embedding failure rate {rate:.2%} exceeds"
-                f" threshold {threshold:.2%}; aborting before Neo4j write"
-            )
-
-    total_attempts = sum(summary.embeddings.attempts.values())
-    total_successes = sum(summary.embeddings.successes.values())
-    if total_attempts > 0:
-        aggregate_rate = (total_attempts - total_successes) / total_attempts
-        summary.embeddings.aggregate_failure_rate = aggregate_rate
-        if aggregate_rate > threshold:
-            raise RuntimeError(
-                f"[dbxcarta] Aggregate embedding failure rate {aggregate_rate:.2%} exceeds"
-                f" threshold {threshold:.2%}; aborting before Neo4j write"
-            )
 
 
 def _load(
@@ -508,70 +372,3 @@ def _drop_cols(df: "DataFrame", *names: str) -> "DataFrame":
         if name in df.columns:
             df = df.drop(name)
     return df
-
-
-def _embed_and_stage(
-    df: "DataFrame", text_expr: str, label: NodeLabel,
-    settings: SparkIngestSettings, staging_path: str, ledger_path: str, summary: RunSummary,
-) -> "DataFrame":
-    """Embed df, stage to Delta once, compute failure stats into summary.
-
-    When DBXCARTA_LEDGER_ENABLED, rows whose embedding_text_hash and model
-    already exist in the per-label ledger are served from the ledger (no
-    ai_query call). Only misses call the endpoint; the ledger is then upserted
-    with the newly-computed vectors (excluding error rows).
-    """
-    from pyspark.sql.functions import col, expr as spark_expr, lit, sha2
-    from pyspark.sql.types import ArrayType, DoubleType
-
-    endpoint = settings.dbxcarta_embedding_endpoint
-    dimension = settings.dbxcarta_embedding_dimension
-
-    if settings.dbxcarta_ledger_enabled:
-        spark = df.sparkSession
-        ledger_df = read_ledger(spark, ledger_path, label)
-
-        if ledger_df is not None:
-            df_hashed = df.withColumn("_curr_hash", sha2(spark_expr(text_expr), 256))
-            hits_df, misses_df = split_by_ledger(df_hashed, ledger_df, endpoint)
-            hit_count = hits_df.count()
-            summary.embeddings.ledger_hits[label] = hit_count
-
-            hit_final = hits_df.select(
-                *[col(c) for c in df.columns],
-                col("_curr_hash").alias("embedding_text_hash"),
-                col("_led_embedding").cast(ArrayType(DoubleType())).alias("embedding"),
-                lit(None).cast("string").alias("embedding_error"),
-                col("_led_model").alias("embedding_model"),
-                col("_led_embedded_at").alias("embedded_at"),
-            )
-
-            embedded_misses = emb.add_embedding_column(
-                misses_df, text_expr, endpoint, dimension, label=label.value,
-            )
-            enriched = hit_final.unionByName(embedded_misses)
-        else:
-            summary.embeddings.ledger_hits[label] = 0
-            enriched = emb.add_embedding_column(
-                df, text_expr, endpoint, dimension, label=label.value,
-            )
-    else:
-        enriched = emb.add_embedding_column(
-            df, text_expr, endpoint, dimension, label=label.value,
-        )
-
-    staged = stage_embedded_nodes(enriched, staging_path, label)
-    rate, attempts, successes = emb.compute_failure_stats(staged)
-    summary.embeddings.attempts[label] = attempts
-    summary.embeddings.successes[label] = successes
-    summary.embeddings.failure_rate_per_label[label] = rate
-
-    if settings.dbxcarta_ledger_enabled:
-        upsert_ledger(staged, ledger_path, label)
-
-    logger.info(
-        "[dbxcarta] %s embeddings: attempts=%d successes=%d failure_rate=%.2f%% ledger_hits=%d",
-        label.value, attempts, successes, rate * 100,
-        summary.embeddings.ledger_hits.get(label, 0),
-    )
-    return staged

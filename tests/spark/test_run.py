@@ -23,7 +23,7 @@ def test_run_dbxcarta_accepts_explicit_settings_and_spark(monkeypatch) -> None:
         calls["emit"] = (spark, volume_path, table_name, summary.status)
 
     monkeypatch.setattr(pipeline, "_run", fake_run)
-    monkeypatch.setattr(pipeline.RunSummary, "emit", fake_emit)
+    monkeypatch.setattr(pipeline.summary_io, "emit", fake_emit)
 
     pipeline.run_dbxcarta(settings=settings, spark=fake_spark)
 

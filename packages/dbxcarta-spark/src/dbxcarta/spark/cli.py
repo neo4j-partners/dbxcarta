@@ -53,7 +53,7 @@ def _handle_verify(argv: list[str]) -> int:
     args = parser.parse_args(argv)
 
     from dbxcarta.spark.settings import SparkIngestSettings
-    from dbxcarta.spark.ingest.summary import LoadSummaryError, load_summary_from_volume
+    from dbxcarta.spark.ingest.summary_io import LoadSummaryError, load_summary_from_volume
     from dbxcarta.spark.verify import verify_run
 
     settings = SparkIngestSettings()

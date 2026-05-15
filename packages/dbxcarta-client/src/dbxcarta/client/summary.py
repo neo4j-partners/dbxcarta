@@ -17,6 +17,10 @@ if TYPE_CHECKING:
 def _mkdirs(dirpath: Path) -> None:
     parts = dirpath.parts
     if len(parts) > 1 and parts[1] == "Volumes":
+        # UC Volumes (/Volumes/<catalog>/<schema>/<volume>/...) reject
+        # parents=True mkdir on the managed prefix; the catalog/schema/volume
+        # already exist, so create only the subpath levels (depth >= 6) one
+        # at a time.
         for depth in range(6, len(parts) + 1):
             Path(*parts[:depth]).mkdir(exist_ok=True)
     else:
