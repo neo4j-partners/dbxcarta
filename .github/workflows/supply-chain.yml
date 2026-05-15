@@ -22,6 +22,7 @@ jobs:
             tests: tests/core
           - layer: spark
             package: dbxcarta-spark
+            extra_package: dbxcarta-client
             tests: tests/spark
           - layer: client
             package: dbxcarta-client
@@ -31,6 +32,7 @@ jobs:
             tests: tests/presets
           - layer: boundary
             package: dbxcarta-spark
+            extra_package: dbxcarta-client
             tests: tests/boundary
           - layer: finance-genie
             package: dbxcarta-finance-genie-example
@@ -65,11 +67,10 @@ jobs:
         run: uv lock --check
 
       - name: Sync package test environment
-        run: >
-          uv sync --frozen
-          --package ${{ matrix.package }}
-          --extra test
-          --no-default-groups
+        run: |
+          args="--package ${{ matrix.package }}"
+          [[ -n "${{ matrix.extra_package }}" ]] && args="$args --package ${{ matrix.extra_package }}"
+          uv sync --frozen $args --extra test --no-default-groups
 
       - name: Run layer tests
         run: uv run --no-sync pytest ${{ matrix.tests }}
