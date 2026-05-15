@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
 from dbxcarta.client.databricks import build_workspace_client
-from dbxcarta.core.databricks import quote_identifier
+from dbxcarta.spark.databricks import quote_identifier
 from dbxcarta_dense_schema_example.config import DenseSchemaConfig, load_config
 from dbxcarta_dense_schema_example.utils import (
     load_dotenv_file,

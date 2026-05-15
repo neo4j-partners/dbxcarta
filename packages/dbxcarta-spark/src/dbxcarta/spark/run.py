@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING
 
 import dbxcarta.spark.ingest.transform.embeddings as emb
 import dbxcarta.spark.ingest.transform.sample_values as sv
-from dbxcarta.core.contract import CONTRACT_VERSION, NodeLabel, REFERENCES_PROPERTIES, RelType
+from dbxcarta.spark.contract import CONTRACT_VERSION, NodeLabel, REFERENCES_PROPERTIES, RelType
 from dbxcarta.spark.ingest.extract import ExtractResult, extract
 from dbxcarta.spark.ingest.fk.discovery import FKDiscoveryResult, run_fk_discovery
 from dbxcarta.spark.ingest.transform.ledger import read_ledger, split_by_ledger, upsert_ledger
@@ -254,7 +254,7 @@ def _run(
 
 
 def _verify(driver: "Driver", settings: SparkIngestSettings, summary: RunSummary) -> None:
-    """Final pipeline step: re-run dbxcarta.core.verify against the run summary just
+    """Final pipeline step: re-run dbxcarta.spark.verify against the run summary just
     built. Records the outcome on summary.verify (durable in JSON + Delta).
     Warn-only by default; raises when settings.dbxcarta_verify_gate is True.
 
@@ -265,7 +265,7 @@ def _verify(driver: "Driver", settings: SparkIngestSettings, summary: RunSummary
     """
     from databricks.sdk import WorkspaceClient
     from dbxcarta.spark.ingest.summary import VerifyResult
-    from dbxcarta.core.verify import verify_run
+    from dbxcarta.spark.verify import verify_run
 
     summary_dict = summary.to_dict()
     summary_dict["status"] = "success"

@@ -5,12 +5,6 @@ from pathlib import Path
 
 from databricks_job_runner import Runner
 
-# Per-entrypoint distribution that owns the corresponding console script and
-# carries the runtime deps Databricks needs on the cluster. After the
-# split-package cutover, the `dbxcarta` CLI itself ships in `dbxcarta-presets`,
-# `dbxcarta-ingest` in `dbxcarta-spark`, and `dbxcarta-client` in
-# `dbxcarta-client`. Each PythonWheelTask must be configured with the matching
-# distribution name so Databricks installs the right wheel.
 _ENTRYPOINT_WHEEL_PACKAGE: dict[str, str] = {
     "ingest": "dbxcarta-spark",
     "client": "dbxcarta-client",
@@ -18,14 +12,9 @@ _ENTRYPOINT_WHEEL_PACKAGE: dict[str, str] = {
 
 runner = Runner(
     run_name_prefix="dbxcarta",
-    wheel_package="dbxcarta-presets",
+    wheel_package="dbxcarta-spark",
     scripts_dir="scripts",
     cli_command="uv run dbxcarta",
-    # Excluded from cleartext env-param forwarding to job parameters. The
-    # runner instead emits DATABRICKS_SECRET_KEYS=NEO4J_URI,... and
-    # inject_params() pulls these from databricks_secret_scope on the
-    # cluster. Required to keep credentials out of the job-run record
-    # (visible via `databricks jobs get-run <id>`).
     secret_keys=["NEO4J_URI", "NEO4J_USERNAME", "NEO4J_PASSWORD"],
 )
 
@@ -33,19 +22,11 @@ runner = Runner(
 def main() -> None:
     """Entry point.
 
-    - `dbxcarta verify [--run-id RUN_ID]` runs graph and catalog verification
-      against the most recent status='success' run summary in
-      `dbxcarta_summary_volume` (or the explicit run-id) and exits non-zero on
-      any violation.
+    - `dbxcarta verify [--run-id RUN_ID]` runs graph and catalog verification.
     - `dbxcarta preset <import-path> {--print-env|--check-ready|--upload-questions|--run}`
-      resolves the given preset from a `module.path:attr` import spec and runs
-      the requested action against it. `--run` overlays the preset env onto the
-      current environment (existing values win) and invokes the same ingest
-      entrypoint a library consumer would call. Presets ship as their own pip
-      packages; dbxcarta core ships no preset implementations.
-    - `dbxcarta submit-entrypoint {ingest|client}` submits the installed wheel's
-      Databricks entrypoints without uploading per-repo runner scripts.
-    - All other invocations dispatch to the databricks_job_runner.Runner.
+      resolves the given preset and runs the requested action.
+    - `dbxcarta submit-entrypoint {ingest|client}` submits the wheel entrypoint.
+    - All other invocations dispatch to databricks_job_runner.Runner.
     """
     if sys.argv[1:2] == ["verify"]:
         sys.exit(_handle_verify(sys.argv[2:]))
@@ -67,13 +48,13 @@ def _handle_verify(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="dbxcarta verify")
     parser.add_argument(
         "--run-id",
-        help="Run id to verify. Defaults to the most recent status='success' summary in dbxcarta_summary_volume.",
+        help="Run id to verify. Defaults to the most recent status='success' summary.",
     )
     args = parser.parse_args(argv)
 
     from dbxcarta.spark.settings import SparkIngestSettings
     from dbxcarta.spark.ingest.summary import LoadSummaryError, load_summary_from_volume
-    from dbxcarta.core.verify import verify_run
+    from dbxcarta.spark.verify import verify_run
 
     settings = SparkIngestSettings()  # type: ignore[call-arg]
 
@@ -114,52 +95,19 @@ def _handle_preset(argv: list[str]) -> int:
     load_dotenv(Path(".env"), override=False)
 
     parser = argparse.ArgumentParser(prog="dbxcarta preset")
-    parser.add_argument(
-        "spec",
-        help="Preset import spec in 'package.module:attr' form (e.g. dbxcarta_finance_genie_example:preset).",
-    )
+    parser.add_argument("spec", help="Preset import spec in 'package.module:attr' form.")
     actions = parser.add_mutually_exclusive_group(required=True)
-    actions.add_argument(
-        "--print-env",
-        action="store_true",
-        help="Print the preset's recommended dbxcarta env overlay.",
-    )
-    actions.add_argument(
-        "--check-ready",
-        action="store_true",
-        help="Run the preset's readiness check against the configured warehouse.",
-    )
-    actions.add_argument(
-        "--upload-questions",
-        action="store_true",
-        help="Invoke the preset's demo-question upload helper.",
-    )
-    actions.add_argument(
-        "--run",
-        action="store_true",
-        help=(
-            "Overlay the preset's env onto os.environ (existing values win) and"
-            " invoke run_dbxcarta() the same way an external library consumer would."
-        ),
-    )
-    parser.add_argument(
-        "--warehouse-id",
-        default="",
-        help="Override DATABRICKS_WAREHOUSE_ID for --check-ready.",
-    )
-    parser.add_argument(
-        "--strict-optional",
-        action="store_true",
-        help="Fail readiness if optional (e.g. Gold) tables are missing.",
-    )
+    actions.add_argument("--print-env", action="store_true")
+    actions.add_argument("--check-ready", action="store_true")
+    actions.add_argument("--upload-questions", action="store_true")
+    actions.add_argument("--run", action="store_true")
+    parser.add_argument("--warehouse-id", default="")
+    parser.add_argument("--strict-optional", action="store_true")
     args = parser.parse_args(argv)
 
-    from dbxcarta.presets.loader import load_preset
-    from dbxcarta.presets import (
-        QuestionsUploadable,
-        ReadinessCheckable,
-        format_env,
-    )
+    from dbxcarta.spark.loader import load_preset
+    from dbxcarta.spark.presets import format_env
+    from dbxcarta.client.presets import ReadinessCheckable, QuestionsUploadable
 
     try:
         preset = load_preset(args.spec)
@@ -173,17 +121,11 @@ def _handle_preset(argv: list[str]) -> int:
 
     if args.check_ready:
         if not isinstance(preset, ReadinessCheckable):
-            print(
-                f"error: preset {args.spec!r} does not implement readiness()",
-                file=sys.stderr,
-            )
+            print(f"error: preset {args.spec!r} does not implement readiness()", file=sys.stderr)
             return 2
         warehouse_id = args.warehouse_id or os.environ.get("DATABRICKS_WAREHOUSE_ID", "")
         if not warehouse_id:
-            print(
-                "error: DATABRICKS_WAREHOUSE_ID is required for --check-ready",
-                file=sys.stderr,
-            )
+            print("error: DATABRICKS_WAREHOUSE_ID is required for --check-ready", file=sys.stderr)
             return 2
         ws = _build_workspace_client()
         report = preset.readiness(ws, warehouse_id)
@@ -192,24 +134,21 @@ def _handle_preset(argv: list[str]) -> int:
 
     if args.upload_questions:
         if not isinstance(preset, QuestionsUploadable):
-            print(
-                f"error: preset {args.spec!r} does not implement upload_questions()",
-                file=sys.stderr,
-            )
+            print(f"error: preset {args.spec!r} does not implement upload_questions()", file=sys.stderr)
             return 2
         ws = _build_workspace_client()
         preset.upload_questions(ws)
         return 0
 
     if args.run:
-        from dbxcarta.core.env import apply_env_overlay
+        from dbxcarta.spark.env import apply_env_overlay
         from dbxcarta.spark.run import run_dbxcarta
 
         apply_env_overlay(preset)
         run_dbxcarta()
         return 0
 
-    return 2  # unreachable: argparse requires one of the action flags.
+    return 2
 
 
 def _handle_submit_entrypoint(argv: list[str]) -> int:
@@ -218,22 +157,9 @@ def _handle_submit_entrypoint(argv: list[str]) -> int:
     from databricks_job_runner.errors import RunnerError
 
     parser = argparse.ArgumentParser(prog="dbxcarta submit-entrypoint")
-    parser.add_argument(
-        "entrypoint",
-        choices=("ingest", "client"),
-        help="Installed dbxcarta wheel entrypoint to submit as a Databricks job.",
-    )
-    parser.add_argument(
-        "--compute",
-        choices=("cluster", "serverless"),
-        default=None,
-        help="Override DATABRICKS_COMPUTE_MODE for this submission.",
-    )
-    parser.add_argument(
-        "--no-wait",
-        action="store_true",
-        help="Submit the job and return immediately.",
-    )
+    parser.add_argument("entrypoint", choices=("ingest", "client"))
+    parser.add_argument("--compute", choices=("cluster", "serverless"), default=None)
+    parser.add_argument("--no-wait", action="store_true")
     args = parser.parse_args(argv)
 
     console_entrypoints = {
@@ -282,17 +208,12 @@ def _submit_wheel_entrypoint(
 
     params = runner.config.env_params(secret_keys=runner.secret_keys)
     run_name = f"{runner.run_name_prefix}: {name}"
-    # Brittle dep: databricks_job_runner exposes no public compute resolver, so
-    # we reach into Runner._compute() to honour DATABRICKS_COMPUTE_MODE and the
-    # --compute override. If the runner renames or removes this, replace with a
-    # local cluster/serverless resolver built from runner.config.
     compute = runner._compute(compute_mode)
     if name == "ingest" and _is_serverless_compute(compute):
         raise RunnerError(
             "dbxcarta ingest uses the Neo4j Spark Connector, which is not "
             "supported on Databricks serverless jobs compute. Use classic "
-            "compute with `--compute cluster` and a cluster configured for "
-            "single-user access."
+            "compute with `--compute cluster`."
         )
 
     print("Submitting wheel entrypoint")

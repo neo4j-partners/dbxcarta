@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Mapping
 
-from dbxcarta.core.contract import EdgeSource, generate_id
+from dbxcarta.spark.contract import EdgeSource, generate_id
 
 
 _TYPE_EQUIV: dict[str, str] = {

@@ -5,7 +5,7 @@ authoritative contract between the pipeline and any client that reads the graph.
 Pipelines write to this shape; clients query against it.
 
 The enums that define labels, relationship types, and edge-source values live in
-`dbxcarta.core.contract` and are kept in sync with this document.
+`dbxcarta.spark.contract` and are kept in sync with this document.
 
 ---
 
@@ -30,7 +30,7 @@ sampled value string to the owning column id.
 "my_catalog.finance.orders.status.d41d8cd98f00b204e9800998ecf8427e"
 ```
 
-Both functions are implemented in Python (`dbxcarta.core.contract`) and as
+Both functions are implemented in Python (`dbxcarta.spark.contract`) and as
 equivalent Spark SQL expressions (`dbxcarta.spark.ingest.contract_expr`), so
 ids are byte-identical whether produced on the driver or on executors.
 

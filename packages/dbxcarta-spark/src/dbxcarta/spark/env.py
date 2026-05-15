@@ -1,4 +1,5 @@
 """Environment overlay protocol and cluster bootstrap helpers."""
+
 from __future__ import annotations
 
 import importlib

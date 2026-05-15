@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from dbxcarta.core.databricks import validate_serving_endpoint_name
+from dbxcarta.spark.databricks import validate_serving_endpoint_name
 
 if TYPE_CHECKING:
     from pyspark.sql import Column, DataFrame

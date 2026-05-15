@@ -7,18 +7,21 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
+    "databricks-job-runner>=0.4.8",
     "databricks-sdk>=0.40",
-    "dbxcarta-core",
+    "dbxcarta-client",
     "neo4j>=5.0",
     "pydantic>=2",
     "pydantic-settings>=2",
     "pyspark>=3.5",
+    "python-dotenv",
 ]
 
 [project.optional-dependencies]
 test = ["pytest"]
 
 [project.scripts]
+dbxcarta = "dbxcarta.spark.cli:main"
 dbxcarta-ingest = "dbxcarta.spark.entrypoint:main"
 
 [build-system]
@@ -26,7 +29,7 @@ requires = ["uv_build>=0.11.0,<0.12.0"]
 build-backend = "uv_build"
 
 [tool.uv.sources]
-dbxcarta-core = { workspace = true }
+dbxcarta-client = { workspace = true }
 
 [tool.uv.build-backend]
 module-name = "dbxcarta.spark"

@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from dbxcarta.core.contract import NodeLabel
+from dbxcarta.spark.contract import NodeLabel
 
 if TYPE_CHECKING:
     from pyspark.sql import DataFrame, SparkSession

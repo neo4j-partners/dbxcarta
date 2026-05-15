@@ -5,9 +5,9 @@ This directory is a standalone integration example package,
 Unity Catalog workload with hundreds of tables so dbxcarta retrieval can be
 tested against dense schema context.
 
-The package depends on `dbxcarta-core`, `dbxcarta-spark`, `dbxcarta-client`,
-and `dbxcarta-presets`. Its tests live under `tests/examples/dense-schema/`
-and run in CI as a first-class sample consumer.
+The package depends on `dbxcarta-spark` and `dbxcarta-client`. Its tests live
+under `tests/examples/dense-schema/` and run in CI as a first-class sample
+consumer.
 
 ## What lives here
 
@@ -56,4 +56,4 @@ uv run dbxcarta submit-entrypoint client
 ```
 
 Synthetic materialization and question generation stay inside this example.
-They are not part of the `dbxcarta-core` public API.
+They are not part of the `dbxcarta-spark` or `dbxcarta-client` public APIs.

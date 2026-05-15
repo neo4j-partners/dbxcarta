@@ -298,7 +298,7 @@ def _parse_fixture_fks(catalog: str) -> set[tuple[str, str]]:
     """Parse `tests/fixtures/setup_test_catalog.sql` and return the canonical
     set of *declared* `(src_id, dst_id)` REFERENCES edges, normalized via
     `generate_id`."""
-    from dbxcarta.core.contract import generate_id
+    from dbxcarta.spark.contract import generate_id
 
     fixture_sql = (PROJECT_ROOT / "tests" / "fixtures" / "setup_test_catalog.sql").read_text()
     out: set[tuple[str, str]] = set()

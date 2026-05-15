@@ -23,7 +23,7 @@ import re
 from dataclasses import dataclass, field
 from enum import Enum
 
-from dbxcarta.core.contract import EdgeSource
+from dbxcarta.spark.contract import EdgeSource
 from dbxcarta.spark.ingest.fk.common import (
     ColumnMeta,
     DeclaredPair,

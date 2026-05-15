@@ -12,8 +12,8 @@ from __future__ import annotations
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings
 
-from dbxcarta.core.contract import DEFAULT_EMBEDDING_ENDPOINT
-from dbxcarta.core.databricks import (
+from dbxcarta.spark.contract import DEFAULT_EMBEDDING_ENDPOINT
+from dbxcarta.spark.databricks import (
     split_qualified_name,
     validate_identifier,
     validate_serving_endpoint_name,

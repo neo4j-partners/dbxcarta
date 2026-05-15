@@ -3,9 +3,10 @@
 Parses leading KEY=VALUE positional arguments into the environment, then runs
 the Text2SQL evaluation harness.
 """
+
 from __future__ import annotations
 
-from dbxcarta.core.env import inject_params
+from dbxcarta.client.env import inject_params
 from dbxcarta.client.eval import run_client
 
 

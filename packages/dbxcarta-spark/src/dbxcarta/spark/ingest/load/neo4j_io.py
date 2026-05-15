@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from dbxcarta.core.contract import NodeLabel, REFERENCES_PROPERTIES, RelType
+from dbxcarta.spark.contract import NodeLabel, REFERENCES_PROPERTIES, RelType
 from dbxcarta.spark.ingest.load.writer import write_nodes, write_relationship
 
 if TYPE_CHECKING:

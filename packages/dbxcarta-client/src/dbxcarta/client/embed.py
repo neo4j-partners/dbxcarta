@@ -23,7 +23,18 @@ def embed_questions(
             f"/serving-endpoints/{endpoint}/invocations",
             body={"input": texts},
         )
-        items: list[dict[str, Any]] = data["data"]
+        if not isinstance(data, dict):
+            actual_type = type(data).__name__
+            raise TypeError(f"embedding response must be a dict, got {actual_type}")
+        raw_items = data.get("data")
+        if not isinstance(raw_items, list):
+            raise TypeError("embedding response missing list field 'data'")
+
+        items: list[dict[str, Any]] = []
+        for item in raw_items:
+            if not isinstance(item, dict):
+                raise TypeError("embedding response 'data' items must be objects")
+            items.append(item)
         items.sort(key=lambda x: x["index"])
         return [item["embedding"] for item in items], None
     except Exception as exc:

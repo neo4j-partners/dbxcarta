@@ -11,8 +11,9 @@ capabilities (`ReadinessCheckable`, `QuestionsUploadable`) live in
 
 from __future__ import annotations
 
-from dbxcarta.spark.env import EnvOverlay
 from typing import Protocol, runtime_checkable
+
+from dbxcarta.spark.env import EnvOverlay
 
 
 @runtime_checkable
@@ -20,7 +21,7 @@ class Preset(EnvOverlay, Protocol):
     """Required structural contract for a dbxcarta preset."""
 
     def env(self) -> dict[str, str]:
-        """Return the dbxcarta env overlay (keys are `DBXCARTA_*` / `DATABRICKS_*`)."""
+        """Return the dbxcarta env overlay."""
         ...
 
 

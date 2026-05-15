@@ -27,7 +27,7 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
-from dbxcarta.core.contract import EdgeSource, REFERENCES_PROPERTIES
+from dbxcarta.spark.contract import EdgeSource, REFERENCES_PROPERTIES
 from dbxcarta.spark.ingest.fk.common import (
     ColumnMeta,
     ConstraintRow,

@@ -6,9 +6,9 @@ as Delta tables in a dedicated Unity Catalog catalog and runs dbxcarta
 against the result. It is a second reference consumer alongside the
 finance-genie example and shares no state with it.
 
-The package depends on `dbxcarta-core`, `dbxcarta-spark`, `dbxcarta-client`,
-and `dbxcarta-presets`. Its tests live under `tests/examples/schemapile/` so
-the repo-level CI can run it as a first-class integration consumer.
+The package depends on `dbxcarta-spark` and `dbxcarta-client`. Its tests live
+under `tests/examples/schemapile/` so the repo-level CI can run it as a
+first-class integration consumer.
 
 ## What lives here
 

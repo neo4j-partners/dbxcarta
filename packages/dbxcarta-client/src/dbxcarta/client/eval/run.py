@@ -29,7 +29,7 @@ from dbxcarta.client.settings import ClientSettings
 from dbxcarta.client.sql import parse_sql as _parse_sql
 from dbxcarta.client.summary import ClientRunSummary
 from dbxcarta.client.databricks import build_workspace_client
-from dbxcarta.core.databricks import (
+from dbxcarta.client.databricks import (
     quote_qualified_name,
     split_qualified_name,
 )

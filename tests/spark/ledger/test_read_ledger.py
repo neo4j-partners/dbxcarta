@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from dbxcarta.core.contract import NodeLabel
+from dbxcarta.spark.contract import NodeLabel
 from dbxcarta.spark.ingest.transform.ledger import read_ledger
 
 

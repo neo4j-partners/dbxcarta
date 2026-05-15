@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from dbxcarta.core.contract import CONTRACT_VERSION, generate_id
+from dbxcarta.spark.contract import CONTRACT_VERSION, generate_id
 from dbxcarta.spark.ingest.contract_expr import id_expr
 
 if TYPE_CHECKING:

@@ -15,10 +15,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from dbxcarta.presets import ReadinessReport
-from dbxcarta.core import validate_identifier
+from dbxcarta.client.presets import ReadinessReport
+from dbxcarta.spark.databricks import validate_identifier
 from dbxcarta.client.questions import load_questions
-from dbxcarta.core.databricks import quote_identifier
+from dbxcarta.spark.databricks import quote_identifier
 
 if TYPE_CHECKING:
     from databricks.sdk import WorkspaceClient

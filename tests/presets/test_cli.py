@@ -8,7 +8,7 @@ import pytest
 
 from databricks_job_runner.errors import RunnerError
 
-from dbxcarta.presets import cli
+from dbxcarta.spark import cli
 
 
 class _ConfigStub:

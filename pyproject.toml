@@ -1,17 +1,15 @@
 [project]
 name = "dbxcarta-workspace"
 version = "1.0.0"
-description = "Workspace for dbxcarta core and extension distributions"
+description = "Workspace for dbxcarta distributions"
 authors = [
     { name = "Ryan Knight" },
 ]
 requires-python = ">=3.12"
 dependencies = [
     "dbxcarta-client",
-    "dbxcarta-core",
     "dbxcarta-dense-schema-example",
     "dbxcarta-finance-genie-example",
-    "dbxcarta-presets",
     "dbxcarta-schemapile-example",
     "dbxcarta-spark",
 ]
@@ -29,8 +27,6 @@ package = false
 
 [tool.uv.sources]
 dbxcarta-client = { workspace = true }
-dbxcarta-core = { workspace = true }
-dbxcarta-presets = { workspace = true }
 dbxcarta-spark = { workspace = true }
 dbxcarta-dense-schema-example = { workspace = true }
 dbxcarta-finance-genie-example = { workspace = true }
@@ -39,8 +35,6 @@ dbxcarta-schemapile-example = { workspace = true }
 [tool.uv.workspace]
 members = [
     "packages/dbxcarta-client",
-    "packages/dbxcarta-core",
-    "packages/dbxcarta-presets",
     "packages/dbxcarta-spark",
     "examples/integration/dense-schema",
     "examples/integration/finance-genie",
@@ -53,14 +47,12 @@ markers = [
     "live: tests that require a live Databricks profile, Neo4j, and a previously-loaded catalog (default pytest skips these)",
 ]
 
-# Mypy-strict covers the ingestion domain layer: FK types, FK discovery,
-# extract, settings, summary, and pipeline-edge I/O helpers.
 [tool.mypy]
 python_version = "3.12"
 
 [[tool.mypy.overrides]]
 module = [
-    "dbxcarta.core.contract",
+    "dbxcarta.spark.contract",
     "dbxcarta.spark.ingest.fk.common",
     "dbxcarta.spark.ingest.fk.declared",
     "dbxcarta.spark.ingest.fk.metadata",

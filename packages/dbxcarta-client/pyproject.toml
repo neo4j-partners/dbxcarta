@@ -8,7 +8,6 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "databricks-sdk>=0.40",
-    "dbxcarta-core",
     "neo4j>=5.0",
     "pydantic>=2",
     "pydantic-settings>=2",
@@ -24,9 +23,6 @@ dbxcarta-client = "dbxcarta.client.eval.entrypoint:main"
 [build-system]
 requires = ["uv_build>=0.11.0,<0.12.0"]
 build-backend = "uv_build"
-
-[tool.uv.sources]
-dbxcarta-core = { workspace = true }
 
 [tool.uv.build-backend]
 module-name = "dbxcarta.client"

@@ -5,9 +5,7 @@ description = "Reference dbxcarta preset that materializes SchemaPile slices as 
 authors = [{ name = "Ryan Knight" }]
 requires-python = ">=3.12"
 dependencies = [
-    "dbxcarta-core",
     "dbxcarta-client",
-    "dbxcarta-presets",
     "dbxcarta-spark",
     "databricks-sdk>=0.40",
     "python-dotenv",
@@ -29,9 +27,7 @@ requires = ["uv_build>=0.11.0,<0.12.0"]
 build-backend = "uv_build"
 
 [tool.uv.sources]
-dbxcarta-core = { workspace = true }
 dbxcarta-client = { workspace = true }
-dbxcarta-presets = { workspace = true }
 dbxcarta-spark = { workspace = true }
 
 [tool.pytest.ini_options]

@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-from dbxcarta.presets import Preset, ReadinessReport
-from dbxcarta.presets import QuestionsUploadable, ReadinessCheckable
+from dbxcarta.client.presets import (
+    QuestionsUploadable,
+    ReadinessCheckable,
+    ReadinessReport,
+)
+from dbxcarta.spark.presets import Preset
 from dbxcarta_schemapile_example.preset import (
     _QUESTIONS_FILE,
     _validate_questions_file,

@@ -24,7 +24,7 @@ from pathlib import Path
 
 import pytest
 
-from dbxcarta.core.contract import EdgeSource
+from dbxcarta.spark.contract import EdgeSource
 from dbxcarta.spark.ingest.fk.common import ColumnMeta, ConstraintRow, DeclaredPair, PKIndex
 from dbxcarta.spark.ingest.fk.semantic import (
     ColumnEmbedding,

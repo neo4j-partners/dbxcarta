@@ -12,7 +12,7 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from dbxcarta.core.contract import CONTRACT_VERSION, generate_id
+from dbxcarta.spark.contract import CONTRACT_VERSION, generate_id
 from dbxcarta.spark.ingest.contract_expr import id_expr_from_columns, value_id_expr
 
 if TYPE_CHECKING:

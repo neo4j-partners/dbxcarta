@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from dbxcarta.core.databricks import quote_identifier, quote_qualified_name
+from dbxcarta.spark.databricks import quote_identifier, quote_qualified_name
 from dbxcarta.spark.ingest.transform.staging import parse_volume_path
 
 if TYPE_CHECKING:

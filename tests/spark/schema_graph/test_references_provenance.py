@@ -7,7 +7,7 @@ all flow through the same 5-column schema via the FKEdge dataclass.
 
 from __future__ import annotations
 
-from dbxcarta.core.contract import EdgeSource, REFERENCES_PROPERTIES
+from dbxcarta.spark.contract import EdgeSource, REFERENCES_PROPERTIES
 from dbxcarta.spark.ingest.fk.common import FKEdge
 from dbxcarta.spark.ingest.schema_graph import build_references_rel
 

@@ -167,8 +167,8 @@ uv run dbxcarta submit-entrypoint client
 
 ## Verifying a Run
 
-Pipeline self-verification lives in `dbxcarta.core.verify` and is exposed
-through the `dbxcarta` CLI from `dbxcarta-presets`.
+Pipeline self-verification lives in `dbxcarta.spark.verify` and is exposed
+through the `dbxcarta` CLI from `dbxcarta-spark`.
 After a successful run, point at the run summary in your UC Volume to
 re-run every structural invariant (node counts, FK accounting, HAS_VALUE
 shape, value-id format, run-summary parity):

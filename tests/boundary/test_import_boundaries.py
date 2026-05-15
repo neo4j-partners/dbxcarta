@@ -84,26 +84,8 @@ def test_top_level_namespace_has_no_compatibility_reexports() -> None:
     assert has_client == "False"
 
 
-def test_core_does_not_load_extension_or_spark_modules() -> None:
+def test_client_root_does_not_load_spark_modules() -> None:
     forbidden = {
-        "databricks.sdk",
-        "dbxcarta.client",
-        "dbxcarta.presets",
-        "dbxcarta.spark",
-        "delta",
-        "py4j",
-        "pyspark",
-    }
-
-    leaked = _matching_modules(_loaded_modules_after("import dbxcarta.core"), forbidden)
-
-    assert not leaked, f"Forbidden modules loaded by dbxcarta.core: {sorted(leaked)}"
-
-
-def test_client_root_does_not_load_spark_or_databricks_modules() -> None:
-    forbidden = {
-        "databricks.sdk",
-        "dbxcarta.presets",
         "dbxcarta.spark",
         "delta",
         "py4j",
@@ -115,10 +97,11 @@ def test_client_root_does_not_load_spark_or_databricks_modules() -> None:
     assert not leaked, f"Forbidden modules loaded by dbxcarta.client: {sorted(leaked)}"
 
 
-def test_spark_root_does_not_load_client_eval_or_presets() -> None:
+def test_spark_root_does_not_load_client_eval() -> None:
+    # spark.cli imports dbxcarta.client.databricks lazily (inside functions),
+    # so a top-level import of dbxcarta.spark should not pull client modules.
     forbidden = {
         "dbxcarta.client",
-        "dbxcarta.presets",
     }
 
     leaked = _matching_modules(_loaded_modules_after("import dbxcarta.spark"), forbidden)
@@ -126,11 +109,15 @@ def test_spark_root_does_not_load_client_eval_or_presets() -> None:
     assert not leaked, f"Forbidden modules loaded by dbxcarta.spark: {sorted(leaked)}"
 
 
-def test_source_imports_preserve_core_and_extension_boundaries() -> None:
-    forbidden_by_layer = {
-        "core": ("dbxcarta.spark", "dbxcarta.client", "dbxcarta.presets"),
-        "spark": ("dbxcarta.client", "dbxcarta.presets"),
-        "client": ("dbxcarta.spark", "dbxcarta.presets"),
+def test_source_imports_preserve_layer_boundaries() -> None:
+    # spark.cli is allowed to import dbxcarta.client (it wires both packages at
+    # the CLI boundary). All other spark source files must not import client.
+    cli_path = (
+        _REPO_ROOT
+        / "packages/dbxcarta-spark/src/dbxcarta/spark/cli.py"
+    )
+    forbidden_by_layer: dict[str, tuple[str, ...]] = {
+        "client": ("dbxcarta.spark",),
     }
     violations: list[str] = []
 
@@ -141,11 +128,14 @@ def test_source_imports_preserve_core_and_extension_boundaries() -> None:
                     rel = path.relative_to(_REPO_ROOT)
                     violations.append(f"{rel}: imports {module}")
 
+    # Check spark files excluding cli.py (which intentionally bridges both packages)
+    spark_forbidden = ("dbxcarta.client",)
+    for path in _layer_source_files("spark"):
+        if path == cli_path:
+            continue
+        for module in sorted(_imported_modules(path)):
+            if _matches_forbidden(module, spark_forbidden):
+                rel = path.relative_to(_REPO_ROOT)
+                violations.append(f"{rel}: imports {module}")
+
     assert not violations, "Forbidden cross-layer imports:\n" + "\n".join(violations)
-
-
-# Note: dbxcarta.presets intentionally depends on dbxcarta.spark and
-# dbxcarta.client (Decision 2 in docs/proposal/clean-boundaries.md). It is
-# the operational umbrella that wires extensions together at the application
-# boundary, so a "presets must not import other extensions" check would
-# contradict the design.

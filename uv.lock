@@ -9,10 +9,8 @@ resolution-markers = [
 [manifest]
 members = [
     "dbxcarta-client",
-    "dbxcarta-core",
     "dbxcarta-dense-schema-example",
     "dbxcarta-finance-genie-example",
-    "dbxcarta-presets",
     "dbxcarta-schemapile-example",
     "dbxcarta-spark",
     "dbxcarta-workspace",
@@ -299,7 +297,6 @@ version = "1.0.0"
 source = { editable = "packages/dbxcarta-client" }
 dependencies = [
     { name = "databricks-sdk" },
-    { name = "dbxcarta-core" },
     { name = "neo4j" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
@@ -314,36 +311,11 @@ test = [
 [package.metadata]
 requires-dist = [
     { name = "databricks-sdk", specifier = ">=0.40" },
-    { name = "dbxcarta-core", editable = "packages/dbxcarta-core" },
     { name = "neo4j", specifier = ">=5.0" },
     { name = "pydantic", specifier = ">=2" },
     { name = "pydantic-settings", specifier = ">=2" },
     { name = "pytest", marker = "extra == 'test'" },
     { name = "requests" },
-]
-provides-extras = ["test"]
-
-[[package]]
-name = "dbxcarta-core"
-version = "1.0.0"
-source = { editable = "packages/dbxcarta-core" }
-dependencies = [
-    { name = "neo4j" },
-    { name = "pydantic" },
-    { name = "pydantic-settings" },
-]
-
-[package.optional-dependencies]
-test = [
-    { name = "pytest" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "neo4j", specifier = ">=5.0" },
-    { name = "pydantic", specifier = ">=2" },
-    { name = "pydantic-settings", specifier = ">=2" },
-    { name = "pytest", marker = "extra == 'test'" },
 ]
 provides-extras = ["test"]
 
@@ -354,8 +326,6 @@ source = { editable = "examples/integration/dense-schema" }
 dependencies = [
     { name = "databricks-sdk" },
     { name = "dbxcarta-client" },
-    { name = "dbxcarta-core" },
-    { name = "dbxcarta-presets" },
     { name = "dbxcarta-spark" },
     { name = "faker" },
     { name = "orjson" },
@@ -371,8 +341,6 @@ test = [
 requires-dist = [
     { name = "databricks-sdk", specifier = ">=0.40" },
     { name = "dbxcarta-client", editable = "packages/dbxcarta-client" },
-    { name = "dbxcarta-core", editable = "packages/dbxcarta-core" },
-    { name = "dbxcarta-presets", editable = "packages/dbxcarta-presets" },
     { name = "dbxcarta-spark", editable = "packages/dbxcarta-spark" },
     { name = "faker", specifier = "==40.15.0" },
     { name = "orjson" },
@@ -388,8 +356,6 @@ source = { editable = "examples/integration/finance-genie" }
 dependencies = [
     { name = "databricks-sdk" },
     { name = "dbxcarta-client" },
-    { name = "dbxcarta-core" },
-    { name = "dbxcarta-presets" },
     { name = "dbxcarta-spark" },
     { name = "python-dotenv" },
 ]
@@ -403,8 +369,6 @@ test = [
 requires-dist = [
     { name = "databricks-sdk", specifier = ">=0.40" },
     { name = "dbxcarta-client", editable = "packages/dbxcarta-client" },
-    { name = "dbxcarta-core", editable = "packages/dbxcarta-core" },
-    { name = "dbxcarta-presets", editable = "packages/dbxcarta-presets" },
     { name = "dbxcarta-spark", editable = "packages/dbxcarta-spark" },
     { name = "pytest", marker = "extra == 'test'" },
     { name = "python-dotenv" },
@@ -412,16 +376,45 @@ requires-dist = [
 provides-extras = ["test"]
 
 [[package]]
-name = "dbxcarta-presets"
+name = "dbxcarta-schemapile-example"
+version = "0.1.0"
+source = { editable = "examples/integration/schemapile" }
+dependencies = [
+    { name = "databricks-sdk" },
+    { name = "dbxcarta-client" },
+    { name = "dbxcarta-spark" },
+    { name = "orjson" },
+    { name = "python-dotenv" },
+]
+
+[package.optional-dependencies]
+test = [
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "databricks-sdk", specifier = ">=0.40" },
+    { name = "dbxcarta-client", editable = "packages/dbxcarta-client" },
+    { name = "dbxcarta-spark", editable = "packages/dbxcarta-spark" },
+    { name = "orjson" },
+    { name = "pytest", marker = "extra == 'test'" },
+    { name = "python-dotenv" },
+]
+provides-extras = ["test"]
+
+[[package]]
+name = "dbxcarta-spark"
 version = "1.0.0"
-source = { editable = "packages/dbxcarta-presets" }
+source = { editable = "packages/dbxcarta-spark" }
 dependencies = [
     { name = "databricks-job-runner" },
     { name = "databricks-sdk" },
     { name = "dbxcarta-client" },
-    { name = "dbxcarta-core" },
-    { name = "dbxcarta-spark" },
     { name = "neo4j" },
+    { name = "pydantic" },
+    { name = "pydantic-settings" },
+    { name = "pyspark" },
     { name = "python-dotenv" },
 ]
 
@@ -435,73 +428,12 @@ requires-dist = [
     { name = "databricks-job-runner", specifier = ">=0.4.8" },
     { name = "databricks-sdk", specifier = ">=0.40" },
     { name = "dbxcarta-client", editable = "packages/dbxcarta-client" },
-    { name = "dbxcarta-core", editable = "packages/dbxcarta-core" },
-    { name = "dbxcarta-spark", editable = "packages/dbxcarta-spark" },
-    { name = "neo4j", specifier = ">=5.0" },
-    { name = "pytest", marker = "extra == 'test'" },
-    { name = "python-dotenv" },
-]
-provides-extras = ["test"]
-
-[[package]]
-name = "dbxcarta-schemapile-example"
-version = "0.1.0"
-source = { editable = "examples/integration/schemapile" }
-dependencies = [
-    { name = "databricks-sdk" },
-    { name = "dbxcarta-client" },
-    { name = "dbxcarta-core" },
-    { name = "dbxcarta-presets" },
-    { name = "dbxcarta-spark" },
-    { name = "orjson" },
-    { name = "python-dotenv" },
-]
-
-[package.optional-dependencies]
-test = [
-    { name = "pytest" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "databricks-sdk", specifier = ">=0.40" },
-    { name = "dbxcarta-client", editable = "packages/dbxcarta-client" },
-    { name = "dbxcarta-core", editable = "packages/dbxcarta-core" },
-    { name = "dbxcarta-presets", editable = "packages/dbxcarta-presets" },
-    { name = "dbxcarta-spark", editable = "packages/dbxcarta-spark" },
-    { name = "orjson" },
-    { name = "pytest", marker = "extra == 'test'" },
-    { name = "python-dotenv" },
-]
-provides-extras = ["test"]
-
-[[package]]
-name = "dbxcarta-spark"
-version = "1.0.0"
-source = { editable = "packages/dbxcarta-spark" }
-dependencies = [
-    { name = "databricks-sdk" },
-    { name = "dbxcarta-core" },
-    { name = "neo4j" },
-    { name = "pydantic" },
-    { name = "pydantic-settings" },
-    { name = "pyspark" },
-]
-
-[package.optional-dependencies]
-test = [
-    { name = "pytest" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "databricks-sdk", specifier = ">=0.40" },
-    { name = "dbxcarta-core", editable = "packages/dbxcarta-core" },
     { name = "neo4j", specifier = ">=5.0" },
     { name = "pydantic", specifier = ">=2" },
     { name = "pydantic-settings", specifier = ">=2" },
     { name = "pyspark", specifier = ">=3.5" },
     { name = "pytest", marker = "extra == 'test'" },
+    { name = "python-dotenv" },
 ]
 provides-extras = ["test"]
 
@@ -511,10 +443,8 @@ version = "1.0.0"
 source = { virtual = "." }
 dependencies = [
     { name = "dbxcarta-client" },
-    { name = "dbxcarta-core" },
     { name = "dbxcarta-dense-schema-example" },
     { name = "dbxcarta-finance-genie-example" },
-    { name = "dbxcarta-presets" },
     { name = "dbxcarta-schemapile-example" },
     { name = "dbxcarta-spark" },
 ]
@@ -530,10 +460,8 @@ test = [
 [package.metadata]
 requires-dist = [
     { name = "dbxcarta-client", editable = "packages/dbxcarta-client" },
-    { name = "dbxcarta-core", editable = "packages/dbxcarta-core" },
     { name = "dbxcarta-dense-schema-example", editable = "examples/integration/dense-schema" },
     { name = "dbxcarta-finance-genie-example", editable = "examples/integration/finance-genie" },
-    { name = "dbxcarta-presets", editable = "packages/dbxcarta-presets" },
     { name = "dbxcarta-schemapile-example", editable = "examples/integration/schemapile" },
     { name = "dbxcarta-spark", editable = "packages/dbxcarta-spark" },
 ]

@@ -3,15 +3,13 @@ from __future__ import annotations
 import pytest
 
 import dbxcarta_finance_genie_example.finance_genie as preset_module
-from dbxcarta.presets import (
-    Preset,
+from dbxcarta.client.presets import (
     QuestionsUploadable,
     ReadinessReport,
     ReadinessCheckable,
 )
-from dbxcarta.presets.loader import (
-    load_preset,
-)
+from dbxcarta.spark.loader import load_preset
+from dbxcarta.spark.presets import Preset
 from dbxcarta.spark.settings import SparkIngestSettings
 from dbxcarta_finance_genie_example.finance_genie import (
     FinanceGeniePreset,

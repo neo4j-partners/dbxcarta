@@ -1,4 +1,4 @@
-"""Unit tests for `dbxcarta.core.env.inject_params`."""
+"""Unit tests for `dbxcarta.spark.env.inject_params`."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from dbxcarta.core import env as _bootstrap
+from dbxcarta.spark import env as _bootstrap
 
 
 @dataclass(frozen=True)

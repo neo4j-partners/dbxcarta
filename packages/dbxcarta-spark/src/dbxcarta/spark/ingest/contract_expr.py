@@ -1,9 +1,9 @@
 """PySpark Column expressions for graph contract identifiers.
 
-Spark-side counterparts of `dbxcarta.core.contract.generate_id` and
-`generate_value_id`. Kept in the Spark layer so `dbxcarta.core` stays free of
-PySpark imports. The Python and SQL implementations must agree byte-for-byte;
-`dbxcarta.core.verify.catalog._check_id_normalization` enforces this.
+Spark-side counterparts of `dbxcarta.spark.contract.generate_id` and
+`generate_value_id`. The Python and SQL implementations must agree
+byte-for-byte; `dbxcarta.spark.verify.catalog._check_id_normalization`
+enforces this.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from pyspark.sql import Column
 
 # Characters translated in normalization: space→_, hyphen→_.
-# Mirrors the substitutions in dbxcarta.core.contract.generate_id.
+# Mirrors the substitutions in dbxcarta.spark.contract.generate_id.
 _TRANSLATE_FROM = " -"
 _TRANSLATE_TO = "__"
 

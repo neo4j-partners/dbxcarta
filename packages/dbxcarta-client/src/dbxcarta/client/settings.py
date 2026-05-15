@@ -3,7 +3,7 @@ from __future__ import annotations
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from dbxcarta.core.databricks import (
+from dbxcarta.client.databricks import (
     split_qualified_name,
     validate_identifier,
     validate_serving_endpoint_name,

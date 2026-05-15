@@ -58,10 +58,8 @@ stringly-typed counter.
 ## File Layout
 
 ```
-packages/dbxcarta-core/src/dbxcarta/core/
-  contract.py                NodeLabel, RelType, EdgeSource; identifier generation
-
 packages/dbxcarta-spark/src/dbxcarta/spark/
+  contract.py                NodeLabel, RelType, EdgeSource; identifier generation
   settings.py                SparkIngestSettings + cross-field validators
   run.py                     run_dbxcarta + _run orchestrator
   ingest/

@@ -27,10 +27,9 @@ examples/integration/finance-genie/
 The package declares dbxcarta as a normal pip dependency in `pyproject.toml`.
 Inside this repo, `uv` resolves it to the editable parent through
 `[tool.uv.sources]`; from outside, you would pin it like
-`dependencies = ["dbxcarta-core", "dbxcarta-spark", "dbxcarta-client",
-"dbxcarta-presets"]` and pip would fetch those distributions from your wheel
-index. There is nothing privileged about the example's relationship to the
-dbxcarta workspace.
+`dependencies = ["dbxcarta-spark", "dbxcarta-client"]` and pip would fetch
+those distributions from your wheel index. There is nothing privileged about
+the example's relationship to the dbxcarta workspace.
 
 The Finance Genie settings are normal Python data. A direct library call can
 construct `SparkIngestSettings` from the package-owned overlay and call the

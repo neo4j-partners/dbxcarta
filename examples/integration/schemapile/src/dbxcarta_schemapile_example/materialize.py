@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
 from dbxcarta.client.databricks import build_workspace_client
-from dbxcarta.core.databricks import quote_identifier
+from dbxcarta.spark.databricks import quote_identifier
 from dbxcarta_schemapile_example.config import SchemaPileConfig, load_config
 from dbxcarta_schemapile_example.utils import (
     load_dotenv_file,

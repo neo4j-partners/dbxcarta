@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import Counter
 from itertools import combinations
-from typing import Any
+from typing import Any, Sequence
 
 
 # Result-set comparison algorithm boundaries. Not runtime tunables.
@@ -20,12 +20,15 @@ def stringify_cell(value: Any) -> str:
     return str(value).casefold()
 
 
-def normalize_row(row: list, col_names: list[str] = ()) -> tuple:
+def normalize_row(row: Sequence[Any], col_names: Sequence[str] = ()) -> tuple[str, ...]:
     """Sort stringified cell values, making column order and aliases irrelevant."""
     return tuple(sorted(stringify_cell(v) for v in row))
 
 
-def normalize_result_set(col_names: list[str], rows: list[list]) -> list[tuple]:
+def normalize_result_set(
+    col_names: Sequence[str],
+    rows: Sequence[Sequence[Any]],
+) -> list[tuple[str, ...]]:
     normalized = [normalize_row(row, col_names) for row in rows]
     return sorted(normalized)
 
@@ -50,7 +53,7 @@ def project_to_ref_columns(
 def _subset_matches(
     gen_cols: list[str],
     gen_rows: list[list],
-    ref_norm: list[tuple],
+    ref_norm: list[tuple[str, ...]],
     n: int,
 ) -> bool:
     """Return True if any n-column subset of gen_rows normalizes to ref_norm.
@@ -67,7 +70,10 @@ def _subset_matches(
     return False
 
 
-def is_row_superset(ref_norm: list[tuple], gen_norm: list[tuple]) -> bool:
+def is_row_superset(
+    ref_norm: list[tuple[str, ...]],
+    gen_norm: list[tuple[str, ...]],
+) -> bool:
     """True when every reference row appears in generated at least as often."""
     ref_counter = Counter(ref_norm)
     gen_counter = Counter(gen_norm)

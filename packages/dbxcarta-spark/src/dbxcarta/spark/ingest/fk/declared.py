@@ -15,7 +15,7 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from dbxcarta.core.contract import EdgeSource, generate_id
+from dbxcarta.spark.contract import EdgeSource, generate_id
 from dbxcarta.spark.ingest.fk.common import DeclaredPair, FKEdge
 
 if TYPE_CHECKING:

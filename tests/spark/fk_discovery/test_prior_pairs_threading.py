@@ -7,7 +7,7 @@ same meaning — "already emitted by an earlier strategy in this run."
 
 from __future__ import annotations
 
-from dbxcarta.core.contract import EdgeSource
+from dbxcarta.spark.contract import EdgeSource
 from dbxcarta.spark.ingest.fk.common import ColumnMeta, ConstraintRow, DeclaredPair, PKIndex
 from dbxcarta.spark.ingest.fk.metadata import infer_fk_pairs
 from dbxcarta.spark.ingest.fk.semantic import ColumnEmbedding, infer_semantic_pairs

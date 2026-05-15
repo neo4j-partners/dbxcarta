@@ -16,8 +16,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from dbxcarta.core.contract import NodeLabel
-from dbxcarta.core.databricks import quote_qualified_name
+from dbxcarta.spark.contract import NodeLabel
+from dbxcarta.spark.databricks import quote_qualified_name
 
 if TYPE_CHECKING:
     from databricks.sdk import WorkspaceClient
