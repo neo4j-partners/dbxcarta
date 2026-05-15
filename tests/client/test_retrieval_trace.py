@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+from dbxcarta.client.ids import schema_from_node_id
 from dbxcarta.client.trace import (
     RetrievalTrace,
-    _schema_from_id,
     chosen_schemas_from_columns,
     compute_retrieval_metrics,
     emit_retrieval_traces,
@@ -14,21 +14,21 @@ from dbxcarta.client.retriever import ColumnEntry
 
 
 # ---------------------------------------------------------------------------
-# _schema_from_id
+# schema_from_node_id
 # ---------------------------------------------------------------------------
 
 
 def test_schema_from_column_id() -> None:
-    assert _schema_from_id("cat.myschema.tbl.col") == "myschema"
+    assert schema_from_node_id("cat.myschema.tbl.col") == "myschema"
 
 
 def test_schema_from_table_id() -> None:
-    assert _schema_from_id("cat.myschema.tbl") == "myschema"
+    assert schema_from_node_id("cat.myschema.tbl") == "myschema"
 
 
 def test_schema_from_short_id_returns_none() -> None:
-    assert _schema_from_id("cat.tbl") is None
-    assert _schema_from_id("only") is None
+    assert schema_from_node_id("cat.tbl") is None
+    assert schema_from_node_id("only") is None
 
 
 # ---------------------------------------------------------------------------

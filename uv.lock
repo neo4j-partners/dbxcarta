@@ -410,7 +410,6 @@ source = { editable = "packages/dbxcarta-spark" }
 dependencies = [
     { name = "databricks-job-runner" },
     { name = "databricks-sdk" },
-    { name = "dbxcarta-client" },
     { name = "neo4j" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
@@ -427,7 +426,6 @@ test = [
 requires-dist = [
     { name = "databricks-job-runner", specifier = ">=0.4.8" },
     { name = "databricks-sdk", specifier = ">=0.40" },
-    { name = "dbxcarta-client", editable = "packages/dbxcarta-client" },
     { name = "neo4j", specifier = ">=5.0" },
     { name = "pydantic", specifier = ">=2" },
     { name = "pydantic-settings", specifier = ">=2" },

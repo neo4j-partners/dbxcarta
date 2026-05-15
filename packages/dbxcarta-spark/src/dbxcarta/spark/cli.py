@@ -106,8 +106,11 @@ def _handle_preset(argv: list[str]) -> int:
     args = parser.parse_args(argv)
 
     from dbxcarta.spark.loader import load_preset
-    from dbxcarta.spark.presets import format_env
-    from dbxcarta.client.presets import ReadinessCheckable, QuestionsUploadable
+    from dbxcarta.spark.presets import (
+        QuestionsUploadable,
+        ReadinessCheckable,
+        format_env,
+    )
 
     try:
         preset = load_preset(args.spec)
@@ -276,7 +279,7 @@ def _is_serverless_compute(compute: object) -> bool:
 
 
 def _build_workspace_client():
-    from dbxcarta.client.databricks import build_workspace_client
+    from dbxcarta.spark.databricks import build_workspace_client
 
     return build_workspace_client()
 

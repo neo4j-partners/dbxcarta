@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 import dbxcarta_finance_genie_example.finance_genie as preset_module
-from dbxcarta.client.presets import (
+from dbxcarta.spark.presets import (
     QuestionsUploadable,
     ReadinessReport,
     ReadinessCheckable,

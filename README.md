@@ -46,8 +46,8 @@ top-level `dbxcarta` import surface; consumers import the layer they need.
 
 **Layer responsibilities:**
 
-- **Spark** owns the concrete Unity Catalog ingest implementation, the graph contract, verification, Databricks validators, and the operational CLI.
-- **Client** owns retrieval primitives, preset readiness/question-upload capabilities, and the Text2SQL eval harness.
+- **Spark** owns the concrete Unity Catalog ingest implementation, the graph contract, verification, Databricks validators, preset capability protocols, and the operational CLI.
+- **Client** owns retrieval primitives and the Text2SQL eval harness.
 
 Code running with Databricks Spark access can construct `SparkIngestSettings` and call the ingest implementation directly:
 
@@ -158,14 +158,14 @@ This repository uses a clean boundary cutover. Old top-level imports are deleted
 | `from dbxcarta import Settings` | `from dbxcarta.spark import SparkIngestSettings` |
 | `from dbxcarta import run_client` | `from dbxcarta.client.eval import run_client` |
 | `dbxcarta.contract` | `dbxcarta.spark.contract` |
-| `dbxcarta.databricks` | `dbxcarta.spark.databricks` for validators; `dbxcarta.client.databricks` for `WorkspaceClient` construction |
+| `dbxcarta.databricks` | `dbxcarta.spark.databricks` for operational helpers; `dbxcarta.client.databricks` for client workflow helpers |
 | `dbxcarta.verify` | `dbxcarta.spark.verify` |
 | `dbxcarta.ingest.*` | `dbxcarta.spark.ingest.*` |
 | `dbxcarta.ingest.pipeline` | `dbxcarta.spark.run` |
 | `dbxcarta.client.client` | `dbxcarta.client.eval.run` |
 | `dbxcarta.entrypoints.ingest` | `dbxcarta.spark.entrypoint` |
 | `dbxcarta.entrypoints.client` | `dbxcarta.client.eval.entrypoint` |
-| `dbxcarta.presets` module file | `dbxcarta.spark.presets`, `dbxcarta.spark.loader`, and `dbxcarta.client.presets` |
+| `dbxcarta.presets` module file | `dbxcarta.spark.presets` and `dbxcarta.spark.loader` |
 
 The `dbxcarta` and `dbxcarta-ingest` commands are registered by
 `dbxcarta-spark`; `dbxcarta-client` is registered by `dbxcarta-client`.
@@ -179,8 +179,9 @@ External projects depend on the distribution that matches the capability they us
 
 A preset is a small configuration adapter published by an external package and
 referenced by an import-path spec like `your_pkg.module:preset`. Optional
-readiness and question-upload hooks live in `dbxcarta.client.presets` for CLI
-and demo integrations; they are not required for Spark library consumption.
+readiness and question-upload hooks live in `dbxcarta.spark.presets` for CLI
+and demo integrations; they do not require the Spark package to depend on the
+client runtime.
 
 Removing or renaming a public name above is a breaking change. Adding a new name is additive. Implementation modules below a layer remain internal unless documented here.
 

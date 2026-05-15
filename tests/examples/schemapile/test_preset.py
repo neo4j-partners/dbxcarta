@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from dbxcarta.client.presets import (
+from dbxcarta.spark.presets import (
     QuestionsUploadable,
     ReadinessCheckable,
     ReadinessReport,

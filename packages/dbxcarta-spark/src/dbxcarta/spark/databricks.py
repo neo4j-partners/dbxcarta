@@ -2,10 +2,19 @@
 
 from __future__ import annotations
 
+import os
 import re
+
+from databricks.sdk import WorkspaceClient
 
 _IDENTIFIER_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_-]*$")
 _VOLUME_SUBPATH_PART_RE = re.compile(r"^[A-Za-z0-9._=-]+$")
+
+
+def build_workspace_client() -> WorkspaceClient:
+    """Build a WorkspaceClient from DATABRICKS_PROFILE or default SDK auth."""
+    profile = os.environ.get("DATABRICKS_PROFILE")
+    return WorkspaceClient(profile=profile) if profile else WorkspaceClient()
 
 
 def validate_identifier(value: str, *, label: str = "identifier") -> str:

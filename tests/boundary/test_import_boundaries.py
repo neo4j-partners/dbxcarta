@@ -110,14 +110,9 @@ def test_spark_root_does_not_load_client_eval() -> None:
 
 
 def test_source_imports_preserve_layer_boundaries() -> None:
-    # spark.cli is allowed to import dbxcarta.client (it wires both packages at
-    # the CLI boundary). All other spark source files must not import client.
-    cli_path = (
-        _REPO_ROOT
-        / "packages/dbxcarta-spark/src/dbxcarta/spark/cli.py"
-    )
     forbidden_by_layer: dict[str, tuple[str, ...]] = {
         "client": ("dbxcarta.spark",),
+        "spark": ("dbxcarta.client",),
     }
     violations: list[str] = []
 
@@ -127,15 +122,5 @@ def test_source_imports_preserve_layer_boundaries() -> None:
                 if _matches_forbidden(module, forbidden):
                     rel = path.relative_to(_REPO_ROOT)
                     violations.append(f"{rel}: imports {module}")
-
-    # Check spark files excluding cli.py (which intentionally bridges both packages)
-    spark_forbidden = ("dbxcarta.client",)
-    for path in _layer_source_files("spark"):
-        if path == cli_path:
-            continue
-        for module in sorted(_imported_modules(path)):
-            if _matches_forbidden(module, spark_forbidden):
-                rel = path.relative_to(_REPO_ROOT)
-                violations.append(f"{rel}: imports {module}")
 
     assert not violations, "Forbidden cross-layer imports:\n" + "\n".join(violations)
