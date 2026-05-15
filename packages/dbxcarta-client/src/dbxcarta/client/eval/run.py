@@ -1,14 +1,8 @@
 """DBxCarta client — Text2SQL evaluation harness.
 
-Evaluation arms:
-  - reference: executes reference_sql directly to validate the grading path.
-  - no_context/schema_dump: generate SQL with ai_query, parse it, execute it
-    on the warehouse, and compare the result set against reference_sql.
-  - graph_rag: embed the question, retrieve graph context from Neo4j, then
-    generate and grade SQL through the same execution path.
-
 This module owns orchestration: settings, preflight, arm dispatch, and summary
-emission. The per-arm logic lives in ``dbxcarta.client.eval.arms``.
+emission. The per-arm logic and arm semantics (reference / no_context /
+schema_dump / graph_rag) live in ``dbxcarta.client.eval.arms``.
 """
 
 from __future__ import annotations

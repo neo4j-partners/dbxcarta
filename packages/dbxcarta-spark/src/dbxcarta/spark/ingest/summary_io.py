@@ -108,7 +108,7 @@ def emit_stdout(summary: RunSummary) -> None:
         f"[dbxcarta] run_id={summary.run_id} job={summary.job_name} "
         f"status={summary.status} catalog={summary.catalog}"
     )
-    for stage, count in summary._build_row_counts().items():
+    for stage, count in summary.to_dict()["row_counts"].items():
         print(f"  {stage}: {count}")
     for label, count in summary.neo4j_counts.items():
         print(f"  neo4j/{label}: {count}")
