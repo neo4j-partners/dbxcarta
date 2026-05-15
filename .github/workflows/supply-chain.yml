@@ -120,7 +120,7 @@ jobs:
       - name: Vulnerability scan
         run: |
           uv export --frozen --all-packages --no-hashes -o /tmp/all-requirements.txt
-          grep -v "dbxcarta" /tmp/all-requirements.txt > /tmp/requirements.txt
+          grep -v "^-e " /tmp/all-requirements.txt > /tmp/requirements.txt
           uvx pip-audit -r /tmp/requirements.txt
 
       - name: Clean package output
