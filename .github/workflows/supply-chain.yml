@@ -112,7 +112,7 @@ jobs:
         run: uv run pytest
 
       - name: Type check
-        run: uv run mypy packages/dbxcarta-spark/src packages/dbxcarta-client/src
+        run: uv run mypy -p dbxcarta.spark -p dbxcarta.client
 
       - name: Lint
         run: uvx ruff check .
