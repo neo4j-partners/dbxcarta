@@ -56,7 +56,7 @@ def _handle_verify(argv: list[str]) -> int:
     from dbxcarta.spark.ingest.summary import LoadSummaryError, load_summary_from_volume
     from dbxcarta.spark.verify import verify_run
 
-    settings = SparkIngestSettings()  # type: ignore[call-arg]
+    settings = SparkIngestSettings()
 
     ws = _build_workspace_client()
     try:

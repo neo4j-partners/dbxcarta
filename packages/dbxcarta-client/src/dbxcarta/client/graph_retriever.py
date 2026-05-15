@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from neo4j import GraphDatabase
 
+from dbxcarta.client.ids import schema_from_node_id
 from dbxcarta.client.neo4j_utils import neo4j_credentials
 from dbxcarta.client.retriever import ColumnEntry, ContextBundle, JoinLine, Retriever
 from dbxcarta.client.settings import ClientSettings
@@ -170,11 +171,6 @@ def _select_schemas(
     return selected
 
 
-def _schema_from_node_id(node_id: str) -> str | None:
-    parts = node_id.split(".")
-    return parts[1] if len(parts) >= 3 else None
-
-
 def _filter_seed_pairs_to_schemas(
     seed_pairs: list[tuple[str, float]],
     schemas: list[str],
@@ -185,7 +181,7 @@ def _filter_seed_pairs_to_schemas(
     return [
         (node_id, score)
         for node_id, score in seed_pairs
-        if _schema_from_node_id(node_id) in allowed
+        if schema_from_node_id(node_id) in allowed
     ]
 
 
@@ -194,7 +190,7 @@ def _normalized_schema_scores(
 ) -> dict[str, float]:
     raw: dict[str, float] = {}
     for node_id, score in seed_pairs:
-        schema = _schema_from_node_id(node_id)
+        schema = schema_from_node_id(node_id)
         if schema:
             raw[schema] = raw.get(schema, 0.0) + score
     total = sum(raw.values()) or 1.0

@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from databricks.sdk import WorkspaceClient
+from databricks.sdk.errors import DatabricksError
+
+logger = logging.getLogger(__name__)
 
 
 def embed_questions(
@@ -37,5 +41,6 @@ def embed_questions(
             items.append(item)
         items.sort(key=lambda x: x["index"])
         return [item["embedding"] for item in items], None
-    except Exception as exc:
+    except (DatabricksError, KeyError, TypeError) as exc:
+        logger.warning("embedding call to %s failed: %s", endpoint, exc)
         return None, str(exc)

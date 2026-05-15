@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 import os
 
 from dbxcarta.client.settings import ClientSettings
+
+logger = logging.getLogger(__name__)
 
 
 def neo4j_credentials(settings: ClientSettings) -> tuple[str, str, str]:
@@ -18,7 +21,8 @@ def neo4j_credentials(settings: ClientSettings) -> tuple[str, str, str]:
             dbutils.secrets.get(scope=scope, key="NEO4J_USERNAME"),
             dbutils.secrets.get(scope=scope, key="NEO4J_PASSWORD"),
         )
-    except Exception:
+    except ImportError:
+        logger.debug("dbutils unavailable; reading Neo4j credentials from environment")
         return (
             os.environ["NEO4J_URI"],
             os.environ["NEO4J_USERNAME"],

@@ -181,7 +181,8 @@ def _run_llm_arm(
             )
             continue
 
-        assert cleaned_sql is not None
+        if cleaned_sql is None:
+            raise RuntimeError("parser reported success but produced no SQL")
         executed, non_empty, exec_error = execute_sql(
             ws,
             settings.databricks_warehouse_id,
@@ -192,7 +193,8 @@ def _run_llm_arm(
         gradable = bool(reference_sql) and executed
         correct = False
         if gradable:
-            assert reference_sql is not None
+            if reference_sql is None:
+                raise RuntimeError("reference_sql missing despite gradable=True")
             correct, _ = _grade_correct(
                 cleaned_sql,
                 reference_sql,
@@ -327,7 +329,8 @@ def _run_graph_rag_arm(
             )
             continue
 
-        assert cleaned_sql is not None
+        if cleaned_sql is None:
+            raise RuntimeError("parser reported success but produced no SQL")
         executed, non_empty, exec_error = execute_sql(
             ws,
             settings.databricks_warehouse_id,
@@ -338,7 +341,8 @@ def _run_graph_rag_arm(
         gradable = bool(reference_sql) and executed
         correct = False
         if gradable:
-            assert reference_sql is not None
+            if reference_sql is None:
+                raise RuntimeError("reference_sql missing despite gradable=True")
             correct, _ = _grade_correct(
                 cleaned_sql,
                 reference_sql,
@@ -376,7 +380,7 @@ def _run_graph_rag_arm(
 
 
 def run_client() -> None:
-    settings = ClientSettings()  # type: ignore[call-arg]
+    settings = ClientSettings()
 
     from pyspark.sql import SparkSession
 

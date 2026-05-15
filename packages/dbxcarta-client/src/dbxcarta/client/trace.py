@@ -6,15 +6,10 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from dbxcarta.client.databricks import quote_qualified_name
+from dbxcarta.client.ids import schema_from_node_id
 
 if TYPE_CHECKING:
     from pyspark.sql import SparkSession
-
-
-def _schema_from_id(node_id: str) -> str | None:
-    """Extract the schema component from a catalog.schema.table[.column] ID."""
-    parts = node_id.split(".")
-    return parts[1] if len(parts) >= 3 else None
 
 
 def schema_scores_from_seeds(
@@ -41,7 +36,7 @@ def _normalized_schema_scores(
 ) -> dict[str, float]:
     raw: dict[str, float] = {}
     for node_id, score in zip(seed_ids, seed_scores):
-        schema = _schema_from_id(node_id)
+        schema = schema_from_node_id(node_id)
         if schema:
             raw[schema] = raw.get(schema, 0.0) + score
     total = sum(raw.values()) or 1.0
@@ -55,7 +50,7 @@ def chosen_schemas_from_columns(
     seen: set[str] = set()
     result: list[str] = []
     for col in columns:
-        schema = _schema_from_id(col.table_fqn)
+        schema = schema_from_node_id(col.table_fqn)
         if schema and schema not in seen:
             seen.add(schema)
             result.append(schema)
@@ -99,7 +94,7 @@ def compute_retrieval_metrics(trace: RetrievalTrace) -> None:
     if trace.final_col_ids:
         from_target = sum(
             1 for cid in trace.final_col_ids
-            if _schema_from_id(cid) == trace.target_schema
+            if schema_from_node_id(cid) == trace.target_schema
         )
         trace.context_purity = from_target / len(trace.final_col_ids)
 

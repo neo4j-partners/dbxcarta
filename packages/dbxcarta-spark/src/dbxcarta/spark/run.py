@@ -97,7 +97,7 @@ def run_dbxcarta(
     settings are loaded from environment variables and the active Spark session
     is resolved lazily. Library consumers can pass an explicit SparkIngestSettings.
     """
-    resolved_settings = settings if settings is not None else SparkIngestSettings()  # type: ignore[call-arg]
+    resolved_settings = settings if settings is not None else SparkIngestSettings()
 
     if spark is None:
         from pyspark.sql import SparkSession

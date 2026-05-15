@@ -30,10 +30,8 @@ jobs:
         run: |
           uv version --bump ${{ inputs.bump_type }} --frozen
           version=$(uv version --short)
-          uv version --package dbxcarta-core "$version" --frozen
-          uv version --package dbxcarta-spark "$version" --frozen
           uv version --package dbxcarta-client "$version" --frozen
-          uv version --package dbxcarta-presets "$version" --frozen
+          uv version --package dbxcarta-spark "$version" --frozen
           uv lock
 
       - name: Get version

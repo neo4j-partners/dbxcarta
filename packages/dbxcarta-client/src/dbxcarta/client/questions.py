@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+if TYPE_CHECKING:
+    from pyspark.sql import SparkSession
 
 
 class Question(BaseModel):
@@ -54,7 +57,7 @@ def is_table_ref(source: str) -> bool:
     return len(source.split(".")) == 3 and not source.startswith(("/", "."))
 
 
-def load_questions(source: str, spark: Any = None) -> list[Question]:
+def load_questions(source: str, spark: SparkSession | None = None) -> list[Question]:
     """Load and validate client questions from a Delta table or JSON file."""
     if is_table_ref(source):
         if spark is None:

@@ -26,10 +26,8 @@ jobs:
 
       - name: Build wheels and sdists
         run: |
-          uv build --package dbxcarta-core
-          uv build --package dbxcarta-spark
           uv build --package dbxcarta-client
-          uv build --package dbxcarta-presets
+          uv build --package dbxcarta-spark
 
       - name: Store distribution packages
         uses: actions/upload-artifact@v4
