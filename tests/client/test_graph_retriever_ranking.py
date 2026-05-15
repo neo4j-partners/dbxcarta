@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from dbxcarta.client.graph_retriever import _rank_by_combined_score
 
 

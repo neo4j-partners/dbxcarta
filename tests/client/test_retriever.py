@@ -60,7 +60,7 @@ def test_context_bundle_to_text_groups_by_table() -> None:
     text = bundle.to_text()
     lines = text.splitlines()
 
-    table_lines = [l for l in lines if l.startswith("Table:")]
+    table_lines = [ln for ln in lines if ln.startswith("Table:")]
     assert len(table_lines) == 2
     assert "cat.schema.accounts" in table_lines[0]
     assert "cat.schema.transactions" in table_lines[1]

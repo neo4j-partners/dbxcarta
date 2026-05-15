@@ -131,7 +131,6 @@ def run_unit_tests() -> dict:
 def run_schema_setup() -> dict:
     print("\n=== Schema Teardown and Setup ===")
     catalog = os.environ["DBXCARTA_CATALOG"]
-    volume_path = os.environ.get("DATABRICKS_VOLUME_PATH", "")
 
     # Teardown — best-effort (ignore returncode)
     print("  Teardown...")

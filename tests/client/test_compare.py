@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-import pytest
-
 from dbxcarta.client.compare import (
     compare_result_sets,
     normalize_row,
-    normalize_result_set,
     project_to_ref_columns,
     stringify_cell,
 )

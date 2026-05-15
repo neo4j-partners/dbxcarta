@@ -18,7 +18,7 @@ _BASE = {
 }
 
 
-def _semantic_on(**overrides) -> Settings:
+def _semantic_on(**overrides) -> SparkIngestSettings:
     return SparkIngestSettings(
         dbxcarta_infer_semantic=True,
         dbxcarta_include_embeddings_columns=True,

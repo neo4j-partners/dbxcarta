@@ -9,11 +9,7 @@ from pathlib import Path
 import pytest
 
 from dbxcarta_dense_schema_example.config import DenseSchemaConfig
-from dbxcarta_dense_schema_example.generator import (
-    generate_candidates_json,
-    _DOMAIN_SPECS,
-    _SUPPORTED_COUNTS,
-)
+from dbxcarta_dense_schema_example.generator import generate_candidates_json
 from dbxcarta_dense_schema_example.question_generator import (
     _default_cache_dir,
     _format_sample_rows,

@@ -173,7 +173,7 @@ def split_sql_statements(sql: str) -> list[str]:
             segment = "".join(current).strip()
             has_sql = any(
                 line and not line.startswith("--")
-                for line in (l.strip() for l in segment.splitlines())
+                for line in (raw.strip() for raw in segment.splitlines())
             )
             if has_sql:
                 result.append(segment)
@@ -186,7 +186,7 @@ def split_sql_statements(sql: str) -> list[str]:
     segment = "".join(current).strip()
     has_sql = any(
         line and not line.startswith("--")
-        for line in (l.strip() for l in segment.splitlines())
+        for line in (raw.strip() for raw in segment.splitlines())
     )
     if has_sql:
         result.append(segment)

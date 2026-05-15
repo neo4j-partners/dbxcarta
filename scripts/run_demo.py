@@ -29,8 +29,12 @@ import argparse
 import os
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from dotenv import load_dotenv
+
+if TYPE_CHECKING:
+    from databricks.sdk import WorkspaceClient
 
 load_dotenv()
 
