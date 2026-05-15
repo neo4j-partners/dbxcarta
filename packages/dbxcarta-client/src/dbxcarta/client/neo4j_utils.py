@@ -21,8 +21,16 @@ def neo4j_credentials(settings: ClientSettings) -> tuple[str, str, str]:
             dbutils.secrets.get(scope=scope, key="NEO4J_USERNAME"),
             dbutils.secrets.get(scope=scope, key="NEO4J_PASSWORD"),
         )
-    except ImportError:
-        logger.debug("dbutils unavailable; reading Neo4j credentials from environment")
+    except Exception as exc:
+        # Best-effort resolver: databricks-sdk always ships RemoteDbUtils, so
+        # the import succeeds off-cluster but secrets.get() then fails (no
+        # workspace / scope / auth). ANY failure to read the secret scope must
+        # fall back to env vars — this is the local / non-Databricks path, so
+        # a broad catch is deliberate here.
+        logger.debug(
+            "Neo4j secret-scope lookup failed (%s); falling back to environment",
+            exc,
+        )
         return (
             os.environ["NEO4J_URI"],
             os.environ["NEO4J_USERNAME"],
