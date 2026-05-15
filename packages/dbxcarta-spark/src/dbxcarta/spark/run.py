@@ -22,7 +22,6 @@ from typing import TYPE_CHECKING
 import dbxcarta.spark.ingest.transform.embeddings as emb
 import dbxcarta.spark.ingest.transform.sample_values as sv
 from dbxcarta.core.contract import CONTRACT_VERSION, NodeLabel, REFERENCES_PROPERTIES, RelType
-from dbxcarta.core.settings import SemanticLayerConfig
 from dbxcarta.spark.ingest.extract import ExtractResult, extract
 from dbxcarta.spark.ingest.fk.discovery import FKDiscoveryResult, run_fk_discovery
 from dbxcarta.spark.ingest.transform.ledger import read_ledger, split_by_ledger, upsert_ledger
@@ -90,25 +89,15 @@ class ValueResult:
 def run_dbxcarta(
     *,
     settings: SparkIngestSettings | None = None,
-    semantic_config: SemanticLayerConfig | None = None,
     spark: "SparkSession | None" = None,
 ) -> RunSummary:
     """Run a complete ingest and return the finished RunSummary.
 
-    When called with no arguments, this remains the Databricks wheel entrypoint:
+    When called with no arguments, this is the Databricks wheel entrypoint:
     settings are loaded from environment variables and the active Spark session
-    is resolved lazily. Library consumers can pass explicit Spark settings, or
-    pass a backend-neutral SemanticLayerConfig and let Spark-specific settings
-    load the remaining operational fields from the environment.
+    is resolved lazily. Library consumers can pass an explicit SparkIngestSettings.
     """
-    if settings is not None and semantic_config is not None:
-        raise ValueError("pass either settings or semantic_config, not both")
-    if settings is not None:
-        resolved_settings = settings
-    elif semantic_config is not None:
-        resolved_settings = SparkIngestSettings.from_semantic_config(semantic_config)
-    else:
-        resolved_settings = SparkIngestSettings()  # type: ignore[call-arg]
+    resolved_settings = settings if settings is not None else SparkIngestSettings()  # type: ignore[call-arg]
 
     if spark is None:
         from pyspark.sql import SparkSession

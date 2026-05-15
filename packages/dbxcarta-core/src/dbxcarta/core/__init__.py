@@ -1,12 +1,11 @@
 """Public core API for dbxcarta.
 
-Core owns the stable semantic graph contract, validation helpers, lightweight
-configuration protocols, and verification primitives. It intentionally excludes
-client evaluation arms, question upload helpers, readiness checks, Spark job
-orchestration, and synthetic materialization utilities.
+Core owns the stable semantic graph contract, validation helpers, and
+verification primitives. It intentionally excludes client evaluation arms,
+question upload helpers, readiness checks, Spark job orchestration, and
+synthetic materialization utilities.
 """
 
-from dbxcarta.core.builder import SemanticLayerBuilder, SemanticLayerResult
 from dbxcarta.core.contract import (
     CONTRACT_VERSION,
     DEFAULT_EMBEDDING_ENDPOINT,
@@ -28,7 +27,6 @@ from dbxcarta.core.databricks import (
     validate_uc_volume_subpath,
 )
 from dbxcarta.core.env import EnvOverlay, apply_env_overlay, inject_params, load_env_overlay
-from dbxcarta.core.settings import SemanticLayerConfig
 from dbxcarta.core.verify import Report, Violation, verify_run
 
 __all__ = [
@@ -40,9 +38,6 @@ __all__ = [
     "REFERENCES_PROPERTIES",
     "RelType",
     "Report",
-    "SemanticLayerBuilder",
-    "SemanticLayerConfig",
-    "SemanticLayerResult",
     "Violation",
     "apply_env_overlay",
     "generate_id",
