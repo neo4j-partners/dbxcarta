@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from databricks_job_runner import Runner
+
+if TYPE_CHECKING:
+    from databricks_job_runner import DesiredLibrary
 
 _ENTRYPOINT_WHEEL_PACKAGE: dict[str, str] = {
     "ingest": "dbxcarta-spark",
@@ -34,8 +39,59 @@ def main() -> None:
         sys.exit(_handle_preset(sys.argv[2:]))
     if sys.argv[1:2] == ["submit-entrypoint"]:
         sys.exit(_handle_submit_entrypoint(sys.argv[2:]))
+    if sys.argv[1:2] == ["upload"] and "--wheel" in sys.argv[2:]:
+        sys.exit(_handle_upload(sys.argv[2:]))
 
     runner.main()
+
+
+_CLUSTER_LIBRARY_POLL_SECONDS = 15
+_CLUSTER_LIBRARY_TIMEOUT_SECONDS = 15 * 60
+
+_ENTRYPOINT_CLUSTER_PYPI_PACKAGES: dict[str, tuple[str, ...]] = {
+    "ingest": (
+        "databricks-job-runner==0.4.8",
+        "neo4j==6.1.0",
+        "pydantic-settings==2.14.0",
+        "python-dotenv==1.2.2",
+        "typing-inspection==0.4.2",
+    ),
+    "client": (
+        "neo4j==6.1.0",
+        "pydantic-settings==2.14.0",
+        "typing-inspection==0.4.2",
+    ),
+}
+
+_ENTRYPOINT_CLUSTER_MAVEN_PACKAGES: dict[str, tuple[str, ...]] = {
+    "ingest": (
+        "org.neo4j:neo4j-connector-apache-spark_2.13:5.3.10_for_spark_3",
+    ),
+    "client": (),
+}
+
+
+def _handle_upload(argv: list[str]) -> int:
+    from databricks_job_runner.errors import RunnerError
+    from databricks_job_runner.upload import find_latest_wheel
+
+    try:
+        runner.main(["upload", *argv])
+
+        wheel = find_latest_wheel(runner.project_dir / "dist", "dbxcarta-spark")
+        if wheel is None:
+            raise RunnerError("no dbxcarta-spark wheel found after upload.")
+        wheel_path = f"{runner.wheel_volume_dir}/{wheel.name}"
+        _sync_cluster_libraries(
+            "ingest",
+            wheel_path,
+            compute_mode=None,
+            wait=True,
+        )
+    except RunnerError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    return 0
 
 
 def _handle_verify(argv: list[str]) -> int:
@@ -218,6 +274,12 @@ def _submit_wheel_entrypoint(
             "supported on Databricks serverless jobs compute. Use classic "
             "compute with `--compute cluster`."
         )
+    suppress_task_wheel = _sync_cluster_libraries(
+        name,
+        wheel_path,
+        compute_mode=compute_mode,
+        wait=True,
+    )
 
     print("Submitting wheel entrypoint")
     print(f"  Entrypoint: {console_entrypoint}")
@@ -227,7 +289,6 @@ def _submit_wheel_entrypoint(
         print(f"  Params:     {len(params)} env values from .env")
     print("---")
 
-    compute.validate(runner.ws)
     task = SubmitTask(
         task_key=f"run_{name}",
         python_wheel_task=PythonWheelTask(
@@ -236,7 +297,8 @@ def _submit_wheel_entrypoint(
             parameters=params if params else None,
         ),
     )
-    task = compute.decorate_task(task, wheel_path)
+    task_wheel_path = None if suppress_task_wheel else wheel_path
+    task = compute.decorate_task(task, task_wheel_path)
 
     waiter = runner.ws.jobs.submit(
         run_name=run_name,
@@ -276,6 +338,95 @@ def _submit_wheel_entrypoint(
 
 def _is_serverless_compute(compute: object) -> bool:
     return compute.__class__.__name__ == "Serverless"
+
+
+def _sync_cluster_libraries(
+    name: str,
+    wheel_path: str,
+    *,
+    compute_mode: str | None,
+    wait: bool,
+) -> bool:
+    from databricks_job_runner import (
+        DesiredLibrary,
+        format_cluster_library_plan,
+        sync_cluster_libraries,
+    )
+    from databricks_job_runner.errors import RunnerError
+
+    compute = runner._compute(compute_mode)
+    if _is_serverless_compute(compute):
+        return False
+
+    cluster_id = getattr(compute, "cluster_id", None)
+    if not cluster_id:
+        raise RunnerError("DATABRICKS_CLUSTER_ID must be set to sync libraries.")
+
+    compute.validate(runner.ws)
+
+    wheel_package = _ENTRYPOINT_WHEEL_PACKAGE[name]
+    desired = [DesiredLibrary.whl(wheel_path, package=wheel_package)]
+    desired.extend(
+        DesiredLibrary.pypi(package)
+        for package in _ENTRYPOINT_CLUSTER_PYPI_PACKAGES[name]
+    )
+    desired.extend(
+        DesiredLibrary.maven(coordinates)
+        for coordinates in _ENTRYPOINT_CLUSTER_MAVEN_PACKAGES[name]
+    )
+
+    print()
+    print(f"Syncing cluster libraries on {cluster_id}")
+    print("---")
+    plan = sync_cluster_libraries(runner.ws, cluster_id, desired)
+    print(format_cluster_library_plan(plan))
+
+    if plan.failed:
+        raise RunnerError("cluster library sync has failed libraries.")
+    if plan.restart_required:
+        raise RunnerError(
+            "cluster restart required after library cleanup. Restart the "
+            "cluster, then rerun the command."
+        )
+
+    if wait and not plan.ready:
+        _wait_for_cluster_libraries(cluster_id, desired)
+
+    return True
+
+
+def _wait_for_cluster_libraries(
+    cluster_id: str,
+    desired: list[DesiredLibrary],
+) -> None:
+    from databricks_job_runner import (
+        check_cluster_libraries,
+        format_cluster_library_plan,
+    )
+    from databricks_job_runner.errors import RunnerError
+
+    deadline = time.time() + _CLUSTER_LIBRARY_TIMEOUT_SECONDS
+    while time.time() < deadline:
+        time.sleep(_CLUSTER_LIBRARY_POLL_SECONDS)
+        plan = check_cluster_libraries(runner.ws, cluster_id, desired)
+        if plan.ready:
+            print("Cluster libraries ready.")
+            return
+        if plan.failed:
+            print(format_cluster_library_plan(plan))
+            raise RunnerError("cluster library sync has failed libraries.")
+        if plan.restart_required:
+            print(format_cluster_library_plan(plan))
+            raise RunnerError(
+                "cluster restart required after library cleanup. Restart the "
+                "cluster, then rerun the command."
+            )
+        print("  Waiting for cluster libraries...")
+
+    raise RunnerError(
+        "cluster libraries did not become ready within "
+        f"{_CLUSTER_LIBRARY_TIMEOUT_SECONDS // 60} minutes."
+    )
 
 
 def _build_workspace_client():

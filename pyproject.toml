@@ -1,6 +1,6 @@
 [project]
 name = "dbxcarta-workspace"
-version = "1.0.0"
+version = "1.0.1"
 description = "Workspace for dbxcarta distributions"
 authors = [
     { name = "Ryan Knight" },
