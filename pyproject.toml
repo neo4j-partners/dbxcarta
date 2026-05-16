@@ -42,9 +42,10 @@ members = [
 ]
 
 [tool.pytest.ini_options]
-addopts = "-m 'not live' --import-mode=importlib"
+addopts = "-m 'not live and not slow' --import-mode=importlib"
 markers = [
     "live: tests that require a live Databricks profile, Neo4j, and a previously-loaded catalog (default pytest skips these)",
+    "slow: heavier guard/regression tests kept separate from the fast unit suite",
 ]
 
 [tool.mypy]

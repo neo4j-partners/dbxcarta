@@ -168,7 +168,6 @@ def test_recovers_renamed_edges_above_threshold(
         assert r["source"] == EdgeSource.SEMANTIC.value
         assert r["criteria"] is None
     assert counts.accepted == 2
-    assert counts.rejected == max(0, counts.candidates - counts.accepted)
 
 
 def test_unrelated_pair_rejected_sub_threshold(
@@ -200,11 +199,10 @@ def test_value_overlap_adds_bonus_up_to_cap(local_spark, phase4_vectors) -> None
         src: {"v1", "v2", "v3", "v4"},
         tgt: {"v1", "v2", "v3", "v9", "v10"},  # |src∩tgt|/|src| = 3/4
     })
-    by_pair, counts, _df = _run(
+    by_pair, _counts, _df = _run(
         local_spark, phase4_vectors, value_node_df=vnode, has_value_df=hvalue,
     )
     assert by_pair[_BUYER]["confidence"] == pytest.approx(0.90, abs=1e-3)
-    assert counts.value_corroborated >= 1
 
 
 def test_value_overlap_below_threshold_no_bonus(
@@ -216,11 +214,10 @@ def test_value_overlap_below_threshold_no_bonus(
         src: {"v1", "v2", "v3", "v4"},
         tgt: {"v1", "v9", "v10", "v11"},  # 1/4 = 25%
     })
-    by_pair, counts, _df = _run(
+    by_pair, _counts, _df = _run(
         local_spark, phase4_vectors, value_node_df=vnode, has_value_df=hvalue,
     )
     assert by_pair[_BUYER]["confidence"] == pytest.approx(0.88, abs=1e-3)
-    assert counts.value_corroborated == 0
 
 
 def test_value_overlap_is_asymmetric(local_spark, phase4_vectors) -> None:
@@ -235,11 +232,10 @@ def test_value_overlap_is_asymmetric(local_spark, phase4_vectors) -> None:
         src: {"v1", "v2"},
         tgt: {"v1", "v2", "v3", "v4", "v5"},
     })
-    by_pair, counts, _df = _run(
+    by_pair, _counts, _df = _run(
         local_spark, phase4_vectors, value_node_df=vnode, has_value_df=hvalue,
     )
     assert by_pair[_BUYER]["confidence"] == pytest.approx(0.90, abs=1e-3)
-    assert counts.value_corroborated >= 1
 
 
 # --- Missing embeddings skipped ---------------------------------------------
@@ -306,3 +302,48 @@ def test_generic_id_exact_matches_are_not_inferred(local_spark) -> None:
     )
     assert by_pair == {}
     assert counts.accepted == 0
+
+
+def test_id_rescue_is_value_gated_and_directional(local_spark) -> None:
+    """A true shared-PK split is rescued only in child-to-parent direction."""
+    vec = [1.0] + [0.0] * 1023
+    user_id = f"{_CAT}.{_SCHEMA}.users.id"
+    profile_id = f"{_CAT}.{_SCHEMA}.user_profile.id"
+    event_id = f"{_CAT}.{_SCHEMA}.events.id"
+    vectors = {
+        user_id: vec,
+        profile_id: vec,
+        event_id: vec,
+    }
+    cols = [
+        (_CAT, _SCHEMA, "users", "id", "BIGINT", None),
+        (_CAT, _SCHEMA, "user_profile", "id", "BIGINT", None),
+        (_CAT, _SCHEMA, "events", "id", "BIGINT", None),
+    ]
+    cons = [
+        (_CAT, _SCHEMA, "users", "id", "PRIMARY KEY", 1, "users_pk"),
+        (
+            _CAT, _SCHEMA, "user_profile", "id", "PRIMARY KEY", 1,
+            "profile_pk",
+        ),
+        (_CAT, _SCHEMA, "events", "id", "PRIMARY KEY", 1, "events_pk"),
+    ]
+    vnode, hvalue = _value_frames(local_spark, {
+        profile_id: {"u1", "u2"},
+        user_id: {"u1", "u2", "u3", "u4", "u5"},
+        event_id: {"e1", "e2"},
+    })
+
+    by_pair, counts, _df = _run(
+        local_spark,
+        vectors,
+        columns=cols,
+        constraints=cons,
+        value_node_df=vnode,
+        has_value_df=hvalue,
+    )
+
+    assert set(by_pair) == {(profile_id, user_id)}
+    assert (user_id, profile_id) not in by_pair
+    assert all(event_id not in pair for pair in by_pair)
+    assert counts.accepted == 1

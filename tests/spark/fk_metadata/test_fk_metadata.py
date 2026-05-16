@@ -131,7 +131,6 @@ def test_v5fk_rediscovers_three_declared_fks(local_spark) -> None:
         assert r["source"] == EdgeSource.INFERRED_METADATA.value
         assert r["criteria"] is None
     assert counts.accepted == len(expected)
-    assert counts.rejected == max(0, counts.candidates - counts.accepted)
 
 
 def test_declared_prior_pair_suppression(local_spark) -> None:
@@ -198,7 +197,6 @@ def test_tie_break_drops_fanout(local_spark) -> None:
         cons.append(_pk(schema, t))
     edges, counts, _composite, _df = _run(local_spark, cols, cons)
     assert edges == {}
-    assert counts.candidates >= 3
     assert counts.accepted == 0
 
 

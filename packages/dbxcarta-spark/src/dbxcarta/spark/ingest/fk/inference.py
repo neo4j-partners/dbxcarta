@@ -20,9 +20,13 @@ Both strategies share:
     aggregations and joins.
   - `canonicalize_expr` — the native port of `common.canonicalize`.
 
-Counters are coarse by design (accepted plus a single rejected total); the
-revised proposal explicitly drops exact per-reason attribution and the
-counter invariant.
+Production counters are deliberately minimal: only `accepted` (the
+load-bearing written-edge count) and `composite_pk_skipped` (the cheap
+`build_pk_gate` constraints aggregation) are computed on the hot path. The
+former per-strategy `candidates` / `rejected` / `value_corroborated`
+counters were removed because each forced an extra Spark action over the
+n²-shaped graph; pre-filter effectiveness and value corroboration are now
+validated in the `fk_guard` regression test, not on every production run.
 """
 
 from __future__ import annotations
@@ -52,27 +56,28 @@ if TYPE_CHECKING:
 
 @dataclass
 class CoarseFKCounts:
-    """Accepted edges and a coarse rejected total for one inferred strategy.
+    """The two production-path counts for one inferred strategy.
 
-    `candidates` is the pre-scoring working-set size (post name-match/dedup
-    for metadata, post pre-filter for semantic); `rejected` is
-    `candidates - accepted`. No per-reason attribution and no invariant —
-    the revised proposal drops both.
+    `accepted` is the post-attenuation, post-anti-join written edge count —
+    it is load-bearing because materializing it also materializes the frame
+    written to Neo4j. `composite_pk_skipped` is the multi-column-PK
+    observation from `build_pk_gate`'s small constraints aggregation, which
+    already runs regardless of this field.
+
+    The former `candidates` / `rejected` / `value_corroborated` counters were
+    intentionally removed: each was a separate Spark action over the
+    n²-shaped graph and nothing in-repo consumes them. Do not reinstate them
+    on this path — pre-filter effectiveness and value corroboration are
+    validated in the `fk_guard` regression test instead.
     """
 
-    candidates: int = 0
     accepted: int = 0
-    rejected: int = 0
     composite_pk_skipped: int = 0
-    value_corroborated: int = 0
 
     def as_summary_dict(self, prefix: str) -> dict[str, int]:
         return {
-            f"{prefix}_candidates": self.candidates,
             f"{prefix}_accepted": self.accepted,
-            f"{prefix}_rejected": self.rejected,
             f"{prefix}_composite_pk_skipped": self.composite_pk_skipped,
-            f"{prefix}_value_corroborated": self.value_corroborated,
         }
 
 
@@ -393,6 +398,12 @@ def infer_metadata_edges(
         },
     )
 
+    # The id↔id term below is a scale prune, NOT a correctness gate: it keeps
+    # an id-count × id-count cartesian out of the join/window/dedup. Do not
+    # "simplify" it away — attenuation would also suppress generic id→id
+    # fanout, and a genuine shared-PK FK is declared and caught by the
+    # declared path, so dropping it only adds a large useless intermediate to
+    # the heaviest region of the pipeline for zero correctness gain.
     matched = src.join(
         tgt,
         (F.col("s_catalog") == F.col("t_catalog"))
@@ -440,7 +451,6 @@ def infer_metadata_edges(
     # Window set = post name-dedup, type, PK, and score>=threshold. cnt over
     # source_id reproduces Python's per_source candidate count.
     above = scored.filter(F.col("score") >= F.lit(threshold))
-    candidates = above.count()
     att_w = Window.partitionBy("source_id")
     attenuated = (
         above.withColumn("_cnt", F.count(F.lit(1)).over(att_w))
@@ -475,9 +485,7 @@ def infer_metadata_edges(
     if accepted == 0:
         edges.unpersist()
     counts = CoarseFKCounts(
-        candidates=candidates,
         accepted=accepted,
-        rejected=max(0, candidates - accepted),
         composite_pk_skipped=composite_pk_count,
     )
     return edges, counts, composite_pk_count
@@ -615,7 +623,48 @@ def infer_semantic_edges(
             "left_anti",
         )
 
-    candidates = cand.count()
+    # id↔id rescue. The blunt term in `cand` above keeps the id↔id cartesian
+    # out of cosine and value-overlap, but it also erases the legitimate 1:1
+    # shared-PK split (user.id → user_profile.id). Semantic has no
+    # attenuation curve to damp generic id↔id fanout, so the separating
+    # signal is value containment. Re-admit ONLY the id↔id subset that passes
+    # value overlap: build the small id↔id set separately (mirroring the
+    # `cand` prefilter — same catalog/schema, type-compatible, distinct
+    # columns, prior anti-join — with the id↔id condition required instead of
+    # excluded), gate it on `build_value_overlap`, and union survivors back
+    # before cosine. This is a second scoped invocation of the overlap
+    # *function*, not a shared frame with the post-cosine one (a shared
+    # pre-cosine overlap over the full candidate set is materially more
+    # expensive). Value-gated by design: when no values were sampled
+    # `build_value_overlap` returns None and the rescue cannot fire — a
+    # genuine 1:1 split is then dropped from the semantic path, which is
+    # accepted because there is no containment signal to separate it from
+    # generic id↔id noise and the declared path still covers declared FKs.
+    id_cand = src.join(
+        tgt,
+        (F.col("s_catalog") == F.col("t_catalog"))
+        & (F.col("s_schema") == F.col("t_schema"))
+        & (F.col("source_id") != F.col("target_id"))
+        & (F.col("s_canon") == F.col("t_canon"))
+        & (F.lower(F.col("s_column")) == F.lit("id"))
+        & (F.lower(F.col("t_column")) == F.lit("id")),
+        "inner",
+    )
+    if prior_edges_df is not None:
+        id_cand = id_cand.join(
+            prior,
+            (F.col("source_id") == F.col("_p_s"))
+            & (F.col("target_id") == F.col("_p_t")),
+            "left_anti",
+        )
+    id_overlap = build_value_overlap(id_cand, value_node_df, has_value_df)
+    if id_overlap is not None:
+        rescued = id_cand.join(
+            id_overlap.filter(F.col("ratio") >= F.lit(overlap_threshold)),
+            ["source_id", "target_id"],
+            "left_semi",
+        )
+        cand = cand.unionByName(rescued)
 
     dot = F.aggregate(
         F.zip_with(F.col("s_emb"), F.col("t_emb"), lambda x, y: x * y),
@@ -663,13 +712,5 @@ def infer_semantic_edges(
     accepted = edges.cache().count()
     if accepted == 0:
         edges.unpersist()
-    value_corroborated = (
-        scored.filter(F.col("_corr")).count() if accepted else 0
-    )
-    counts = CoarseFKCounts(
-        candidates=candidates,
-        accepted=accepted,
-        rejected=max(0, candidates - accepted),
-        value_corroborated=value_corroborated,
-    )
+    counts = CoarseFKCounts(accepted=accepted)
     return edges, counts

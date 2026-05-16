@@ -76,71 +76,95 @@ def run_fk_discovery(
     (DBXCARTA_SEMANTIC_MIN_TABLES). Column embeddings are required and
     already validated present by Settings' cross-field validator.
     """
+    from pyspark import StorageLevel
+
     constraints_df = _constraints_df(spark, settings, schema_list)
     columns_frame = build_columns_frame(
         extract.columns_df, extract.column_node_df,
     )
-    pk_gate, composite_pk_count = build_pk_gate(columns_frame, constraints_df)
-
-    # Declared FK: bounded by catalog-declared FKs, not n²; collect retained
-    # by design (see proposal). build_references_rel emits the canonical
-    # 5-col REFERENCES schema, identical to the inferred edge frames.
-    declared_edges, declared_counters = discover_declared(
-        spark, settings, schema_list,
-    )
-    summary.fk_declared = declared_counters
-    declared_edges_df = (
-        sg.build_references_rel(spark, declared_edges) if declared_edges else None
-    )
-
-    metadata_edges_df, metadata_counts, composite_skipped = infer_metadata_edges(
-        spark, columns_frame, pk_gate, declared_edges_df,
-        composite_pk_count=composite_pk_count,
-    )
-    summary.fk_metadata = metadata_counts
-    logger.info(
-        "[dbxcarta] metadata inference: candidates=%d accepted=%d"
-        " composite_pks_skipped=%d",
-        metadata_counts.candidates, metadata_counts.accepted, composite_skipped,
-    )
-    metadata_out = metadata_edges_df if metadata_counts.accepted else None
-    if metadata_out is None:
-        metadata_edges_df.unpersist()
-
-    # declared ∪ metadata, for the semantic anti-join only.
-    prior_edges_df = _union_pairs(declared_edges_df, metadata_out)
-
-    semantic_out: "DataFrame | None" = None
-    semantic_count = 0
-    if _should_run_semantic(settings, summary.extract.tables):
-        sv_node_df, sv_has_df = _semantic_value_frames(
-            value_node_df, has_value_df, sample_stats,
+    # columns_frame and pk_gate each feed up to three jobs (build_pk_gate,
+    # then the two strategy actions). Persist once so the n²-shaped lineage
+    # is not re-run per strategy. MEMORY_AND_DISK (not cache/MEMORY_ONLY) so
+    # eviction at the 10k-table target cannot cause a silent recompute.
+    # Marking persisted does not materialize; both fill lazily on first use.
+    columns_frame.persist(StorageLevel.MEMORY_AND_DISK)
+    # pk_gate is internal to this function; its lifecycle ends here. Wrap the
+    # body in try/finally so both caches are released on the failure path
+    # too — otherwise a failed FK discovery leaks them into the session for
+    # the rest of the job. This is separate from FKDiscoveryResult's edge
+    # caches (FKDiscoveryResult.unpersist_cached), which the caller owns.
+    pk_gate: "DataFrame | None" = None
+    try:
+        pk_gate, composite_pk_count = build_pk_gate(
+            columns_frame, constraints_df,
         )
-        semantic_edges_df, semantic_counts = infer_semantic_edges(
-            columns_frame, pk_gate, prior_edges_df, sv_node_df, sv_has_df,
-            threshold=settings.dbxcarta_semantic_threshold,
+        pk_gate.cache()
+
+        # Declared FK: bounded by catalog-declared FKs, not n²; collect
+        # retained by design (see proposal). build_references_rel emits the
+        # canonical 5-col REFERENCES schema, identical to the inferred edge
+        # frames.
+        declared_edges, declared_counters = discover_declared(
+            spark, settings, schema_list,
         )
-        summary.fk_semantic = semantic_counts
+        summary.fk_declared = declared_counters
+        declared_edges_df = (
+            sg.build_references_rel(spark, declared_edges)
+            if declared_edges else None
+        )
+
+        metadata_edges_df, metadata_counts, composite_skipped = (
+            infer_metadata_edges(
+                spark, columns_frame, pk_gate, declared_edges_df,
+                composite_pk_count=composite_pk_count,
+            )
+        )
+        summary.fk_metadata = metadata_counts
         logger.info(
-            "[dbxcarta] semantic inference: candidates=%d accepted=%d"
-            " value_corroborated=%d",
-            semantic_counts.candidates, semantic_counts.accepted,
-            semantic_counts.value_corroborated,
+            "[dbxcarta] metadata inference: accepted=%d"
+            " composite_pks_skipped=%d",
+            metadata_counts.accepted, composite_skipped,
         )
-        if semantic_counts.accepted:
-            semantic_out = semantic_edges_df
-            semantic_count = semantic_counts.accepted
-        else:
-            semantic_edges_df.unpersist()
+        metadata_out = metadata_edges_df if metadata_counts.accepted else None
+        if metadata_out is None:
+            metadata_edges_df.unpersist()
 
-    return FKDiscoveryResult(
-        declared_edges_df=declared_edges_df,
-        declared_edge_count=len(declared_edges),
-        metadata_edges_df=metadata_out,
-        metadata_edge_count=metadata_counts.accepted,
-        semantic_edges_df=semantic_out,
-        semantic_edge_count=semantic_count,
-    )
+        # declared ∪ metadata, for the semantic anti-join only.
+        prior_edges_df = _union_pairs(declared_edges_df, metadata_out)
+
+        semantic_out: "DataFrame | None" = None
+        semantic_count = 0
+        if _should_run_semantic(settings, summary.extract.tables):
+            sv_node_df, sv_has_df = _semantic_value_frames(
+                value_node_df, has_value_df, sample_stats,
+            )
+            semantic_edges_df, semantic_counts = infer_semantic_edges(
+                columns_frame, pk_gate, prior_edges_df, sv_node_df, sv_has_df,
+                threshold=settings.dbxcarta_semantic_threshold,
+            )
+            summary.fk_semantic = semantic_counts
+            logger.info(
+                "[dbxcarta] semantic inference: accepted=%d",
+                semantic_counts.accepted,
+            )
+            if semantic_counts.accepted:
+                semantic_out = semantic_edges_df
+                semantic_count = semantic_counts.accepted
+            else:
+                semantic_edges_df.unpersist()
+
+        return FKDiscoveryResult(
+            declared_edges_df=declared_edges_df,
+            declared_edge_count=len(declared_edges),
+            metadata_edges_df=metadata_out,
+            metadata_edge_count=metadata_counts.accepted,
+            semantic_edges_df=semantic_out,
+            semantic_edge_count=semantic_count,
+        )
+    finally:
+        columns_frame.unpersist()
+        if pk_gate is not None:
+            pk_gate.unpersist()
 
 
 def _union_pairs(
