@@ -2,13 +2,21 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import TypedDict
+from typing import TYPE_CHECKING, TypedDict
 
 from databricks_job_runner import (
+    Compute,
     DesiredLibrary,
     Runner,
+    Serverless,
     maven_libraries_preflight,
 )
+
+if TYPE_CHECKING:
+    from databricks.sdk import WorkspaceClient
+    from neo4j import Driver
+
+    from dbxcarta.spark.settings import SparkIngestSettings
 
 _ENTRYPOINT_WHEEL_PACKAGE: dict[str, str] = {
     "ingest": "dbxcarta-spark",
@@ -308,6 +316,9 @@ def _handle_preset(argv: list[str]) -> int:
         run_dbxcarta()
         return 0
 
+    # Unreachable: the actions group is mutually exclusive and required,
+    # so exactly one branch above returns. Kept to satisfy the int return
+    # contract, since mypy cannot prove the argparse group is exhaustive.
     return 2
 
 
@@ -352,6 +363,10 @@ def _submit_bootstrap_entrypoint(
     # maven preflight; the client and generic paths do not need it.
     submit_runner = _ingest_runner() if name == "ingest" else runner
 
+    # Runner._compute is private but is the only accessor for the resolved
+    # Compute strategy; there is no public equivalent. Pinned to
+    # databricks-job-runner==0.6 in the closures above, so the surface is
+    # stable for this code's lifetime.
     if name == "ingest" and _is_serverless_compute(
         submit_runner._compute(compute_mode)
     ):
@@ -382,17 +397,19 @@ def _submit_bootstrap_entrypoint(
     )
 
 
-def _is_serverless_compute(compute: object) -> bool:
-    return compute.__class__.__name__ == "Serverless"
+def _is_serverless_compute(compute: Compute) -> bool:
+    return isinstance(compute, Serverless)
 
 
-def _build_workspace_client():
+def _build_workspace_client() -> WorkspaceClient:
     from dbxcarta.spark.databricks import build_workspace_client
 
     return build_workspace_client()
 
 
-def _build_neo4j_driver(ws, settings):
+def _build_neo4j_driver(
+    ws: WorkspaceClient, settings: SparkIngestSettings
+) -> Driver:
     import base64
 
     from neo4j import GraphDatabase
@@ -400,7 +417,12 @@ def _build_neo4j_driver(ws, settings):
     scope = settings.databricks_secret_scope
 
     def _secret(key: str) -> str:
-        return base64.b64decode(ws.secrets.get_secret(scope=scope, key=key).value).decode()
+        value = ws.secrets.get_secret(scope=scope, key=key).value
+        if value is None:
+            raise RuntimeError(
+                f"secret {key!r} not found in scope {scope!r}"
+            )
+        return base64.b64decode(value).decode()
 
     return GraphDatabase.driver(
         _secret("NEO4J_URI"),
