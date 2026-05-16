@@ -30,6 +30,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+import dbxcarta.spark.ingest.schema_graph as sg
 from dbxcarta.spark.contract import EdgeSource
 from dbxcarta.spark.ingest.contract_expr import id_expr_from_columns
 from dbxcarta.spark.ingest.fk.common import _TYPE_EQUIV
@@ -44,9 +45,9 @@ if TYPE_CHECKING:
     from pyspark.sql import Column, DataFrame, SparkSession
 
 
-# REFERENCES edge schema, identical to schema_graph.build_references_rel so the
-# inferred DataFrames are write-compatible without a FKEdge round-trip.
-_EDGE_COLS = ("source_id", "target_id", "confidence", "source", "criteria")
+# Inference frames are projected onto the canonical REFERENCES schema via
+# schema_graph.to_references_rel at each strategy's exit — the schema contract
+# lives once in schema_graph, not duplicated here.
 
 
 @dataclass
@@ -287,6 +288,23 @@ def _score_table_df(spark: "SparkSession") -> "DataFrame":
     )
 
 
+def _select_as(df: "DataFrame", mapping: "dict[str, str]") -> "DataFrame":
+    """Project `df` to exactly `mapping`'s columns, renaming each old → new.
+
+    One declarative spec for the self-join projections below. Keeping the
+    rename map as data (not a hand-written `.alias()` list duplicated per
+    call site) removes the duplicated magic strings and the asymmetry traps:
+    the source side keeps `lk`/`kind` bare while the target side prefixes
+    them, and `col_id` becomes `source_id`/`target_id` rather than a blind
+    prefix — a uniform "prefix every column" helper would silently break the
+    join. `mapping` is insertion-ordered so column order is preserved, and
+    `F.col` accepts nested refs so struct fields like `_k.lk` are valid keys.
+    """
+    from pyspark.sql import functions as F
+
+    return df.select([F.col(old).alias(new) for old, new in mapping.items()])
+
+
 # --- Metadata strategy ------------------------------------------------------
 
 def infer_metadata_edges(
@@ -332,18 +350,18 @@ def infer_metadata_edges(
                 ),
             )
         )
-    src = (
-        cf.withColumn("_k", F.explode(F.array_compact(F.array(*src_keys))))
-        .select(
-            F.col("catalog").alias("s_catalog"),
-            F.col("schema").alias("s_schema"),
-            F.col("column").alias("s_column"),
-            F.col("col_id").alias("source_id"),
-            F.col("canon").alias("s_canon"),
-            F.col("ctok").alias("s_ctok"),
-            F.col("_k.lk").alias("lk"),
-            F.col("_k.kind").alias("kind"),
-        )
+    src = _select_as(
+        cf.withColumn("_k", F.explode(F.array_compact(F.array(*src_keys)))),
+        {
+            "catalog": "s_catalog",
+            "schema": "s_schema",
+            "column": "s_column",
+            "col_id": "source_id",
+            "canon": "s_canon",
+            "ctok": "s_ctok",
+            "_k.lk": "lk",
+            "_k.kind": "kind",
+        },
     )
 
     # tgt exact key for any column; suffix keys (singular + plural-stripped
@@ -361,18 +379,18 @@ def infer_metadata_edges(
     tgt_keys.append(F.when(is_id & tbl_l.endswith("es"), F.struct(
         F.concat(F.lit("S|"), F.expr("substring(lower(table), 1, length(lower(table)) - 2)")).alias("lk"),
         F.lit(NameMatchKind.SUFFIX.value).alias("kind"))))
-    tgt = (
-        cf.withColumn("_k", F.explode(F.array_compact(F.array(*tgt_keys))))
-        .select(
-            F.col("catalog").alias("t_catalog"),
-            F.col("schema").alias("t_schema"),
-            F.col("column").alias("t_column"),
-            F.col("col_id").alias("target_id"),
-            F.col("canon").alias("t_canon"),
-            F.col("ctok").alias("t_ctok"),
-            F.col("_k.lk").alias("t_lk"),
-            F.col("_k.kind").alias("t_kind"),
-        )
+    tgt = _select_as(
+        cf.withColumn("_k", F.explode(F.array_compact(F.array(*tgt_keys)))),
+        {
+            "catalog": "t_catalog",
+            "schema": "t_schema",
+            "column": "t_column",
+            "col_id": "target_id",
+            "canon": "t_canon",
+            "ctok": "t_ctok",
+            "_k.lk": "t_lk",
+            "_k.kind": "t_kind",
+        },
     )
 
     matched = src.join(
@@ -452,7 +470,7 @@ def infer_metadata_edges(
             "left_anti",
         )
 
-    edges = edges.select(*_EDGE_COLS)
+    edges = sg.to_references_rel(edges)
     accepted = edges.cache().count()
     if accepted == 0:
         edges.unpersist()
@@ -546,25 +564,31 @@ def infer_semantic_edges(
 
     cf = columns_frame.filter(F.col("embedding").isNotNull())
 
-    src = cf.select(
-        F.col("catalog").alias("s_catalog"),
-        F.col("schema").alias("s_schema"),
-        F.col("column").alias("s_column"),
-        F.col("col_id").alias("source_id"),
-        F.col("canon").alias("s_canon"),
-        F.col("embedding").alias("s_emb"),
+    src = _select_as(
+        cf,
+        {
+            "catalog": "s_catalog",
+            "schema": "s_schema",
+            "column": "s_column",
+            "col_id": "source_id",
+            "canon": "s_canon",
+            "embedding": "s_emb",
+        },
     )
-    tgt = cf.join(
-        pk_gate.select(F.col("col_id").alias("_pk_id")),
-        cf["col_id"] == F.col("_pk_id"),
-        "inner",
-    ).select(
-        F.col("catalog").alias("t_catalog"),
-        F.col("schema").alias("t_schema"),
-        F.col("column").alias("t_column"),
-        F.col("col_id").alias("target_id"),
-        F.col("canon").alias("t_canon"),
-        F.col("embedding").alias("t_emb"),
+    tgt = _select_as(
+        cf.join(
+            pk_gate.select(F.col("col_id").alias("_pk_id")),
+            cf["col_id"] == F.col("_pk_id"),
+            "inner",
+        ),
+        {
+            "catalog": "t_catalog",
+            "schema": "t_schema",
+            "column": "t_column",
+            "col_id": "target_id",
+            "canon": "t_canon",
+            "embedding": "t_emb",
+        },
     )
 
     cand = src.join(
@@ -628,13 +652,13 @@ def infer_semantic_edges(
             "_conf", F.col("_base_conf"),
         )
 
-    edges = scored.select(
+    edges = sg.to_references_rel(scored.select(
         F.col("source_id"),
         F.col("target_id"),
         F.round(F.col("_conf"), 4).alias("confidence"),
         F.lit(EdgeSource.SEMANTIC.value).alias("source"),
         F.lit(None).cast("string").alias("criteria"),
-    ).select(*_EDGE_COLS)
+    ))
 
     accepted = edges.cache().count()
     if accepted == 0:

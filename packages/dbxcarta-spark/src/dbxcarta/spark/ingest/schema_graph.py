@@ -20,6 +20,7 @@ from dbxcarta.spark.ingest.contract_expr import id_expr
 
 if TYPE_CHECKING:
     from pyspark.sql import DataFrame, SparkSession
+    from pyspark.sql.types import StructType
 
     from dbxcarta.spark.ingest.fk.common import FKEdge
 
@@ -172,6 +173,40 @@ def build_has_column_rel(columns_df: "DataFrame") -> "DataFrame":
     )
 
 
+def references_schema() -> "StructType":
+    """The canonical REFERENCES 5-col schema — single source of truth.
+
+    Both the bounded declared path (`build_references_rel`, list[FKEdge] ->
+    DataFrame) and the catalog-scale Spark-native inference path
+    (`to_references_rel`, DataFrame -> DataFrame) conform to exactly this.
+    """
+    from pyspark.sql.types import DoubleType, StringType, StructField, StructType
+
+    return StructType([
+        StructField("source_id", StringType(), False),
+        StructField("target_id", StringType(), False),
+        StructField("confidence", DoubleType(), False),
+        StructField("source", StringType(), False),
+        StructField("criteria", StringType(), True),
+    ])
+
+
+def to_references_rel(df: "DataFrame") -> "DataFrame":
+    """Project a Spark-native inference frame onto `references_schema`.
+
+    DataFrame -> DataFrame, no driver collect. Casts each column to the
+    canonical type so byte-compatibility with the declared path is enforced
+    by the schema, not by coincidental conformance of the upstream
+    expressions. The input must already carry the five named columns.
+    """
+    from pyspark.sql.functions import col
+
+    fields = references_schema().fields
+    return df.select(*[
+        col(f.name).cast(f.dataType).alias(f.name) for f in fields
+    ])
+
+
 def build_references_rel(
     spark: "SparkSession", edges: "list[FKEdge]",
 ) -> "DataFrame":
@@ -181,17 +216,8 @@ def build_references_rel(
     INFERRED_METADATA, SEMANTIC). The enum `.value` is serialized at this
     tuple boundary — no magic strings downstream.
     """
-    from pyspark.sql.types import DoubleType, StringType, StructField, StructType
-
-    schema = StructType([
-        StructField("source_id", StringType(), False),
-        StructField("target_id", StringType(), False),
-        StructField("confidence", DoubleType(), False),
-        StructField("source", StringType(), False),
-        StructField("criteria", StringType(), True),
-    ])
     tuples = [
         (e.source_id, e.target_id, e.confidence, e.source.value, e.criteria)
         for e in edges
     ]
-    return spark.createDataFrame(tuples, schema=schema)
+    return spark.createDataFrame(tuples, schema=references_schema())
