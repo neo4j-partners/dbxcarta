@@ -284,3 +284,25 @@ def test_cross_schema_pairs_skipped(local_spark) -> None:
     )
     assert by_pair == {}
     assert counts.accepted == 0
+
+
+def test_generic_id_exact_matches_are_not_inferred(local_spark) -> None:
+    """Perfectly similar standalone `id` columns are still not FK evidence."""
+    vec = [1.0] + [0.0] * 1023
+    vectors = {
+        f"{_CAT}.{_SCHEMA}.customers.id": vec,
+        f"{_CAT}.{_SCHEMA}.orders.id": vec,
+    }
+    cols = [
+        (_CAT, _SCHEMA, "customers", "id", "BIGINT", None),
+        (_CAT, _SCHEMA, "orders", "id", "BIGINT", None),
+    ]
+    cons = [
+        (_CAT, _SCHEMA, "customers", "id", "PRIMARY KEY", 1, "customers_pk"),
+        (_CAT, _SCHEMA, "orders", "id", "PRIMARY KEY", 1, "orders_pk"),
+    ]
+    by_pair, counts, _df = _run(
+        local_spark, vectors, columns=cols, constraints=cons,
+    )
+    assert by_pair == {}
+    assert counts.accepted == 0

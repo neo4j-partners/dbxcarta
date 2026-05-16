@@ -367,7 +367,9 @@ Notes:
   gate is unchanged. `tests/spark/fk_semantic` rewritten to DataFrame I/O;
   a dedicated fixture pins the asymmetric divisor (src-count passes where
   target-count and union would not). The embedding collect is gone — the
-  `embedding` array stays a DataFrame column end to end.
+  `embedding` array stays a DataFrame column end to end. Follow-up hardening
+  suppresses generic `id` → `id` inferred relationships in both inferred
+  paths and releases cached inferred edge frames after the load step.
 
 ### Phase 3: Configurable Relationship Write Parallelism
 

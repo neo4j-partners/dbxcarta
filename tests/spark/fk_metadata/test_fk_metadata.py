@@ -256,6 +256,18 @@ def test_same_catalog_schema_pair_inferred(local_spark) -> None:
     ) in edges
 
 
+def test_generic_id_exact_matches_are_not_inferred(local_spark) -> None:
+    """Standalone `id` columns are not useful FK evidence by themselves."""
+    cols = [
+        (_CAT, "s", "customers", "id", "BIGINT", None),
+        (_CAT, "s", "orders", "id", "BIGINT", None),
+    ]
+    cons = [_pk("s", "customers"), _pk("s", "orders")]
+    edges, counts, _composite, _df = _run(local_spark, cols, cons)
+    assert edges == {}
+    assert counts.accepted == 0
+
+
 # --- Type compatibility ------------------------------------------------------
 
 def test_type_equiv_accepts_int_and_bigint(local_spark) -> None:

@@ -53,6 +53,12 @@ class FKDiscoveryResult:
     semantic_edges_df: "DataFrame | None"
     semantic_edge_count: int
 
+    def unpersist_cached(self) -> None:
+        """Release inferred edge caches created for count/write reuse."""
+        for df in (self.metadata_edges_df, self.semantic_edges_df):
+            if df is not None:
+                df.unpersist()
+
 
 def run_fk_discovery(
     spark: "SparkSession",
@@ -98,6 +104,8 @@ def run_fk_discovery(
         metadata_counts.candidates, metadata_counts.accepted, composite_skipped,
     )
     metadata_out = metadata_edges_df if metadata_counts.accepted else None
+    if metadata_out is None:
+        metadata_edges_df.unpersist()
 
     # declared ∪ metadata, for the semantic anti-join only.
     prior_edges_df = _union_pairs(declared_edges_df, metadata_out)
@@ -122,6 +130,8 @@ def run_fk_discovery(
         if semantic_counts.accepted:
             semantic_out = semantic_edges_df
             semantic_count = semantic_counts.accepted
+        else:
+            semantic_edges_df.unpersist()
 
     return FKDiscoveryResult(
         declared_edges_df=declared_edges_df,

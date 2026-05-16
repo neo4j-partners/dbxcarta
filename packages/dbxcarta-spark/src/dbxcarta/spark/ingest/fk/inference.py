@@ -337,6 +337,7 @@ def infer_metadata_edges(
         .select(
             F.col("catalog").alias("s_catalog"),
             F.col("schema").alias("s_schema"),
+            F.col("column").alias("s_column"),
             F.col("col_id").alias("source_id"),
             F.col("canon").alias("s_canon"),
             F.col("ctok").alias("s_ctok"),
@@ -365,6 +366,7 @@ def infer_metadata_edges(
         .select(
             F.col("catalog").alias("t_catalog"),
             F.col("schema").alias("t_schema"),
+            F.col("column").alias("t_column"),
             F.col("col_id").alias("target_id"),
             F.col("canon").alias("t_canon"),
             F.col("ctok").alias("t_ctok"),
@@ -379,7 +381,11 @@ def infer_metadata_edges(
         & (F.col("s_schema") == F.col("t_schema"))
         & (F.col("lk") == F.col("t_lk"))
         & (F.col("kind") == F.col("t_kind"))
-        & (F.col("source_id") != F.col("target_id")),
+        & (F.col("source_id") != F.col("target_id"))
+        & ~(
+            (F.lower(F.col("s_column")) == F.lit("id"))
+            & (F.lower(F.col("t_column")) == F.lit("id"))
+        ),
         "inner",
     )
 
@@ -448,6 +454,8 @@ def infer_metadata_edges(
 
     edges = edges.select(*_EDGE_COLS)
     accepted = edges.cache().count()
+    if accepted == 0:
+        edges.unpersist()
     counts = CoarseFKCounts(
         candidates=candidates,
         accepted=accepted,
@@ -541,6 +549,7 @@ def infer_semantic_edges(
     src = cf.select(
         F.col("catalog").alias("s_catalog"),
         F.col("schema").alias("s_schema"),
+        F.col("column").alias("s_column"),
         F.col("col_id").alias("source_id"),
         F.col("canon").alias("s_canon"),
         F.col("embedding").alias("s_emb"),
@@ -552,6 +561,7 @@ def infer_semantic_edges(
     ).select(
         F.col("catalog").alias("t_catalog"),
         F.col("schema").alias("t_schema"),
+        F.col("column").alias("t_column"),
         F.col("col_id").alias("target_id"),
         F.col("canon").alias("t_canon"),
         F.col("embedding").alias("t_emb"),
@@ -562,7 +572,11 @@ def infer_semantic_edges(
         (F.col("s_catalog") == F.col("t_catalog"))
         & (F.col("s_schema") == F.col("t_schema"))
         & (F.col("source_id") != F.col("target_id"))
-        & (F.col("s_canon") == F.col("t_canon")),
+        & (F.col("s_canon") == F.col("t_canon"))
+        & ~(
+            (F.lower(F.col("s_column")) == F.lit("id"))
+            & (F.lower(F.col("t_column")) == F.lit("id"))
+        ),
         "inner",
     )
 
@@ -623,6 +637,8 @@ def infer_semantic_edges(
     ).select(*_EDGE_COLS)
 
     accepted = edges.cache().count()
+    if accepted == 0:
+        edges.unpersist()
     value_corroborated = (
         scored.filter(F.col("_corr")).count() if accepted else 0
     )

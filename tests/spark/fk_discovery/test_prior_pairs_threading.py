@@ -8,6 +8,7 @@ DataFrames, never collected.
 from __future__ import annotations
 
 from dbxcarta.spark.contract import EdgeSource
+from dbxcarta.spark.ingest.fk.discovery import FKDiscoveryResult
 from dbxcarta.spark.ingest.fk.inference import (
     build_columns_frame,
     build_pk_gate,
@@ -117,3 +118,38 @@ def test_semantic_skips_declared_and_metadata_prior_pairs(local_spark) -> None:
     assert _EDGE not in emitted
     for r in rows:
         assert r["source"] == EdgeSource.SEMANTIC.value
+
+
+def test_fk_result_releases_cached_inferred_edges(local_spark) -> None:
+    from pyspark.sql.types import DoubleType, StringType, StructField, StructType
+
+    edge_schema = StructType([
+        StructField("source_id", StringType(), False),
+        StructField("target_id", StringType(), False),
+        StructField("confidence", DoubleType(), False),
+        StructField("source", StringType(), False),
+        StructField("criteria", StringType(), True),
+    ])
+    metadata_df = local_spark.createDataFrame(
+        [("s", "t", 0.9, EdgeSource.INFERRED_METADATA.value, None)],
+        schema=edge_schema,
+    ).cache()
+    semantic_df = local_spark.createDataFrame(
+        [("s2", "t2", 0.9, EdgeSource.SEMANTIC.value, None)],
+        schema=edge_schema,
+    ).cache()
+    metadata_df.count()
+    semantic_df.count()
+
+    result = FKDiscoveryResult(
+        declared_edges_df=None,
+        declared_edge_count=0,
+        metadata_edges_df=metadata_df,
+        metadata_edge_count=1,
+        semantic_edges_df=semantic_df,
+        semantic_edge_count=1,
+    )
+    result.unpersist_cached()
+
+    assert not metadata_df.storageLevel.useMemory
+    assert not semantic_df.storageLevel.useMemory

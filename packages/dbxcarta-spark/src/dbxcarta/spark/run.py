@@ -175,6 +175,7 @@ def _run(
 
     extract_result: ExtractResult | None = None
     values: ValueResult | None = None
+    fk_result: FKDiscoveryResult | None = None
     scope = settings.databricks_secret_scope
     neo4j = Neo4jConfig(
         uri=dbutils.secrets.get(scope=scope, key="NEO4J_URI"),
@@ -216,11 +217,21 @@ def _run(
         run_error = exc
         raise
     finally:
-        # Release both cached snapshots after run_fk_discovery and _load have
+        # Release cached snapshots after run_fk_discovery and _load have
         # finished reading them. Each release is guarded independently so a
-        # failure in one still attempts the other; on the success path a
+        # failure in one still attempts the others; on the success path a
         # release failure is re-raised, on the failure path it is logged so it
         # does not mask the original error.
+        if fk_result is not None:
+            try:
+                fk_result.unpersist_cached()
+            except Exception:
+                if run_error is not None:
+                    logger.exception(
+                        "[dbxcarta] failed to unpersist cached FK edge DataFrames"
+                    )
+                else:
+                    raise
         if values is not None:
             try:
                 values.unpersist_cached()
