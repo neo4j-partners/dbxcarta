@@ -371,7 +371,7 @@ Everything runs inside Databricks: no external orchestrators, no local execution
 - **Spark:** extraction and transformation use PySpark DataFrames, so the pipeline scales to large catalogs without single-process bottlenecks.
 - **Model Serving:** embeddings are generated in Spark via `ai_query` against a Databricks-hosted foundation model endpoint (`databricks-gte-large-en` by default), with `failOnError => false` so row-level failures are counted rather than thrown.
 - **Materialize-once:** enriched node DataFrames are written to a Delta staging table between transform and load, so the failure-rate aggregation and the Neo4j write both consume the staged rows without re-invoking `ai_query`.
-- **Neo4j Spark Connector:** bulk, partitioned writes from DataFrames. Relationship writes are `coalesce(1)` to avoid endpoint-node lock contention on Aura; `batch.size` is tuned via `DBXCARTA_NEO4J_BATCH_SIZE`.
+- **Neo4j Spark Connector:** bulk, partitioned writes from DataFrames. Relationship writes default to `coalesce(1)` to avoid endpoint-node lock contention on Aura, configurable via `DBXCARTA_REL_WRITE_PARTITIONS` (raise only with production evidence); `batch.size` is tuned via `DBXCARTA_NEO4J_BATCH_SIZE`.
 - **Preflight:** grants and serving-endpoint permissions required by the enabled flags are checked before any extract runs; missing permissions fail the run fast.
 - **Secrets:** Neo4j credentials live in a Databricks secret scope and are injected at job time, not read from a local file.
 - **Metadata source:** Unity Catalog `information_schema` only; no pluggable multi-source connector layer.

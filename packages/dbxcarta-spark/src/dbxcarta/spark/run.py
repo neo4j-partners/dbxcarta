@@ -314,8 +314,11 @@ def _load(
     """Write extracted, inferred, and sampled graph artifacts to Neo4j.
 
     Node writes omit coalesce(1) so the connector can parallelize at
-    `batch_size`. Relationship writes keep coalesce(1) to reduce lock
-    contention when multiple Spark partitions would merge adjacent edges.
+    `batch_size`. Relationship writes are partitioned by `_rel_partition`
+    per `dbxcarta_rel_write_partitions`: the default of 1 coalesces to a
+    single partition (byte-for-byte identical to the historical write, the
+    safe default for Neo4j lock contention); a higher value repartitions
+    for tuned parallel relationship writes.
     """
     candidate_col_ids = sv.get_candidate_col_ids(extract_result.columns_df)
     purge_stale_values(driver, candidate_col_ids)
@@ -351,25 +354,25 @@ def _load(
         write_node(_project(values.value_node_df, NodeLabel.VALUE), neo4j, NodeLabel.VALUE)
         logger.info("[dbxcarta] writing relationships: HAS_VALUE (%d)", values.sample_stats.has_value_edges)
         write_rel(
-            values.has_value_df.coalesce(1), neo4j,
+            _rel_partition(values.has_value_df, settings.dbxcarta_rel_write_partitions), neo4j,
             RelType.HAS_VALUE, NodeLabel.COLUMN, NodeLabel.VALUE,
         )
 
     logger.info("[dbxcarta] writing relationships: HAS_SCHEMA")
     write_rel(
-        extract_result.has_schema_df.coalesce(1), neo4j,
+        _rel_partition(extract_result.has_schema_df, settings.dbxcarta_rel_write_partitions), neo4j,
         RelType.HAS_SCHEMA, NodeLabel.DATABASE, NodeLabel.SCHEMA,
     )
 
     logger.info("[dbxcarta] writing relationships: HAS_TABLE")
     write_rel(
-        extract_result.has_table_df.coalesce(1), neo4j,
+        _rel_partition(extract_result.has_table_df, settings.dbxcarta_rel_write_partitions), neo4j,
         RelType.HAS_TABLE, NodeLabel.SCHEMA, NodeLabel.TABLE,
     )
 
     logger.info("[dbxcarta] writing relationships: HAS_COLUMN")
     write_rel(
-        extract_result.has_column_df.coalesce(1), neo4j,
+        _rel_partition(extract_result.has_column_df, settings.dbxcarta_rel_write_partitions), neo4j,
         RelType.HAS_COLUMN, NodeLabel.TABLE, NodeLabel.COLUMN,
     )
 
@@ -379,7 +382,7 @@ def _load(
             fk_result.declared_edge_count,
         )
         write_rel(
-            fk_result.declared_edges_df.coalesce(1), neo4j,
+            _rel_partition(fk_result.declared_edges_df, settings.dbxcarta_rel_write_partitions), neo4j,
             RelType.REFERENCES, NodeLabel.COLUMN, NodeLabel.COLUMN,
             properties=REFERENCES_PROPERTIES,
         )
@@ -390,7 +393,7 @@ def _load(
             fk_result.metadata_edge_count,
         )
         write_rel(
-            fk_result.metadata_edges_df.coalesce(1), neo4j,
+            _rel_partition(fk_result.metadata_edges_df, settings.dbxcarta_rel_write_partitions), neo4j,
             RelType.REFERENCES, NodeLabel.COLUMN, NodeLabel.COLUMN,
             properties=REFERENCES_PROPERTIES,
         )
@@ -401,7 +404,7 @@ def _load(
             fk_result.semantic_edge_count,
         )
         write_rel(
-            fk_result.semantic_edges_df.coalesce(1), neo4j,
+            _rel_partition(fk_result.semantic_edges_df, settings.dbxcarta_rel_write_partitions), neo4j,
             RelType.REFERENCES, NodeLabel.COLUMN, NodeLabel.COLUMN,
             properties=REFERENCES_PROPERTIES,
         )
@@ -431,3 +434,12 @@ def _project(df: "DataFrame", label: NodeLabel) -> "DataFrame":
             f" properties {missing}; columns present: {sorted(present)}"
         )
     return df.select(*[c for c in declared if c in present])
+
+
+def _rel_partition(df: "DataFrame", n: int) -> "DataFrame":
+    """Set relationship-write partitioning per `dbxcarta_rel_write_partitions`.
+
+    `repartition(1)` is deliberately not the `n <= 1` branch: it forces a
+    shuffle and is not equivalent to `coalesce(1)`.
+    """
+    return df.coalesce(1) if n <= 1 else df.repartition(n)

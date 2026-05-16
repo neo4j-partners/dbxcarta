@@ -27,7 +27,7 @@ from dbxcarta.spark.ingest.fk.inference import (
     infer_metadata_edges,
     infer_semantic_edges,
 )
-from dbxcarta.spark.ingest.summary import RunSummary
+from dbxcarta.spark.ingest.summary import FKSkipCounts, RunSummary
 
 if TYPE_CHECKING:
     from pyspark.sql import DataFrame, SparkSession
@@ -77,6 +77,9 @@ def run_fk_discovery(
     already validated present by Settings' cross-field validator.
     """
     from pyspark import StorageLevel
+
+    if _fk_guardrail_tripped(settings, summary):
+        return _skipped_result()
 
     constraints_df = _constraints_df(spark, settings, schema_list)
     columns_frame = build_columns_frame(
@@ -218,6 +221,48 @@ def _should_run_semantic(settings: "SparkIngestSettings", n_tables: int) -> bool
         )
         return False
     return True
+
+
+def _fk_guardrail_tripped(
+    settings: "SparkIngestSettings", summary: RunSummary,
+) -> bool:
+    """Skip FK discovery when the catalog is absurdly wide.
+
+    `dbxcarta_fk_max_columns == 0` disables the guardrail. Otherwise, skip
+    when the extracted column count exceeds it and record the trip on
+    `summary`. Reads the already-materialized `summary.extract.columns`
+    scalar, so no driver action is added.
+    """
+    limit = settings.dbxcarta_fk_max_columns
+    if limit <= 0:
+        return False
+    columns = summary.extract.columns
+    if columns <= limit:
+        return False
+    logger.warning(
+        "[dbxcarta] FK discovery skipped by guardrail: %d columns > limit %d"
+        " (DBXCARTA_FK_MAX_COLUMNS)",
+        columns, limit,
+    )
+    summary.fk_skip = FKSkipCounts(column_count=columns, column_limit=limit)
+    return True
+
+
+def _skipped_result() -> FKDiscoveryResult:
+    """All-`None` result so the load step writes no REFERENCES edges.
+
+    Reuses the existing FKDiscoveryResult None-edge contract rather than a
+    separate skip path: `_load` already guards each REFERENCES write on a
+    non-None DataFrame and a positive count.
+    """
+    return FKDiscoveryResult(
+        declared_edges_df=None,
+        declared_edge_count=0,
+        metadata_edges_df=None,
+        metadata_edge_count=0,
+        semantic_edges_df=None,
+        semantic_edge_count=0,
+    )
 
 
 def _constraints_df(

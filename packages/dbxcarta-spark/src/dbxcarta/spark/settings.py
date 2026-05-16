@@ -83,6 +83,13 @@ class SparkIngestSettings(BaseSettings):
     dbxcarta_staging_path: str = ""
     # Neo4j Spark Connector batch.size.
     dbxcarta_neo4j_batch_size: int = 20000
+    # Relationship write parallelism. 1 (default) coalesces to a single
+    # partition, byte-for-byte identical to historical writes and the safe
+    # default for Neo4j lock contention. A value > 1 repartitions (a full
+    # shuffle) to that many partitions for tuned parallel relationship
+    # writes. Raise the default only with production evidence that Neo4j
+    # handles parallel relationship writes safely.
+    dbxcarta_rel_write_partitions: int = 1
     # Re-embedding ledger: skip ai_query for unchanged nodes.
     dbxcarta_ledger_enabled: bool = False
     dbxcarta_ledger_path: str = ""
@@ -94,10 +101,39 @@ class SparkIngestSettings(BaseSettings):
     dbxcarta_infer_semantic: bool = False
     dbxcarta_semantic_min_tables: int = 10
     dbxcarta_semantic_threshold: float = 0.85
+    # FK discovery guardrail backstop. 0 (default) means unlimited: the
+    # guardrail is disabled and default small-catalog behavior is unchanged.
+    # When > 0 and the extracted column count exceeds it, FK discovery is
+    # skipped entirely (extract and load still run) and the skip is recorded
+    # in the run summary. This is a backstop, not a substitute for the
+    # Spark-native FK rewrite.
+    dbxcarta_fk_max_columns: int = 0
     # When False (default), verify violations are logged as warnings and the run
     # completes with status='success'. When True, any violation raises and the
     # task fails. Flip after two consecutive zero-violation warn-only runs.
     dbxcarta_verify_gate: bool = False
+
+    @field_validator("dbxcarta_rel_write_partitions")
+    @classmethod
+    def _validate_rel_write_partitions(cls, v: int) -> int:
+        """Reject < 1: 0 or negative is not a valid partition count."""
+        if v < 1:
+            raise ValueError(
+                "DBXCARTA_REL_WRITE_PARTITIONS must be >= 1"
+                f" (got {v}); 1 keeps the safe single-partition default"
+            )
+        return v
+
+    @field_validator("dbxcarta_fk_max_columns")
+    @classmethod
+    def _validate_fk_max_columns(cls, v: int) -> int:
+        """Reject negative: 0 means unlimited (disabled), > 0 is the cap."""
+        if v < 0:
+            raise ValueError(
+                "DBXCARTA_FK_MAX_COLUMNS must be >= 0"
+                f" (got {v}); 0 disables the guardrail"
+            )
+        return v
 
     @field_validator("dbxcarta_catalog")
     @classmethod

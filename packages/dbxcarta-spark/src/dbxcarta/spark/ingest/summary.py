@@ -26,6 +26,28 @@ if TYPE_CHECKING:
 
 
 @dataclass
+class FKSkipCounts:
+    """Set when the `dbxcarta_fk_max_columns` guardrail skips FK discovery.
+
+    `None` on `RunSummary` means the guardrail did not fire. The row_counts
+    keys are deliberately namespaced `fk_discovery_skipped*`: the bare
+    `fk_skipped` key belongs to declared-FK accounting (`fk_declared -
+    fk_resolved`), which `verify.references._check_accounting` invariant-
+    checks. Reusing it would make a guardrail trip fail that invariant."""
+
+    column_count: int = 0
+    column_limit: int = 0
+
+    def as_row_counts(self) -> dict[str, int]:
+        """Flatten the guardrail trip into the shared row_counts map."""
+        return {
+            "fk_discovery_skipped": 1,
+            "fk_discovery_skipped_column_count": self.column_count,
+            "fk_discovery_skipped_column_limit": self.column_limit,
+        }
+
+
+@dataclass
 class ExtractCounts:
     """Counts captured immediately after Unity Catalog extraction."""
 
@@ -195,6 +217,7 @@ class RunSummary:
     embeddings: EmbeddingCounts = field(default_factory=EmbeddingCounts)
     neo4j_counts: dict[str, int] = field(default_factory=dict)
     verify: VerifyResult | None = None
+    fk_skip: "FKSkipCounts | None" = None
 
     def finish(self, *, status: str, error: str | None = None) -> None:
         """Mark the run terminal and stamp its end time.
@@ -218,6 +241,8 @@ class RunSummary:
             out.update(self.fk_semantic.as_summary_dict("fk_inferred_semantic"))
         if self.sample_values is not None:
             out.update(self.sample_values.as_row_counts())
+        if self.fk_skip is not None:
+            out.update(self.fk_skip.as_row_counts())
         return out
 
     def to_dict(self) -> dict[str, Any]:

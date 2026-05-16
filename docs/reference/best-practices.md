@@ -74,7 +74,7 @@ Neo4j write lock contention is the concern the connector docs warn about. Relati
 
 **How we apply it:**
 
-- **Relationship writes** — every relationship DataFrame is `.coalesce(1)` before the Neo4j write. No exceptions; relationships always lock two nodes.
+- **Relationship writes** — every relationship DataFrame defaults to `.coalesce(1)` before the Neo4j write, because relationships always lock both endpoint nodes. The default is configurable via `DBXCARTA_REL_WRITE_PARTITIONS` (default `1`, which is exactly `coalesce(1)`); a value `> 1` repartitions for parallel writes and must only be raised with production evidence that Neo4j tolerates the added endpoint-lock contention. The single-partition default is the safe baseline and the correctness reasoning above holds for it.
 - **Node writes** — every node DataFrame is `.repartition(N, "id")` before the Neo4j write, where `N` comes from `DBXCARTA_NEO4J_NODE_PARTITIONS` (default `4`). This is a standing rule, not a benchmark-gated optimization; no measurement is required to prove it's safe because the partitioning guarantees disjoint lock keys.
 
 Tuning `N` is a throughput question, not a correctness question.

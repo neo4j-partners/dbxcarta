@@ -260,6 +260,11 @@ Validation:
   call: inspect the metadata FK path's `explain()` plan for the expected
   joins/windows, and run a synthetic large-catalog fixture under a bounded
   driver-memory ceiling that would OOM if a collect were reintroduced.
+  **Deferred (2026-05-16):** the synthetic large-catalog
+  bounded-driver-memory fixture is not implemented and is deferred until
+  later. The structural `explain()`/`grep` verification of no-driver-collect
+  is in place; the memory-ceiling fixture is the outstanding part of this
+  criterion.
 
 Notes:
 
@@ -349,7 +354,9 @@ Validation:
   Cartesian product) as the pass/fail gate.
 - The semantic path's `explain()` plan shows no embedding collect; the
   large-catalog fixture runs under the same bounded driver-memory ceiling
-  as Phase 1.
+  as Phase 1. **Deferred (2026-05-16):** same as Phase 1 — the bounded
+  driver-memory fixture is deferred until later; the `explain()`-based
+  no-collect check is in place.
 
 Notes:
 
@@ -373,23 +380,36 @@ Notes:
 
 ### Phase 3: Configurable Relationship Write Parallelism
 
-Status: Pending
+Status: Complete
 
 Goal: Keep the safe single-partition default while allowing tuned
 parallel relationship writes.
 
 Checklist:
 
-- Add a relationship write partition setting.
-- Add a helper: `df.coalesce(1) if n <= 1 else df.repartition(n)`. The
-  default of 1 keeps writes byte-for-byte identical to today.
-  `repartition(1)` is not equivalent to `coalesce(1)` and must not be the
-  default branch.
-- Apply the helper to every `write_rel` call in `run.py:_load`.
+- Add `dbxcarta_rel_write_partitions: int = 1` to `SparkIngestSettings`,
+  following the existing `dbxcarta_*` convention, with a `field_validator`
+  that rejects values `< 1` (0 or negative silently breaks the helper's
+  `n <= 1` branch and would shuffle to `repartition(0)`).
+- Add a `_rel_partition(df, n)` helper next to `_project` in `run.py`:
+  `df.coalesce(1) if n <= 1 else df.repartition(n)`. The default of 1
+  keeps writes byte-for-byte identical to today. `repartition(1)` is not
+  equivalent to `coalesce(1)` (it forces a full shuffle) and must not be
+  the default branch.
+- Apply the helper to every `write_rel` call in `run.py:_load` (seven call
+  sites: HAS_VALUE, HAS_SCHEMA, HAS_TABLE, HAS_COLUMN, and the declared,
+  metadata, and semantic REFERENCES writes). A single global setting
+  governs all relationship writes; per-relationship tuning is out of scope.
+- Update the `_load` docstring, which currently asserts "Relationship
+  writes keep coalesce(1) to reduce lock contention." That invariant no
+  longer holds; the docstring must describe the configurable behavior or
+  the code ships self-contradicting.
 
 Validation:
 
-- Writer fakes verify the configured partition behavior.
+- Writer fakes assert the path taken, not just the outcome: `n = 1` (and
+  the default) takes the `coalesce` path and never `repartition`; `n > 1`
+  takes `repartition(n)`. A test pins the default at 1.
 - Default behavior stays equivalent to the current `coalesce(1)` path.
 
 Notes:
@@ -397,29 +417,122 @@ Notes:
 - Operational tuning, not a correctness or scale fix. The default does not
   change until production evidence shows Neo4j handles parallel writes
   safely.
+- Phase 0 already threaded `settings` into `_load`, so this is a purely
+  local change with no new plumbing.
+- Done (2026-05-16): `dbxcarta_rel_write_partitions: int = 1` added with a
+  `_validate_rel_write_partitions` field validator rejecting `< 1`.
+  `_rel_partition(df, n)` added next to `_project` in `run.py`
+  (`coalesce(1)` for `n <= 1`, else `repartition(n)`). Applied to all
+  seven relationship `write_rel` call sites in `_load`: HAS_VALUE,
+  HAS_SCHEMA, HAS_TABLE, HAS_COLUMN, and the declared / metadata / semantic
+  REFERENCES writes (the checklist parenthetical originally miscounted this
+  as six; corrected in this revision). The `_load` docstring was updated to
+  describe the configurable behavior.
+  `tests/spark/test_rel_partition.py` asserts the helper's path with a spy
+  DataFrame (`n <= 1` → `coalesce(1)` only, never `repartition`; `n > 1` →
+  `repartition(n)` only);
+  `tests/spark/test_load_rel_partition_wiring.py` asserts `_load` routes
+  every one of the seven relationship writes through `_rel_partition` with
+  the configured count and never writes one that bypassed it;
+  `tests/spark/settings/test_partition_and_guardrail_settings.py` pins the
+  default at 1 and the `< 1` rejection.
 
 ### Phase 4: Thin Guardrail and Documentation
 
-Status: Pending
+Status: Complete
 
 Goal: Add a small optional safety net and document the new settings.
 
 Checklist:
 
-- Add one optional setting to cap or skip FK discovery when column count is
-  absurd. This replaces V2's heavy guardrail phase, which is unnecessary
-  once Phase 1 removes the driver collect.
-- Record any skip in the run summary.
-- Document the new settings and the write-parallelism tradeoff.
+- Add `dbxcarta_fk_max_columns: int = 0` to `SparkIngestSettings`, where 0
+  means unlimited (guardrail disabled). The default being the disabled
+  sentinel makes "default small-catalog behavior unchanged" true by
+  construction, and keeps the backstop opt-in. This replaces V2's heavy
+  guardrail phase, which is unnecessary once Phase 1 removes the driver
+  collect.
+- The behavior is **skip, not cap**. When the column count exceeds the
+  limit, FK discovery does not run at all; extract and load still proceed.
+  Capping by truncating the column set was considered and rejected: it
+  produces silently partial and incorrect FK edges, a correctness hazard
+  worse than emitting none.
+- Obtain the column count from the already-materialized extract summary
+  (`summary.extract.columns`). `extract()` sets this unconditionally via
+  `columns_df.count()` and always runs before `run_fk_discovery`, so the
+  count is always populated and no fallback `columns_df.count()` path is
+  needed (an earlier draft floated one; it is unreachable and was dropped).
+  Even a scalar `count()` would not violate the no-driver-collect rule
+  (CLAUDE.md / best-practices §5), which forbids collecting catalog-scale
+  rows, not reading one aggregate; state this so the guardrail is not
+  misread as a Phase 1 regression.
+- Gate inside `run_fk_discovery` (or immediately before its call in
+  `run.py`): on trip, early-return an all-`None` `FKDiscoveryResult`,
+  reusing the existing contract that the load step skips writes whose
+  DataFrame is `None`. Do not invent a separate skip path.
+- Record the skip in the run summary as a cohesive counter group on
+  `RunSummary` (matching `ExtractCounts` / `SampleValueCounts`), serialized
+  through `to_dict` / `_build_row_counts` alongside the FK counters.
+  Logging alone (as `_should_run_semantic` does today) is not sufficient
+  for this item. The serialized `row_counts` keys must be namespaced
+  (e.g. `fk_discovery_skipped*`) and must not reuse the bare `fk_skipped`
+  key, which belongs to declared-FK accounting and is invariant-checked by
+  `verify.references._check_accounting`.
+- Document the new settings inline in `settings.py` docstrings (consistent
+  with the existing comment style there), document the Phase 3
+  write-parallelism / Neo4j lock-contention tradeoff next to
+  `dbxcarta_rel_write_partitions`, and add a cited rule to
+  `docs/reference/best-practices.md` if one is established.
 
 Validation:
 
-- Tests cover below-limit and above-limit behavior.
-- Default small-catalog behavior is unchanged.
+- Tests cover below-limit (FK runs normally), above-limit (FK skipped,
+  extract and load still write, summary records the skip), and the default
+  (0 / disabled, behavior unchanged).
+- The Phase 1/2 large-catalog bounded-driver-memory fixture runs with the
+  guardrail disabled, so the guardrail cannot mask that OOM regression test.
+  **Deferred (2026-05-16):** this depends on the Phase 1/2 fixture, which is
+  deferred until later. The guardrail defaults to disabled (`0`), so it
+  cannot mask such a test once that fixture exists; the dependency is
+  recorded here so the criterion is not read as satisfied.
 
 Notes:
 
 - The guardrail is a backstop, not a substitute for the Phase 1 fix.
+- Done (2026-05-16): `dbxcarta_fk_max_columns: int = 0` added with a
+  `_validate_fk_max_columns` validator rejecting negatives (0 = unlimited /
+  disabled). `_fk_guardrail_tripped(settings, summary)` and
+  `_skipped_result()` added to `discovery.py`; `run_fk_discovery`
+  early-returns the all-`None` `FKDiscoveryResult` before any FK work when
+  the cap is exceeded, reusing the existing load-step None-edge contract.
+  The column count is read from `summary.extract.columns`, already
+  materialized by the extract stage (verified: `extract.py` sets it via
+  `columns_df.count()` before `run_fk_discovery` is called), so no new
+  driver action is introduced. The skip is recorded as an `FKSkipCounts`
+  dataclass on `RunSummary.fk_skip` (`None` = did not fire) with an
+  `as_row_counts()` flattened uniformly in `_build_row_counts`, structurally
+  matching `ExtractCounts` / `SampleValueCounts` rather than loose fields
+  (no `summary_io` schema change needed, since `row_counts` is an existing
+  `MapType(String, Long)`). The serialized keys are namespaced
+  `fk_discovery_skipped*`, **not** the bare `fk_skipped`: that key is owned
+  by declared-FK accounting (`DeclaredCounters`, `fk_declared -
+  fk_resolved`) and is invariant-checked by
+  `verify.references._check_accounting`. A post-implementation review caught
+  that the first cut reused `fk_skipped`, which made every guardrail trip
+  raise a false `references.accounting_mismatch`; the namespaced keys fix
+  it and a regression test pins it. Settings are documented inline in
+  `settings.py` docstrings (including the Phase 3 write-parallelism / Neo4j
+  lock-contention tradeoff), in `.env.sample`, in
+  `docs/reference/best-practices.md`, and in `README.md`. No new rule was
+  added to `best-practices.md`: this is operational tuning / a backstop,
+  not a new pipeline design rule. `tests/spark/fk_guard/test_fk_column_guardrail.py`
+  covers disabled-default, below / at / above limit, the summary record,
+  the namespaced `row_counts` surfacing, non-collision with declared-FK
+  `fk_skipped`, the verifier accounting regression, and the all-`None`
+  result honoring the load contract. Open item: the Phase 1/2 synthetic
+  large-catalog bounded-driver-memory fixture this validation references
+  does not yet exist; the guardrail's disabled-by-default (`0`) means it
+  cannot mask such a test once written, but the fixture itself is an
+  outstanding Phase 1/2 deliverable (see Phase 1/2 validation).
 
 ## Completion Criteria
 
