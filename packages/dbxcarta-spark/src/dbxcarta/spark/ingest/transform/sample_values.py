@@ -75,21 +75,34 @@ def sample(
     sample_limit: int,
     cardinality_threshold: int,
     stack_chunk_size: int,
-) -> tuple["DataFrame", "DataFrame", SampleStats]:
+) -> tuple["DataFrame", "DataFrame", SampleStats, "DataFrame | None"]:
     """Discover and sample distinct values for STRING/BOOLEAN columns.
 
-    Returns (value_node_df, has_value_rel_df, stats). DataFrames may be empty
-    when no qualifying values are found; check stats.value_nodes before writing.
-    stats.candidate_col_ids is used by the pipeline for stale-value purge.
+    Returns (value_node_df, has_value_rel_df, stats, cache_handle). DataFrames
+    may be empty when no qualifying values are found; check stats.value_nodes
+    before writing. stats.candidate_col_ids is used by the pipeline for
+    stale-value purge.
+
+    cache_handle is the cached sampled-value DataFrame on the success path, or
+    None when nothing was cached (no rows, or zero value nodes — that path
+    unpersists before returning). The caller must unpersist the handle only
+    after both FK discovery and the Neo4j load have finished reading it, so the
+    cache is not released here on the success path.
     """
     from pyspark.sql.functions import col, lit
     from pyspark.sql.types import LongType, StringType, StructField, StructType
 
+    # `embedding_text` mirrors the VALUE embedding-text expression
+    # (contract.EMBEDDING_TEXT_EXPR[VALUE] == "value"): a transient copy of
+    # the `value` column so the embed stage is uniform across labels. The
+    # fail-closed write boundary strips it; `value` stays a declared
+    # property in its own right.
     value_schema = StructType([
         StructField("id", StringType(), nullable=False),
         StructField("value", StringType()),
         StructField("count", LongType()),
         StructField("contract_version", StringType()),
+        StructField("embedding_text", StringType()),
     ])
     rel_schema = StructType([
         StructField("source_id", StringType(), nullable=False),
@@ -137,6 +150,7 @@ def sample(
             spark.createDataFrame([], schema=value_schema),
             spark.createDataFrame([], schema=rel_schema),
             stats,
+            None,
         )
 
     # Cache raw_df so the two .count() actions and the downstream Neo4j writes
@@ -152,6 +166,7 @@ def sample(
             col("val").alias("value"),
             col("cnt").alias("count"),
             lit(CONTRACT_VERSION).alias("contract_version"),
+            col("val").alias("embedding_text"),
         )
         .dropDuplicates(["id"])
     )
@@ -168,10 +183,11 @@ def sample(
             spark.createDataFrame([], schema=value_schema),
             spark.createDataFrame([], schema=rel_schema),
             stats,
+            None,
         )
     stats.has_value_edges = has_value_df.count()  # reads from cache
 
-    return (value_node_df, has_value_df, stats)
+    return (value_node_df, has_value_df, stats, raw_df)
 
 
 def _candidates_from_columns_df(

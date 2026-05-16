@@ -10,7 +10,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from dbxcarta.spark.contract import CONTRACT_VERSION, generate_id
+from dbxcarta.spark.contract import (
+    CONTRACT_VERSION,
+    EMBEDDING_TEXT_EXPR,
+    NodeLabel,
+    generate_id,
+)
 from dbxcarta.spark.ingest.contract_expr import id_expr
 
 if TYPE_CHECKING:
@@ -25,12 +30,20 @@ def build_database_nodes(
     """Build one Database node per ingested catalog.
 
     A single-catalog run passes a one-element list, so the historical
-    one-Database-node behavior is preserved.
+    one-Database-node behavior is preserved. Carries the declared Database
+    properties plus a transient `embedding_text` (equal to `name`, the
+    Database embedding-text expression) so the embed stage is uniform
+    across labels; the write boundary strips `embedding_text`.
     """
     from pyspark.sql import Row
 
     return spark.createDataFrame([
-        Row(id=generate_id(c), name=c, contract_version=CONTRACT_VERSION)
+        Row(
+            id=generate_id(c),
+            name=c,
+            contract_version=CONTRACT_VERSION,
+            embedding_text=c,
+        )
         for c in catalogs
     ])
 
@@ -38,17 +51,20 @@ def build_database_nodes(
 def build_schema_nodes(schemata_df: "DataFrame") -> "DataFrame":
     """Build Schema nodes from information_schema.schemata rows.
 
-    Keeps `catalog_name` only for downstream embedding text construction; the
-    load step drops it before writing to Neo4j.
+    Computes `embedding_text` inline (while `catalog_name` is still in
+    scope), then selects only the declared Schema properties plus that one
+    transient `embedding_text` column. No helper column leaves the builder;
+    the fail-closed write boundary strips `embedding_text`.
     """
-    from pyspark.sql.functions import col, lit
+    from pyspark.sql.functions import col, expr, lit
 
     return (
         schemata_df
         .withColumn("id", id_expr("catalog_name", "schema_name"))
         .withColumn("name", col("schema_name"))
         .withColumn("contract_version", lit(CONTRACT_VERSION))
-        .select("id", "name", "catalog_name", "comment", "contract_version")
+        .withColumn("embedding_text", expr(EMBEDDING_TEXT_EXPR[NodeLabel.SCHEMA]))
+        .select("id", "name", "comment", "contract_version", "embedding_text")
     )
 
 
@@ -57,15 +73,16 @@ def build_table_nodes(
 ) -> "DataFrame":
     """Build Table nodes from information_schema.tables rows.
 
-    The selected columns form the public graph payload plus `table_catalog`
-    and `table_schema`, which are retained only until embedding text has been
-    generated (the load step drops `table_catalog` before the Neo4j write, so
-    the graph contract is unchanged). The `layer` property is derived from
-    `table_catalog` through the configured catalog->layer map; catalogs absent
-    from the map (or an empty map) yield a null `layer` (contract v1.1,
-    additive).
+    Computes `embedding_text` inline (while `table_catalog` / `table_schema`
+    are still in scope), then selects only the declared Table properties
+    plus that one transient `embedding_text` column. `table_catalog` and
+    `table_schema` are transform inputs and do not leave the builder; the
+    fail-closed write boundary strips `embedding_text`. The `layer` property
+    is derived from `table_catalog` through the configured catalog->layer
+    map; catalogs absent from the map (or an empty map) yield a null `layer`
+    (contract v1.1, additive). `layer` is a real, declared property.
     """
-    from pyspark.sql.functions import col, lit, when
+    from pyspark.sql.functions import col, expr, lit, when
     from pyspark.sql.types import StringType
 
     layer_expr = lit(None).cast(StringType())
@@ -80,9 +97,11 @@ def build_table_nodes(
         .withColumn("name", col("table_name"))
         .withColumn("layer", layer_expr)
         .withColumn("contract_version", lit(CONTRACT_VERSION))
-        # table_catalog + table_schema are retained for the embedding text
-        # expression; table_catalog is dropped before the Neo4j write.
-        .select("id", "name", "layer", "table_catalog", "table_schema", "comment", "table_type", "created", "last_altered", "contract_version")
+        .withColumn("embedding_text", expr(EMBEDDING_TEXT_EXPR[NodeLabel.TABLE]))
+        .select(
+            "id", "name", "layer", "comment", "table_type", "created",
+            "last_altered", "contract_version", "embedding_text",
+        )
     )
 
 
@@ -90,12 +109,15 @@ def build_column_nodes(columns_df: "DataFrame") -> "DataFrame":
     """Build Column nodes from information_schema.columns rows.
 
     Converts Databricks YES/NO nullability strings into booleans while
-    preserving ordinal position, data type, and comments for retrieval context.
-    `table_catalog`/`table_schema`/`table_name` are retained only for the
-    embedding text expression; the load step drops them before the Neo4j
-    write, so the graph contract is unchanged.
+    preserving ordinal position, data type, and comments for retrieval
+    context. Computes `embedding_text` inline (while
+    `table_catalog` / `table_schema` / `table_name` are still in scope),
+    then selects only the declared Column properties plus that one
+    transient `embedding_text` column. The qualifying columns are transform
+    inputs and do not leave the builder; the fail-closed write boundary
+    strips `embedding_text`.
     """
-    from pyspark.sql.functions import col, lit, when
+    from pyspark.sql.functions import col, expr, lit, when
 
     return (
         columns_df
@@ -106,7 +128,11 @@ def build_column_nodes(columns_df: "DataFrame") -> "DataFrame":
             when(col("is_nullable") == "YES", True).when(col("is_nullable") == "NO", False),
         )
         .withColumn("contract_version", lit(CONTRACT_VERSION))
-        .select("id", "name", "table_catalog", "table_schema", "table_name", "data_type", "is_nullable", "ordinal_position", "comment", "contract_version")
+        .withColumn("embedding_text", expr(EMBEDDING_TEXT_EXPR[NodeLabel.COLUMN]))
+        .select(
+            "id", "name", "data_type", "is_nullable", "ordinal_position",
+            "comment", "contract_version", "embedding_text",
+        )
     )
 
 

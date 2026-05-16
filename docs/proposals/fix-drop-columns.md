@@ -140,8 +140,8 @@ Proposed:
 
 ## Checklist
 
-### Phase 1: contract single source of truth
-- [ ] Add to `contract.py` a per-label declared-property tuple for
+### Phase 1: contract single source of truth — COMPLETE
+- [x] Add to `contract.py` a per-label declared-property tuple for
       `DATABASE`, `SCHEMA`, `TABLE`, `COLUMN`, `VALUE`: the exact
       columns that may be written to Neo4j, including `id`,
       `contract_version`, and the optional `embedding`. The
@@ -154,7 +154,7 @@ Proposed:
       is dropped). They remain in the Delta staging table, the
       re-embedding ledger, and the run summary, which are their
       canonical homes; they no longer ride on graph nodes.
-- [ ] Move the per-label embedding-text expressions
+- [x] Move the per-label embedding-text expressions
       (`_TABLE_/_COLUMN_/_SCHEMA_/_DATABASE_EMBEDDING_TEXT_EXPR`) from
       `embed_stage.py` into `contract.py` so the builder, embed stage,
       and tests share one definition. The expressions are unchanged in
@@ -162,24 +162,28 @@ Proposed:
       raw `information_schema` columns (`table_catalog`, `table_schema`,
       `table_name`, `catalog_name`, `data_type`), all of which are in
       scope inside the builder before its `.select(...)`.
+      Implemented as `contract.EMBEDDING_TEXT_EXPR` and
+      `contract.NODE_PROPERTIES` dicts keyed by `NodeLabel`, mirroring
+      the existing `REFERENCES_PROPERTIES` pattern. `embedding` is the
+      last, optional member of each `NODE_PROPERTIES` tuple.
 
-### Phase 2: builders attach embedding_text and emit only properties
-- [ ] `build_table_nodes`: add `embedding_text` via the contract TABLE
+### Phase 2: builders attach embedding_text and emit only properties — COMPLETE
+- [x] `build_table_nodes`: add `embedding_text` via the contract TABLE
       expression before the `.select(...)`, then select only the
       declared Table properties plus `embedding_text`. Drop
       `table_catalog` and `table_schema` from the output. Keep `layer`
       (a real, derived property). Update the docstring to state the
       node carries declared properties plus one transient
       `embedding_text` that the write boundary strips.
-- [ ] `build_column_nodes`: same pattern with the COLUMN expression;
+- [x] `build_column_nodes`: same pattern with the COLUMN expression;
       drop `table_catalog`, `table_schema`, `table_name` from the
       output.
-- [ ] `build_schema_nodes`: same pattern with the SCHEMA expression;
+- [x] `build_schema_nodes`: same pattern with the SCHEMA expression;
       drop `catalog_name` from the output.
-- [ ] `build_database_nodes`: attach `embedding_text` equal to `name`
+- [x] `build_database_nodes`: attach `embedding_text` equal to `name`
       so the embed stage is uniform across labels. Output stays
       `id`, `name`, `contract_version`, plus `embedding_text`.
-- [ ] Value builder (`sample_values.py`, the `sv.sample` path that
+- [x] Value builder (`sample_values.py`, the `sv.sample` path that
       produces `value_node_df` with `id`, `value`, `count`,
       `contract_version`): attach `embedding_text` equal to the `value`
       column so the embed stage is uniform and no longer needs a
@@ -190,17 +194,17 @@ Proposed:
       right; `embedding_text` is the transient copy the write boundary
       strips.
 
-### Phase 3: embed stage consumes the column
-- [ ] `embeddings.add_embedding_column`: stop taking a `text_expr`
+### Phase 3: embed stage consumes the column — COMPLETE
+- [x] `embeddings.add_embedding_column`: stop taking a `text_expr`
       argument. Read the existing `embedding_text` column. Compute
       `embedding_text_hash` as `sha2(col("embedding_text"), 256)`. Keep
       dropping `embedding_text` after hashing and embedding so the Delta
       staging schema is unchanged.
-- [ ] `_embed_and_stage` ledger path: compute
+- [x] `_embed_and_stage` ledger path: compute
       `_curr_hash = sha2(col("embedding_text"), 256)` instead of
       evaluating a SQL string. Confirm hit and miss paths hash the
       identical column so the ledger does not churn.
-- [ ] `_embed_and_stage` ledger hit-path schema alignment (new
+- [x] `_embed_and_stage` ledger hit-path schema alignment (new
       requirement, not optional). Today `embedding_text` is created and
       dropped entirely inside `add_embedding_column`, so it is never in
       `df.columns` at `_embed_and_stage`. After Phase 2 the builder adds
@@ -213,22 +217,22 @@ Proposed:
       hit `select`, or exclude it from the carried column list) so both
       union arms match and the Delta staging schema is unchanged.
       `split_by_ledger` itself is unchanged.
-- [ ] Delete the `_EMBEDDING_TEXT_EXPRS` map and the per-label
+- [x] Delete the `_EMBEDDING_TEXT_EXPRS` map and the per-label
       expression constants from `embed_stage.py`. `embed_label` no
       longer needs an expression argument.
-- [ ] `transform_embeddings` is structurally unchanged. It passes node
+- [x] `transform_embeddings` is structurally unchanged. It passes node
       DataFrames as before. Disabled labels are untouched; their
       `embedding_text` column is stripped fail-closed at the write
       boundary like any other non-declared column.
-- [ ] `VALUE`: with the Phase 2 Value-builder change in place, the
+- [x] `VALUE`: with the Phase 2 Value-builder change in place, the
       sample-value embed path reads the builder-produced
       `embedding_text` column through the same `embed_label` ->
       `_embed_and_stage` -> `add_embedding_column` path as the other
       labels, with no per-label SQL string. Verify the path end to end
       after the Phase 2 change lands.
 
-### Phase 4: fail-closed write boundary
-- [ ] In `_load`, replace each `_drop_cols(...)` call with a projection
+### Phase 4: fail-closed write boundary — COMPLETE
+- [x] In `_load`, replace each `_drop_cols(...)` call with a projection
       to the declared per-label property tuple from Phase 1. A bare
       `df.select(*PROPERTIES[label])` throws when the optional
       `embedding` column is absent (label not embedded), so select the
@@ -241,14 +245,15 @@ Proposed:
       `embedding_text_hash`, `embedding_model`, `embedded_at`,
       `embedding_error`, and any other staging-only column by
       construction.
-- [ ] Delete `_drop_cols` (the projection subsumes it). Remove its
-      import and call sites.
-- [ ] Confirm `HAS_SCHEMA` / `HAS_TABLE` / `HAS_COLUMN` builders are
+- [x] Delete `_drop_cols` (the projection subsumes it). Remove its
+      import and call sites. Replaced by `run._project(df, label)`.
+- [x] Confirm `HAS_SCHEMA` / `HAS_TABLE` / `HAS_COLUMN` builders are
       unaffected: they derive ids from the source DataFrame, not from
-      node-DF helper columns.
+      node-DF helper columns. Verified — `build_has_*_rel` operate on
+      `schemata_df` / `tables_df` / `columns_df`, not the node DFs.
 
-### Phase 5: tests and quality gates
-- [ ] Contract regression test: for each label, in both the embedded
+### Phase 5: tests and quality gates — COMPLETE
+- [x] Contract regression test: for each label, in both the embedded
       and not-embedded case, the DataFrame handed to the writer has a
       column set exactly equal to the declared property tuple. The
       embedded case must explicitly assert `embedding_text`,
@@ -257,30 +262,64 @@ Proposed:
       refactor removes from the graph, and this assertion is the
       regression guard for that removal. This is the test that makes
       drift impossible to reintroduce silently.
-- [ ] Builder tests: `build_table_nodes` / `build_column_nodes` /
+      Added `tests/spark/test_node_projection.py` exercising
+      `run._project` for every node label in both embedded and
+      not-embedded modes, plus the missing-required-property
+      loud-failure path.
+- [x] Builder tests: `build_table_nodes` / `build_column_nodes` /
       `build_schema_nodes` / `build_database_nodes` expose only
       declared properties plus `embedding_text`, with no helper
-      columns.
-- [ ] Embedding-text test: the `embedding_text` produced by each
+      columns. Rewrote `tests/spark/schema_graph/test_node_builders.py`
+      (old tests asserted the now-removed helper-retention behavior).
+- [x] Embedding-text test: the `embedding_text` produced by each
       builder equals the string the old in-place expression produced,
       including the multi-catalog catalog-qualified prefix
       (`bronze.sales.orders` vs `gold.sales.orders` differ; identical
-      schema.table across catalogs no longer collide).
-- [ ] Ledger test: `embedding_text_hash` for a given row equals the
+      schema.table across catalogs no longer collide). Pinned to exact
+      expected strings in the rewritten builder tests.
+- [x] Ledger test: `embedding_text_hash` for a given row equals the
       pre-refactor hash for the same inputs (text content unchanged).
-- [ ] Disabled-label test: with a label's embedding flag off, its node
+      Covered by the existing
+      `test_embedding_text_hash_is_sha256_of_text` and the unchanged
+      `split_by_ledger` tests (still green).
+- [x] Disabled-label test: with a label's embedding flag off, its node
       DataFrame reaches the writer property-only, with `embedding_text`
-      stripped and no `embedding` column.
-- [ ] Run `uv run --group test pytest tests/spark tests/presets
+      stripped and no `embedding` column. Covered by
+      `test_project_not_embedded_node_omits_optional_embedding`.
+- [x] Run `uv run --group test pytest tests/spark tests/presets
       tests/examples/finance-genie`, `uvx ruff check`, and
       `uvx --with-editable packages/dbxcarta-spark mypy -p dbxcarta.spark`.
-      All green, zero new mypy or ruff findings.
+      All green, zero new mypy or ruff findings. Result: 182 passed,
+      1 skipped; ruff "All checks passed!"; mypy "no issues found in
+      38 source files".
 
-### Phase 6: cleanup
-- [ ] Delete the now-dead "retained for embedding text" comments and
+### Phase 6: cleanup — COMPLETE
+- [x] Delete the now-dead "retained for embedding text" comments and
       docstring notes in `schema_graph.py`.
-- [ ] Update any proposal or reference doc that describes the old
+- [x] Update any proposal or reference doc that describes the old
       drop-before-write flow.
+
+Implementation notes:
+- `schema_graph.py` had no surviving "retained for embedding text"
+  comments — the Phase 2 docstring rewrites already removed them
+  (grep for the phrase returns no matches).
+- `docs/reference/pipeline.md` Step 7 now documents the fail-closed
+  write boundary (`run._project` projecting to
+  `contract.NODE_PROPERTIES`, allowlist not denylist, raises on a
+  missing declared property). A new "Key Design Principles" section
+  encodes the lessons: one source of truth in `contract.py`; allowlist
+  not denylist; helper columns are transform inputs that never reach
+  the graph; embedding bookkeeping lives in Delta/ledger not the graph;
+  `embedding_text` computed once in the builder; structure is edges,
+  not properties.
+- `docs/schema/SCHEMA.md` now reflects the narrowed graph contract:
+  `embedding` remains the only embedding-side graph property, `layer`
+  is documented on Table nodes, and the embedding bookkeeping columns
+  are described as staging/ledger data rather than node properties.
+- `tests/integration/test_semantic_search.py` no longer reads
+  `Table.embedding_text` from Neo4j. The self-ranking and graph
+  expansion probes use the stored `embedding` vector, which matches the
+  new graph contract.
 
 ## Risks and mitigations
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dbxcarta.client.ids import schema_from_node_id
+from dbxcarta.client.ids import catalog_from_node_id, schema_from_node_id
 from dbxcarta.client.trace import (
     RetrievalTrace,
     chosen_schemas_from_columns,
@@ -29,6 +29,24 @@ def test_schema_from_table_id() -> None:
 def test_schema_from_short_id_returns_none() -> None:
     assert schema_from_node_id("cat.tbl") is None
     assert schema_from_node_id("only") is None
+
+
+# ---------------------------------------------------------------------------
+# catalog_from_node_id
+# ---------------------------------------------------------------------------
+
+
+def test_catalog_from_column_id() -> None:
+    assert catalog_from_node_id("cat.myschema.tbl.col") == "cat"
+
+
+def test_catalog_from_table_id() -> None:
+    assert catalog_from_node_id("cat.myschema.tbl") == "cat"
+
+
+def test_catalog_from_short_id_returns_none() -> None:
+    assert catalog_from_node_id("cat.tbl") is None
+    assert catalog_from_node_id("only") is None
 
 
 # ---------------------------------------------------------------------------

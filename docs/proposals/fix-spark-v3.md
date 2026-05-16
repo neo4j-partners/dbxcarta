@@ -2,7 +2,7 @@
 
 ## Goal
 
-Make `packages/dbxcarta-spark` scale to the ~500-table target by removing
+Make `packages/dbxcarta-spark` scale to the ~10,000-table target by removing
 driver-side foreign-key work and keeping FK discovery in Spark. This is a
 clean rewrite of the FK path, not a parity-preserving refactor. Nothing
 downstream depends on the exact edges the current Python implementation
@@ -16,38 +16,52 @@ the FK driver work, so V3 fixes that first and demotes the rest.
 
 ## Current Assessment
 
-The scaling ceiling is the FK discovery stage:
+The scaling ceiling is the FK discovery stage. Line numbers below are
+indicative only: these files are mid-refactor, so the implementer must
+re-derive each location from the current source rather than trust the
+references here.
 
-- `fk/discovery.py:79` collects every extracted column to the driver.
-- `fk/discovery.py:201` collects every PK and UNIQUE constraint to the
-  driver.
-- `fk/discovery.py:252` collects the entire value index to the driver when
-  semantic inference runs.
-- `fk/metadata.py:192-193` compares every column against every other
-  column in a single-threaded Python double loop.
+- `fk/discovery.py` collects every extracted column to the driver
+  (`run_fk_discovery`, the `ColumnMeta.from_row` comprehension).
+- `fk/discovery.py` collects every PK and UNIQUE constraint to the driver
+  (`_build_pk_index`).
+- `fk/discovery.py` collects every column embedding to the driver
+  (`_collect_column_embeddings`). At ~10k columns × 1024 floats this is the
+  single largest driver-memory item — larger than the column and
+  constraint collects — yet it was missing from earlier assessments. It is
+  behind the default-off semantic gate, so it is not the live ceiling for a
+  default run; it becomes the dominant item the moment semantic is enabled.
+- `fk/discovery.py` collects the entire value index to the driver when
+  semantic inference runs (`_build_value_index`).
+- `fk/metadata.py` compares every column against every other column in a
+  single-threaded Python double loop (`infer_fk_pairs`).
 - `fk/semantic.py` repeats the same all-pairs double loop with a
   hand-rolled Python cosine.
 
-At ~500 tables this is tens of thousands of columns and billions of
-comparisons on one node. That is both a memory ceiling and a runtime
-ceiling.
+At ~10,000 tables this is hundreds of thousands of columns and tens of
+billions of comparisons on one node. That is both a memory ceiling and a
+runtime ceiling.
 
 Lower-severity issues:
 
-- `sample_values.py:145` caches `raw_df` and never releases it on the
-  success path. No handle escapes the function, so the caller cannot
-  release it.
+- `sample_values.py` caches `raw_df` and, on the success path, never
+  unpersists it (it does unpersist on the zero-rows early return). No
+  handle escapes the function, so the caller cannot release the cache after
+  the downstream writes finish.
 - `run.py:_load` forces `coalesce(1)` on every relationship write.
 - `run.py:291` runs a logging-only `database_df.count()`.
 - Orphan `ingest/__pycache__/pipeline.cpython-*.pyc` files exist with no
   `.py` source.
 
 `fk/declared.py` is already Spark-native and already unpersists its caches,
-so it needs interface alignment only.
+so it needs interface alignment only. Its `collect()` of resolved FK pairs
+is intentionally retained: it is bounded by the number of catalog-declared
+foreign keys, not by the n²-shaped all-pairs comparison, so it does not
+threaten driver memory at ~10,000 tables. Do not "fix" it.
 
 ## Assumptions
 
-- The target is reliability and scale at ~500 tables, not preservation of
+- The target is reliability and scale at ~10,000 tables, not preservation of
   the current Python edge output.
 - No migration, shim, or dual-run period is required. The Python FK path is
   replaced, not kept alongside.
@@ -59,13 +73,24 @@ so it needs interface alignment only.
 
 ## Risks
 
-- Name-match rules (stem and plural handling) and type compatibility are
-  nontrivial. Expressing them as raw Spark SQL is error-prone. The
-  recommended path is a vectorized `pandas_udf` so the rule logic stays
-  readable and runs on executors without a driver collect.
-- A new attenuation and tie-break curve changes which low-confidence edges
-  survive. This is acceptable because parity is not a goal, but the new
-  curve must be documented and covered by fixtures.
+- Name-match rules (stem and plural handling), type compatibility, and the
+  score table look dynamic but are driven by tiny static tables. They must
+  be expressed as native Spark `Column` expressions and broadcast lookups,
+  built once at plan-construction time. No `pandas_udf` or Python UDF: a
+  UDF is opaque to Catalyst, blocks predicate pushdown and whole-stage
+  codegen, and pays Arrow JVM-to-Python cost on every batch, which is
+  multiplied across an n²-shaped join.
+- The attenuation and tie-break curve is reproduced as-is, not changed.
+  The Spark expression `score / greatest(1.0, sqrt(cnt - 1))` is
+  mathematically identical to the current Python
+  `score / max(1.0, sqrt(max(0, n - 1)))` for every n, so this is a faithful
+  port, not a new curve.
+- Single-schema skew: if the catalog is one schema (the common prototype
+  case), an equi-join keyed only on `(catalog, schema)` collapses to a
+  single M² partition on one node — the same ceiling, relocated from the
+  driver to one executor. Phase 1 must therefore push the name-match rule
+  into the join key itself (see Phase 1), so the join output is bounded by
+  actual name matches, not by schema size.
 - Releasing the sampled-value cache too early breaks the semantic
   value-index build and the HAS_VALUE write. The release must happen after
   both `run_fk_discovery` and `_load`.
@@ -76,7 +101,7 @@ so it needs interface alignment only.
 
 ### Phase 0: Cache Hygiene and Cleanup
 
-Status: Pending
+Status: Complete
 
 Goal: Remove the sampled-value cache leak and stray cruft before the
 refactor, with no behavior change to FK output.
@@ -104,41 +129,137 @@ Notes:
 
 - Cheap, isolated, and independent of the FK rewrite. It runs first so
   memory pressure is removed before the larger change lands.
+- Done (2026-05-16): `sample()` returns a 4th `cache_handle` element;
+  `ValueResult` gained `cache_handle` + `unpersist_cached()` mirroring
+  `ExtractResult`. `run.py:_run` initializes `values = None` and releases it
+  in the existing `finally` (per-snapshot guarded so a failure path logs
+  rather than masks the original error). `database_df.count()` replaced with
+  `len(settings.resolved_catalogs())` (`_load` now takes `settings`). Orphan
+  `pipeline.cpython-{313,314}.pyc` deleted. `uv run pytest tests/spark -q`:
+  155 passed, 1 skipped.
+
+### Execution decision (2026-05-16): Phases 1 and 2 are executed together
+
+Phases 1 and 2 share the same two driver collects (`column_metas`,
+`pk_index` in `discovery.py`) and the same Spark scaffolding (the
+constraints DataFrame, `canonicalize_expr` type compatibility, the PK-like
+target gate, and the prior-pair anti-join). Executing Phase 1 alone forces
+one of two bad outcomes: scope the shared collects into the semantic-only
+branch as throwaway scaffolding that Phase 2 immediately deletes, or delete
+them and ship a functionally broken (default-off) semantic path between
+phases for no scale benefit (the embedding collect, the largest driver
+item, would remain until Phase 2 anyway).
+
+Neither is "doing it properly." The two phases are therefore implemented as
+one coherent FK-path rewrite: build the shared Spark scaffolding once, use
+it for both the metadata and semantic strategies, and remove all four
+driver collects (columns, constraints, embeddings, value-index) in a single
+pass. Phase 1 and Phase 2 checklists below remain the specification of
+*what* each strategy must do; they are validated together. The recommended
+order's "Phase 2 cannot precede Phase 1" still holds — they are not
+reordered, they are merged.
 
 ### Phase 1: Spark-Native Declared and Metadata FK
 
-Status: Pending
+Status: In progress (merged with Phase 2)
 
 Goal: Replace the metadata Python loop and its driver collects with Spark
 DataFrame joins.
 
 Checklist:
 
-- Self-join `extract.columns_df` aliased as `src` and `tgt`. Join
-  predicate: same catalog and schema, not the same column.
-- Port the matching rules, not the loop. Reuse the logic in `_name_match`,
-  `_stem_matches_table`, `types_compatible`, and `_SCORE_TABLE` from
-  `fk/metadata.py` and `fk/common.py` inside a vectorized `pandas_udf`
-  applied to the joined DataFrame.
+- Push the name-match rule into the join key, not a post-join filter. A
+  plain equi-join on `(catalog, schema)` plus a name predicate evaluated
+  after the join still materializes the full per-schema cartesian and
+  collapses to one M² partition when the catalog is a single schema. Avoid
+  this by deriving a `link_key` on each side from the static name rule and
+  equi-joining on `(catalog, schema, link_key)` so non-matching pairs are
+  never produced:
+  - `src` side emits, per column, the set of keys it could match on:
+    `lower(column)` for the exact branch, and for each suffix in the static
+    `_STEM_SUFFIXES` the stripped stem (when the column ends with that
+    suffix and is longer than it) for the suffix branch. Build this with
+    an `array(...)` of the candidate keys, then `explode` it once at
+    plan-construction time. The suffix loop is unrolled in Python while
+    building the plan; no UDF.
+  - `tgt` side emits the keys it can be matched against: `lower(column)`
+    for the exact branch, and for the suffix branch the singular/plural
+    forms of `lower(table)` (`t`, `t` with trailing `s`/`es` stripped)
+    gated on `lower(column) = 'id'`.
+  - The join output is then bounded by real name matches, not by schema
+    size, which removes the single-schema skew. Add a not-same-column
+    condition and the same-`(table, column)` self-reference guard as
+    residual predicates.
+- Collapse the explode to one row per `(src_id, tgt_id)` before anything
+  downstream. A pair can match on more than one emitted key (the exact key
+  plus a stem, or several tgt table-forms — singular, `-s`, `-es` — that
+  collide on a degenerate table name), producing duplicate join rows with
+  different `_SCORE_TABLE` scores. Dedup with an explicit kind-priority
+  tiebreak: `EXACT` before `SUFFIX`, so each pair carries exactly one
+  `NameMatchKind`. The dedup must run before the attenuation window so the
+  window `cnt` is the per-source candidate count.
+- No UDF anywhere. Python builds the plan, Spark evaluates every row.
+  Expand the remaining static rules into native expressions at
+  plan-construction time:
+  - Type compatibility: `types_compatible` is **not** a static pair lookup
+    — it is `canonicalize(a) == canonicalize(b)`, and `canonicalize`
+    normalizes before any map lookup (regex parse of `DECIMAL|NUMERIC(p,s)`
+    keeping scale and discarding precision, regex strip of
+    `STRING|VARCHAR|CHAR(n)` to `STRING`, `trim`/`upper`, then the
+    `_TYPE_EQUIV` integer-family map). Port `canonicalize` as a native
+    `canonicalize_expr(col)` built from `upper`/`trim`/`regexp_extract`/
+    `when`, producing one comparable token (family plus decimal scale). The
+    predicate is then the derived-column equality
+    `canonicalize_expr(src.data_type) == canonicalize_expr(tgt.data_type)`
+    — no broadcast join. `_TYPE_EQUIV` is small enough to inline as a
+    chained `when`; a broadcast map is not needed.
+  - `_SCORE_TABLE`: materialize this static map as a small DataFrame keyed
+    by `(name_kind, pk_evidence, comment_present)` and `broadcast`-join it
+    in.
+  - Comment-token overlap: native higher-order array functions
+    (`split`, `filter` with length and stopword predicates,
+    `array_intersect`, `size`); stopwords as a broadcast literal array.
 - Apply the PK-like target gate by joining against the constraints
-  DataFrame. Keep the `discovery.py:201` constraints query as a DataFrame
-  and do not collect it. Express the id-column heuristic as a join.
-- Compute attenuation and tie-break with `Window.partitionBy(src_id)` and a
-  score expression. The curve is new and clean. It is not required to match
-  `math.sqrt(n-1)`.
-- Filter by threshold. Anti-join the declared `prior_pairs` DataFrame to
-  suppress duplicates.
-- Produce counters from Spark aggregations into `summary.fk_metadata`.
+  DataFrame. Keep the `_build_pk_index` constraints query as a DataFrame
+  and do not collect it. The id-column heuristic is its own sub-task, not a
+  one-line join: `pk_kind`'s `{table}_id` branch fires only when that is
+  the *sole* `_id`-suffixed column in the table, so it needs a per-table
+  aggregation (`count` of `_id` columns grouped by `table_key`) feeding a
+  conditional join. Budget for it explicitly. `PKIndex`'s composite-PK
+  count must also be reproduced as a Spark aggregation, not a Python loop.
+- Attenuation window and filter order (affects which edges survive; encode
+  exactly this):
+  - Window set = rows surviving name dedup, the type filter, the PK gate,
+    and the `_SCORE_TABLE >= threshold` filter; **before** the prior-pair
+    anti-join and **before** the attenuated-`>=`-threshold filter.
+  - Compute `cnt = count() over Window.partitionBy(src_id)` on that frame,
+    then `attenuated = score / greatest(1.0, sqrt(cnt - 1))`. This
+    reproduces the current Python curve exactly (identical for every n) — a
+    faithful port, not a new curve.
+  - Then filter `attenuated >= threshold`.
+  - Then left-anti-join the **declared-only** edges DataFrame. This is the
+    DataFrame form of the `prior_pairs` the metadata stage actually
+    receives: in `discovery.py`, when `infer_fk_pairs` runs, `prior_pairs`
+    is declared edges only — metadata edges are folded into `prior_pairs`
+    *after* this stage, so metadata must not anti-join against its own
+    output. Separately, once this stage completes, emit the union
+    `declared ∪ metadata` as a distinct DataFrame for Phase 2's semantic
+    anti-join to consume; it is *not* the DataFrame used here.
+- Produce summary counts from Spark aggregations into `summary.fk_metadata`
+  (accepted edges and a coarse rejected total). Exact per-reason
+  attribution and the counter invariant are not reproduced.
 - Feed the result straight into `schema_graph.build_references_rel`.
-- Remove the `discovery.py:79` and `discovery.py:201` collects.
+- Remove the column and constraint driver collects in `fk/discovery.py`.
 
 Validation:
 
 - `tests/spark/fk_metadata` and `tests/spark/fk_declared` rewritten to
-  DataFrame input and output. They assert correct edges, confidences,
-  rejection reasons, and prior-pair suppression on known fixtures.
-- A synthetic large-catalog fixture confirms no driver-side `collect()` on
-  the metadata FK path.
+  DataFrame input and output. They assert correct edges, confidences, and
+  prior-pair suppression on known fixtures.
+- No-driver-collect is verified structurally, not by asserting absence of a
+  call: inspect the metadata FK path's `explain()` plan for the expected
+  joins/windows, and run a synthetic large-catalog fixture under a bounded
+  driver-memory ceiling that would OOM if a collect were reintroduced.
 
 Notes:
 
@@ -148,19 +269,45 @@ Notes:
 
 ### Phase 2: Spark-Native Semantic FK
 
-Status: Pending
+Status: In progress (merged with Phase 1 — see Execution decision above)
 
-Goal: Remove the semantic Python all-pairs loop and the value-index
-collect.
+Goal: Remove the semantic Python all-pairs loop, the embedding collect, and
+the value-index collect.
 
 Checklist:
 
-- Pre-filter candidates by target PK-like, type compatibility, and
-  prior-pair anti-join before any vector math.
-- Compute cosine similarity in Spark on the reduced candidate set. Drop the
-  Python `_cosine` and the all-pairs loop.
+- Embeddings are never collected to the driver, not collected in batches.
+  Batch-streaming the collect would only cap peak memory; keeping the
+  embedding column in the DataFrame removes the driver step entirely and is
+  strictly better. The column node DataFrame's `embedding` array stays a
+  DataFrame column end to end.
+- Pre-filter candidates by target PK-like, type compatibility, and the
+  prior-pair anti-join (the `declared ∪ metadata` DataFrame emitted by
+  Phase 1) before any vector math. The relative order of these pre-filters
+  does not change the surviving candidate set, so exact rejection-reason
+  precedence is not reproduced.
+- Produce summary counts from Spark aggregations (accepted edges and a
+  coarse rejected total). The counter invariant and exact per-reason
+  attribution are not reproduced.
+- Compute cosine in-join; do not normalize or mutate the persisted vector.
+  The stored `Column.embedding` feeds the Neo4j vector index and the
+  semantic-search retriever; normalizing it at write time has a wide blast
+  radius and is only safe if every consumer uses a scale-invariant metric,
+  which is not assumed. The current `_cosine` does not assume normalized
+  vectors — it divides by `a.norm * b.norm`. Port it faithfully: on the
+  reduced candidate set, compute the dot product and both norms inline with
+  native higher-order array functions (`aggregate` over the arrays for
+  `sum(x*y)`, `sum(x*x)`, `sum(y*y)`), then `dot / (sqrt(na) * sqrt(nb))`.
+  No `pandas_udf` or Python `_cosine`, no normalization step, persisted
+  vectors unchanged, and the all-pairs loop is dropped.
 - Apply value-overlap corroboration as a join on the Value and HAS_VALUE
-  DataFrames. Remove the `discovery.py:252` collect.
+  DataFrames. Reproduce `overlap_ratio` exactly: it is **asymmetric** —
+  `|src_values ∩ tgt_values| / |src_values|`, the denominator being the
+  *source* column's sampled-distinct count, not the target's and not the
+  union. Corroboration fires when `ratio >= 0.5`; on a hit, add the `0.05`
+  bonus then re-clamp confidence to `[0.80, 0.90]` (the bonus cannot push
+  confidence past the cap). Remove the value-index driver collect in
+  `fk/discovery.py`.
 - Keep the existing enable and min-tables gate in `_should_run_semantic`
   unchanged.
 
@@ -168,8 +315,16 @@ Validation:
 
 - `tests/spark/fk_semantic` rewritten to DataFrame input and output,
   asserting threshold, confidence clamp, value corroboration, and
-  prior-pair suppression on fixtures.
-- A benchmark records candidate count before and after pre-filtering.
+  prior-pair suppression on fixtures. A fixture pins the asymmetric
+  `overlap_ratio` (distinct source/target value sets chosen so dividing by
+  the source count vs target count vs union give different results, and
+  only the source-count divisor passes).
+- A benchmark records candidate count before and after pre-filtering, with
+  a stated upper bound (candidate set must be a small fraction of the
+  Cartesian product) as the pass/fail gate.
+- The semantic path's `explain()` plan shows no embedding collect; the
+  large-catalog fixture runs under the same bounded driver-memory ceiling
+  as Phase 1.
 
 Notes:
 
@@ -248,6 +403,10 @@ Phase 0 first. It is cheap, isolated, and removes memory pressure.
 
 Phase 1 next. It is the core fix and the reason for V3.
 
-Phase 2 after Phase 1, since semantic is off by default.
+Phase 2 after Phase 1, not reordered ahead of it despite fixing the
+largest driver-memory item. That item (the embedding collect) is behind
+the default-off semantic gate, so it is not the ceiling for a default run,
+and Phase 2 structurally depends on Phase 1's edges and shared
+constraints/type-compat DataFrames. It cannot precede Phase 1.
 
 Phases 3 and 4 last. They are tuning and backstops.

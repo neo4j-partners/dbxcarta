@@ -1,10 +1,13 @@
 """Embedding transform stage.
 
-Owns the per-label embedding-text expressions, the materialize-once
-embed+stage step (with optional ledger reuse), and the post-embedding
-failure-rate gate. ``run.py`` calls ``transform_embeddings`` /
-``check_thresholds``; the sample-values stage calls ``embed_label`` to embed
-Value nodes through the same path.
+Owns the materialize-once embed+stage step (with optional ledger reuse) and
+the post-embedding failure-rate gate. The per-label embedding-text
+expressions are no longer here: each node builder attaches a single
+`embedding_text` column from the one source of truth
+(contract.EMBEDDING_TEXT_EXPR), and this stage simply hashes and embeds it.
+``run.py`` calls ``transform_embeddings`` / ``check_thresholds``; the
+sample-values stage calls ``embed_label`` to embed Value nodes through the
+same path.
 """
 
 from __future__ import annotations
@@ -30,43 +33,15 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# Catalog is part of the qualified name in every label's embedding text
-# (Schema already used catalog_name). In a multi-catalog graph this is what
-# keeps `bronze.sales.orders` and `gold.sales.orders` from embedding
-# identically; in a single-catalog graph it is a constant prefix.
-_TABLE_EMBEDDING_TEXT_EXPR = (
-    "concat_ws(' | ', concat_ws('.', table_catalog, table_schema, name),"
-    " nullif(trim(comment), ''))"
-)
-_COLUMN_EMBEDDING_TEXT_EXPR = (
-    "concat_ws(' | ', concat_ws('.', table_catalog, table_schema, table_name, name),"
-    " data_type, nullif(trim(comment), ''))"
-)
-_SCHEMA_EMBEDDING_TEXT_EXPR = (
-    "concat_ws(' | ', concat_ws('.', catalog_name, name), nullif(trim(comment), ''))"
-)
-_DATABASE_EMBEDDING_TEXT_EXPR = "name"
-_VALUE_EMBEDDING_TEXT_EXPR = "value"
-
-_EMBEDDING_TEXT_EXPRS: dict[NodeLabel, str] = {
-    NodeLabel.TABLE: _TABLE_EMBEDDING_TEXT_EXPR,
-    NodeLabel.COLUMN: _COLUMN_EMBEDDING_TEXT_EXPR,
-    NodeLabel.SCHEMA: _SCHEMA_EMBEDDING_TEXT_EXPR,
-    NodeLabel.DATABASE: _DATABASE_EMBEDDING_TEXT_EXPR,
-    NodeLabel.VALUE: _VALUE_EMBEDDING_TEXT_EXPR,
-}
-
-
 def embed_label(
     df: "DataFrame", label: NodeLabel,
     settings: SparkIngestSettings, staging_path: str, ledger_path: str,
     summary: RunSummary,
 ) -> "DataFrame":
-    """Embed `df` for `label` using the label's text expression, stage to
-    Delta once, and record failure stats into `summary`."""
+    """Embed `df` for `label` (reading its builder-attached `embedding_text`
+    column), stage to Delta once, and record failure stats into `summary`."""
     return _embed_and_stage(
-        df, _EMBEDDING_TEXT_EXPRS[label], label,
-        settings, staging_path, ledger_path, summary,
+        df, label, settings, staging_path, ledger_path, summary,
     )
 
 
@@ -135,18 +110,22 @@ def check_thresholds(settings: SparkIngestSettings, summary: RunSummary) -> None
 
 
 def _embed_and_stage(
-    df: "DataFrame", text_expr: str, label: NodeLabel,
+    df: "DataFrame", label: NodeLabel,
     settings: SparkIngestSettings, staging_path: str, ledger_path: str,
     summary: RunSummary,
 ) -> "DataFrame":
     """Embed df, stage to Delta once, compute failure stats into summary.
+
+    `df` carries a builder-attached `embedding_text` column; the hash and
+    the ai_query input both derive from it, so the ledger never churns from
+    a hash/embed mismatch.
 
     When DBXCARTA_LEDGER_ENABLED, rows whose embedding_text_hash and model
     already exist in the per-label ledger are served from the ledger (no
     ai_query call). Only misses call the endpoint; the ledger is then upserted
     with the newly-computed vectors (excluding error rows).
     """
-    from pyspark.sql.functions import col, expr as spark_expr, lit, sha2
+    from pyspark.sql.functions import col, lit, sha2
     from pyspark.sql.types import ArrayType, DoubleType
 
     endpoint = settings.dbxcarta_embedding_endpoint
@@ -157,13 +136,17 @@ def _embed_and_stage(
         ledger_df = read_ledger(spark, ledger_path, label)
 
         if ledger_df is not None:
-            df_hashed = df.withColumn("_curr_hash", sha2(spark_expr(text_expr), 256))
+            df_hashed = df.withColumn("_curr_hash", sha2(col("embedding_text"), 256))
             hits_df, misses_df = split_by_ledger(df_hashed, ledger_df, endpoint)
             hit_count = hits_df.count()
             summary.embeddings.ledger_hits[label] = hit_count
 
+            # `embedding_text` is now a builder column, so it is in
+            # df.columns. The miss branch (add_embedding_column) drops it;
+            # exclude it here too so both unionByName arms — and the Delta
+            # staging schema — match.
             hit_final = hits_df.select(
-                *[col(c) for c in df.columns],
+                *[col(c) for c in df.columns if c != "embedding_text"],
                 col("_curr_hash").alias("embedding_text_hash"),
                 col("_led_embedding").cast(ArrayType(DoubleType())).alias("embedding"),
                 lit(None).cast("string").alias("embedding_error"),
@@ -172,17 +155,17 @@ def _embed_and_stage(
             )
 
             embedded_misses = emb.add_embedding_column(
-                misses_df, text_expr, endpoint, dimension, label=label.value,
+                misses_df, endpoint, dimension, label=label.value,
             )
             enriched = hit_final.unionByName(embedded_misses)
         else:
             summary.embeddings.ledger_hits[label] = 0
             enriched = emb.add_embedding_column(
-                df, text_expr, endpoint, dimension, label=label.value,
+                df, endpoint, dimension, label=label.value,
             )
     else:
         enriched = emb.add_embedding_column(
-            df, text_expr, endpoint, dimension, label=label.value,
+            df, endpoint, dimension, label=label.value,
         )
 
     staged = stage_embedded_nodes(enriched, staging_path, label)

@@ -42,25 +42,29 @@ def _validate_embedding(raw_col: "Column", expected_dim: int) -> tuple["Column",
 
 def add_embedding_column(
     df: "DataFrame",
-    text_expr: str,
     endpoint: str,
     expected_dimension: int,
     *,
     label: str,
 ) -> "DataFrame":
-    """Append embedding_text, embedding_text_hash, embedding, embedding_error,
-    embedding_model, embedded_at to df.
+    """Append embedding_text_hash, embedding, embedding_error,
+    embedding_model, embedded_at to df, then drop the input embedding_text.
 
-    embedding_text_hash is sha256 hex of the input text and is always stored
+    `df` must already carry an `embedding_text` column produced by its node
+    builder (the single source of truth is contract.EMBEDDING_TEXT_EXPR).
+    This function no longer evaluates a per-label SQL string.
+
+    embedding_text_hash is sha256 hex of embedding_text and is always stored
     (even on failed rows) so post-mortem can correlate failures by hash.
     embedding is nulled when ai_query() returns an errorMessage (endpoint
     failure) or the returned vector length does not match expected_dimension
     (shape failure) — both count as failures in compute_failure_stats().
     embedding_error carries the reason: endpoint-wins precedence.
-    embedding_text is dropped for all labels; the hash alone is sufficient
-    for drift detection. embedding_error is dropped by the caller before the
-    Neo4j node write (it lives only in the Delta staging table from Stage 2
-    and the run-summary breakdown).
+    embedding_text is dropped before returning; the hash alone is sufficient
+    for drift detection and keeps the Delta staging schema stable.
+    embedding_text_hash / embedding_model / embedded_at / embedding_error
+    live only in the Delta staging table, the ledger, and the run summary —
+    the fail-closed write boundary projects them off the graph.
     """
     # Guard before interpolation: ai_query requires the endpoint as a string
     # literal. validate_serving_endpoint_name rejects characters that would
@@ -74,7 +78,6 @@ def add_embedding_column(
 
     df = (
         df
-        .withColumn("embedding_text", expr(text_expr))
         .withColumn("embedding_text_hash", sha2(col("embedding_text"), 256))
         .withColumn("_emb_raw", raw)
         .withColumn("embedding", embedding_col)

@@ -1,14 +1,12 @@
 """Integration tests for end-to-end semantic search through the graph.
 
-Exercises the full client-side retrieval path described in the README: embed
-a text string via the live Databricks Foundation Model API endpoint, run a
-similarity search against the Neo4j vector index, then traverse graph
-relationships to produce a schema subgraph.
+Exercises the live embedding endpoint dimension, the Neo4j vector index, and
+the graph expansion path. The graph contract stores only `embedding`, not the
+source `embedding_text`, so self-ranking probes query with stored vectors.
 
 Requires:
   - DBXCARTA_INCLUDE_EMBEDDINGS_TABLES=true in the most recent run — Table
-    nodes are the only label that retains embedding_text, so they are the
-    only label where re-embedding + self-rank is meaningful.
+    nodes must carry `embedding` vectors for the vector-index probes below.
   - A Databricks workspace reachable with the current SDK auth configuration.
 """
 
@@ -68,13 +66,12 @@ def test_embedding_endpoint_returns_correct_dimension(neo4j_driver, ws, run_summ
     assert len(vecs[0]) == expected_dim
 
 
-def test_table_semantic_self_ranking(neo4j_driver, ws, run_summary) -> None:
-    """Re-embedding a Table's own embedding_text must recover the node at cosine >= 0.99.
+def test_table_semantic_self_ranking(neo4j_driver, run_summary) -> None:
+    """Querying with a Table's own stored vector must recover that node.
 
-    databricks-gte-large-en is deterministic, so re-encoding the same string
-    should return a nearly identical vector. A score below the threshold
-    indicates either that the index is stale relative to the current model or
-    that the wrong endpoint is configured.
+    The graph no longer stores `embedding_text`; it stores only the vector.
+    A self-vector score below the threshold indicates that the vector index is
+    stale, missing the node, or reading the wrong property.
 
     This test is graph-size-independent: it checks the cosine score directly
     rather than rank, so it passes on a 3-table fixture as well as a
@@ -83,68 +80,58 @@ def test_table_semantic_self_ranking(neo4j_driver, ws, run_summary) -> None:
     if not _tables_enabled(run_summary):
         pytest.skip("Table embeddings not enabled in the latest run")
 
-    endpoint = run_summary.get("embedding_model", "databricks-gte-large-en")
-
     with neo4j_driver.session() as session:
         rows = list(session.run(
-            "MATCH (n:Table) WHERE n.embedding IS NOT NULL AND n.embedding_text IS NOT NULL "
-            f"RETURN n.id AS id, n.embedding_text AS text LIMIT {_SAMPLE}"
+            "MATCH (n:Table) WHERE n.embedding IS NOT NULL "
+            f"RETURN n.id AS id, n.embedding AS vector LIMIT {_SAMPLE}"
         ))
 
     if not rows:
-        pytest.skip("No Table nodes with embedding_text found")
-
-    texts = [r["text"] for r in rows]
-    fresh_vecs = _embed_texts(ws, endpoint, texts)
+        pytest.skip("No Table nodes with embedding vectors found")
 
     with neo4j_driver.session() as session:
-        for row, vec in zip(rows, fresh_vecs):
+        for row in rows:
             result = session.run(
                 "CALL db.index.vector.queryNodes('table_embedding', $k, $vec) "
                 "YIELD node, score WHERE node.id = $id RETURN score",
                 k=_TOP_K,
-                vec=vec,
+                vec=row["vector"],
                 id=row["id"],
             ).single()
             assert result is not None, (
                 f"Table '{row['id']}' not found in top-{_TOP_K} when its own "
-                "embedding_text was re-embedded via the live endpoint"
+                "stored embedding vector was queried"
             )
             assert result["score"] >= _MIN_SELF_SIMILARITY, (
                 f"Table '{row['id']}' self-similarity score {result['score']:.4f} "
-                f"< {_MIN_SELF_SIMILARITY} — index may be stale or model has drifted"
+                f"< {_MIN_SELF_SIMILARITY} — index may be stale or property mapping is wrong"
             )
 
 
-def test_graph_expansion_from_vector_search(neo4j_driver, ws, run_summary) -> None:
+def test_graph_expansion_from_vector_search(neo4j_driver, run_summary) -> None:
     """A vector search result expands into a non-empty column subgraph.
 
-    Mirrors the two-step retrieval pattern from the README: embed a query,
-    find top-k Tables via similarity search, traverse HAS_COLUMN for the top
-    result. Verifies that the combined pipeline returns structured schema
-    context suitable for an LLM call.
+    Uses a stored Table vector to find top-k Tables, then traverses
+    HAS_COLUMN for the top result. This verifies that the vector index and
+    relationship expansion still produce structured schema context.
     """
     if not _tables_enabled(run_summary):
         pytest.skip("Table embeddings not enabled in the latest run")
 
-    endpoint = run_summary.get("embedding_model", "databricks-gte-large-en")
-
     with neo4j_driver.session() as session:
         probe = session.run(
-            "MATCH (n:Table) WHERE n.embedding IS NOT NULL AND n.embedding_text IS NOT NULL "
-            "RETURN n.id AS id, n.embedding_text AS text LIMIT 1"
+            "MATCH (n:Table) WHERE n.embedding IS NOT NULL "
+            "RETURN n.id AS id, n.embedding AS vector LIMIT 1"
         ).single()
 
     if probe is None:
-        pytest.skip("No Table nodes with embedding_text found")
-
-    (vec,) = _embed_texts(ws, endpoint, [probe["text"]])
+        pytest.skip("No Table nodes with embedding vectors found")
 
     with neo4j_driver.session() as session:
         top_tables = list(session.run(
             "CALL db.index.vector.queryNodes('table_embedding', 5, $vec) "
             "YIELD node RETURN node.id AS id",
-            vec=vec,
+            vec=probe["vector"],
         ))
         assert top_tables, "Vector search returned no Table nodes"
 

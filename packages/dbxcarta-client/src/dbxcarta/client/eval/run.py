@@ -23,6 +23,7 @@ from dbxcarta.client.eval.arms import (
     _LLM_ARMS,
     _REFERENCE_ARM,
     _STAGING_ARMS,
+    _ReferenceCache,
     _run_graph_rag_arm,
     _run_llm_arm,
     _run_reference_arm,
@@ -97,19 +98,28 @@ def run_client() -> None:
         from dbxcarta.client.schema_dump import fetch_schema_dump
         schema_text = fetch_schema_dump(settings)
 
+    # Shared across arms: each question's reference SQL runs at most once.
+    ref_cache = _ReferenceCache(
+        ws,
+        settings.databricks_warehouse_id,
+        settings.dbxcarta_client_timeout_sec,
+    )
+
     primary_error: BaseException | None = None
     try:
         for arm in active_arms:
             if arm == _REFERENCE_ARM:
-                _run_reference_arm(ws, settings, questions, summary)
+                _run_reference_arm(questions, summary, ref_cache)
             elif arm in _LLM_ARMS:
                 _run_llm_arm(
-                    spark, ws, settings, questions, summary, arm, staging_table,
+                    spark, ws, settings, questions, summary, ref_cache, arm,
+                    staging_table,
                     schema_text=schema_text if arm == "schema_dump" else None,
                 )
             elif arm == "graph_rag":
                 _run_graph_rag_arm(
-                    spark, ws, settings, questions, summary, staging_table,
+                    spark, ws, settings, questions, summary, ref_cache,
+                    staging_table,
                 )
             else:
                 raise ValueError(f"Unknown arm: {arm!r}")

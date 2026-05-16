@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from neo4j import GraphDatabase
 
-from dbxcarta.client.ids import schema_from_node_id
+from dbxcarta.client.ids import catalog_from_node_id, schema_from_node_id
 from dbxcarta.client.neo4j_utils import neo4j_credentials
 from dbxcarta.client.retriever import ColumnEntry, ContextBundle, JoinLine, Retriever
 from dbxcarta.client.settings import ClientSettings
@@ -139,7 +139,6 @@ class GraphRetriever(Retriever):
 
     def retrieve(self, question: str, embedding: list[float]) -> ContextBundle:
         top_k = self._settings.dbxcarta_client_top_k
-        catalog = self._settings.dbxcarta_catalog
         threshold = self._settings.dbxcarta_confidence_threshold
         inject_criteria = self._settings.dbxcarta_inject_criteria
         configured_schemas = self._settings.schemas_list
@@ -189,7 +188,7 @@ class GraphRetriever(Retriever):
                 parent_tbl_ids + ref_tbl_ids + lexical_tbl_ids + lexical_col_tbl_ids
             ))
             all_tbl_ids = list(dict.fromkeys(active_tbl_seeds + expansion_tbl_ids))
-            columns = _fetch_columns(session, all_tbl_ids, catalog, fetch_schemas)
+            columns = _fetch_columns(session, all_tbl_ids, fetch_schemas)
 
             join_col_ids = _join_column_ids(session, active_col_seeds, threshold)
             retrieved_col_ids = [c.column_id for c in columns if c.column_id]
@@ -440,7 +439,7 @@ def _join_column_ids(
 
 
 def _fetch_columns(
-    session: Session, table_ids: list[str], catalog: str, schemas: list[str]
+    session: Session, table_ids: list[str], schemas: list[str]
 ) -> list[ColumnEntry]:
     if not table_ids:
         return []
@@ -458,6 +457,10 @@ def _fetch_columns(
     )
     entries: list[ColumnEntry] = []
     for row in result:
+        # Catalog is authoritative per node id (ingest builds ids
+        # catalog-qualified); the graph spans multiple catalogs, so it
+        # cannot come from a single configured catalog.
+        catalog = catalog_from_node_id(row["col_id"]) or ""
         fqt = f"`{catalog}`.`{row['schema_name']}`.`{row['table_name']}`"
         entries.append(ColumnEntry(
             table_fqn=fqt,

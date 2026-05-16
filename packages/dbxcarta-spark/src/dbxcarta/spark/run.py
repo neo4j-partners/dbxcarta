@@ -19,7 +19,13 @@ import os
 from typing import TYPE_CHECKING
 
 import dbxcarta.spark.ingest.transform.sample_values as sv
-from dbxcarta.spark.contract import CONTRACT_VERSION, NodeLabel, REFERENCES_PROPERTIES, RelType
+from dbxcarta.spark.contract import (
+    CONTRACT_VERSION,
+    NODE_PROPERTIES,
+    NodeLabel,
+    REFERENCES_PROPERTIES,
+    RelType,
+)
 from dbxcarta.spark.ingest.extract import ExtractResult, extract
 from dbxcarta.spark.ingest.fk.discovery import FKDiscoveryResult, run_fk_discovery
 from dbxcarta.spark.ingest.load.neo4j_io import (
@@ -168,6 +174,7 @@ def _run(
     from neo4j import GraphDatabase
 
     extract_result: ExtractResult | None = None
+    values: ValueResult | None = None
     scope = settings.databricks_secret_scope
     neo4j = Neo4jConfig(
         uri=dbutils.secrets.get(scope=scope, key="NEO4J_URI"),
@@ -202,13 +209,28 @@ def _run(
                 summary,
             )
 
-            _load(neo4j, driver, extract_result, fk_result, values, summary)
+            _load(neo4j, driver, settings, extract_result, fk_result, values, summary)
             summary.neo4j_counts = query_counts(driver)
             _verify(driver, settings, summary)
     except Exception as exc:
         run_error = exc
         raise
     finally:
+        # Release both cached snapshots after run_fk_discovery and _load have
+        # finished reading them. Each release is guarded independently so a
+        # failure in one still attempts the other; on the success path a
+        # release failure is re-raised, on the failure path it is logged so it
+        # does not mask the original error.
+        if values is not None:
+            try:
+                values.unpersist_cached()
+            except Exception:
+                if run_error is not None:
+                    logger.exception(
+                        "[dbxcarta] failed to unpersist cached sampled-value DataFrame"
+                    )
+                else:
+                    raise
         if extract_result is not None:
             try:
                 extract_result.unpersist_cached()
@@ -272,6 +294,7 @@ def _verify(driver: "Driver", settings: SparkIngestSettings, summary: RunSummary
 def _load(
     neo4j: Neo4jConfig,
     driver: "Driver",
+    settings: SparkIngestSettings,
     extract_result: ExtractResult,
     fk_result: FKDiscoveryResult,
     values: ValueResult | None,
@@ -286,36 +309,35 @@ def _load(
     candidate_col_ids = sv.get_candidate_col_ids(extract_result.columns_df)
     purge_stale_values(driver, candidate_col_ids)
 
+    # Database nodes are one per resolved catalog; use the settings-derived
+    # catalog count instead of a logging-only count() action on database_df.
     logger.info(
         "[dbxcarta] writing nodes: Database (%d)",
-        extract_result.database_df.count(),
+        len(settings.resolved_catalogs()),
     )
-    write_node(_drop_cols(extract_result.database_df, "embedding_error"), neo4j, NodeLabel.DATABASE)
+    write_node(_project(extract_result.database_df, NodeLabel.DATABASE), neo4j, NodeLabel.DATABASE)
 
     logger.info("[dbxcarta] writing nodes: Schema (%d)", summary.extract.schemas)
     write_node(
-        _drop_cols(extract_result.schema_node_df, "catalog_name", "embedding_error"),
+        _project(extract_result.schema_node_df, NodeLabel.SCHEMA),
         neo4j, NodeLabel.SCHEMA,
     )
 
     logger.info("[dbxcarta] writing nodes: Table (%d)", summary.extract.tables)
     write_node(
-        _drop_cols(extract_result.table_node_df, "table_catalog", "embedding_error"),
+        _project(extract_result.table_node_df, NodeLabel.TABLE),
         neo4j, NodeLabel.TABLE,
     )
 
     logger.info("[dbxcarta] writing nodes: Column (%d)", summary.extract.columns)
     write_node(
-        _drop_cols(
-            extract_result.column_node_df,
-            "table_catalog", "table_schema", "table_name", "embedding_error",
-        ),
+        _project(extract_result.column_node_df, NodeLabel.COLUMN),
         neo4j, NodeLabel.COLUMN,
     )
 
     if values is not None and values.sample_stats.value_nodes > 0:
         logger.info("[dbxcarta] writing nodes: Value (%d)", values.sample_stats.value_nodes)
-        write_node(_drop_cols(values.value_node_df, "embedding_error"), neo4j, NodeLabel.VALUE)
+        write_node(_project(values.value_node_df, NodeLabel.VALUE), neo4j, NodeLabel.VALUE)
         logger.info("[dbxcarta] writing relationships: HAS_VALUE (%d)", values.sample_stats.has_value_edges)
         write_rel(
             values.has_value_df.coalesce(1), neo4j,
@@ -374,13 +396,27 @@ def _load(
         )
 
 
-def _drop_cols(df: "DataFrame", *names: str) -> "DataFrame":
-    """Drop optional pipeline-only columns before connector writes.
+def _project(df: "DataFrame", label: NodeLabel) -> "DataFrame":
+    """Project a node DataFrame to its declared per-label property set.
 
-    The helper is intentionally tolerant because embedding columns only exist
-    for labels whose embedding flag was enabled for this run.
+    This is the fail-closed write boundary: a column reaches Neo4j if and
+    only if it is listed in `contract.NODE_PROPERTIES[label]`. Helper
+    columns and embedding bookkeeping (`embedding_text`,
+    `embedding_text_hash`, `embedding_model`, `embedded_at`,
+    `embedding_error`) are dropped by construction because they are not
+    declared — no hand-maintained denylist.
+
+    `embedding` is the only declared column that may be legitimately absent
+    (present only when the label was embedded this run); the projection
+    selects the intersection. Any other missing declared column is a real
+    contract violation and fails loudly rather than being silently skipped.
     """
-    for name in names:
-        if name in df.columns:
-            df = df.drop(name)
-    return df
+    declared = NODE_PROPERTIES[label]
+    present = set(df.columns)
+    missing = [c for c in declared if c != "embedding" and c not in present]
+    if missing:
+        raise RuntimeError(
+            f"[dbxcarta] {label.value} node DataFrame is missing declared"
+            f" properties {missing}; columns present: {sorted(present)}"
+        )
+    return df.select(*[c for c in declared if c in present])

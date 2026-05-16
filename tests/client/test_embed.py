@@ -104,7 +104,7 @@ def test_graph_rag_raises_when_embedding_fails(monkeypatch) -> None:
     )
     with pytest.raises(RuntimeError, match="graph_rag embedding failed"):
         arms._run_graph_rag_arm(
-            None, None, _settings(), _questions(3), None, "staging"
+            None, None, _settings(), _questions(3), None, None, "staging"
         )
 
 
@@ -114,5 +114,5 @@ def test_graph_rag_raises_on_embedding_count_mismatch(monkeypatch) -> None:
     )
     with pytest.raises(RuntimeError, match="misaligned embeddings"):
         arms._run_graph_rag_arm(
-            None, None, _settings(), _questions(3), None, "staging"
+            None, None, _settings(), _questions(3), None, None, "staging"
         )

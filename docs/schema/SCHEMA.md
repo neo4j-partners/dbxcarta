@@ -46,11 +46,8 @@ One node per catalog ingested.
 |----------------------|---------|----------|-------------------------------------|
 | `id`                 | string  | no       | `generate_id(catalog_name)`; unique |
 | `name`               | string  | no       | catalog name                        |
-| `contract_version`   | string  | no       | schema version, currently `"1.0"`   |
+| `contract_version`   | string  | no       | schema version, currently `"1.1"`   |
 | `embedding`          | float[] | yes      | 1024-dim cosine vector; present only when `DBXCARTA_INCLUDE_EMBEDDINGS_DATABASES=true` |
-| `embedding_text_hash`| string  | yes      | SHA-256 hex of the embedding input text; present when `embedding` is |
-| `embedding_model`    | string  | yes      | serving endpoint name used; present when `embedding` is |
-| `embedded_at`        | timestamp | yes    | when the embedding was computed; present when `embedding` is |
 
 Neo4j constraint: `database_id` — `id IS UNIQUE`.
 
@@ -65,11 +62,8 @@ One node per Unity Catalog schema in scope.
 | `id`                 | string  | no       | `generate_id(catalog, schema)`; unique |
 | `name`               | string  | no       | schema name                          |
 | `comment`            | string  | yes      | UC schema comment                    |
-| `contract_version`   | string  | no       | `"1.0"`                              |
+| `contract_version`   | string  | no       | `"1.1"`                              |
 | `embedding`          | float[] | yes      | 1024-dim; present only when `DBXCARTA_INCLUDE_EMBEDDINGS_SCHEMAS=true` |
-| `embedding_text_hash`| string  | yes      | SHA-256 hex of the embedding input text; present when `embedding` is |
-| `embedding_model`    | string  | yes      | serving endpoint name used; present when `embedding` is |
-| `embedded_at`        | timestamp | yes    | when the embedding was computed; present when `embedding` is |
 
 Neo4j constraint: `schema_id` — `id IS UNIQUE`.
 
@@ -83,15 +77,13 @@ One node per table or view in scope.
 |----------------------|-----------|----------|-------------------------------------|
 | `id`                 | string    | no       | `generate_id(catalog, schema, table)`; unique |
 | `name`               | string    | no       | table name                          |
+| `layer`              | string    | yes      | optional catalog-derived layer such as `bronze`, `silver`, or `gold` |
 | `table_type`         | string    | yes      | UC `table_type` (e.g. `MANAGED`, `EXTERNAL`, `VIEW`) |
 | `comment`            | string    | yes      | UC table comment                    |
 | `created`            | timestamp | yes      | UC creation timestamp               |
 | `last_altered`       | timestamp | yes      | UC last-altered timestamp           |
-| `contract_version`   | string    | no       | `"1.0"`                             |
+| `contract_version`   | string    | no       | `"1.1"`                             |
 | `embedding`          | float[]   | yes      | 1024-dim; present only when `DBXCARTA_INCLUDE_EMBEDDINGS_TABLES=true` |
-| `embedding_text_hash`| string    | yes      | SHA-256 hex of the embedding input text; present when `embedding` is |
-| `embedding_model`    | string    | yes      | serving endpoint name used; present when `embedding` is |
-| `embedded_at`        | timestamp | yes      | when the embedding was computed; present when `embedding` is |
 
 Neo4j constraint: `table_id` — `id IS UNIQUE`.
 Vector index: `table_embedding` on `embedding` when embeddings are enabled.
@@ -110,11 +102,8 @@ One node per column in scope.
 | `is_nullable`        | boolean | yes      | `true` / `false`; `null` when UC returns unexpected value |
 | `ordinal_position`   | integer | yes      | 1-based column position             |
 | `comment`            | string  | yes      | UC column comment                   |
-| `contract_version`   | string  | no       | `"1.0"`                             |
+| `contract_version`   | string  | no       | `"1.1"`                             |
 | `embedding`          | float[] | yes      | 1024-dim; present only when `DBXCARTA_INCLUDE_EMBEDDINGS_COLUMNS=true` |
-| `embedding_text_hash`| string  | yes      | SHA-256 hex of the embedding input text; present when `embedding` is |
-| `embedding_model`    | string  | yes      | serving endpoint name used; present when `embedding` is |
-| `embedded_at`        | timestamp | yes    | when the embedding was computed; present when `embedding` is |
 
 Neo4j constraint: `column_id` — `id IS UNIQUE`.
 Neo4j index: `column_data_type` on `data_type`.
@@ -132,14 +121,19 @@ cardinality falls below the configured threshold.
 | `id`                 | string  | no       | `generate_value_id(column_id, value_str)`; unique |
 | `value`              | string  | yes      | the sampled value as a string       |
 | `count`              | long    | yes      | approximate row count for this value |
-| `contract_version`   | string  | no       | `"1.0"`                             |
+| `contract_version`   | string  | no       | `"1.1"`                             |
 | `embedding`          | float[] | yes      | 1024-dim; present only when `DBXCARTA_INCLUDE_EMBEDDINGS_VALUES=true` |
-| `embedding_text_hash`| string  | yes      | SHA-256 hex of the embedding input text; present when `embedding` is |
-| `embedding_model`    | string  | yes      | serving endpoint name used; present when `embedding` is |
-| `embedded_at`        | timestamp | yes    | when the embedding was computed; present when `embedding` is |
 
 Neo4j constraint: `value_id` — `id IS UNIQUE`.
 Vector index: `value_embedding` on `embedding` when embeddings are enabled.
+
+---
+
+Embedding bookkeeping columns such as `embedding_text`,
+`embedding_text_hash`, `embedding_model`, `embedded_at`, and
+`embedding_error` are not graph properties. They live in the Delta staging
+tables, the re-embedding ledger, and the run summary where applicable. The
+Neo4j graph only carries the `embedding` vector itself.
 
 ---
 
@@ -227,7 +221,7 @@ corresponding nodes. Vector indexes for that label are not created.
 
 ## Versioning
 
-The current schema version is **`1.0`**, stored as `contract_version` on every
-node. Adding a new property or relationship type increments the version. Removing
-or renaming a property is a breaking change. Clients should treat unknown
-properties as additive and not error on their presence.
+The current schema version is **`1.1`**, stored as `contract_version` on every
+node. Adding a new property or relationship type increments the version.
+Removing or renaming a property is a breaking change. Clients should treat
+unknown properties as additive and not error on their presence.

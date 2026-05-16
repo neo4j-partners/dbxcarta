@@ -36,6 +36,21 @@ class ValueResult:
     value_node_df: "DataFrame"
     has_value_df: "DataFrame"
     sample_stats: sv.SampleStats
+    # Cached sampled-value DataFrame backing value_node_df and has_value_df.
+    # None when nothing was cached. The pipeline releases this only after FK
+    # discovery and the Neo4j load have finished, mirroring
+    # ExtractResult.unpersist_cached().
+    cache_handle: "DataFrame | None" = None
+
+    def unpersist_cached(self) -> None:
+        """Release the cached sampled-value DataFrame after the ingest run.
+
+        Sampling caches raw_df because the semantic value-index build and the
+        HAS_VALUE write both read it. The pipeline calls this once those steps
+        no longer need the cache. Idempotent and a no-op when nothing cached.
+        """
+        if self.cache_handle is not None:
+            self.cache_handle.unpersist()
 
 
 def transform_sample_values(
@@ -52,7 +67,7 @@ def transform_sample_values(
     if not settings.dbxcarta_include_values:
         return None
 
-    value_node_df, has_value_df, sample_stats = sv.sample(
+    value_node_df, has_value_df, sample_stats, cache_handle = sv.sample(
         spark, extract_result.columns_df, settings.dbxcarta_catalog, schema_list,
         settings.dbxcarta_sample_limit,
         settings.dbxcarta_sample_cardinality_threshold,
@@ -76,4 +91,5 @@ def transform_sample_values(
         value_node_df=value_node_df,
         has_value_df=has_value_df,
         sample_stats=sample_stats,
+        cache_handle=cache_handle,
     )
