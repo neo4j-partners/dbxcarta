@@ -384,6 +384,28 @@ Final review gate:
 - [ ] Confirm both projects meet their requirements and close the plan
       out.
 
+## Post-Implementation Remediation (databricks-job-runner)
+
+Verification after Phases 4 to 6 surfaced live issues that were fixed:
+
+- The first hardened publish already shipped: tag `v0.5` published to
+  PyPI through the split, SHA-pinned, attested workflow. Phase 5 is
+  proven end to end in production, not just by construction.
+- CI was red because the locked closure carried known CVEs. Fixed by
+  bumping `urllib3` 2.6.3 to 2.7.0 (CVE-2026-44431, CVE-2026-44432) and
+  `cryptography` 46.0.6 to 48.0.0 (CVE-2026-39892) in `uv.lock`. CI is
+  green after the fix.
+- `publish.yml` had no supply-chain gate, so `v0.5` shipped on red CI.
+  Added `uv lock --check` and `pip-audit` to the publish build job so a
+  tagged release cannot ship with lockfile drift or a known-vulnerable
+  closure.
+- Branch protection added on `main`: one required review, required and
+  strict `Locked tests and audit` status check, no force-push, no
+  deletion.
+- The `pypi` environment had `protection_rules: []`. Deployment is now
+  restricted to a `v*` tag policy. The human-approval required-reviewer
+  gate is still open because it needs a named user or team.
+
 ## Out of Scope
 
 - Any change to harden-deploy scope or its install model beyond

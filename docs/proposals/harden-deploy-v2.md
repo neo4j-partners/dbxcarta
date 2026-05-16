@@ -191,24 +191,101 @@ before `upload --wheel`, exactly as before this change. This is
 unchanged consumer behavior and is documented in the project README; the
 build contract is intentionally out of scope for this phase.
 
-### Phase V3: Validate the full dbxcarta ingest on the warm cluster
+### Phase V3: Validate the full dbxcarta ingest on the warm cluster [Status: in progress, blocked on runner 0.4.10 publish]
 
 Goal: the real ingest path works end to end, exercising the parts the
 smoke harness does not: the Neo4j connector probe, the pinned closure
 lock and smoke check with a real closure, and secret-scope loading.
 
 Steps:
-- [ ] Run the full dbxcarta ingest on the warm cluster.
+- [~] Run the full dbxcarta ingest on the warm cluster. Attempted on
+      `0515-141455-wb8qxgo2`; aborted at preflight by a runner defect
+      (see "Defect found" below). No Databricks run was created.
 - [ ] Confirm new code is picked up with no version bump and no cluster
-      restart.
+      restart. Not reached. The cluster cold-started to RUNNING this
+      attempt, so the no-restart criterion must be judged on the rerun,
+      not this attempt.
 - [ ] Confirm the connector probe, the closure lock and smoke check, and
-      secret-scope loading all behave correctly.
-- [ ] If a defect is found, fix it in the runner, publish the next patch
+      secret-scope loading all behave correctly. Not reached. The crash
+      was client-side at preflight, before any run, so the connector
+      probe result, the closure lock and smoke check, and secret-scope
+      loading are all still unvalidated.
+- [x] If a defect is found, fix it in the runner, publish the next patch
       version, bump the dbxcarta pin, and rerun. Repeat until the ingest
-      is clean.
+      is clean. Defect found and fixed in the runner (uncommitted,
+      unpublished); publish, pin bump, and rerun are pending.
 
 Done when: a full ingest succeeds against a published runner version
 with no manual code step and no restart.
+
+#### Completed this attempt (preconditions, all green)
+
+- Workspace auth on profile `azure-rk-knight`.
+- Source readiness: all 8 finance-genie tables present in
+  `graph-enriched-lakehouse.graph-enriched-schema` (5 required + 3 gold,
+  strict-optional). `scripts/run_demo.py` was not needed.
+- `uv build --all-packages` rebuilt the wheels, picking up the
+  uncommitted Phase V2 `cli.py` change.
+- `dbxcarta upload --wheel` published the stable wheels
+  (`dbxcarta_spark-stable.whl`, `dbxcarta_client-stable.whl`) and shipped
+  the runner bootstrap script (`_dbxrunner_bootstrap.py`).
+- `dbxcarta upload --data tests/fixtures` uploaded the data fixtures.
+
+#### Defect found (this is the expected V3 contingency)
+
+`dbxcarta submit-entrypoint ingest --compute cluster` died client-side at
+the connector preflight, before any Databricks run was created:
+
+```
+databricks_job_runner==0.4.9  libraries.py:163-164
+AttributeError: 'list' object has no attribute 'library_statuses'
+```
+
+Root cause: in modern `databricks-sdk`, `LibrariesAPI.cluster_status()`
+returns a bare iterator of `LibraryFullStatus` (it unwraps
+`.library_statuses` itself). The runner accessed `.library_statuses` on
+that list a second time. The runner's own test fakes returned the
+obsolete wrapped shape, which is why its suite was green while production
+crashed. The bug is reached via `maven_libraries_preflight`, wired into
+`_ingest_runner()` in Phase V2; the `client` and generic paths have no
+preflight and are unaffected.
+
+#### Fix applied in databricks-job-runner (uncommitted, unpublished)
+
+- `src/databricks_job_runner/libraries.py`: consume `cluster_status` as a
+  bare list.
+- `src/databricks_job_runner/clean.py`: same fix at the legacy
+  reconciler call site (would have crashed identically when reached).
+- `tests/test_libraries.py`, `tests/test_preflight.py`: corrected the
+  masking fakes to the real bare-list shape; added an SDK-contract
+  regression test so the bug cannot be re-masked.
+- `CHANGELOG.md`: new; `0.4.10` fix entry plus a backfilled `0.4.9`
+  entry (closes the V1 changelog item, which was ticked without a file).
+- Runner suite: 43 passed.
+
+#### Retest required (after runner 0.4.10 is published to PyPI)
+
+The publish is operator-gated (the V1 publish gate). Once
+`databricks-job-runner==0.4.10` is live and installable:
+
+1. Bump the dbxcarta pin `0.4.9 -> 0.4.10` in
+   `packages/dbxcarta-spark/pyproject.toml`, the `_INGEST_PINNED_CLOSURE`
+   and `_CLIENT_PINNED_CLOSURE` strings in
+   `packages/dbxcarta-spark/src/dbxcarta/spark/cli.py`, and `uv.lock`.
+2. `uv build --all-packages`, then `dbxcarta upload --wheel` to
+   republish the stable wheels against the new pin. Data fixtures do not
+   need re-uploading.
+3. Rerun `dbxcarta submit-entrypoint ingest --compute cluster`.
+4. Confirm, on the rerun, the items the crash never reached: the Neo4j
+   connector probe passes, the pinned closure lock and post-install
+   smoke check behave with the real closure, secret-scope loading
+   works, the run ends `status=success` with no manual code step and no
+   cluster restart, then `dbxcarta verify` passes.
+
+The precondition gates above (auth, readiness, build, stable-wheel and
+bootstrap publish, data upload) were green this attempt and only need
+re-confirming to the extent the pin bump and rebuild change them
+(rebuild and `upload --wheel` in step 2 cover that).
 
 ### Phase V4: Cluster configuration drift check
 
