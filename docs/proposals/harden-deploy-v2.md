@@ -191,7 +191,7 @@ before `upload --wheel`, exactly as before this change. This is
 unchanged consumer behavior and is documented in the project README; the
 build contract is intentionally out of scope for this phase.
 
-### Phase V3: Validate the full dbxcarta ingest on the warm cluster [Status: deploy/runner path validated on runner 0.5.1; ingest blocked on a separate dbxcarta verify bug, now fixed in the consumer — live rerun pending]
+### Phase V3: Validate the full dbxcarta ingest on the warm cluster [Status: done — full ingest succeeded on runner 0.5.1, verify gate passed, no manual step, no restart]
 
 Goal: the real ingest path works end to end, exercising the parts the
 smoke harness does not: the Neo4j connector probe, the pinned closure
@@ -204,12 +204,12 @@ Steps:
       `409478094845255`); it executed end to end and failed only at the
       dbxcarta verify gate (see "Second attempt" below) — not in the
       deploy/runner path.
-- [~] Confirm new code is picked up with no version bump and no cluster
-      restart. New code (stable wheel + closure) was picked up with no
-      version bump. The no-restart criterion is still not cleanly
-      demonstrated: the cluster had auto-terminated since the prior
-      check and cold-started both attempts. Not a code issue; needs a
-      run that starts against an already-warm cluster.
+- [x] Confirm new code is picked up with no version bump and no cluster
+      restart. Confirmed on the final rerun (run `67154826827483`, task
+      `770822335752429`): the cluster was already `RUNNING` and stayed up
+      (same `spark_context_id` `4985552566577751676` as the prior 0.5.1
+      run, no `PENDING` waits), and the rebuilt stable wheel + verify fix
+      were picked up with no version bump.
 - [x] Confirm the connector probe, the closure lock and smoke check, and
       secret-scope loading all behave correctly. All validated on the
       0.5.1 run: connector preflight correctly failed-fast while the
@@ -230,10 +230,10 @@ Steps:
       `libraries.py` and `clean.py`.
 
 Done when: a full ingest succeeds against a published runner version
-with no manual code step and no restart. Deploy/runner criteria are met
-on 0.5.1; closing this requires one more live rerun after the verify fix
-below, ideally against an already-warm cluster to also settle the
-no-restart criterion.
+with no manual code step and no restart. **Met.** Run `67154826827483`
+on published `databricks-job-runner==0.5.1` ended `status=success` with
+`verify: ok=True violations=0` (gate on, `DBXCARTA_VERIFY_GATE=true`), no
+manual code step, and no cluster restart.
 
 #### Completed this attempt (preconditions, all green)
 
@@ -327,19 +327,23 @@ Fix applied in the dbxcarta consumer (uncommitted):
   genuine count mismatch is still flagged. Full consumer suite: 366
   passed, 1 skipped, 3 deselected.
 
-#### Retest required (live rerun, after the verify fix)
+#### Closed: verify fix validated live
 
-The fix is in consumer code, so the stable wheel must be rebuilt and
-re-uploaded before the verify gate can be confirmed live:
+The consumer was rebuilt (`uv build --all-packages`), the stable wheels
+re-published (`dbxcarta upload --wheel`) with the verify fix, and
+`dbxcarta submit-entrypoint ingest --compute cluster` rerun against the
+already-warm cluster `0515-141455-wb8qxgo2`.
 
-1. `uv build --all-packages`, then `dbxcarta upload --wheel` to
-   republish the stable wheels with the verify fix. Pin is already at
-   `0.5.1`; data fixtures do not need re-uploading.
-2. Rerun `dbxcarta submit-entrypoint ingest --compute cluster`,
-   preferably against an already-warm cluster so the no-restart
-   criterion is also settled.
-3. Confirm the run ends `status=success` and the verify gate passes
-   (0 violations) with no manual code step and no cluster restart.
+Outcome (run `67154826827483`, task `770822335752429`):
+
+- `[dbxcarta] run_id=local job=dbxcarta status=success catalog=graph-enriched-lakehouse`
+- `verify: ok=True violations=0` with `DBXCARTA_VERIFY_GATE=true`.
+- Closure installed `databricks-job-runner==0.5.1`; manifest
+  `smoke_check: "ok (6)"`.
+- No cluster restart: same `spark_context_id` as the prior 0.5.1 run,
+  preflight saw `Cluster: RUNNING` with no `PENDING` waits.
+
+Phase V3 is complete. Phases V4–V6 remain (independent improvements).
 
 ### Phase V4: Cluster configuration drift check
 
