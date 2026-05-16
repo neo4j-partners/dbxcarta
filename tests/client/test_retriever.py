@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dbxcarta.client.graph_retriever import (
+    _fetch_columns,
     _filter_seed_pairs_to_schemas,
     _select_schemas,
 )
@@ -275,6 +276,44 @@ def test_select_schemas_empty_seeds() -> None:
     assert _select_schemas([], []) == []
 
 
+def test_fetch_columns_uses_catalog_from_column_id() -> None:
+    class SessionStub:
+        def run(self, _query, **kwargs):
+            assert kwargs["tids"] == ["bronze.sales.orders", "gold.sales.orders"]
+            assert kwargs["schemas"] == ["sales"]
+            return [
+                {
+                    "schema_name": "sales",
+                    "table_name": "orders",
+                    "col_id": "bronze.sales.orders.id",
+                    "col_name": "id",
+                    "data_type": "BIGINT",
+                    "comment": "raw id",
+                    "pos": 1,
+                },
+                {
+                    "schema_name": "sales",
+                    "table_name": "orders",
+                    "col_id": "gold.sales.orders.id",
+                    "col_name": "id",
+                    "data_type": "BIGINT",
+                    "comment": "curated id",
+                    "pos": 1,
+                },
+            ]
+
+    columns = _fetch_columns(
+        SessionStub(),
+        ["bronze.sales.orders", "gold.sales.orders"],
+        ["sales"],
+    )
+
+    assert [column.table_fqn for column in columns] == [
+        "`bronze`.`sales`.`orders`",
+        "`gold`.`sales`.`orders`",
+    ]
+
+
 def test_select_schemas_three_schemas_only_top_two_considered() -> None:
     col_pairs = [
         ("cat.sp_a.t.c", 0.6),
@@ -299,3 +338,14 @@ def test_graph_rag_prompt_single_schema_constraint() -> None:
     assert "Use ONLY the exact tables and columns listed in the context" in prompt
     assert "backtick-quoted three-part names" in prompt
     assert "target schema" in prompt.lower()
+
+
+def test_graph_rag_prompt_treats_context_fqns_as_authoritative() -> None:
+    from dbxcarta.client.prompt import graph_rag_prompt
+
+    context = "Table: `other_catalog`.`sp_a`.`users`\n  id (BIGINT)"
+    prompt = graph_rag_prompt("find users", "default_catalog", ["sp_a"], context)
+
+    assert "catalog 'default_catalog'" not in prompt
+    assert "full three-part table names in the context as authoritative" in prompt
+    assert "`other_catalog`.`sp_a`.`users`" in prompt

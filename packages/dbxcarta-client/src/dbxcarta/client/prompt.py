@@ -52,7 +52,9 @@ def graph_rag_prompt(
     )
     return (
         f"You are a SQL expert. Write a single SQL SELECT query to answer the following question.\n"
-        f"The data lives in Databricks Unity Catalog: catalog '{catalog}', {schema_hint}.\n"
+        f"The retrieved context below lists the available Databricks Unity Catalog "
+        f"tables for {schema_hint}. Some contexts can span multiple catalogs; "
+        f"treat the full three-part table names in the context as authoritative.\n"
         f"Use ONLY the exact tables and columns listed in the context. "
         f"Do not invent, guess, or rename any table name or column name.\n"
         f"Use the full backtick-quoted three-part names exactly as shown in the context "

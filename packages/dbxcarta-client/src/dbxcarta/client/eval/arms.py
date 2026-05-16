@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import os
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any
+from typing import Any, NamedTuple
 
 from databricks.sdk import WorkspaceClient
 
