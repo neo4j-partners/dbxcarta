@@ -1,14 +1,16 @@
 """FK discovery orchestrator: runs declared → metadata → semantic.
 
-Pipeline boundary for all FK-discovery work. Owns the Spark Row → dataclass
-conversions for columns, constraints, embeddings, and sampled values.
-Produces `FKDiscoveryResult` — ready-to-write REFERENCES DataFrames tagged
-with `EdgeSource.{DECLARED, INFERRED_METADATA, SEMANTIC}`.
+Pipeline boundary for all FK-discovery work. Declared FK is read from
+information_schema as a bounded Spark frame; metadata and semantic
+inference run entirely in Spark via `fk.inference` — no catalog-scale
+collect to the driver, no Python all-pairs loop. Produces
+`FKDiscoveryResult` — ready-to-write REFERENCES DataFrames tagged with
+`EdgeSource.{DECLARED, INFERRED_METADATA, SEMANTIC}`.
 
-Each strategy receives `prior_pairs: frozenset[DeclaredPair]` accumulated
-from earlier strategies and skips pairs already covered. Declared receives
-an empty set; metadata receives declared's pairs; semantic receives
-declared + metadata.
+Each strategy is suppressed against the edges earlier strategies already
+emitted. Declared receives nothing; metadata anti-joins declared-only;
+semantic anti-joins declared ∪ metadata. The prior set is threaded as a
+`(source_id, target_id)` DataFrame, never collected.
 """
 
 from __future__ import annotations
@@ -18,19 +20,12 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import dbxcarta.spark.ingest.schema_graph as sg
-from dbxcarta.spark.ingest.fk.common import (
-    ColumnMeta,
-    ConstraintRow,
-    DeclaredPair,
-    FKEdge,
-    PKIndex,
-)
 from dbxcarta.spark.ingest.fk.declared import discover_declared
-from dbxcarta.spark.ingest.fk.metadata import infer_fk_pairs
-from dbxcarta.spark.ingest.fk.semantic import (
-    ColumnEmbedding,
-    ValueIndex,
-    infer_semantic_pairs,
+from dbxcarta.spark.ingest.fk.inference import (
+    build_columns_frame,
+    build_pk_gate,
+    infer_metadata_edges,
+    infer_semantic_edges,
 )
 from dbxcarta.spark.ingest.summary import RunSummary
 
@@ -69,83 +64,108 @@ def run_fk_discovery(
     has_value_df: "DataFrame | None",
     summary: RunSummary,
 ) -> FKDiscoveryResult:
-    """Run declared → metadata → semantic, threading prior_pairs uniformly.
+    """Run declared → metadata → semantic, threading prior edges in Spark.
 
     Semantic is gated on DBXCARTA_INFER_SEMANTIC and on a catalog-size floor
     (DBXCARTA_SEMANTIC_MIN_TABLES). Column embeddings are required and
     already validated present by Settings' cross-field validator.
     """
-    column_metas = [
-        ColumnMeta.from_row(r.asDict()) for r in extract.columns_df.collect()
-    ]
-    pk_index = _build_pk_index(spark, settings, schema_list)
+    constraints_df = _constraints_df(spark, settings, schema_list)
+    columns_frame = build_columns_frame(
+        extract.columns_df, extract.column_node_df,
+    )
+    pk_gate, composite_pk_count = build_pk_gate(columns_frame, constraints_df)
 
-    prior_pairs: frozenset[DeclaredPair] = frozenset()
-
+    # Declared FK: bounded by catalog-declared FKs, not n²; collect retained
+    # by design (see proposal). build_references_rel emits the canonical
+    # 5-col REFERENCES schema, identical to the inferred edge frames.
     declared_edges, declared_counters = discover_declared(
-        spark, settings, schema_list, prior_pairs=prior_pairs,
+        spark, settings, schema_list,
     )
     summary.fk_declared = declared_counters
     declared_edges_df = (
         sg.build_references_rel(spark, declared_edges) if declared_edges else None
     )
-    prior_pairs = prior_pairs | _edges_as_pairs(declared_edges)
 
-    metadata_edges, metadata_counters = infer_fk_pairs(
-        column_metas, pk_index, prior_pairs,
+    metadata_edges_df, metadata_counts, composite_skipped = infer_metadata_edges(
+        spark, columns_frame, pk_gate, declared_edges_df,
+        composite_pk_count=composite_pk_count,
     )
-    summary.fk_metadata = metadata_counters
+    summary.fk_metadata = metadata_counts
     logger.info(
         "[dbxcarta] metadata inference: candidates=%d accepted=%d"
         " composite_pks_skipped=%d",
-        metadata_counters.candidates, metadata_counters.accepted,
-        metadata_counters.composite_pk_skipped,
+        metadata_counts.candidates, metadata_counts.accepted, composite_skipped,
     )
-    metadata_edges_df = (
-        sg.build_references_rel(spark, metadata_edges) if metadata_edges else None
-    )
-    prior_pairs = prior_pairs | _edges_as_pairs(metadata_edges)
+    metadata_out = metadata_edges_df if metadata_counts.accepted else None
 
-    semantic_edges_df: "DataFrame | None" = None
-    semantic_edge_count = 0
+    # declared ∪ metadata, for the semantic anti-join only.
+    prior_edges_df = _union_pairs(declared_edges_df, metadata_out)
 
+    semantic_out: "DataFrame | None" = None
+    semantic_count = 0
     if _should_run_semantic(settings, summary.extract.tables):
-        embeddings = _collect_column_embeddings(extract.column_node_df)
-        value_index = _build_value_index(value_node_df, has_value_df, sample_stats)
-
-        semantic_edges, semantic_counters = infer_semantic_pairs(
-            columns=column_metas,
-            embeddings=embeddings,
-            pk_index=pk_index,
-            prior_pairs=prior_pairs,
-            value_index=value_index,
+        sv_node_df, sv_has_df = _semantic_value_frames(
+            value_node_df, has_value_df, sample_stats,
+        )
+        semantic_edges_df, semantic_counts = infer_semantic_edges(
+            columns_frame, pk_gate, prior_edges_df, sv_node_df, sv_has_df,
             threshold=settings.dbxcarta_semantic_threshold,
         )
-        summary.fk_semantic = semantic_counters
+        summary.fk_semantic = semantic_counts
         logger.info(
-            "[dbxcarta] semantic inference: considered=%d accepted=%d"
+            "[dbxcarta] semantic inference: candidates=%d accepted=%d"
             " value_corroborated=%d",
-            semantic_counters.considered, semantic_counters.accepted,
-            semantic_counters.value_corroborated,
+            semantic_counts.candidates, semantic_counts.accepted,
+            semantic_counts.value_corroborated,
         )
-        if semantic_edges:
-            semantic_edges_df = sg.build_references_rel(spark, semantic_edges)
-            semantic_edge_count = len(semantic_edges)
+        if semantic_counts.accepted:
+            semantic_out = semantic_edges_df
+            semantic_count = semantic_counts.accepted
 
     return FKDiscoveryResult(
         declared_edges_df=declared_edges_df,
         declared_edge_count=len(declared_edges),
-        metadata_edges_df=metadata_edges_df,
-        metadata_edge_count=len(metadata_edges),
-        semantic_edges_df=semantic_edges_df,
-        semantic_edge_count=semantic_edge_count,
+        metadata_edges_df=metadata_out,
+        metadata_edge_count=metadata_counts.accepted,
+        semantic_edges_df=semantic_out,
+        semantic_edge_count=semantic_count,
     )
 
 
-def _edges_as_pairs(edges: list[FKEdge]) -> frozenset[DeclaredPair]:
-    return frozenset(
-        DeclaredPair(source_id=e.source_id, target_id=e.target_id) for e in edges
-    )
+def _union_pairs(
+    a: "DataFrame | None", b: "DataFrame | None",
+) -> "DataFrame | None":
+    """`(source_id, target_id)` union of two edge frames, dropping None."""
+    frames = [
+        f.select("source_id", "target_id") for f in (a, b) if f is not None
+    ]
+    if not frames:
+        return None
+    out = frames[0]
+    for f in frames[1:]:
+        out = out.unionByName(f)
+    return out.distinct()
+
+
+def _semantic_value_frames(
+    value_node_df: "DataFrame | None",
+    has_value_df: "DataFrame | None",
+    sample_stats: "SampleStats | None",
+) -> tuple["DataFrame | None", "DataFrame | None"]:
+    """Pass the sampled-value frames through only when values were sampled.
+
+    None signals "no corroboration signal available" to the semantic
+    overlap join — the value bonus then simply does not apply.
+    """
+    if (
+        value_node_df is None
+        or has_value_df is None
+        or sample_stats is None
+        or sample_stats.value_nodes == 0
+    ):
+        return None, None
+    return value_node_df, has_value_df
 
 
 def _should_run_semantic(settings: "SparkIngestSettings", n_tables: int) -> bool:
@@ -166,19 +186,21 @@ def _should_run_semantic(settings: "SparkIngestSettings", n_tables: int) -> bool
     return True
 
 
-def _build_pk_index(
+def _constraints_df(
     spark: "SparkSession", settings: "SparkIngestSettings", schema_list: list[str],
-) -> PKIndex:
-    """Pull information_schema constraints and build the PKIndex."""
+) -> "DataFrame":
+    """PK/UNIQUE constraints across every ingested catalog as a Spark frame.
+
+    Never collected — fed straight into `build_pk_gate`. Cross-catalog FK
+    pairing stays blocked downstream (inference equi-joins on
+    catalog/schema), so unioning per-catalog reads only makes per-catalog
+    PKs visible.
+    """
     from functools import reduce
 
     from pyspark.sql.functions import col
 
-    # Read PK/UNIQUE constraints from every ingested catalog. Cross-catalog FK
-    # pairing is still blocked downstream (metadata.infer_fk_pairs skips pairs
-    # whose catalog/schema differ), so this only makes per-catalog PKs visible,
-    # with no Phase 2 cross-catalog behavior leaking in.
-    pk_rows_df = reduce(
+    rows = reduce(
         lambda a, b: a.unionByName(b),
         [
             spark.sql(
@@ -196,59 +218,5 @@ def _build_pk_index(
         ],
     )
     if schema_list:
-        pk_rows_df = pk_rows_df.filter(col("table_schema").isin(schema_list))
-
-    constraint_rows = [ConstraintRow.from_row(r.asDict()) for r in pk_rows_df.collect()]
-    return PKIndex.from_constraints(constraint_rows)
-
-
-def _collect_column_embeddings(column_node_df: "DataFrame") -> dict[str, ColumnEmbedding]:
-    """Pipeline-edge conversion: staged column node DataFrame →
-    dict[col_id → ColumnEmbedding].
-
-    Rows with null embedding (ai_query failures, dimension mismatches) are
-    skipped — semantic discovery never considers them as candidates."""
-    from pyspark.sql.functions import col
-
-    rows = (
-        column_node_df
-        .filter(col("embedding").isNotNull())
-        .select("id", "embedding")
-        .collect()
-    )
-    return {
-        r["id"]: ColumnEmbedding.from_vector(r["id"], list(r["embedding"]))
-        for r in rows
-    }
-
-
-def _build_value_index(
-    value_node_df: "DataFrame | None",
-    has_value_df: "DataFrame | None",
-    sample_stats: "SampleStats | None",
-) -> ValueIndex | None:
-    """Pipeline-edge conversion: Value node + HAS_VALUE edges → ValueIndex.
-
-    Returns None when values weren't sampled (DBXCARTA_INCLUDE_VALUES off,
-    or zero value_nodes). Semantic interprets None as "no corroboration
-    signal available" and the value-bonus simply doesn't apply.
-    """
-    from pyspark.sql.functions import col
-
-    if (
-        value_node_df is None
-        or has_value_df is None
-        or sample_stats is None
-        or sample_stats.value_nodes == 0
-    ):
-        return None
-
-    joined = (
-        has_value_df.alias("h")
-        .join(value_node_df.alias("v"), col("h.target_id") == col("v.id"))
-        .select(col("h.source_id").alias("col_id"), col("v.value").alias("val"))
-    )
-    by_col: dict[str, set[str]] = {}
-    for r in joined.collect():
-        by_col.setdefault(r["col_id"], set()).add(str(r["val"]))
-    return ValueIndex(values_by_col_id={k: frozenset(v) for k, v in by_col.items()})
+        rows = rows.filter(col("table_schema").isin(schema_list))
+    return rows

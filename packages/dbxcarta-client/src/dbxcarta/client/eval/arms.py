@@ -105,6 +105,48 @@ def _grade_correct(
     return _compare_result_sets(gen_cols or [], gen_rows, ref_cols or [], ref_rows)
 
 
+class _ExecGrade(NamedTuple):
+    executed: bool
+    non_empty: bool
+    gradable: bool
+    correct: bool
+    error: str | None
+
+
+def _execute_and_grade(
+    ws: WorkspaceClient,
+    settings: ClientSettings,
+    generated_sql: str,
+    reference_sql: str | None,
+    question_id: str,
+    ref_cache: _ReferenceCache,
+) -> _ExecGrade:
+    """Run the generated SQL once, then grade it against the cached reference.
+
+    ``executed``/``non_empty``/``error`` come from the single ``fetch_rows``
+    call; ``gradable`` requires a reference SQL and a successful execution;
+    ``correct`` is the result-set comparison (False unless gradable). Shared
+    by the LLM and graph_rag arms so the grading contract cannot drift.
+    """
+    gen_cols, gen_rows, error = fetch_rows(
+        ws,
+        settings.databricks_warehouse_id,
+        generated_sql,
+        settings.dbxcarta_client_timeout_sec,
+    )
+    executed = gen_rows is not None
+    non_empty = bool(gen_rows)
+    gradable = bool(reference_sql) and executed
+    correct = False
+    if gradable:
+        if reference_sql is None or gen_rows is None:
+            raise RuntimeError("gradable SQL missing reference or generated rows")
+        correct, _ = _grade_correct(
+            gen_cols, gen_rows, reference_sql, question_id, ref_cache
+        )
+    return _ExecGrade(executed, non_empty, gradable, correct, error)
+
+
 def _run_reference_arm(
     questions: list[Question],
     summary: ClientRunSummary,
@@ -184,34 +226,20 @@ def _run_llm_arm(
 
         if cleaned_sql is None:
             raise RuntimeError("parser reported success but produced no SQL")
-        gen_cols, gen_rows, exec_error = fetch_rows(
-            ws,
-            settings.databricks_warehouse_id,
-            cleaned_sql,
-            settings.dbxcarta_client_timeout_sec,
+        graded = _execute_and_grade(
+            ws, settings, cleaned_sql, q.reference_sql, qid, ref_cache
         )
-        executed = gen_rows is not None
-        non_empty = bool(gen_rows)
-        reference_sql = q.reference_sql
-        gradable = bool(reference_sql) and executed
-        correct = False
-        if gradable:
-            if reference_sql is None:
-                raise RuntimeError("reference_sql missing despite gradable=True")
-            correct, _ = _grade_correct(
-                gen_cols, gen_rows or [], reference_sql, qid, ref_cache
-            )
         summary.add_result(
             question_id=qid,
             question=q.question,
             arm=arm,
             sql=cleaned_sql,
             parsed=True,
-            executed=executed,
-            non_empty=non_empty,
-            correct=correct,
-            gradable=gradable,
-            error=exec_error,
+            executed=graded.executed,
+            non_empty=graded.non_empty,
+            correct=graded.correct,
+            gradable=graded.gradable,
+            error=graded.error,
         )
 
 
@@ -348,29 +376,15 @@ def _run_graph_rag_arm(
 
         if cleaned_sql is None:
             raise RuntimeError("parser reported success but produced no SQL")
-        gen_cols, gen_rows, exec_error = fetch_rows(
-            ws,
-            settings.databricks_warehouse_id,
-            cleaned_sql,
-            settings.dbxcarta_client_timeout_sec,
+        graded = _execute_and_grade(
+            ws, settings, cleaned_sql, q.reference_sql, qid, ref_cache
         )
-        executed = gen_rows is not None
-        non_empty = bool(gen_rows)
-        reference_sql = q.reference_sql
-        gradable = bool(reference_sql) and executed
-        correct = False
-        if gradable:
-            if reference_sql is None:
-                raise RuntimeError("reference_sql missing despite gradable=True")
-            correct, _ = _grade_correct(
-                gen_cols, gen_rows or [], reference_sql, qid, ref_cache
-            )
 
         trace.generated_sql = cleaned_sql
         trace.parsed = True
-        trace.executed = executed
-        trace.correct = correct
-        trace.execution_error = exec_error
+        trace.executed = graded.executed
+        trace.correct = graded.correct
+        trace.execution_error = graded.error
 
         summary.add_result(
             question_id=qid,
@@ -379,11 +393,11 @@ def _run_graph_rag_arm(
             sql=cleaned_sql,
             context_ids=trace.col_seed_ids + trace.tbl_seed_ids,
             parsed=True,
-            executed=executed,
-            non_empty=non_empty,
-            correct=correct,
-            gradable=gradable,
-            error=exec_error,
+            executed=graded.executed,
+            non_empty=graded.non_empty,
+            correct=graded.correct,
+            gradable=graded.gradable,
+            error=graded.error,
             top1_schema_match=trace.top1_schema_match,
             schema_in_context=trace.schema_in_context,
             context_purity=trace.context_purity,

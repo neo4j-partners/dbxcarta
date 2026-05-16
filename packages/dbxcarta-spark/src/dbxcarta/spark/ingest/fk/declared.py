@@ -4,9 +4,9 @@ Queries `information_schema.referential_constraints` + `key_column_usage`,
 emits one FKEdge per resolved column pair tagged with EdgeSource.DECLARED
 and confidence=1.0, and records the four declared counters.
 
-Peer of `metadata.infer_fk_pairs` and `semantic.infer_semantic_pairs`; shares the
-uniform `prior_pairs` contract so the orchestrator can treat the three
-strategies identically.
+Peer of the Spark-native metadata and semantic strategies in `fk.inference`;
+the orchestrator suppresses each later strategy against the edges earlier
+ones emitted.
 """
 
 from __future__ import annotations

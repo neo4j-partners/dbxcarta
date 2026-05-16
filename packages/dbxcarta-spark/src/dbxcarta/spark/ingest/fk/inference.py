@@ -295,6 +295,7 @@ def infer_metadata_edges(
     pk_gate: "DataFrame",
     declared_edges_df: "DataFrame | None",
     *,
+    composite_pk_count: int = 0,
     threshold: float = 0.8,
 ) -> tuple["DataFrame", CoarseFKCounts, int]:
     """Spark-native metadata FK inference.
@@ -302,7 +303,9 @@ def infer_metadata_edges(
     Returns `(edges_df, counts, composite_pk_skipped)` where `edges_df` has
     the canonical REFERENCES columns. `declared_edges_df` is the
     declared-only prior-pair frame (anti-joined last, mirroring Python where
-    metadata receives declared edges only).
+    metadata receives declared edges only). `composite_pk_count` is the
+    `build_pk_gate` composite-PK observation, threaded through into the
+    coarse counts.
     """
     from pyspark.sql import functions as F
     from pyspark.sql.window import Window
@@ -444,12 +447,12 @@ def infer_metadata_edges(
         )
 
     edges = edges.select(*_EDGE_COLS)
-    accepted = edges.count()
+    accepted = edges.cache().count()
     counts = CoarseFKCounts(
         candidates=candidates,
         accepted=accepted,
         rejected=max(0, candidates - accepted),
-        composite_pk_skipped=composite_pk_count if False else 0,
+        composite_pk_skipped=composite_pk_count,
     )
     return edges, counts, composite_pk_count
 

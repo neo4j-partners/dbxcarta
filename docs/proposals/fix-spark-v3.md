@@ -161,7 +161,7 @@ reordered, they are merged.
 
 ### Phase 1: Spark-Native Declared and Metadata FK
 
-Status: In progress (merged with Phase 2)
+Status: Complete (merged with Phase 2 — see Execution decision above)
 
 Goal: Replace the metadata Python loop and its driver collects with Spark
 DataFrame joins.
@@ -266,10 +266,35 @@ Notes:
 - This is the core fix and the reason for V3. Declared FK is already
   Spark-native, so the work here is the metadata path and the shared
   constraints DataFrame.
+- Done (2026-05-16): new `fk/inference.py` is the single Spark-native
+  source for both inferred strategies. `build_columns_frame` (per-column
+  working frame + optional embedding left-join), `build_pk_gate`
+  (PKIndex + pk_kind as Spark aggregations/joins, composite-PK count),
+  `canonicalize_expr` (native type-compat token), `_comment_tokens_expr`,
+  `_score_table_df` (broadcast `_SCORE_TABLE`), `infer_metadata_edges`
+  (link_key explode → name dedup window → type → PK gate → broadcast
+  score → attenuation window → declared-only anti-join). `discovery.py`
+  rewritten: builds the constraints DataFrame (no collect), threads
+  declared-only then declared∪metadata as `(source_id,target_id)` frames;
+  all four driver collects removed (columns, constraints, embeddings,
+  value-index). The dead Python loop in `metadata.py` was deleted, leaving
+  only the static rule tables it owns; `semantic.py` deleted. `summary.py`
+  now carries `CoarseFKCounts` for `fk_metadata`/`fk_semantic`.
+- `tests/spark/fk_metadata`, `fk_semantic`, and `fk_discovery` rewritten to
+  DataFrame input/output asserting edges, confidences, attenuation
+  drop/preserve, prior-pair suppression, and the asymmetric overlap
+  divisor. `fk_declared`/`fk_common`/`fk_discovery` gate tests unchanged and
+  still green. No-driver-collect verified structurally: `grep` shows zero
+  `.collect()` in `discovery.py`/`inference.py`, and the metadata
+  `explain()` plan shows the link_key join, suffix-array explode, dedup
+  row_number window, PK-gate join, broadcast `_SCORE_TABLE` join, and the
+  `count() over partitionBy(source_id)` attenuation window. `discover_declared`'s
+  bounded resolved-FK collect is intentionally retained per Assessment.
+  `uv run pytest`: 412 passed, 1 skipped, 3 deselected.
 
 ### Phase 2: Spark-Native Semantic FK
 
-Status: In progress (merged with Phase 1 — see Execution decision above)
+Status: Complete (merged with Phase 1 — see Execution decision above)
 
 Goal: Remove the semantic Python all-pairs loop, the embedding collect, and
 the value-index collect.
@@ -330,6 +355,19 @@ Notes:
 
 - Semantic is disabled by default, so this lands after the metadata fix.
   The pattern is the same: pre-filter, then score in Spark.
+- Done (2026-05-16): `infer_semantic_edges` pre-filters by same
+  (catalog, schema), embeddings present on both sides (left-join null →
+  dropped), target PK-like, `canonicalize_expr` type-compat, and the
+  declared∪metadata anti-join before any vector math. Cosine is computed
+  in-join with `zip_with`/`aggregate`/`transform` (`dot/(sqrt(na)*sqrt(nb))`,
+  zero-norm guarded); the persisted embedding is never normalized or
+  mutated. `build_value_overlap` reproduces the asymmetric ratio
+  `|src∩tgt|/|src|` as Value/HAS_VALUE joins; corroboration adds 0.05 then
+  re-clamps to [0.80, 0.90]. The `_should_run_semantic` enable/min-tables
+  gate is unchanged. `tests/spark/fk_semantic` rewritten to DataFrame I/O;
+  a dedicated fixture pins the asymmetric divisor (src-count passes where
+  target-count and union would not). The embedding collect is gone — the
+  `embedding` array stays a DataFrame column end to end.
 
 ### Phase 3: Configurable Relationship Write Parallelism
 

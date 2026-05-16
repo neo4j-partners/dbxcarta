@@ -1,7 +1,7 @@
 """Run-summary data model and wire shape.
 
 The in-memory shape is nominal — `ExtractCounts`, `EmbeddingCounts`,
-`SampleValueCounts`, `InferenceCounters`, `SemanticInferenceCounters` — so
+`SampleValueCounts`, `CoarseFKCounts` — so
 that no pipeline site pokes stringly-typed keys into a dict-bag. The flat
 `row_counts: dict[str, int]` and `embedding_*: dict[str, int/float]` shape
 still appears on the wire (JSON + Delta), but only at the `to_dict()`
@@ -21,8 +21,7 @@ from dbxcarta.spark.contract import NodeLabel
 
 if TYPE_CHECKING:
     from dbxcarta.spark.ingest.fk.declared import DeclaredCounters
-    from dbxcarta.spark.ingest.fk.metadata import InferenceCounters
-    from dbxcarta.spark.ingest.fk.semantic import SemanticInferenceCounters
+    from dbxcarta.spark.ingest.fk.inference import CoarseFKCounts
     from dbxcarta.spark.ingest.transform.sample_values import SampleStats
 
 
@@ -190,8 +189,8 @@ class RunSummary:
     error: str | None = None
     extract: ExtractCounts = field(default_factory=ExtractCounts)
     fk_declared: "DeclaredCounters | None" = None
-    fk_metadata: "InferenceCounters | None" = None
-    fk_semantic: "SemanticInferenceCounters | None" = None
+    fk_metadata: "CoarseFKCounts | None" = None
+    fk_semantic: "CoarseFKCounts | None" = None
     sample_values: SampleValueCounts | None = None
     embeddings: EmbeddingCounts = field(default_factory=EmbeddingCounts)
     neo4j_counts: dict[str, int] = field(default_factory=dict)
