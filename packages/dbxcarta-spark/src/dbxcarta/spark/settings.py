@@ -37,13 +37,25 @@ class SparkIngestSettings(BaseSettings):
     # Comma-separated list of catalogs to ingest into one graph. Blank means
     # "ingest only dbxcarta_catalog" — the historical single-catalog behavior,
     # so every existing preset is unaffected. When set, every listed catalog is
-    # extracted into the same Neo4j graph with one Database node each. The
-    # ops/summary/verify path still keys off the single dbxcarta_catalog.
+    # extracted into the same Neo4j graph with one Database node each.
+    #
+    # KNOWN LIMITATION (tracked): the ops/summary/verify path still keys off
+    # the single dbxcarta_catalog. RunSummary.catalog records only that catalog,
+    # and verify's catalog-vs-graph checks (id normalization, complex-type
+    # round-trip) sample-validate only that catalog. The other ingested catalogs
+    # are extracted and written to Neo4j but are NOT post-write verified, so
+    # verification coverage shrinks as catalogs are added. Widening verify to
+    # every resolved catalog is deferred to a follow-up (each extra catalog
+    # multiplies the warehouse information_schema queries).
     dbxcarta_catalogs: str = ""
     # Comma-separated catalog:layer pairs (e.g.
     # "cat-bronze:bronze,cat-silver:silver,cat-gold:gold"). Drives the Table
     # node `layer` property. Catalogs absent from the map yield layer=null.
     # Config, not a name-prefix regex, so it does not become a new hardcode.
+    # Every catalog named here must also be an ingested catalog (see the
+    # cross-field validator) — a layer mapped to a catalog that is never
+    # ingested is dead config and almost always a typo, so it is rejected at
+    # startup rather than silently producing all-null layers.
     dbxcarta_layer_map: str = ""
     # Comma-separated list of bare schema names under each ingested catalog.
     # Blank string means "every schema in the catalog". Whitespace around each
@@ -127,10 +139,17 @@ class SparkIngestSettings(BaseSettings):
         return v
 
     def resolved_catalogs(self) -> list[str]:
-        """Catalogs to ingest. Falls back to the single dbxcarta_catalog when
-        dbxcarta_catalogs is blank, preserving historical behavior."""
+        """Catalogs to ingest, order-preserving and de-duplicated.
+
+        Falls back to the single dbxcarta_catalog when dbxcarta_catalogs is
+        blank, preserving historical behavior. Duplicates in the list are
+        collapsed: Neo4j MERGE-on-id would dedupe the nodes anyway, but a
+        repeated catalog would otherwise double-count extract totals and
+        re-write every node, so the dedupe happens here at the single source
+        of truth for "which catalogs does this run touch".
+        """
         listed = [c.strip() for c in self.dbxcarta_catalogs.split(",") if c.strip()]
-        return listed or [self.dbxcarta_catalog]
+        return list(dict.fromkeys(listed)) or [self.dbxcarta_catalog]
 
     def layer_map(self) -> dict[str, str]:
         """Parsed catalog -> layer mapping. Empty when unset."""
@@ -183,6 +202,9 @@ class SparkIngestSettings(BaseSettings):
            no Value nodes to embed otherwise.
         2. Semantic FK discovery requires column embeddings to be enabled —
            cosine similarity needs vectors.
+        3. Every dbxcarta_layer_map catalog must be an ingested catalog —
+           a layer mapped to a never-ingested catalog is silently dead
+           config (all-null layers) and is almost always a typo.
         """
         if (
             self.dbxcarta_include_embeddings_values
@@ -200,5 +222,14 @@ class SparkIngestSettings(BaseSettings):
                 "DBXCARTA_INFER_SEMANTIC=true requires"
                 " DBXCARTA_INCLUDE_EMBEDDINGS_COLUMNS=true"
                 " (semantic FK discovery consumes column embeddings)"
+            )
+        ingested = set(self.resolved_catalogs())
+        unknown = sorted(set(self.layer_map()) - ingested)
+        if unknown:
+            raise ValueError(
+                f"DBXCARTA_LAYER_MAP references catalog(s) {unknown} that are"
+                " not ingested. Every layer-mapped catalog must appear in"
+                " DBXCARTA_CATALOGS (or be DBXCARTA_CATALOG when the list is"
+                " blank); a layer on a never-ingested catalog is dead config."
             )
         return self

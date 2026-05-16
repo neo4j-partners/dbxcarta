@@ -363,6 +363,66 @@ def test_cross_schema_candidates_silently_rejected() -> None:
     assert counters.accepted == 0
 
 
+def test_cross_catalog_candidates_silently_rejected() -> None:
+    """Identical schema.table.column across two catalogs produces no edges.
+
+    The multi-catalog guarantee: catalogs ingested into one graph stay
+    disjoint for FK inference. The candidate is skipped before
+    `record_candidate()`, so no spurious cross-catalog FK is manufactured
+    even when names line up exactly.
+    """
+    columns = [
+        ColumnMeta(
+            catalog="bronze", schema=_SA, table="customers", column="id",
+            data_type="BIGINT", comment=None,
+        ),
+        ColumnMeta(
+            catalog="gold", schema=_SA, table="orders", column="customer_id",
+            data_type="BIGINT", comment=None,
+        ),
+    ]
+    pk_index = PKIndex.from_constraints([
+        ConstraintRow(
+            table_catalog="bronze", table_schema=_SA, table_name="customers",
+            column_name="id", constraint_type="PRIMARY KEY",
+            ordinal_position=1, constraint_name="customers_pk",
+        ),
+    ])
+    refs, counters = infer_fk_pairs(columns, pk_index, prior_pairs=frozenset())
+    assert refs == []
+    assert counters.candidates == 0
+    assert counters.accepted == 0
+
+
+def test_same_catalog_schema_pair_still_inferred() -> None:
+    """Control for the cross-catalog test: the same columns within one
+    catalog+schema DO produce the expected edge, so the isolation above is
+    the catalog guard firing, not an unrelated rejection."""
+    columns = [
+        ColumnMeta(
+            catalog="bronze", schema=_SA, table="customers", column="id",
+            data_type="BIGINT", comment=None,
+        ),
+        ColumnMeta(
+            catalog="bronze", schema=_SA, table="orders", column="customer_id",
+            data_type="BIGINT", comment=None,
+        ),
+    ]
+    pk_index = PKIndex.from_constraints([
+        ConstraintRow(
+            table_catalog="bronze", table_schema=_SA, table_name="customers",
+            column_name="id", constraint_type="PRIMARY KEY",
+            ordinal_position=1, constraint_name="customers_pk",
+        ),
+    ])
+    refs, counters = infer_fk_pairs(columns, pk_index, prior_pairs=frozenset())
+    assert (
+        "bronze.dbxcarta_fk_test.orders.customer_id",
+        "bronze.dbxcarta_fk_test.customers.id",
+    ) in {(r.source_id, r.target_id) for r in refs}
+    assert counters.candidates > 0
+
+
 # --- Type-compatibility sanity ----------------------------------------------
 
 def test_type_equiv_accepts_int_and_bigint() -> None:

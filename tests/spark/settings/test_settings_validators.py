@@ -162,3 +162,127 @@ def test_settings_accepts_semantic_with_column_embeddings() -> None:
     )
     assert s.dbxcarta_infer_semantic is True
     assert s.dbxcarta_include_embeddings_columns is True
+
+
+# --- Multi-catalog list ------------------------------------------------------
+
+@pytest.mark.parametrize("bad_list", [
+    "good,evil`cat",     # backtick in one entry — injection vector
+    "good,cat.sub",      # dotted entry
+    "good,1cat",         # leading digit
+])
+def test_settings_rejects_bad_catalog_in_multi_list(bad_list: str) -> None:
+    with pytest.raises(ValidationError, match="Invalid Databricks catalog"):
+        SparkIngestSettings(
+            dbxcarta_catalog="main", dbxcarta_catalogs=bad_list, **_BASE_SETTINGS,
+        )
+
+
+def test_settings_accepts_valid_multi_catalog_list() -> None:
+    s = SparkIngestSettings(
+        dbxcarta_catalog="main",
+        dbxcarta_catalogs="bronze, silver ,gold",
+        **_BASE_SETTINGS,
+    )
+    assert s.resolved_catalogs() == ["bronze", "silver", "gold"]
+
+
+def test_resolved_catalogs_falls_back_to_single_when_blank() -> None:
+    """Blank dbxcarta_catalogs preserves the historical single-catalog path."""
+    s = SparkIngestSettings(dbxcarta_catalog="main", **_BASE_SETTINGS)
+    assert s.resolved_catalogs() == ["main"]
+
+
+def test_resolved_catalogs_dedupes_order_preserving() -> None:
+    """A repeated catalog collapses without reordering — no double-count."""
+    s = SparkIngestSettings(
+        dbxcarta_catalog="main",
+        dbxcarta_catalogs="bronze,gold,bronze,silver,gold",
+        **_BASE_SETTINGS,
+    )
+    assert s.resolved_catalogs() == ["bronze", "gold", "silver"]
+
+
+def test_resolved_catalogs_strips_whitespace_and_empties() -> None:
+    s = SparkIngestSettings(
+        dbxcarta_catalog="main",
+        dbxcarta_catalogs=" bronze ,, gold ,",
+        **_BASE_SETTINGS,
+    )
+    assert s.resolved_catalogs() == ["bronze", "gold"]
+
+
+# --- Layer map ---------------------------------------------------------------
+
+def test_layer_map_parses_pairs() -> None:
+    s = SparkIngestSettings(
+        dbxcarta_catalog="main",
+        dbxcarta_catalogs="bronze,silver,gold",
+        dbxcarta_layer_map="bronze:bronze, silver:silver ,gold:gold",
+        **_BASE_SETTINGS,
+    )
+    assert s.layer_map() == {"bronze": "bronze", "silver": "silver", "gold": "gold"}
+
+
+def test_layer_map_empty_by_default() -> None:
+    s = SparkIngestSettings(dbxcarta_catalog="main", **_BASE_SETTINGS)
+    assert s.layer_map() == {}
+
+
+@pytest.mark.parametrize("bad_map", [
+    "bronze",              # no colon
+    "bronze:b:extra",      # two colons
+    "bronze:",             # empty layer
+    "1bad:bronze",         # bad catalog identifier
+    "bronze:has space",    # non-alnum layer token
+])
+def test_settings_rejects_malformed_layer_map(bad_map: str) -> None:
+    with pytest.raises(ValidationError):
+        SparkIngestSettings(
+            dbxcarta_catalog="main",
+            dbxcarta_catalogs="bronze",
+            dbxcarta_layer_map=bad_map,
+            **_BASE_SETTINGS,
+        )
+
+
+def test_settings_rejects_layer_map_for_non_ingested_catalog() -> None:
+    """A layer mapped to a catalog that is never ingested is a typo, not config.
+
+    Cross-field validator turns the otherwise-silent all-null-layer outcome
+    into a startup failure.
+    """
+    with pytest.raises(ValidationError, match="not ingested"):
+        SparkIngestSettings(
+            dbxcarta_catalog="main",
+            dbxcarta_catalogs="bronze,silver",
+            dbxcarta_layer_map="bronze:bronze,glod:gold",  # typo: glod
+            **_BASE_SETTINGS,
+        )
+
+
+def test_settings_accepts_layer_map_subset_of_ingested() -> None:
+    """Mapping only some ingested catalogs is valid; the rest yield null layer."""
+    s = SparkIngestSettings(
+        dbxcarta_catalog="main",
+        dbxcarta_catalogs="bronze,silver,gold",
+        dbxcarta_layer_map="bronze:bronze,gold:gold",
+        **_BASE_SETTINGS,
+    )
+    assert s.layer_map() == {"bronze": "bronze", "gold": "gold"}
+
+
+def test_settings_layer_map_validated_against_single_catalog_fallback() -> None:
+    """When the list is blank, the lone dbxcarta_catalog is the ingested set."""
+    with pytest.raises(ValidationError, match="not ingested"):
+        SparkIngestSettings(
+            dbxcarta_catalog="main",
+            dbxcarta_layer_map="other:gold",
+            **_BASE_SETTINGS,
+        )
+    ok = SparkIngestSettings(
+        dbxcarta_catalog="main",
+        dbxcarta_layer_map="main:gold",
+        **_BASE_SETTINGS,
+    )
+    assert ok.layer_map() == {"main": "gold"}

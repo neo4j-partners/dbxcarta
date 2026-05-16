@@ -244,6 +244,9 @@ def _verify(driver: "Driver", settings: SparkIngestSettings, summary: RunSummary
         neo4j_driver=driver,
         ws=ws,
         warehouse_id=settings.databricks_warehouse_id,
+        # KNOWN LIMITATION (tracked in SparkIngestSettings.dbxcarta_catalogs):
+        # verify keys off the single primary catalog. In a multi-catalog run
+        # the other resolved catalogs are written but NOT post-write verified.
         catalog=settings.dbxcarta_catalog,
         sample_limit=settings.dbxcarta_sample_limit,
     )
@@ -296,11 +299,17 @@ def _load(
     )
 
     logger.info("[dbxcarta] writing nodes: Table (%d)", summary.extract.tables)
-    write_node(_drop_cols(extract_result.table_node_df, "embedding_error"), neo4j, NodeLabel.TABLE)
+    write_node(
+        _drop_cols(extract_result.table_node_df, "table_catalog", "embedding_error"),
+        neo4j, NodeLabel.TABLE,
+    )
 
     logger.info("[dbxcarta] writing nodes: Column (%d)", summary.extract.columns)
     write_node(
-        _drop_cols(extract_result.column_node_df, "table_schema", "table_name", "embedding_error"),
+        _drop_cols(
+            extract_result.column_node_df,
+            "table_catalog", "table_schema", "table_name", "embedding_error",
+        ),
         neo4j, NodeLabel.COLUMN,
     )
 

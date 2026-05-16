@@ -389,20 +389,16 @@ with matching row counts; the graph has all 12 tables tagged with the correct
 `layer` and zero operational tables; `questions.json` names resolve;
 contract-version tests pass.
 
-### Phase 2: DO NOT DO -  DO NOT SUPPORT Cross-catalog reference support
+### Phase 2: Cross-catalog reference support — DESCOPED (will not be done)
 
-**Goal.** Silver-to-gold joins are discovered when both catalogs are in scope.
+**Status.** Removed from scope by explicit user directive: do not implement
+cross-catalog FK / reference support. FK discovery keeps its existing behavior
+of skipping cross-(catalog, schema) pairs (`metadata.py:196`,
+`semantic.py:190`, declared/PK reads unioned per catalog but never paired across
+catalogs). Silver-to-gold joins will not be discovered as `REFERENCES` edges;
+downstream phases must not assume cross-layer edges exist.
 
-Checklist:
-- [ ] Add an explicit setting controlling cross-catalog reference discovery,
-      defaulting to current per-schema/catalog behavior.
-- [ ] Allow declared and inferred reference discovery to span catalogs within
-      the configured catalog set when the setting is enabled.
-- [ ] Enable the setting for the Finance Genie preset.
-- [ ] Re-ingest; confirm at least one silver-to-gold `REFERENCES` edge exists.
-
-Completion criteria: a known cross-layer join appears as a `REFERENCES` edge;
-default behavior for other presets is unchanged by test.
+No work items. Subsequent phase numbering is retained for traceability.
 
 ### Phase 3: Retriever ranking stage
 
@@ -457,7 +453,7 @@ passes via comparator tolerance, not via a narrowed reference.
 Checklist:
 - [ ] Catalog-to-layer mapping tests.
 - [ ] `build_table_nodes` `layer`-column tests.
-- [ ] Cross-catalog reference discovery tests, both setting states.
+- [ ] (Descoped with Phase 2 — no cross-catalog reference discovery tests.)
 - [ ] Ranking-function tests including the layer-preference term and budget cap.
 - [ ] Comparator tolerance tests from Phase 4.
 - [ ] Full suite green; contract-version assertions updated.
@@ -509,7 +505,7 @@ root cause.
 | Phase | Status |
 |-------|--------|
 | 1 Medallion catalog reorg, layer tagging, re-ingest | In progress |
-| 2 Cross-catalog reference support | Pending |
+| 2 Cross-catalog reference support | Descoped (will not be done) |
 | 3 Retriever ranking stage | Pending |
 | 4 Remove prompt overfit + comparator tolerance | Pending |
 | 5 Restore honest references | Pending |

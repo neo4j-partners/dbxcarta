@@ -370,3 +370,23 @@ during Phase C are all in the **deploy path**, not the fix:
    `submit-entrypoint client` deploys current code. It does not. Phase C
    should explicitly include a republish-and-verify-`wheel_sha`-changed
    step before the eval. This document's Phase C section now records that.
+
+5. **No incremental progress tracking (approved follow-up, separate
+   change).** The eval (`eval/run.py:run_client()`) runs arms
+   sequentially and writes its summary only once at the end via
+   `_emit_summary()`; the per-question loops emit nothing, and Databricks
+   `get_run_output` returns a fixed early stdout window, not a live tail,
+   so a long `graph_rag` arm is opaque from outside the cluster until it
+   finishes. **Decision (user-approved):** implement **A + B** as a
+   separate change *after* this plan completes —
+   (A) checkpoint each arm's partial summary row as soon as the arm
+   finishes, and
+   (B) add a per-N-questions heartbeat row (`run_id, arm, done, total,
+   ts`) for true live progress, both queryable via SQL/the Databricks
+   MCP mid-run.
+   **Constraint:** write progress/heartbeat (and any other dbxcarta
+   scratch state) to the **new dedicated dbxcarta work catalog**, not a
+   production catalog, to keep dbxcarta noise out of prod. The exact
+   work-catalog name is not yet wired into config (`DBXCARTA_CATALOG` is
+   still `schemapile_lakehouse`); confirm the catalog name before
+   implementing.

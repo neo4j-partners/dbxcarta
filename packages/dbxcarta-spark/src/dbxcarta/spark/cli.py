@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import TypedDict
 
 from databricks_job_runner import (
     DesiredLibrary,
@@ -100,13 +101,30 @@ _ENTRYPOINT_JVM_PROBE_CLASS: dict[str, str | None] = {
     "client": None,
 }
 
-_RUNNER_KWARGS = dict(
-    run_name_prefix="dbxcarta",
-    wheel_package="dbxcarta-spark",
-    scripts_dir="scripts",
-    cli_command="uv run dbxcarta",
-    secret_keys=["NEO4J_URI", "NEO4J_USERNAME", "NEO4J_PASSWORD"],
-)
+class _RunnerKwargs(TypedDict):
+    """Per-key types for the shared Runner kwargs.
+
+    A plain ``dict(...)`` literal makes mypy unify the str and list[str]
+    values to ``Sequence[str]``, which then fails to match Runner's distinct
+    parameter types when splatted. The TypedDict preserves each key's type
+    through ``Runner(**_RUNNER_KWARGS)`` while keeping the single source of
+    truth shared by both call sites.
+    """
+
+    run_name_prefix: str
+    wheel_package: str
+    scripts_dir: str
+    cli_command: str
+    secret_keys: list[str]
+
+
+_RUNNER_KWARGS: _RunnerKwargs = {
+    "run_name_prefix": "dbxcarta",
+    "wheel_package": "dbxcarta-spark",
+    "scripts_dir": "scripts",
+    "cli_command": "uv run dbxcarta",
+    "secret_keys": ["NEO4J_URI", "NEO4J_USERNAME", "NEO4J_PASSWORD"],
+}
 
 # Shared runner for generic pass-through commands, the client path, and
 # uploads. No preflights: client and generic commands do not need the

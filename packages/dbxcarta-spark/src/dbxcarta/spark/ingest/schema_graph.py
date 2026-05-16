@@ -57,11 +57,13 @@ def build_table_nodes(
 ) -> "DataFrame":
     """Build Table nodes from information_schema.tables rows.
 
-    The selected columns form the public graph payload plus `table_schema`,
-    which is retained until embedding text has been generated. The `layer`
-    property is derived from `table_catalog` through the configured
-    catalog->layer map; catalogs absent from the map (or an empty map) yield
-    a null `layer` (contract v1.1, additive).
+    The selected columns form the public graph payload plus `table_catalog`
+    and `table_schema`, which are retained only until embedding text has been
+    generated (the load step drops `table_catalog` before the Neo4j write, so
+    the graph contract is unchanged). The `layer` property is derived from
+    `table_catalog` through the configured catalog->layer map; catalogs absent
+    from the map (or an empty map) yield a null `layer` (contract v1.1,
+    additive).
     """
     from pyspark.sql.functions import col, lit, when
     from pyspark.sql.types import StringType
@@ -78,8 +80,9 @@ def build_table_nodes(
         .withColumn("name", col("table_name"))
         .withColumn("layer", layer_expr)
         .withColumn("contract_version", lit(CONTRACT_VERSION))
-        # table_schema is retained for the embedding text expression.
-        .select("id", "name", "layer", "table_schema", "comment", "table_type", "created", "last_altered", "contract_version")
+        # table_catalog + table_schema are retained for the embedding text
+        # expression; table_catalog is dropped before the Neo4j write.
+        .select("id", "name", "layer", "table_catalog", "table_schema", "comment", "table_type", "created", "last_altered", "contract_version")
     )
 
 
@@ -88,6 +91,9 @@ def build_column_nodes(columns_df: "DataFrame") -> "DataFrame":
 
     Converts Databricks YES/NO nullability strings into booleans while
     preserving ordinal position, data type, and comments for retrieval context.
+    `table_catalog`/`table_schema`/`table_name` are retained only for the
+    embedding text expression; the load step drops them before the Neo4j
+    write, so the graph contract is unchanged.
     """
     from pyspark.sql.functions import col, lit, when
 
@@ -100,7 +106,7 @@ def build_column_nodes(columns_df: "DataFrame") -> "DataFrame":
             when(col("is_nullable") == "YES", True).when(col("is_nullable") == "NO", False),
         )
         .withColumn("contract_version", lit(CONTRACT_VERSION))
-        .select("id", "name", "table_schema", "table_name", "data_type", "is_nullable", "ordinal_position", "comment", "contract_version")
+        .select("id", "name", "table_catalog", "table_schema", "table_name", "data_type", "is_nullable", "ordinal_position", "comment", "contract_version")
     )
 
 

@@ -30,11 +30,16 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# Catalog is part of the qualified name in every label's embedding text
+# (Schema already used catalog_name). In a multi-catalog graph this is what
+# keeps `bronze.sales.orders` and `gold.sales.orders` from embedding
+# identically; in a single-catalog graph it is a constant prefix.
 _TABLE_EMBEDDING_TEXT_EXPR = (
-    "concat_ws(' | ', concat_ws('.', table_schema, name), nullif(trim(comment), ''))"
+    "concat_ws(' | ', concat_ws('.', table_catalog, table_schema, name),"
+    " nullif(trim(comment), ''))"
 )
 _COLUMN_EMBEDDING_TEXT_EXPR = (
-    "concat_ws(' | ', concat_ws('.', table_schema, table_name, name),"
+    "concat_ws(' | ', concat_ws('.', table_catalog, table_schema, table_name, name),"
     " data_type, nullif(trim(comment), ''))"
 )
 _SCHEMA_EMBEDDING_TEXT_EXPR = (
