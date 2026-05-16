@@ -384,6 +384,17 @@ Steps:
       `docs/commands.md` (table row, mutual-exclusivity note, description
       bullet) and `runner.py` (`wheel_package` docstring); extra blank
       lines in `upload.py` and `libraries.py` fixed. 42 tests pass.
+      Follow-up cleanup: the now-orphaned versioned-wheel auto-attach
+      thread was also removed — `Runner.find_wheel`, the `submit`
+      `run_{wheel_package}*` auto-attach branch, and the `wheel_path`
+      parameter on `submit_job`/`Compute.decorate_task`/
+      `Compute.environments` plus the `ClassicCluster.attach_libraries`
+      field (no submit path attaches a Python library now; `Serverless`
+      still emits one dependency-free `JobEnvironment`). The
+      `serverless_smoke` example's wheel subpackage was deleted and the
+      example made a non-package (`package = false`). Added
+      `tests/test_compute.py` for the no-arg compute protocol shape;
+      46 tests pass.
 - [ ] Publish a runner release (`0.6.0`) and bump the dbxcarta pin.
 
 Done when: the warm cluster stays warm across the window and the legacy
