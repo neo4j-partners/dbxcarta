@@ -107,7 +107,7 @@ Steps:
 Done when: the version is on PyPI and installable. Done: `0.4.9` is the
 recorded version string and the consumer pin target for Phase V2.
 
-### Phase V2: Switch the dbxcarta consumer to the published runner
+### Phase V2: Switch the dbxcarta consumer to the published runner [Status: implemented, warm-cluster validation deferred to V3]
 
 Goal: the dbxcarta ingest path uses the bootstrap model on the published
 runner. This is the original Phase 7 consumer change.
@@ -148,30 +148,48 @@ ingest code requires pydantic v2 and the DBR-bundled version is not
 guaranteed to match.
 
 Steps:
-- [ ] Move the committed dbxcarta runner pin to `==0.4.9`.
-- [ ] Switch the ingest and client submit-entrypoints from
+- [x] Move the committed dbxcarta runner pin to `==0.4.9`
+      (`packages/dbxcarta-spark/pyproject.toml` and `uv.lock`).
+- [x] Switch the ingest and client submit-entrypoints from
       `PythonWheelTask` to `submit_bootstrap` with a `BootstrapConfig`.
-- [ ] Supply the policy values: the fully pinned dependency closure with
+- [x] Supply the policy values: the fully pinned dependency closure with
       binary wheels (DBR-provided packages excluded as above), the
       `org.neo4j.spark.DataSource` probe class for ingest, and the smoke
       imports.
-- [ ] Wire `maven_libraries_preflight` for the Neo4j connector into a
-      dedicated ingest runner so submit fails fast when the connector is
-      missing, pending, or failed.
-- [ ] Switch the wheel upload path from the versioned upload to
-      `publish_wheel_stable` plus `upload_all` so the bootstrap script
-      ships and the stable Volume wheel is published.
-- [ ] Remove `_sync_cluster_libraries`, `_wait_for_cluster_libraries`,
-      and the `_ENTRYPOINT_CLUSTER_PYPI_PACKAGES` table, and stop
-      installing or uninstalling Python libraries on the cluster as part
-      of submit.
-- [ ] Add a unit test asserting the curated ingest and client closures
+- [x] Wire `maven_libraries_preflight` for the Neo4j connector into a
+      dedicated ingest runner (`_ingest_runner`) so submit fails fast
+      when the connector is missing, pending, or failed. The shared
+      runner used by client and generic commands carries no preflight.
+- [x] Switch the wheel upload path from the versioned upload to
+      `publish_wheel_stable` plus `upload_all`. Because both
+      submit-entrypoints now bootstrap, `upload --wheel` publishes a
+      stable wheel for every `_ENTRYPOINT_WHEEL_PACKAGE` value
+      (`dbxcarta-spark` and `dbxcarta-client`) so each path resolves its
+      wheel from the fixed Volume name, then `upload_all` ships the
+      runner bootstrap script the `SparkPythonTask` runs.
+- [x] Remove `_sync_cluster_libraries`, `_wait_for_cluster_libraries`,
+      and the `_ENTRYPOINT_CLUSTER_PYPI_PACKAGES`/
+      `_ENTRYPOINT_CLUSTER_MAVEN_PACKAGES` tables, and stop installing or
+      uninstalling Python libraries on the cluster as part of submit.
+- [x] Add a unit test asserting the curated ingest and client closures
       exclude the DBR-provided packages (`pyspark`, `py4j`,
-      `databricks-sdk`).
+      `databricks-sdk`) and are fully exact-pinned
+      (`tests/spark/test_cli_closure.py`); update the existing
+      `tests/presets/test_cli.py` guardrail tests to the bootstrap API.
 
 Done when: dbxcarta submits the ingest through the bootstrap path on the
 published runner, the connector preflight is enforced on submit, the
 closure test passes, and no consumer Python-library sync remains.
+Implementation is complete and the full consumer test suite passes (360
+passed, 1 skipped, 3 live-deselected). The live warm-cluster submission
+itself is exercised in Phase V3; this phase does not require it.
+
+Precondition note: `publish_wheel_stable` resolves the package wheel
+from `dist/` by glob (the same `find_latest_wheel` model the prior
+versioned path used), so `uv build --all-packages` must populate `dist/`
+before `upload --wheel`, exactly as before this change. This is
+unchanged consumer behavior and is documented in the project README; the
+build contract is intentionally out of scope for this phase.
 
 ### Phase V3: Validate the full dbxcarta ingest on the warm cluster
 

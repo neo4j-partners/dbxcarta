@@ -10,7 +10,7 @@ from databricks_job_runner.errors import RunnerError
 from dbxcarta.spark import cli
 
 
-class _Serverless:
+class Serverless:
     def validate(self, ws: object) -> None:
         raise AssertionError("validate should not be called")
 
@@ -39,7 +39,7 @@ class _RunnerStub:
 def test_submit_ingest_rejects_serverless_compute(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    stub = _RunnerStub(_Serverless())
+    stub = _RunnerStub(Serverless())
     monkeypatch.setattr(cli, "_ingest_runner", lambda: stub)
 
     with pytest.raises(RunnerError, match="Neo4j Spark Connector"):

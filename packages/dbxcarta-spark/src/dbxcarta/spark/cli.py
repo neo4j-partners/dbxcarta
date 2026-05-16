@@ -156,9 +156,20 @@ def main() -> None:
 
 def _handle_upload() -> int:
     from databricks_job_runner.errors import RunnerError
+    from databricks_job_runner.upload import publish_wheel_stable
 
+    # Publish a stable wheel for every submit-entrypoint package so both
+    # `submit-entrypoint ingest` and `submit-entrypoint client` resolve
+    # their wheel from the fixed Volume path. `upload_all` then ships the
+    # runner bootstrap script the SparkPythonTask runs.
     try:
-        runner.publish_wheel_stable()
+        for wheel_package in dict.fromkeys(_ENTRYPOINT_WHEEL_PACKAGE.values()):
+            publish_wheel_stable(
+                runner.ws,
+                runner.project_dir,
+                runner.wheel_volume_dir,
+                wheel_package,
+            )
         runner.upload_all()
     except RunnerError as exc:
         print(f"error: {exc}", file=sys.stderr)
