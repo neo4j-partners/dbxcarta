@@ -6,7 +6,7 @@ import re
 from typing import TYPE_CHECKING, Any
 
 from dbxcarta.spark.contract import NodeLabel, generate_value_id
-from dbxcarta.spark.verify import Violation, single_value
+from dbxcarta.spark.verify import Violation, scoped_catalog, single_value
 
 if TYPE_CHECKING:
     from neo4j import Driver
@@ -32,8 +32,7 @@ def _check_value_count(driver: "Driver", summary: dict[str, Any]) -> list[Violat
     expected = (summary.get("row_counts") or {}).get("value_nodes")
     if expected is None:
         return []
-    catalog: str = summary.get("catalog") or ""
-    prefix = catalog + "."
+    _, prefix = scoped_catalog(summary)
     with driver.session() as s:
         actual = single_value(s.run(
             f"MATCH (n:{NodeLabel.VALUE}) WHERE n.id STARTS WITH $prefix RETURN count(n) AS cnt",

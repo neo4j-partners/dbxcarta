@@ -191,32 +191,49 @@ before `upload --wheel`, exactly as before this change. This is
 unchanged consumer behavior and is documented in the project README; the
 build contract is intentionally out of scope for this phase.
 
-### Phase V3: Validate the full dbxcarta ingest on the warm cluster [Status: in progress, blocked on runner 0.4.10 publish]
+### Phase V3: Validate the full dbxcarta ingest on the warm cluster [Status: deploy/runner path validated on runner 0.5.1; ingest blocked on a separate dbxcarta verify bug, now fixed in the consumer — live rerun pending]
 
 Goal: the real ingest path works end to end, exercising the parts the
 smoke harness does not: the Neo4j connector probe, the pinned closure
 lock and smoke check with a real closure, and secret-scope loading.
 
 Steps:
-- [~] Run the full dbxcarta ingest on the warm cluster. Attempted on
-      `0515-141455-wb8qxgo2`; aborted at preflight by a runner defect
-      (see "Defect found" below). No Databricks run was created.
-- [ ] Confirm new code is picked up with no version bump and no cluster
-      restart. Not reached. The cluster cold-started to RUNNING this
-      attempt, so the no-restart criterion must be judged on the rerun,
-      not this attempt.
-- [ ] Confirm the connector probe, the closure lock and smoke check, and
-      secret-scope loading all behave correctly. Not reached. The crash
-      was client-side at preflight, before any run, so the connector
-      probe result, the closure lock and smoke check, and secret-scope
-      loading are all still unvalidated.
+- [x] Run the full dbxcarta ingest on the warm cluster. Ran on
+      `0515-141455-wb8qxgo2` against published `databricks-job-runner==0.5.1`.
+      A real Databricks run was created (run `502035378647744`, task
+      `409478094845255`); it executed end to end and failed only at the
+      dbxcarta verify gate (see "Second attempt" below) — not in the
+      deploy/runner path.
+- [~] Confirm new code is picked up with no version bump and no cluster
+      restart. New code (stable wheel + closure) was picked up with no
+      version bump. The no-restart criterion is still not cleanly
+      demonstrated: the cluster had auto-terminated since the prior
+      check and cold-started both attempts. Not a code issue; needs a
+      run that starts against an already-warm cluster.
+- [x] Confirm the connector probe, the closure lock and smoke check, and
+      secret-scope loading all behave correctly. All validated on the
+      0.5.1 run: connector preflight correctly failed-fast while the
+      maven lib was `pending`, then passed (`[ok] neo4j connector`) once
+      `INSTALLED`; bootstrap manifest reported `smoke_check: "ok (6)"`
+      with the real closure (including `databricks-job-runner==0.5.1`);
+      secret-scope `dbxcarta-neo4j` loaded (the ingest connected to and
+      queried Neo4j).
 - [x] If a defect is found, fix it in the runner, publish the next patch
-      version, bump the dbxcarta pin, and rerun. Repeat until the ingest
-      is clean. Defect found and fixed in the runner (uncommitted,
-      unpublished); publish, pin bump, and rerun are pending.
+      version, bump the dbxcarta pin, and rerun. The runner SDK defect
+      was fixed and published as `databricks-job-runner==0.5.1` (operator
+      published; supersedes the planned `0.4.10`). The dbxcarta pin was
+      bumped `0.4.9 -> 0.5.1` consistently across
+      `packages/dbxcarta-spark/pyproject.toml`, the `_INGEST_PINNED_CLOSURE`
+      in `packages/dbxcarta-spark/src/dbxcarta/spark/cli.py`, and
+      `uv.lock`, and the ingest was rerun. The published 0.5.1 wheel was
+      verified to carry the `cluster_status` bare-list fix in both
+      `libraries.py` and `clean.py`.
 
 Done when: a full ingest succeeds against a published runner version
-with no manual code step and no restart.
+with no manual code step and no restart. Deploy/runner criteria are met
+on 0.5.1; closing this requires one more live rerun after the verify fix
+below, ideally against an already-warm cluster to also settle the
+no-restart criterion.
 
 #### Completed this attempt (preconditions, all green)
 
@@ -263,29 +280,66 @@ preflight and are unaffected.
   entry (closes the V1 changelog item, which was ticked without a file).
 - Runner suite: 43 passed.
 
-#### Retest required (after runner 0.4.10 is published to PyPI)
+Note: the operator published `0.5.1` (not the planned `0.4.10`); `0.5.1`
+is the recorded runner version. The `_CLIENT_PINNED_CLOSURE` does not
+carry a runner pin, so only `_INGEST_PINNED_CLOSURE`, `pyproject.toml`,
+and `uv.lock` changed for the consumer bump.
 
-The publish is operator-gated (the V1 publish gate). Once
-`databricks-job-runner==0.4.10` is live and installable:
+#### Second attempt: runner 0.5.1 — deploy/runner path validated; dbxcarta verify bug found and fixed
 
-1. Bump the dbxcarta pin `0.4.9 -> 0.4.10` in
-   `packages/dbxcarta-spark/pyproject.toml`, the `_INGEST_PINNED_CLOSURE`
-   and `_CLIENT_PINNED_CLOSURE` strings in
-   `packages/dbxcarta-spark/src/dbxcarta/spark/cli.py`, and `uv.lock`.
-2. `uv build --all-packages`, then `dbxcarta upload --wheel` to
-   republish the stable wheels against the new pin. Data fixtures do not
-   need re-uploading.
-3. Rerun `dbxcarta submit-entrypoint ingest --compute cluster`.
-4. Confirm, on the rerun, the items the crash never reached: the Neo4j
-   connector probe passes, the pinned closure lock and post-install
-   smoke check behave with the real closure, secret-scope loading
-   works, the run ends `status=success` with no manual code step and no
-   cluster restart, then `dbxcarta verify` passes.
+Pin bumped `0.4.9 -> 0.5.1`, wheels rebuilt (`uv build --all-packages`),
+stable wheels and bootstrap re-published (`dbxcarta upload --wheel`),
+and `dbxcarta submit-entrypoint ingest --compute cluster` rerun.
 
-The precondition gates above (auth, readiness, build, stable-wheel and
-bootstrap publish, data upload) were green this attempt and only need
-re-confirming to the extent the pin bump and rebuild change them
-(rebuild and `upload --wheel` in step 2 cover that).
+Deploy/runner path: fully validated (see the V3 step notes above). The
+0.5.1 SDK fix worked in production — the preflight ran with no
+`AttributeError`, failed-fast while the maven lib was `pending`, then
+passed once `INSTALLED`. Bootstrap, per-run install, closure lock, smoke
+check (`ok (6)`), JVM probe, and secret-scope loading all behaved.
+
+The run then failed at the **dbxcarta verify gate** with 6 violations
+(Database/Schema/Table/Column/REFERENCES/Value all "Neo4j has 0, summary
+reported N"). This was **not** an empty write: the unscoped
+`query_counts` in `run.py` recorded the correct non-zero counts
+(`Database 1, Schema 1, Table 16, Column 169, Value 111, REFERENCES 18`).
+
+Root cause (pre-existing dbxcarta bug, outside harden-deploy scope):
+node ids are normalized via `contract.generate_id` (lowercase; spaces
+and hyphens become underscores), but the catalog-scoped verify checks in
+`verify/graph.py:_check_node_counts`,
+`verify/references.py:_check_edge_count`, and
+`verify/values.py:_check_value_count` filtered `n.id` against the **raw**
+`summary["catalog"]`. With catalog `graph-enriched-lakehouse` and schema
+`graph-enriched-schema`, the raw-hyphen scope never matched the
+underscore-normalized ids, so every scoped count read 0. The verify
+package had no unit tests, so this shipped silently and was only exposed
+by a workspace whose catalog/schema names contain hyphens.
+
+Fix applied in the dbxcarta consumer (uncommitted):
+
+- Added `verify.scoped_catalog(summary) -> (catalog_id, id_prefix)` in
+  `verify/__init__.py`, normalizing the catalog through `generate_id`
+  (single source of truth so the three sites cannot drift again).
+- Wired it into `verify/graph.py`, `verify/references.py`, and
+  `verify/values.py`.
+- Added `tests/spark/test_verify_scope.py`: a hyphenated catalog/schema
+  regression test (would have caught this) plus a negative test that a
+  genuine count mismatch is still flagged. Full consumer suite: 366
+  passed, 1 skipped, 3 deselected.
+
+#### Retest required (live rerun, after the verify fix)
+
+The fix is in consumer code, so the stable wheel must be rebuilt and
+re-uploaded before the verify gate can be confirmed live:
+
+1. `uv build --all-packages`, then `dbxcarta upload --wheel` to
+   republish the stable wheels with the verify fix. Pin is already at
+   `0.5.1`; data fixtures do not need re-uploading.
+2. Rerun `dbxcarta submit-entrypoint ingest --compute cluster`,
+   preferably against an already-warm cluster so the no-restart
+   criterion is also settled.
+3. Confirm the run ends `status=success` and the verify gate passes
+   (0 violations) with no manual code step and no cluster restart.
 
 ### Phase V4: Cluster configuration drift check
 
@@ -302,18 +356,27 @@ Steps:
 
 Done when: a drifted cluster fails preflight with an actionable message.
 
-### Phase V5: Reduce restarts and remove legacy runner code
+### Phase V5: Reduce restarts and remove legacy runner code [Status: legacy removal implemented; publish and pin bump pending]
 
 Goal: keep the warm cluster warm across the active window, and remove
 the superseded library-side code. This is the original Phase 4 plus the
 deferred library-side legacy cleanup.
 
 Steps:
-- [ ] Reduce restart frequency for the active development window so the
-      connector is not re-resolved.
-- [ ] Remove the legacy versioned-upload and reconciler code paths from
-      the runner once no consumer depends on them.
-- [ ] Publish a runner release and bump the dbxcarta pin.
+- [~] Reduce restart frequency for the active development window so the
+      connector is not re-resolved. Deferred: the bootstrap model already
+      eliminates the restart cause (no Python library reconciler, no
+      cluster-library sync). Cluster auto-termination is a configuration
+      concern outside the runner scope.
+- [x] Remove the legacy versioned-upload and reconciler code paths from
+      the runner once no consumer depends on them. Removed in the runner:
+      `sync_cluster_libraries`, `build_and_upload_wheel`,
+      `_bump_patch_version`, `_delete_old_wheels_from_volume`,
+      `clean_cluster_wheel_libraries`, `Runner.upload_wheel`, and the
+      `upload --wheel` CLI subcommand. `sync_cluster_libraries` dropped
+      from the public API. CHANGELOG entry added for `0.6.0`. dbxcarta
+      confirmed to have no call sites for any removed symbol.
+- [ ] Publish a runner release (`0.6.0`) and bump the dbxcarta pin.
 
 Done when: the warm cluster stays warm across the window and the legacy
 paths are gone.

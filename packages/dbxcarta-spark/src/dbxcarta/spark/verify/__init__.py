@@ -33,6 +33,22 @@ def single_value(result: Any, key: str) -> Any:
     return record[key]
 
 
+def scoped_catalog(summary: dict[str, Any]) -> tuple[str, str]:
+    """Return ``(catalog_id, id_prefix)`` for catalog-scoped verify queries.
+
+    Node ids are normalized through ``contract.generate_id`` (lowercased;
+    spaces and hyphens become underscores). Scoping predicates must use the
+    same normalized form: comparing the raw ``summary["catalog"]`` against
+    ``n.id`` means a catalog or schema name containing a hyphen or space never
+    matches, so every scoped count reads 0 even when the graph is correct.
+    """
+    from dbxcarta.spark.contract import generate_id
+
+    catalog = summary.get("catalog") or ""
+    catalog_id = generate_id(catalog) if catalog else ""
+    return catalog_id, catalog_id + "."
+
+
 @dataclass
 class Report:
     run_id: str
@@ -95,4 +111,4 @@ def _check_summary_shape(summary: dict[str, Any]) -> list[Violation]:
     return out
 
 
-__all__ = ["Violation", "Report", "single_value", "verify_run"]
+__all__ = ["Violation", "Report", "single_value", "scoped_catalog", "verify_run"]

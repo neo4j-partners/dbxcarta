@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from dbxcarta.spark.contract import CONTRACT_VERSION, NodeLabel
-from dbxcarta.spark.verify import Violation, single_value
+from dbxcarta.spark.verify import Violation, scoped_catalog, single_value
 
 if TYPE_CHECKING:
     from neo4j import Driver
@@ -29,8 +29,7 @@ def _check_node_counts(driver: "Driver", summary: dict[str, Any]) -> list[Violat
     Queries are scoped to the current catalog so a shared Neo4j instance
     holding data from multiple catalogs does not produce false positives.
     """
-    catalog: str = summary.get("catalog") or ""
-    prefix = catalog + "."
+    catalog, prefix = scoped_catalog(summary)
     counts = summary.get("row_counts") or {}
     expected = {
         NodeLabel.DATABASE: counts.get("databases", 1),

@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from dbxcarta.spark.contract import NodeLabel, RelType
-from dbxcarta.spark.verify import Violation, single_value
+from dbxcarta.spark.verify import Violation, scoped_catalog, single_value
 
 if TYPE_CHECKING:
     from neo4j import Driver
@@ -48,8 +48,7 @@ def _check_edge_count(driver: "Driver", summary: dict[str, Any]) -> list[Violati
     Scoped via the source Column's id prefix so a shared Neo4j instance with
     data from multiple catalogs does not produce false positives.
     """
-    catalog: str = summary.get("catalog") or ""
-    prefix = catalog + "."
+    _, prefix = scoped_catalog(summary)
     expected = _expected_edge_total(summary)
     with driver.session() as s:
         edges = single_value(s.run(
