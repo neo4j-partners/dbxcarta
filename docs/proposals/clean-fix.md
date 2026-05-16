@@ -403,8 +403,13 @@ Verification after Phases 4 to 6 surfaced live issues that were fixed:
   strict `Locked tests and audit` status check, no force-push, no
   deletion.
 - The `pypi` environment had `protection_rules: []`. Deployment is now
-  restricted to a `v*` tag policy. The human-approval required-reviewer
-  gate is still open because it needs a named user or team.
+  restricted to a `v*` tag policy with `retroryan` as the required
+  reviewer.
+- `v0.5.1` was released and passed through the complete hardened path:
+  lockfile check, pip-audit, build, wheel and sdist attestation, then a
+  reviewer-gated publish to PyPI. Every added control is now proven by a
+  real release, not only by construction. `v0.5.1` supersedes the
+  earlier `v0.5` that shipped on red CI.
 
 ## Out of Scope
 
