@@ -1,0 +1,12 @@
+Uploading all scripts/ to /Users/ryan.knight@neo4j.com/dbxcarta/scripts
+---
+Uploading: run_autotest.py -> /Users/ryan.knight@neo4j.com/dbxcarta/scripts/run_autotest.py
+  Done.
+Uploading: run_demo.py -> /Users/ryan.knight@neo4j.com/dbxcarta/scripts/run_demo.py
+  Done.
+Uploading: run_spike_ai_query.py -> /Users/ryan.knight@neo4j.com/dbxcarta/scripts/run_spike_ai_query.py
+  Done.
+Uploading: bootstrap.py -> /Users/ryan.knight@neo4j.com/dbxcarta/scripts/_dbxrunner_bootstrap.py
+  Done.
+
+Upload complete.

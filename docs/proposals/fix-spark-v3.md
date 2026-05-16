@@ -528,11 +528,13 @@ Notes:
   covers disabled-default, below / at / above limit, the summary record,
   the namespaced `row_counts` surfacing, non-collision with declared-FK
   `fk_skipped`, the verifier accounting regression, and the all-`None`
-  result honoring the load contract. Open item: the Phase 1/2 synthetic
-  large-catalog bounded-driver-memory fixture this validation references
-  does not yet exist; the guardrail's disabled-by-default (`0`) means it
-  cannot mask such a test once written, but the fixture itself is an
-  outstanding Phase 1/2 deliverable (see Phase 1/2 validation).
+  result honoring the load contract. Open item. **Deferred
+  (2026-05-16):** the Phase 1/2 synthetic large-catalog
+  bounded-driver-memory fixture this validation references does not yet
+  exist and is deferred until later; the guardrail's disabled-by-default
+  (`0`) means it cannot mask such a test once written, but the fixture
+  itself is an outstanding Phase 1/2 deliverable (see Phase 1/2
+  validation).
 
 ## Completion Criteria
 
@@ -549,6 +551,10 @@ The proposal is complete when:
 - FK tests assert correct rules and edges on fixtures, with no diff against
   the old Python implementation.
 - A synthetic large-catalog run completes with bounded driver memory.
+  **Deferred (2026-05-16):** the synthetic large-catalog
+  bounded-driver-memory fixture is deferred until later; this criterion
+  is not yet satisfied and is tracked as an outstanding Phase 1/2
+  deliverable.
 
 ## Recommended Order
 
