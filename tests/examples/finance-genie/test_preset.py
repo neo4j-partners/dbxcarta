@@ -49,6 +49,8 @@ def test_env_overlay_validates_against_settings() -> None:
     env = preset.env()
     settings = SparkIngestSettings(
         dbxcarta_catalog=env["DBXCARTA_CATALOG"],
+        dbxcarta_catalogs=env["DBXCARTA_CATALOGS"],
+        dbxcarta_layer_map=env["DBXCARTA_LAYER_MAP"],
         dbxcarta_schemas=env["DBXCARTA_SCHEMAS"],
         dbxcarta_summary_volume=env["DBXCARTA_SUMMARY_VOLUME"],
         dbxcarta_summary_table=env["DBXCARTA_SUMMARY_TABLE"],
@@ -65,8 +67,18 @@ def test_env_overlay_validates_against_settings() -> None:
             env["DBXCARTA_EMBEDDING_FAILURE_THRESHOLD"]
         ),
     )
-    assert settings.dbxcarta_catalog == "graph-enriched-lakehouse"
+    assert settings.dbxcarta_catalog == "graph-enriched-finance-silver"
     assert settings.dbxcarta_schemas == "graph-enriched-schema"
+    assert settings.resolved_catalogs() == [
+        "graph-enriched-finance-bronze",
+        "graph-enriched-finance-silver",
+        "graph-enriched-finance-gold",
+    ]
+    assert settings.layer_map() == {
+        "graph-enriched-finance-bronze": "bronze",
+        "graph-enriched-finance-silver": "silver",
+        "graph-enriched-finance-gold": "gold",
+    }
 
 
 def test_env_overlay_pins_known_keys() -> None:

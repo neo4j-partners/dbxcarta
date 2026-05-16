@@ -170,19 +170,30 @@ def _build_pk_index(
     spark: "SparkSession", settings: "SparkIngestSettings", schema_list: list[str],
 ) -> PKIndex:
     """Pull information_schema constraints and build the PKIndex."""
+    from functools import reduce
+
     from pyspark.sql.functions import col
 
-    catalog = settings.dbxcarta_catalog
-    pk_rows_df = spark.sql(
-        f"SELECT kcu.table_catalog, kcu.table_schema, kcu.table_name,"
-        f"       kcu.column_name, tc.constraint_type, kcu.ordinal_position,"
-        f"       kcu.constraint_name"
-        f" FROM `{catalog}`.information_schema.table_constraints tc"
-        f" JOIN `{catalog}`.information_schema.key_column_usage kcu"
-        f"   ON tc.constraint_catalog = kcu.constraint_catalog"
-        f"  AND tc.constraint_schema  = kcu.constraint_schema"
-        f"  AND tc.constraint_name    = kcu.constraint_name"
-        f" WHERE tc.constraint_type IN ('PRIMARY KEY', 'UNIQUE')"
+    # Read PK/UNIQUE constraints from every ingested catalog. Cross-catalog FK
+    # pairing is still blocked downstream (metadata.infer_fk_pairs skips pairs
+    # whose catalog/schema differ), so this only makes per-catalog PKs visible,
+    # with no Phase 2 cross-catalog behavior leaking in.
+    pk_rows_df = reduce(
+        lambda a, b: a.unionByName(b),
+        [
+            spark.sql(
+                f"SELECT kcu.table_catalog, kcu.table_schema, kcu.table_name,"
+                f"       kcu.column_name, tc.constraint_type, kcu.ordinal_position,"
+                f"       kcu.constraint_name"
+                f" FROM `{catalog}`.information_schema.table_constraints tc"
+                f" JOIN `{catalog}`.information_schema.key_column_usage kcu"
+                f"   ON tc.constraint_catalog = kcu.constraint_catalog"
+                f"  AND tc.constraint_schema  = kcu.constraint_schema"
+                f"  AND tc.constraint_name    = kcu.constraint_name"
+                f" WHERE tc.constraint_type IN ('PRIMARY KEY', 'UNIQUE')"
+            )
+            for catalog in settings.resolved_catalogs()
+        ],
     )
     if schema_list:
         pk_rows_df = pk_rows_df.filter(col("table_schema").isin(schema_list))

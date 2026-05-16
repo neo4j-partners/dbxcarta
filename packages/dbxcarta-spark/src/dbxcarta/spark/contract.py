@@ -10,7 +10,10 @@ from __future__ import annotations
 import hashlib
 from enum import StrEnum
 
-CONTRACT_VERSION = "1.0"
+# 1.1 adds the additive Table node `layer` property (bronze/silver/gold),
+# derived at ingest from a configurable catalog->layer map. Readers treat a
+# missing `layer` as null.
+CONTRACT_VERSION = "1.1"
 
 DEFAULT_EMBEDDING_ENDPOINT = "databricks-gte-large-en"
 

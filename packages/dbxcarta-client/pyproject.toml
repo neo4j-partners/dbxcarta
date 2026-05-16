@@ -19,6 +19,7 @@ test = ["pytest"]
 
 [project.scripts]
 dbxcarta-client = "dbxcarta.client.eval.entrypoint:main"
+dbxcarta-embed-probe = "dbxcarta.client.embed_probe:main"
 
 [build-system]
 requires = ["uv_build>=0.11.0,<0.12.0"]

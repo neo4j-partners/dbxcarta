@@ -283,7 +283,10 @@ def _load(
     candidate_col_ids = sv.get_candidate_col_ids(extract_result.columns_df)
     purge_stale_values(driver, candidate_col_ids)
 
-    logger.info("[dbxcarta] writing nodes: Database (1)")
+    logger.info(
+        "[dbxcarta] writing nodes: Database (%d)",
+        extract_result.database_df.count(),
+    )
     write_node(_drop_cols(extract_result.database_df, "embedding_error"), neo4j, NodeLabel.DATABASE)
 
     logger.info("[dbxcarta] writing nodes: Schema (%d)", summary.extract.schemas)

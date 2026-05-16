@@ -101,7 +101,7 @@ class ContextBundle:
                 )
             if value_lines:
                 lines.append("")
-                lines.append("Sample values for seeds:")
+                lines.append("Sample values:")
                 lines.extend(value_lines)
 
         return "\n".join(lines)

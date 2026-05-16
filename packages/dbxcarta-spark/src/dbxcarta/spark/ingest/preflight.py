@@ -34,10 +34,11 @@ def preflight(spark: "SparkSession", settings: "SparkIngestSettings") -> None:
     from py4j.protocol import Py4JJavaError  # type: ignore[import-untyped]
     from pyspark.errors import AnalysisException
 
-    catalog = settings.dbxcarta_catalog
-    spark.sql(
-        f"SELECT 1 FROM {quote_identifier(catalog)}.information_schema.schemata LIMIT 1"
-    ).collect()
+    catalogs = settings.resolved_catalogs()
+    for catalog in catalogs:
+        spark.sql(
+            f"SELECT 1 FROM {quote_identifier(catalog)}.information_schema.schemata LIMIT 1"
+        ).collect()
 
     parts = parse_volume_path(settings.dbxcarta_summary_volume)
     vol_catalog, vol_schema, vol_name = parts[1], parts[2], parts[3]
@@ -112,6 +113,6 @@ def preflight(spark: "SparkSession", settings: "SparkIngestSettings") -> None:
             )
 
     logger.info(
-        "[dbxcarta] preflight passed: %s.information_schema accessible, volume and table ready",
-        catalog,
+        "[dbxcarta] preflight passed: %s information_schema accessible, volume and table ready",
+        ", ".join(catalogs),
     )

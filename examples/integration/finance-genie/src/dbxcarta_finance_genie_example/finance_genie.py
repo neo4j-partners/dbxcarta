@@ -23,9 +23,19 @@ if TYPE_CHECKING:
     from databricks.sdk import WorkspaceClient
 
 
-_DEFAULT_CATALOG = "graph-enriched-lakehouse"
+# Medallion layout: each layer is its own Unity Catalog. The single
+# DBXCARTA_CATALOG anchor (preflight/verify/ops) is the silver catalog;
+# DBXCARTA_CATALOGS lists all three for the unified ingest graph.
+_SILVER_CATALOG = "graph-enriched-finance-silver"
+_BRONZE_CATALOG = "graph-enriched-finance-bronze"
+_GOLD_CATALOG = "graph-enriched-finance-gold"
 _DEFAULT_SCHEMA = "graph-enriched-schema"
-_DEFAULT_VOLUME = "graph-enriched-volume"
+
+# Operational artifacts (run summary, client staging) are excluded from the
+# dataset catalogs and redirected here.
+_OPS_CATALOG = "dbxcarta-catalog"
+_OPS_SCHEMA = "finance_genie_ops"
+_OPS_VOLUME = "dbxcarta-ops"
 
 _BASE_TABLES: tuple[str, ...] = (
     "accounts",
@@ -41,6 +51,15 @@ _GOLD_TABLES: tuple[str, ...] = (
     "gold_fraud_ring_communities",
 )
 
+# Intermediate GDS feature tables live in the bronze catalog. Tracked so the
+# layer demo can show bronze tables tagged, but not a readiness gate.
+_BRONZE_TABLES: tuple[str, ...] = (
+    "account_features",
+    "account_graph_features",
+    "account_similarity_pairs",
+    "training_dataset",
+)
+
 _EXPECTED_TABLES = _BASE_TABLES + _GOLD_TABLES
 
 _QUESTIONS_FILE = Path(__file__).resolve().with_name("questions.json")
@@ -48,31 +67,61 @@ _QUESTIONS_FILE = Path(__file__).resolve().with_name("questions.json")
 
 @dataclass(frozen=True)
 class FinanceGeniePreset:
-    """Preset implementation for the Finance Genie Lakehouse."""
+    """Preset implementation for the Finance Genie medallion Lakehouse.
 
-    catalog: str = _DEFAULT_CATALOG
+    `catalog` is the silver (primary) catalog used as the single
+    DBXCARTA_CATALOG anchor for preflight, verify, and ops table provisioning.
+    Bronze and gold are ingested into the same graph via DBXCARTA_CATALOGS.
+    """
+
+    catalog: str = _SILVER_CATALOG
+    bronze_catalog: str = _BRONZE_CATALOG
+    gold_catalog: str = _GOLD_CATALOG
     schema: str = _DEFAULT_SCHEMA
-    volume: str = _DEFAULT_VOLUME
+    ops_catalog: str = _OPS_CATALOG
+    ops_schema: str = _OPS_SCHEMA
+    ops_volume: str = _OPS_VOLUME
     base_tables: tuple[str, ...] = field(default=_BASE_TABLES)
     optional_tables: tuple[str, ...] = field(default=_GOLD_TABLES)
 
     def __post_init__(self) -> None:
         validate_identifier(self.catalog, label="catalog")
+        validate_identifier(self.bronze_catalog, label="catalog")
+        validate_identifier(self.gold_catalog, label="catalog")
         validate_identifier(self.schema, label="schema")
-        validate_identifier(self.volume, label="volume")
+        validate_identifier(self.ops_catalog, label="catalog")
+        validate_identifier(self.ops_schema, label="schema")
+        validate_identifier(self.ops_volume, label="volume")
+
+    @property
+    def catalogs(self) -> tuple[str, ...]:
+        """All ingested catalogs, bronze -> silver -> gold."""
+        return (self.bronze_catalog, self.catalog, self.gold_catalog)
+
+    @property
+    def layer_map(self) -> str:
+        """DBXCARTA_LAYER_MAP value: catalog:layer for each ingested catalog."""
+        return (
+            f"{self.bronze_catalog}:bronze,"
+            f"{self.catalog}:silver,"
+            f"{self.gold_catalog}:gold"
+        )
 
     @property
     def volume_path(self) -> str:
-        return f"/Volumes/{self.catalog}/{self.schema}/{self.volume}"
+        """Operational UC Volume root for run summaries and the question set."""
+        return f"/Volumes/{self.ops_catalog}/{self.ops_schema}/{self.ops_volume}"
 
     def env(self) -> dict[str, str]:
         volume_path = self.volume_path
         return {
             "DBXCARTA_CATALOG": self.catalog,
+            "DBXCARTA_CATALOGS": ",".join(self.catalogs),
+            "DBXCARTA_LAYER_MAP": self.layer_map,
             "DBXCARTA_SCHEMAS": self.schema,
             "DATABRICKS_VOLUME_PATH": volume_path,
             "DBXCARTA_SUMMARY_VOLUME": f"{volume_path}/dbxcarta/runs",
-            "DBXCARTA_SUMMARY_TABLE": f"{self.catalog}.{self.schema}.dbxcarta_run_summary",
+            "DBXCARTA_SUMMARY_TABLE": f"{self.ops_catalog}.{self.ops_schema}.dbxcarta_run_summary",
             "DBXCARTA_INCLUDE_VALUES": "true",
             "DBXCARTA_SAMPLE_LIMIT": "10",
             "DBXCARTA_SAMPLE_CARDINALITY_THRESHOLD": "50",
@@ -95,17 +144,30 @@ class FinanceGeniePreset:
         ws: "WorkspaceClient",
         warehouse_id: str,
     ) -> ReadinessReport:
-        table_names = _fetch_table_names(ws, warehouse_id, self.catalog, self.schema)
-        present_set = {name.strip() for name in table_names if name and name.strip()}
+        # Base tables live in the silver catalog; gold tables in the gold
+        # catalog. Each layer is queried in its own catalog.
+        silver_names = {
+            name.strip()
+            for name in _fetch_table_names(ws, warehouse_id, self.catalog, self.schema)
+            if name and name.strip()
+        }
+        gold_names = {
+            name.strip()
+            for name in _fetch_table_names(
+                ws, warehouse_id, self.gold_catalog, self.schema
+            )
+            if name and name.strip()
+        }
+        present_set = silver_names | gold_names
         present = tuple(name for name in _EXPECTED_TABLES if name in present_set)
         missing_required = tuple(
-            name for name in self.base_tables if name not in present_set
+            name for name in self.base_tables if name not in silver_names
         )
         missing_optional = tuple(
-            name for name in self.optional_tables if name not in present_set
+            name for name in self.optional_tables if name not in gold_names
         )
         return ReadinessReport(
-            catalog=self.catalog,
+            catalog=f"{self.catalog},{self.gold_catalog}",
             schema=self.schema,
             present=present,
             missing_required=missing_required,

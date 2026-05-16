@@ -65,33 +65,47 @@ def discover_declared(
     `prior_pairs` is empty by construction when declared runs first, but is
     accepted for signature uniformity with the other two strategies.
     """
+    from functools import reduce
+
     from pyspark.sql.functions import col
 
-    catalog = settings.dbxcarta_catalog
+    # Declared FKs are read per ingested catalog. Unity Catalog declared FKs
+    # cannot span catalogs, so unioning per-catalog reads cannot introduce a
+    # cross-catalog edge here; it only widens scope to every ingested catalog.
+    catalogs = settings.resolved_catalogs()
 
-    fk_pairs_df = spark.sql(
-        f"SELECT rc.constraint_schema AS fk_schema,"
-        f"       rc.constraint_name   AS fk_name,"
-        f"       src.table_catalog AS src_catalog, src.table_schema AS src_schema,"
-        f"       src.table_name    AS src_table,   src.column_name  AS src_column,"
-        f"       tgt.table_catalog AS tgt_catalog, tgt.table_schema AS tgt_schema,"
-        f"       tgt.table_name    AS tgt_table,   tgt.column_name  AS tgt_column,"
-        f"       src.ordinal_position AS ord"
-        f" FROM `{catalog}`.information_schema.referential_constraints rc"
-        f" JOIN `{catalog}`.information_schema.key_column_usage src"
-        f"   ON src.constraint_catalog = rc.constraint_catalog"
-        f"  AND src.constraint_schema  = rc.constraint_schema"
-        f"  AND src.constraint_name    = rc.constraint_name"
-        f" JOIN `{catalog}`.information_schema.key_column_usage tgt"
-        f"   ON tgt.constraint_catalog = rc.unique_constraint_catalog"
-        f"  AND tgt.constraint_schema  = rc.unique_constraint_schema"
-        f"  AND tgt.constraint_name    = rc.unique_constraint_name"
-        f"  AND tgt.ordinal_position   = src.position_in_unique_constraint"
-    )
-    declared_df = spark.sql(
-        f"SELECT constraint_schema, constraint_name"
-        f" FROM `{catalog}`.information_schema.referential_constraints"
-    )
+    def _union(frames: list["DataFrame"]) -> "DataFrame":
+        return reduce(lambda a, b: a.unionByName(b), frames)
+
+    fk_pairs_df = _union([
+        spark.sql(
+            f"SELECT rc.constraint_schema AS fk_schema,"
+            f"       rc.constraint_name   AS fk_name,"
+            f"       src.table_catalog AS src_catalog, src.table_schema AS src_schema,"
+            f"       src.table_name    AS src_table,   src.column_name  AS src_column,"
+            f"       tgt.table_catalog AS tgt_catalog, tgt.table_schema AS tgt_schema,"
+            f"       tgt.table_name    AS tgt_table,   tgt.column_name  AS tgt_column,"
+            f"       src.ordinal_position AS ord"
+            f" FROM `{catalog}`.information_schema.referential_constraints rc"
+            f" JOIN `{catalog}`.information_schema.key_column_usage src"
+            f"   ON src.constraint_catalog = rc.constraint_catalog"
+            f"  AND src.constraint_schema  = rc.constraint_schema"
+            f"  AND src.constraint_name    = rc.constraint_name"
+            f" JOIN `{catalog}`.information_schema.key_column_usage tgt"
+            f"   ON tgt.constraint_catalog = rc.unique_constraint_catalog"
+            f"  AND tgt.constraint_schema  = rc.unique_constraint_schema"
+            f"  AND tgt.constraint_name    = rc.unique_constraint_name"
+            f"  AND tgt.ordinal_position   = src.position_in_unique_constraint"
+        )
+        for catalog in catalogs
+    ])
+    declared_df = _union([
+        spark.sql(
+            f"SELECT constraint_schema, constraint_name"
+            f" FROM `{catalog}`.information_schema.referential_constraints"
+        )
+        for catalog in catalogs
+    ])
     if schema_list:
         fk_pairs_df = fk_pairs_df.filter(
             col("fk_schema").isin(schema_list) & col("tgt_schema").isin(schema_list)

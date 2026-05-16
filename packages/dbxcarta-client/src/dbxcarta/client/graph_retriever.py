@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from neo4j import GraphDatabase
 
 from dbxcarta.client.ids import schema_from_node_id
@@ -11,6 +13,14 @@ from dbxcarta.client.settings import ClientSettings
 
 _COL_INDEX = "column_embedding"
 _TABLE_INDEX = "table_embedding"
+
+_STOP_WORDS = frozenset({
+    "a", "an", "the", "in", "on", "of", "by", "to", "for", "from",
+    "and", "or", "is", "are", "that", "this", "with", "what", "how",
+    "where", "which", "all", "each", "many", "have", "has", "out",
+    "who", "show", "list", "get", "find", "do", "did", "does",
+    "per", "avg", "sum", "any", "its", "be", "been",
+})
 _MAX_VALUES_PER_COLUMN = 20
 _MAX_VALUE_CHARS = 80
 _MAX_VALUES_TOTAL = 2000
@@ -67,6 +77,53 @@ _JOIN_COLUMN_IDS_CYPHER = (
 )
 
 
+def _question_tokens(question: str) -> list[str]:
+    tokens = re.findall(r"[a-zA-Z]+", question.lower())
+    return [t for t in tokens if len(t) >= 3 and t not in _STOP_WORDS]
+
+
+def _lexical_table_ids(
+    session, question: str, schemas: list[str]
+) -> list[str]:
+    tokens = _question_tokens(question)
+    if not tokens:
+        return []
+    result = session.run(
+        "UNWIND $tokens AS tok "
+        "MATCH (s:Schema)-[:HAS_TABLE]->(t:Table) "
+        "WHERE toLower(t.name) CONTAINS tok "
+        "  AND (size($schemas) = 0 OR s.name IN $schemas) "
+        "RETURN DISTINCT t.id AS id",
+        tokens=tokens,
+        schemas=schemas,
+    )
+    return [row["id"] for row in result]
+
+
+def _lexical_column_table_ids(
+    session, question: str, schemas: list[str]
+) -> list[str]:
+    """Return parent table IDs of columns whose name contains a question token.
+
+    Surfaces tables that are only discoverable through a column name (e.g.
+    ``account_labels`` via its ``is_fraud`` column) which table-name and
+    vector seeding both miss.
+    """
+    tokens = _question_tokens(question)
+    if not tokens:
+        return []
+    result = session.run(
+        "UNWIND $tokens AS tok "
+        "MATCH (s:Schema)-[:HAS_TABLE]->(t:Table)-[:HAS_COLUMN]->(c:Column) "
+        "WHERE toLower(c.name) CONTAINS tok "
+        "  AND (size($schemas) = 0 OR s.name IN $schemas) "
+        "RETURN DISTINCT t.id AS id",
+        tokens=tokens,
+        schemas=schemas,
+    )
+    return [row["id"] for row in result]
+
+
 class GraphRetriever(Retriever):
     def __init__(self, settings: ClientSettings) -> None:
         self._settings = settings
@@ -118,14 +175,23 @@ class GraphRetriever(Retriever):
             ref_tbl_ids = _references_table_ids_ranked(
                 session, active_col_seeds, threshold, max_expansion, embedding, alpha
             )
-            expansion_tbl_ids = list(dict.fromkeys(parent_tbl_ids + ref_tbl_ids))
-
-            all_tbl_ids = list(dict.fromkeys(active_tbl_seeds + expansion_tbl_ids))
             fetch_schemas = selected_schemas or configured_schemas
+            lexical_tbl_ids = _lexical_table_ids(session, question, fetch_schemas)
+            lexical_col_tbl_ids = _lexical_column_table_ids(
+                session, question, fetch_schemas
+            )
+
+            expansion_tbl_ids = list(dict.fromkeys(
+                parent_tbl_ids + ref_tbl_ids + lexical_tbl_ids + lexical_col_tbl_ids
+            ))
+            all_tbl_ids = list(dict.fromkeys(active_tbl_seeds + expansion_tbl_ids))
             columns = _fetch_columns(session, all_tbl_ids, catalog, fetch_schemas)
 
             join_col_ids = _join_column_ids(session, active_col_seeds, threshold)
-            value_col_ids = list(dict.fromkeys(active_col_seeds + join_col_ids))
+            retrieved_col_ids = [c.column_id for c in columns if c.column_id]
+            value_col_ids = list(dict.fromkeys(
+                active_col_seeds + join_col_ids + retrieved_col_ids
+            ))
             values = _fetch_values(session, value_col_ids)
 
             join_lines = (
@@ -384,7 +450,7 @@ def _fetch_columns(
     )
     entries: list[ColumnEntry] = []
     for row in result:
-        fqt = f"{catalog}.{row['schema_name']}.{row['table_name']}"
+        fqt = f"`{catalog}`.`{row['schema_name']}`.`{row['table_name']}`"
         entries.append(ColumnEntry(
             table_fqn=fqt,
             column_name=row["col_name"],

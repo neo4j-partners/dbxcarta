@@ -197,17 +197,15 @@ def _run_graph_rag_arm(
     texts = [q.question for q in questions]
     embeddings, embed_error = _embed_questions(ws, settings.dbxcarta_embed_endpoint, texts)
     if embeddings is None:
-        for q in questions:
-            summary.add_result(
-                question_id=q.question_id,
-                question=q.question,
-                arm="graph_rag",
-                parsed=False,
-                executed=False,
-                non_empty=False,
-                error=f"embedding failed: {embed_error}",
-            )
-        return
+        raise RuntimeError(
+            f"graph_rag embedding failed against "
+            f"{settings.dbxcarta_embed_endpoint!r}: {embed_error}"
+        )
+    if len(embeddings) != len(questions):
+        raise RuntimeError(
+            f"graph_rag embedding returned {len(embeddings)} vectors for "
+            f"{len(questions)} questions; refusing to run with misaligned embeddings"
+        )
 
     retriever = GraphRetriever(settings)
     try:

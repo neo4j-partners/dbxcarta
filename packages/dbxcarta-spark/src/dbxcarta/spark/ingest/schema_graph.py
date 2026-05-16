@@ -19,13 +19,20 @@ if TYPE_CHECKING:
     from dbxcarta.spark.ingest.fk.common import FKEdge
 
 
-def build_database_node(spark: "SparkSession", catalog: str) -> "DataFrame":
-    """Build the single Database node representing the configured catalog."""
+def build_database_nodes(
+    spark: "SparkSession", catalogs: "list[str]",
+) -> "DataFrame":
+    """Build one Database node per ingested catalog.
+
+    A single-catalog run passes a one-element list, so the historical
+    one-Database-node behavior is preserved.
+    """
     from pyspark.sql import Row
 
-    return spark.createDataFrame(
-        [Row(id=generate_id(catalog), name=catalog, contract_version=CONTRACT_VERSION)]
-    )
+    return spark.createDataFrame([
+        Row(id=generate_id(c), name=c, contract_version=CONTRACT_VERSION)
+        for c in catalogs
+    ])
 
 
 def build_schema_nodes(schemata_df: "DataFrame") -> "DataFrame":
@@ -45,21 +52,34 @@ def build_schema_nodes(schemata_df: "DataFrame") -> "DataFrame":
     )
 
 
-def build_table_nodes(tables_df: "DataFrame") -> "DataFrame":
+def build_table_nodes(
+    tables_df: "DataFrame", layer_map: "dict[str, str] | None" = None,
+) -> "DataFrame":
     """Build Table nodes from information_schema.tables rows.
 
     The selected columns form the public graph payload plus `table_schema`,
-    which is retained until embedding text has been generated.
+    which is retained until embedding text has been generated. The `layer`
+    property is derived from `table_catalog` through the configured
+    catalog->layer map; catalogs absent from the map (or an empty map) yield
+    a null `layer` (contract v1.1, additive).
     """
-    from pyspark.sql.functions import col, lit
+    from pyspark.sql.functions import col, lit, when
+    from pyspark.sql.types import StringType
+
+    layer_expr = lit(None).cast(StringType())
+    for catalog, layer in (layer_map or {}).items():
+        layer_expr = when(col("table_catalog") == catalog, lit(layer)).otherwise(
+            layer_expr
+        )
 
     return (
         tables_df
         .withColumn("id", id_expr("table_catalog", "table_schema", "table_name"))
         .withColumn("name", col("table_name"))
+        .withColumn("layer", layer_expr)
         .withColumn("contract_version", lit(CONTRACT_VERSION))
         # table_schema is retained for the embedding text expression.
-        .select("id", "name", "table_schema", "comment", "table_type", "created", "last_altered", "contract_version")
+        .select("id", "name", "layer", "table_schema", "comment", "table_type", "created", "last_altered", "contract_version")
     )
 
 
@@ -84,13 +104,17 @@ def build_column_nodes(columns_df: "DataFrame") -> "DataFrame":
     )
 
 
-def build_has_schema_rel(schemata_df: "DataFrame", catalog: str) -> "DataFrame":
-    """Build Database -> Schema edges for every schema in scope."""
-    from pyspark.sql.functions import lit
+def build_has_schema_rel(schemata_df: "DataFrame") -> "DataFrame":
+    """Build Database -> Schema edges for every schema in scope.
 
+    The Database source id is derived from each row's `catalog_name`, so a
+    multi-catalog snapshot links every schema to its own Database node. This
+    matches `build_database_nodes`, whose id is `generate_id(catalog)` and
+    `id_expr("catalog_name")` applies the same normalization.
+    """
     return (
         schemata_df
-        .withColumn("source_id", lit(generate_id(catalog)))
+        .withColumn("source_id", id_expr("catalog_name"))
         .withColumn("target_id", id_expr("catalog_name", "schema_name"))
         .select("source_id", "target_id")
     )

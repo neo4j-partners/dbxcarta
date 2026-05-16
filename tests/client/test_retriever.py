@@ -78,7 +78,7 @@ def test_context_bundle_to_text_includes_columns() -> None:
 def test_context_bundle_to_text_includes_values() -> None:
     bundle = _make_bundle()
     text = bundle.to_text()
-    assert "Sample values for seeds:" in text
+    assert "Sample values:" in text
     assert "active" in text
 
 
@@ -92,9 +92,9 @@ def test_context_bundle_values_in_dedicated_section() -> None:
         if line.startswith("  status") and "(" in line
     )
     assert "Sample values" not in status_col_line
-    # Values appear under "Sample values for seeds:" instead.
+    # Values appear under "Sample values:" instead.
     text = "\n".join(lines)
-    seed_section_start = text.index("Sample values for seeds:")
+    seed_section_start = text.index("Sample values:")
     seed_section = text[seed_section_start:]
     assert "active, closed, pending" in seed_section
 
@@ -203,7 +203,7 @@ def test_to_text_values_only_for_columns_in_bundle() -> None:
         },
     )
     text = bundle.to_text()
-    assert "Sample values for seeds:" in text
+    assert "Sample values:" in text
     assert "col (cat.s.t): a, b" in text
     assert "orphan" not in text
 
@@ -296,5 +296,6 @@ def test_graph_rag_prompt_single_schema_constraint() -> None:
     from dbxcarta.client.prompt import graph_rag_prompt
 
     prompt = graph_rag_prompt("find users", "mycat", ["sp_a"], "Target schema: sp_a\n...")
-    assert "Do not join across unrelated schemas" in prompt
+    assert "Use ONLY the exact tables and columns listed in the context" in prompt
+    assert "backtick-quoted three-part names" in prompt
     assert "target schema" in prompt.lower()

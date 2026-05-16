@@ -34,7 +34,18 @@ class SparkIngestSettings(BaseSettings):
     # When unset, those checks self-skip with a `catalog.no_warehouse` violation.
     databricks_warehouse_id: str = ""
     dbxcarta_catalog: str
-    # Comma-separated list of bare schema names under dbxcarta_catalog.
+    # Comma-separated list of catalogs to ingest into one graph. Blank means
+    # "ingest only dbxcarta_catalog" — the historical single-catalog behavior,
+    # so every existing preset is unaffected. When set, every listed catalog is
+    # extracted into the same Neo4j graph with one Database node each. The
+    # ops/summary/verify path still keys off the single dbxcarta_catalog.
+    dbxcarta_catalogs: str = ""
+    # Comma-separated catalog:layer pairs (e.g.
+    # "cat-bronze:bronze,cat-silver:silver,cat-gold:gold"). Drives the Table
+    # node `layer` property. Catalogs absent from the map yield layer=null.
+    # Config, not a name-prefix regex, so it does not become a new hardcode.
+    dbxcarta_layer_map: str = ""
+    # Comma-separated list of bare schema names under each ingested catalog.
     # Blank string means "every schema in the catalog". Whitespace around each
     # name is stripped. FK inference (metadata and semantic) is restricted to
     # column pairs within the same (catalog, schema), so listing many schemas
@@ -81,6 +92,56 @@ class SparkIngestSettings(BaseSettings):
     def _validate_catalog(cls, v: str) -> str:
         """Require a single safe Databricks catalog identifier."""
         return validate_identifier(v)
+
+    @field_validator("dbxcarta_catalogs")
+    @classmethod
+    def _validate_catalogs(cls, v: str) -> str:
+        """Validate each catalog in the multi-catalog ingest list, if set."""
+        for part in v.split(","):
+            name = part.strip()
+            if name:
+                validate_identifier(name, label="catalog")
+        return v
+
+    @field_validator("dbxcarta_layer_map")
+    @classmethod
+    def _validate_layer_map(cls, v: str) -> str:
+        """Validate catalog:layer pairs. Catalog must be a safe identifier;
+        layer must be a non-empty bare token (letters, digits, underscore)."""
+        for part in v.split(","):
+            entry = part.strip()
+            if not entry:
+                continue
+            if entry.count(":") != 1:
+                raise ValueError(
+                    f"Invalid DBXCARTA_LAYER_MAP entry {entry!r};"
+                    " expected exactly one 'catalog:layer' pair"
+                )
+            catalog, layer = (s.strip() for s in entry.split(":"))
+            validate_identifier(catalog, label="layer-map catalog")
+            if not layer or not layer.replace("_", "").isalnum():
+                raise ValueError(
+                    f"Invalid DBXCARTA_LAYER_MAP layer {layer!r};"
+                    " expected a non-empty alphanumeric/underscore token"
+                )
+        return v
+
+    def resolved_catalogs(self) -> list[str]:
+        """Catalogs to ingest. Falls back to the single dbxcarta_catalog when
+        dbxcarta_catalogs is blank, preserving historical behavior."""
+        listed = [c.strip() for c in self.dbxcarta_catalogs.split(",") if c.strip()]
+        return listed or [self.dbxcarta_catalog]
+
+    def layer_map(self) -> dict[str, str]:
+        """Parsed catalog -> layer mapping. Empty when unset."""
+        out: dict[str, str] = {}
+        for part in self.dbxcarta_layer_map.split(","):
+            entry = part.strip()
+            if not entry:
+                continue
+            catalog, layer = (s.strip() for s in entry.split(":"))
+            out[catalog] = layer
+        return out
 
     @field_validator("dbxcarta_summary_table")
     @classmethod

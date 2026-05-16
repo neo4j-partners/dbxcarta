@@ -68,41 +68,46 @@ def extract(
     extract counts are recorded. The returned DataFrames are already filtered
     to the requested schema scope and cached for reuse by later transforms.
     """
+    from functools import reduce
+
     from pyspark.sql.functions import col
 
-    catalog = settings.dbxcarta_catalog
+    catalogs = settings.resolved_catalogs()
 
-    schemata_df = (
+    def _union(frames: list["DataFrame"]) -> "DataFrame":
+        return reduce(lambda a, b: a.unionByName(b), frames)
+
+    schemata_df = _union([
         spark.sql(
             f"SELECT catalog_name, schema_name, comment"
             f" FROM `{catalog}`.information_schema.schemata"
         )
-        .filter(col("schema_name") != "information_schema")
-    )
+        for catalog in catalogs
+    ]).filter(col("schema_name") != "information_schema")
     if schema_list:
         schemata_df = schemata_df.filter(col("schema_name").isin(schema_list))
     schemata_df = schemata_df.cache()
 
-    tables_df = (
+    tables_df = _union([
         spark.sql(
             f"SELECT table_catalog, table_schema, table_name, table_type,"
             f"       comment, created, last_altered"
             f" FROM `{catalog}`.information_schema.tables"
         )
-        .filter(col("table_schema") != "information_schema")
-    )
+        for catalog in catalogs
+    ]).filter(col("table_schema") != "information_schema")
     if schema_list:
         tables_df = tables_df.filter(col("table_schema").isin(schema_list))
     tables_df = tables_df.cache()
 
-    columns_df = (
+    columns_df = _union([
         spark.sql(
             f"SELECT table_catalog, table_schema, table_name, column_name,"
             f"       data_type, is_nullable, ordinal_position, comment"
             f" FROM `{catalog}`.information_schema.columns"
         )
-        .filter(col("table_schema") != "information_schema")
-    )
+        for catalog in catalogs
+    ]).filter(col("table_schema") != "information_schema")
     if schema_list:
         columns_df = columns_df.filter(col("table_schema").isin(schema_list))
     columns_df = columns_df.cache()
@@ -120,11 +125,11 @@ def extract(
         summary.extract.columns,
     )
 
-    database_df = sg.build_database_node(spark, catalog)
+    database_df = sg.build_database_nodes(spark, catalogs)
     schema_node_df = sg.build_schema_nodes(schemata_df)
-    table_node_df = sg.build_table_nodes(tables_df)
+    table_node_df = sg.build_table_nodes(tables_df, settings.layer_map())
     column_node_df = sg.build_column_nodes(columns_df)
-    has_schema_df = sg.build_has_schema_rel(schemata_df, catalog)
+    has_schema_df = sg.build_has_schema_rel(schemata_df)
     has_table_df = sg.build_has_table_rel(tables_df)
     has_column_df = sg.build_has_column_rel(columns_df)
 
