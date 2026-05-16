@@ -48,7 +48,7 @@ _DBR_PROVIDED_PACKAGES: frozenset[str] = frozenset(
 # (notably ``pydantic-core``); that is validated on the warm cluster in
 # Phase V3.
 _INGEST_PINNED_CLOSURE: tuple[str, ...] = (
-    "databricks-job-runner==0.6",
+    "databricks-job-runner==0.6.1",
     "neo4j==6.1.0",
     "pytz==2026.1.post1",
     "pydantic==2.13.3",
@@ -365,7 +365,7 @@ def _submit_bootstrap_entrypoint(
 
     # Runner._compute is private but is the only accessor for the resolved
     # Compute strategy; there is no public equivalent. Pinned to
-    # databricks-job-runner==0.6 in the closures above, so the surface is
+    # databricks-job-runner==0.6.1 in the closures above, so the surface is
     # stable for this code's lifetime.
     if name == "ingest" and _is_serverless_compute(
         submit_runner._compute(compute_mode)

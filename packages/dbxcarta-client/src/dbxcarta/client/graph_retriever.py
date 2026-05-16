@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from typing import TYPE_CHECKING
 
 from neo4j import GraphDatabase
 
@@ -10,6 +11,9 @@ from dbxcarta.client.ids import schema_from_node_id
 from dbxcarta.client.neo4j_utils import neo4j_credentials
 from dbxcarta.client.retriever import ColumnEntry, ContextBundle, JoinLine, Retriever
 from dbxcarta.client.settings import ClientSettings
+
+if TYPE_CHECKING:
+    from neo4j import Session
 
 _COL_INDEX = "column_embedding"
 _TABLE_INDEX = "table_embedding"
@@ -83,7 +87,7 @@ def _question_tokens(question: str) -> list[str]:
 
 
 def _lexical_table_ids(
-    session, question: str, schemas: list[str]
+    session: Session, question: str, schemas: list[str]
 ) -> list[str]:
     tokens = _question_tokens(question)
     if not tokens:
@@ -101,7 +105,7 @@ def _lexical_table_ids(
 
 
 def _lexical_column_table_ids(
-    session, question: str, schemas: list[str]
+    session: Session, question: str, schemas: list[str]
 ) -> list[str]:
     """Return parent table IDs of columns whose name contains a question token.
 
@@ -264,7 +268,7 @@ def _normalized_schema_scores(
 
 
 def _query_vector_seeds(
-    session, index: str, embedding: list[float], k: int
+    session: Session, index: str, embedding: list[float], k: int
 ) -> list[tuple[str, float]]:
     # Neo4j's procedure API does not support parameterized index names.
     # `index` is always one of the two module-level constants, never user-controlled.
@@ -278,7 +282,7 @@ def _query_vector_seeds(
     return [(row["id"], row["score"]) for row in result]
 
 
-def _parent_table_ids(session, col_ids: list[str]) -> list[str]:
+def _parent_table_ids(session: Session, col_ids: list[str]) -> list[str]:
     if not col_ids:
         return []
     result = session.run(
@@ -290,7 +294,9 @@ def _parent_table_ids(session, col_ids: list[str]) -> list[str]:
     return [row["tid"] for row in result]
 
 
-def _references_table_ids(session, col_ids: list[str], threshold: float) -> list[str]:
+def _references_table_ids(
+    session: Session, col_ids: list[str], threshold: float
+) -> list[str]:
     """Follow REFERENCES edges in both directions to find joinable tables."""
     if not col_ids:
         return []
@@ -320,7 +326,7 @@ def _rank_by_combined_score(
 
 
 def _score_candidates_by_cosine(
-    session,
+    session: Session,
     table_ids: list[str],
     embedding: list[float],
 ) -> dict[str, float]:
@@ -345,7 +351,7 @@ def _score_candidates_by_cosine(
 
 
 def _references_table_ids_capped(
-    session, col_ids: list[str], threshold: float, max_tables: int
+    session: Session, col_ids: list[str], threshold: float, max_tables: int
 ) -> list[str]:
     """Like _references_table_ids but scored and capped at max_tables.
 
@@ -366,7 +372,7 @@ def _references_table_ids_capped(
 
 
 def _references_table_ids_ranked(
-    session,
+    session: Session,
     col_ids: list[str],
     threshold: float,
     max_tables: int,
@@ -398,7 +404,7 @@ def _references_table_ids_ranked(
 
 
 def _references_criteria(
-    session, col_ids: list[str], threshold: float
+    session: Session, col_ids: list[str], threshold: float
 ) -> list[JoinLine]:
     """Pull join predicates (with source and confidence) off REFERENCES edges above the threshold."""
     if not col_ids:
@@ -421,7 +427,9 @@ def _references_criteria(
     ]
 
 
-def _join_column_ids(session, col_ids: list[str], threshold: float) -> list[str]:
+def _join_column_ids(
+    session: Session, col_ids: list[str], threshold: float
+) -> list[str]:
     """Return the far-side column IDs of REFERENCES edges from seed columns."""
     if not col_ids:
         return []
@@ -432,7 +440,7 @@ def _join_column_ids(session, col_ids: list[str], threshold: float) -> list[str]
 
 
 def _fetch_columns(
-    session, table_ids: list[str], catalog: str, schemas: list[str]
+    session: Session, table_ids: list[str], catalog: str, schemas: list[str]
 ) -> list[ColumnEntry]:
     if not table_ids:
         return []
@@ -461,7 +469,9 @@ def _fetch_columns(
     return entries
 
 
-def _fetch_values(session, col_ids: list[str]) -> dict[str, list[str]]:
+def _fetch_values(
+    session: Session, col_ids: list[str]
+) -> dict[str, list[str]]:
     """Return {col_id: [values]} for the given column IDs.
 
     Three guards bound prompt growth: per-column cap (categorical columns

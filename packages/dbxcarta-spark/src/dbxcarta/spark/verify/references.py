@@ -25,7 +25,7 @@ def _expected_edge_total(summary: dict[str, Any]) -> int:
     REFERENCES count without summing the inferred totals will always look
     high by `accepted` whenever inference is on (its default for metadata).
     """
-    counts = summary.get("row_counts") or {}
+    counts: dict[str, int] = summary.get("row_counts") or {}
     return (
         counts.get("fk_edges", 0)
         + counts.get("fk_inferred_metadata_accepted", 0)

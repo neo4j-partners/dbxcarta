@@ -50,24 +50,6 @@ markers = [
 [tool.mypy]
 python_version = "3.12"
 plugins = ["pydantic.mypy"]
-
-[[tool.mypy.overrides]]
-module = [
-    "dbxcarta.spark.contract",
-    "dbxcarta.spark.ingest.fk.common",
-    "dbxcarta.spark.ingest.fk.declared",
-    "dbxcarta.spark.ingest.fk.metadata",
-    "dbxcarta.spark.ingest.fk.semantic",
-    "dbxcarta.spark.ingest.extract",
-    "dbxcarta.spark.ingest.fk.discovery",
-    "dbxcarta.spark.settings",
-    "dbxcarta.spark.ingest.summary",
-    "dbxcarta.spark.ingest.summary_io",
-    "dbxcarta.spark.ingest.transform.staging",
-    "dbxcarta.spark.ingest.transform.ledger",
-    "dbxcarta.spark.ingest.load.neo4j_io",
-    "dbxcarta.spark.ingest.preflight",
-]
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
 warn_return_any = true

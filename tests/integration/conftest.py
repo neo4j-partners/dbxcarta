@@ -16,11 +16,22 @@ from collections.abc import Iterator
 import pytest
 from dotenv import load_dotenv
 
-load_dotenv(Path(__file__).parent.parent.parent / ".env")
+@pytest.fixture(scope="session", autouse=True)
+def _load_integration_env() -> None:
+    """Load the repo ``.env`` for live integration tests only.
+
+    A module-scoped ``load_dotenv`` would run at collection time and leak
+    the developer's ``.env`` into the whole session's ``os.environ``, which
+    pydantic ``BaseSettings`` constructors elsewhere then read as unset
+    fields. Confining it to an autouse session fixture means it loads only
+    when a test in this directory actually executes — never in the default
+    ``-m "not live"`` unit run, where these tests are deselected.
+    """
+    load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 
 @pytest.fixture(scope="session")
-def ws():
+def ws(_load_integration_env: None):
     from dbxcarta.client.databricks import build_workspace_client
 
     return build_workspace_client()

@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeVar
 
 from dbxcarta.spark.contract import CONTRACT_VERSION, generate_id
 from dbxcarta.spark.ingest.contract_expr import id_expr_from_columns, value_id_expr
@@ -215,7 +216,10 @@ def _candidates_from_columns_df(
     return out
 
 
-def _chunk(lst: list, n: int):
+_T = TypeVar("_T")
+
+
+def _chunk(lst: list[_T], n: int) -> Iterator[list[_T]]:
     for i in range(0, len(lst), n):
         yield lst[i:i + n]
 
@@ -245,7 +249,7 @@ def _sample_query(fq_table: str, column_names: list[str]) -> str:
 
 
 def _cardinality_filter(
-    spark,
+    spark: SparkSession,
     candidates: list[TableCandidate],
     threshold: int,
     chunk_size: int,
@@ -293,11 +297,11 @@ def _cardinality_filter(
 
 
 def _sample_values(
-    spark,
+    spark: SparkSession,
     candidates: list[TableCandidate],
     limit: int,
     chunk_size: int,
-) -> "DataFrame | None":
+) -> DataFrame | None:
     """Return top-`limit` distinct values per column as a Spark DataFrame.
 
     Columns: col_id, col_name, val, cnt. Returns None when all table queries
@@ -338,16 +342,17 @@ def _sample_values(
         raw_df = raw_df.unionByName(df)
 
     w = Window.partitionBy("col_id").orderBy(col("cnt").desc())
-    return (
+    top_n: DataFrame = (
         raw_df
         .withColumn("_rn", row_number().over(w))
         .filter(col("_rn") <= limit)
         .drop("_rn")
     )
+    return top_n
 
 
 def _filter_readable_schemas(
-    spark,
+    spark: SparkSession,
     candidates: list[TableCandidate],
 ) -> tuple[list[TableCandidate], int]:
     """Probe up to K tables per schema; drop schemas where all probes fail."""
