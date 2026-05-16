@@ -389,7 +389,7 @@ with matching row counts; the graph has all 12 tables tagged with the correct
 `layer` and zero operational tables; `questions.json` names resolve;
 contract-version tests pass.
 
-### Phase 2: Cross-catalog reference support
+### Phase 2: DO NOT DO -  DO NOT SUPPORT Cross-catalog reference support
 
 **Goal.** Silver-to-gold joins are discovered when both catalogs are in scope.
 
