@@ -39,7 +39,7 @@ _DBR_PROVIDED_PACKAGES: frozenset[str] = frozenset(
 # (notably ``pydantic-core``); that is validated on the warm cluster in
 # Phase V3.
 _INGEST_PINNED_CLOSURE: tuple[str, ...] = (
-    "databricks-job-runner==0.5.1",
+    "databricks-job-runner==0.6",
     "neo4j==6.1.0",
     "pytz==2026.1.post1",
     "pydantic==2.13.3",

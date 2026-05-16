@@ -360,7 +360,7 @@ Steps:
 
 Done when: a drifted cluster fails preflight with an actionable message.
 
-### Phase V5: Reduce restarts and remove legacy runner code [Status: quality-reviewed; publish and pin bump pending]
+### Phase V5: Reduce restarts and remove legacy runner code [Status: done]
 
 Goal: keep the warm cluster warm across the active window, and remove
 the superseded library-side code. This is the original Phase 4 plus the
@@ -378,7 +378,7 @@ Steps:
       `_bump_patch_version`, `_delete_old_wheels_from_volume`,
       `clean_cluster_wheel_libraries`, `Runner.upload_wheel`, and the
       `upload --wheel` CLI subcommand. `sync_cluster_libraries` dropped
-      from the public API. CHANGELOG entry added for `0.6.0`. dbxcarta
+      from the public API. CHANGELOG entry added for `0.6`. dbxcarta
       confirmed to have no call sites for any removed symbol.
       Quality review: stale `upload --wheel` references removed from
       `docs/commands.md` (table row, mutual-exclusivity note, description
@@ -395,7 +395,7 @@ Steps:
       example made a non-package (`package = false`). Added
       `tests/test_compute.py` for the no-arg compute protocol shape;
       46 tests pass.
-- [ ] Publish a runner release (`0.6.0`) and bump the dbxcarta pin.
+- [x] Publish a runner release (`0.6`) and bump the dbxcarta pin.
 
 Done when: the warm cluster stays warm across the window and the legacy
 paths are gone.
