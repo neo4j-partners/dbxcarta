@@ -1,27 +1,136 @@
 from __future__ import annotations
 
 import sys
-import time
 from pathlib import Path
-from typing import TYPE_CHECKING
 
-from databricks_job_runner import Runner
-
-if TYPE_CHECKING:
-    from databricks_job_runner import DesiredLibrary
+from databricks_job_runner import (
+    DesiredLibrary,
+    Runner,
+    maven_libraries_preflight,
+)
 
 _ENTRYPOINT_WHEEL_PACKAGE: dict[str, str] = {
     "ingest": "dbxcarta-spark",
     "client": "dbxcarta-client",
 }
 
-runner = Runner(
+_ENTRYPOINT_CONSOLE_SCRIPT: dict[str, str] = {
+    "ingest": "dbxcarta-ingest",
+    "client": "dbxcarta-client",
+}
+
+# Packages the Databricks Runtime provides on the cluster and that the
+# curated closures below must never reinstall. ``pyspark``/``py4j`` are
+# the cluster runtime itself; ``databricks-sdk`` is DBR-managed and
+# reinstalling it would shadow the platform SDK and drag in a heavy auth
+# subtree. ``pydantic``/``pydantic-core`` are deliberately NOT excluded:
+# the ingest and client code require pydantic v2 and the DBR-bundled
+# version is not guaranteed to match.
+_DBR_PROVIDED_PACKAGES: frozenset[str] = frozenset(
+    {"pyspark", "py4j", "databricks-sdk"}
+)
+
+# Fully pinned dependency closures installed by the runner bootstrap into
+# the shared driver environment with ``--no-deps``. These are curated
+# transitive closures, not top-level lists: pip performs no resolution,
+# so a steady-state run cannot pull a newer transitive that conflicts
+# with a DBR-managed package. Each excludes the DBR-provided packages
+# above. The cluster Python/platform must have matching binary wheels
+# (notably ``pydantic-core``); that is validated on the warm cluster in
+# Phase V3.
+_INGEST_PINNED_CLOSURE: tuple[str, ...] = (
+    "databricks-job-runner==0.4.9",
+    "neo4j==6.1.0",
+    "pytz==2026.1.post1",
+    "pydantic==2.13.3",
+    "pydantic-core==2.46.3",
+    "pydantic-settings==2.14.0",
+    "python-dotenv==1.2.2",
+    "annotated-types==0.7.0",
+    "typing-extensions==4.15.0",
+    "typing-inspection==0.4.2",
+)
+
+_CLIENT_PINNED_CLOSURE: tuple[str, ...] = (
+    "neo4j==6.1.0",
+    "pytz==2026.1.post1",
+    "pydantic==2.13.3",
+    "pydantic-core==2.46.3",
+    "pydantic-settings==2.14.0",
+    "python-dotenv==1.2.2",
+    "annotated-types==0.7.0",
+    "typing-extensions==4.15.0",
+    "typing-inspection==0.4.2",
+)
+
+_ENTRYPOINT_PINNED_CLOSURE: dict[str, tuple[str, ...]] = {
+    "ingest": _INGEST_PINNED_CLOSURE,
+    "client": _CLIENT_PINNED_CLOSURE,
+}
+
+# Top-level import names checked by the bootstrap post-install smoke
+# check. Import names cannot be derived from version pins, so they are
+# supplied explicitly.
+_ENTRYPOINT_SMOKE_IMPORTS: dict[str, tuple[str, ...]] = {
+    "ingest": (
+        "databricks_job_runner",
+        "neo4j",
+        "pydantic",
+        "pydantic_core",
+        "pydantic_settings",
+        "dotenv",
+    ),
+    "client": (
+        "neo4j",
+        "pydantic",
+        "pydantic_core",
+        "pydantic_settings",
+    ),
+}
+
+# The Neo4j Spark Connector stays a pinned JVM cluster library (pip
+# cannot install it). Only the ingest path probes and asserts it.
+_NEO4J_MAVEN_COORDINATES = (
+    "org.neo4j:neo4j-connector-apache-spark_2.13:5.3.10_for_spark_3"
+)
+_INGEST_JVM_PROBE_CLASS = "org.neo4j.spark.DataSource"
+
+_ENTRYPOINT_JVM_PROBE_CLASS: dict[str, str | None] = {
+    "ingest": _INGEST_JVM_PROBE_CLASS,
+    "client": None,
+}
+
+_RUNNER_KWARGS = dict(
     run_name_prefix="dbxcarta",
     wheel_package="dbxcarta-spark",
     scripts_dir="scripts",
     cli_command="uv run dbxcarta",
     secret_keys=["NEO4J_URI", "NEO4J_USERNAME", "NEO4J_PASSWORD"],
 )
+
+# Shared runner for generic pass-through commands, the client path, and
+# uploads. No preflights: client and generic commands do not need the
+# Neo4j connector.
+runner = Runner(**_RUNNER_KWARGS)
+
+
+def _ingest_runner() -> Runner:
+    """Runner scoped to the ingest submission with the connector preflight.
+
+    The maven preflight is wired here rather than on the shared runner so
+    submit/validate of the client and generic pass-through paths, which
+    do not use the Neo4j connector, are not gated on it. The check is
+    assert-only: it never installs or uninstalls a library.
+    """
+    return Runner(
+        **_RUNNER_KWARGS,
+        preflights=[
+            maven_libraries_preflight(
+                [DesiredLibrary.maven(_NEO4J_MAVEN_COORDINATES)],
+                name="neo4j connector",
+            )
+        ],
+    )
 
 
 def main() -> None:
@@ -40,54 +149,17 @@ def main() -> None:
     if sys.argv[1:2] == ["submit-entrypoint"]:
         sys.exit(_handle_submit_entrypoint(sys.argv[2:]))
     if sys.argv[1:2] == ["upload"] and "--wheel" in sys.argv[2:]:
-        sys.exit(_handle_upload(sys.argv[2:]))
+        sys.exit(_handle_upload())
 
     runner.main()
 
 
-_CLUSTER_LIBRARY_POLL_SECONDS = 15
-_CLUSTER_LIBRARY_TIMEOUT_SECONDS = 15 * 60
-
-_ENTRYPOINT_CLUSTER_PYPI_PACKAGES: dict[str, tuple[str, ...]] = {
-    "ingest": (
-        "databricks-job-runner==0.4.8",
-        "neo4j==6.1.0",
-        "pydantic-settings==2.14.0",
-        "python-dotenv==1.2.2",
-        "typing-inspection==0.4.2",
-    ),
-    "client": (
-        "neo4j==6.1.0",
-        "pydantic-settings==2.14.0",
-        "typing-inspection==0.4.2",
-    ),
-}
-
-_ENTRYPOINT_CLUSTER_MAVEN_PACKAGES: dict[str, tuple[str, ...]] = {
-    "ingest": (
-        "org.neo4j:neo4j-connector-apache-spark_2.13:5.3.10_for_spark_3",
-    ),
-    "client": (),
-}
-
-
-def _handle_upload(argv: list[str]) -> int:
+def _handle_upload() -> int:
     from databricks_job_runner.errors import RunnerError
-    from databricks_job_runner.upload import find_latest_wheel
 
     try:
-        runner.main(["upload", *argv])
-
-        wheel = find_latest_wheel(runner.project_dir / "dist", "dbxcarta-spark")
-        if wheel is None:
-            raise RunnerError("no dbxcarta-spark wheel found after upload.")
-        wheel_path = f"{runner.wheel_volume_dir}/{wheel.name}"
-        _sync_cluster_libraries(
-            "ingest",
-            wheel_path,
-            compute_mode=None,
-            wait=True,
-        )
+        runner.publish_wheel_stable()
+        runner.upload_all()
     except RunnerError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
@@ -221,14 +293,9 @@ def _handle_submit_entrypoint(argv: list[str]) -> int:
     parser.add_argument("--no-wait", action="store_true")
     args = parser.parse_args(argv)
 
-    console_entrypoints = {
-        "ingest": "dbxcarta-ingest",
-        "client": "dbxcarta-client",
-    }
     try:
-        _submit_wheel_entrypoint(
+        _submit_bootstrap_entrypoint(
             args.entrypoint,
-            console_entrypoints[args.entrypoint],
             compute_mode=args.compute,
             no_wait=args.no_wait,
         )
@@ -238,195 +305,56 @@ def _handle_submit_entrypoint(argv: list[str]) -> int:
     return 0
 
 
-def _submit_wheel_entrypoint(
+def _submit_bootstrap_entrypoint(
     name: str,
-    console_entrypoint: str,
     *,
     compute_mode: str | None,
     no_wait: bool,
 ) -> None:
-    from databricks.sdk.service.jobs import (
-        PythonWheelTask,
-        RunResultState,
-        SubmitTask,
-    )
+    from databricks_job_runner import BootstrapConfig
     from databricks_job_runner.errors import RunnerError
-    from databricks_job_runner.upload import find_latest_wheel
+    from databricks_job_runner.upload import stable_wheel_name
 
     wheel_package = _ENTRYPOINT_WHEEL_PACKAGE.get(name)
     if wheel_package is None:
         raise RunnerError(f"unknown wheel entrypoint {name!r}")
 
-    wheel = find_latest_wheel(runner.project_dir / "dist", wheel_package)
-    if wheel is None:
-        raise RunnerError(
-            f"no {wheel_package} wheel found in dist/."
-            f" Run `uv build --package {wheel_package}` first."
-        )
-    wheel_path = f"{runner.wheel_volume_dir}/{wheel.name}"
+    # Ingest is gated on the Neo4j connector via the dedicated runner's
+    # maven preflight; the client and generic paths do not need it.
+    submit_runner = _ingest_runner() if name == "ingest" else runner
 
-    params = runner.config.env_params(secret_keys=runner.secret_keys)
-    run_name = f"{runner.run_name_prefix}: {name}"
-    compute = runner._compute(compute_mode)
-    if name == "ingest" and _is_serverless_compute(compute):
+    if name == "ingest" and _is_serverless_compute(
+        submit_runner._compute(compute_mode)
+    ):
         raise RunnerError(
             "dbxcarta ingest uses the Neo4j Spark Connector, which is not "
             "supported on Databricks serverless jobs compute. Use classic "
             "compute with `--compute cluster`."
         )
-    suppress_task_wheel = _sync_cluster_libraries(
-        name,
-        wheel_path,
+
+    wheel_volume_path = (
+        f"{submit_runner.wheel_volume_dir}/{stable_wheel_name(wheel_package)}"
+    )
+
+    bootstrap = BootstrapConfig(
+        wheel_volume_path=wheel_volume_path,
+        pinned_closure=list(_ENTRYPOINT_PINNED_CLOSURE[name]),
+        wheel_package=wheel_package,
+        console_script=_ENTRYPOINT_CONSOLE_SCRIPT[name],
+        jvm_probe_class=_ENTRYPOINT_JVM_PROBE_CLASS[name],
+        smoke_imports=list(_ENTRYPOINT_SMOKE_IMPORTS[name]),
+    )
+
+    submit_runner.submit_bootstrap(
+        bootstrap,
+        run_name_suffix=name,
+        no_wait=no_wait,
         compute_mode=compute_mode,
-        wait=True,
     )
-
-    print("Submitting wheel entrypoint")
-    print(f"  Entrypoint: {console_entrypoint}")
-    print(f"  Wheel:      {wheel_path}")
-    print(f"  Run name:   {run_name}")
-    if params:
-        print(f"  Params:     {len(params)} env values from .env")
-    print("---")
-
-    task = SubmitTask(
-        task_key=f"run_{name}",
-        python_wheel_task=PythonWheelTask(
-            package_name=wheel_package,
-            entry_point=console_entrypoint,
-            parameters=params if params else None,
-        ),
-    )
-    task_wheel_path = None if suppress_task_wheel else wheel_path
-    task = compute.decorate_task(task, task_wheel_path)
-
-    waiter = runner.ws.jobs.submit(
-        run_name=run_name,
-        tasks=[task],
-        environments=compute.environments(wheel_path),
-    )
-
-    run_id = waiter.run_id
-    if run_id is None:
-        raise RunnerError("Databricks did not return a run_id for the submitted job.")
-    print(f"  Run ID:     {run_id}")
-
-    if no_wait:
-        print("\nJob submitted (--no-wait). Check status in the Databricks UI.")
-    else:
-        print("  Waiting for completion...")
-        run = waiter.result()
-        result_state = run.state.result_state if run.state else None
-        state_name = result_state.value if result_state else "UNKNOWN"
-        page_url = run.run_page_url or ""
-
-        print(f"\n  Result:     {state_name}")
-        if page_url:
-            print(f"  URL:        {page_url}")
-
-        if result_state != RunResultState.SUCCESS:
-            raise RunnerError(f"Job finished with non-success state: {state_name}")
-        print("\nJob complete.")
-
-    print()
-    print("Next steps:")
-    print(f"  View logs:          {runner.cli_command} logs {run_id}")
-    if runner.config.databricks_volume_path:
-        print(f"  List results:       {runner.cli_command} download --list results")
-        print(f"  Download results:   {runner.cli_command} download results/<filename>")
 
 
 def _is_serverless_compute(compute: object) -> bool:
     return compute.__class__.__name__ == "Serverless"
-
-
-def _sync_cluster_libraries(
-    name: str,
-    wheel_path: str,
-    *,
-    compute_mode: str | None,
-    wait: bool,
-) -> bool:
-    from databricks_job_runner import (
-        DesiredLibrary,
-        format_cluster_library_plan,
-        sync_cluster_libraries,
-    )
-    from databricks_job_runner.errors import RunnerError
-
-    compute = runner._compute(compute_mode)
-    if _is_serverless_compute(compute):
-        return False
-
-    cluster_id = getattr(compute, "cluster_id", None)
-    if not cluster_id:
-        raise RunnerError("DATABRICKS_CLUSTER_ID must be set to sync libraries.")
-
-    compute.validate(runner.ws)
-
-    wheel_package = _ENTRYPOINT_WHEEL_PACKAGE[name]
-    desired = [DesiredLibrary.whl(wheel_path, package=wheel_package)]
-    desired.extend(
-        DesiredLibrary.pypi(package)
-        for package in _ENTRYPOINT_CLUSTER_PYPI_PACKAGES[name]
-    )
-    desired.extend(
-        DesiredLibrary.maven(coordinates)
-        for coordinates in _ENTRYPOINT_CLUSTER_MAVEN_PACKAGES[name]
-    )
-
-    print()
-    print(f"Syncing cluster libraries on {cluster_id}")
-    print("---")
-    plan = sync_cluster_libraries(runner.ws, cluster_id, desired)
-    print(format_cluster_library_plan(plan))
-
-    if plan.failed:
-        raise RunnerError("cluster library sync has failed libraries.")
-    if plan.restart_required:
-        raise RunnerError(
-            "cluster restart required after library cleanup. Restart the "
-            "cluster, then rerun the command."
-        )
-
-    if wait and not plan.ready:
-        _wait_for_cluster_libraries(cluster_id, desired)
-
-    return True
-
-
-def _wait_for_cluster_libraries(
-    cluster_id: str,
-    desired: list[DesiredLibrary],
-) -> None:
-    from databricks_job_runner import (
-        check_cluster_libraries,
-        format_cluster_library_plan,
-    )
-    from databricks_job_runner.errors import RunnerError
-
-    deadline = time.time() + _CLUSTER_LIBRARY_TIMEOUT_SECONDS
-    while time.time() < deadline:
-        time.sleep(_CLUSTER_LIBRARY_POLL_SECONDS)
-        plan = check_cluster_libraries(runner.ws, cluster_id, desired)
-        if plan.ready:
-            print("Cluster libraries ready.")
-            return
-        if plan.failed:
-            print(format_cluster_library_plan(plan))
-            raise RunnerError("cluster library sync has failed libraries.")
-        if plan.restart_required:
-            print(format_cluster_library_plan(plan))
-            raise RunnerError(
-                "cluster restart required after library cleanup. Restart the "
-                "cluster, then rerun the command."
-            )
-        print("  Waiting for cluster libraries...")
-
-    raise RunnerError(
-        "cluster libraries did not become ready within "
-        f"{_CLUSTER_LIBRARY_TIMEOUT_SECONDS // 60} minutes."
-    )
 
 
 def _build_workspace_client():
