@@ -410,21 +410,15 @@ def _build_workspace_client() -> WorkspaceClient:
 def _build_neo4j_driver(
     ws: WorkspaceClient, settings: SparkIngestSettings
 ) -> Driver:
-    import base64
-
     from neo4j import GraphDatabase
 
+    from dbxcarta.spark.databricks import read_workspace_secret
+
     scope = settings.databricks_secret_scope
-
-    def _secret(key: str) -> str:
-        value = ws.secrets.get_secret(scope=scope, key=key).value
-        if value is None:
-            raise RuntimeError(
-                f"secret {key!r} not found in scope {scope!r}"
-            )
-        return base64.b64decode(value).decode()
-
     return GraphDatabase.driver(
-        _secret("NEO4J_URI"),
-        auth=(_secret("NEO4J_USERNAME"), _secret("NEO4J_PASSWORD")),
+        read_workspace_secret(ws, scope, "NEO4J_URI"),
+        auth=(
+            read_workspace_secret(ws, scope, "NEO4J_USERNAME"),
+            read_workspace_secret(ws, scope, "NEO4J_PASSWORD"),
+        ),
     )

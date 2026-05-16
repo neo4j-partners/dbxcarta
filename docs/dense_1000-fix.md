@@ -296,6 +296,11 @@ Investigation via the Databricks Jobs API:
   dbxcarta_client-stable.whl` via the Files API with `overwrite=True`
   (stable size 34,251 → 36,542 bytes). The first stale run
   `885675572908818` was cancelled. Eval resubmitted on the fixed wheel.
+  - **Update (2026-05-16):** fixed upstream in `databricks-job-runner==0.6.1`,
+    which now runs `uv build --wheel --package <pkg>` in `publish_wheel_stable`.
+    The manual workaround above is no longer required; dbxcarta now pins
+    `==0.6.1`. The 0.6 behaviour described above is retained as the record of
+    what was observed at the time.
 - **Third defect (cosmetic):** `submit-entrypoint`'s local SDK waiter
   times out at 20 min while the eval needs ~37 min, so the local command
   always `TimeoutError`s while the remote run continues. Results must be

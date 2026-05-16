@@ -15,6 +15,12 @@ retrieval issue, outside the harden-deploy scope. It is documented here
 because the end-to-end run is the first time it was measured on this
 workspace.
 
+**Update (2026-05-16):** the runner has since been bumped to
+`databricks-job-runner==0.6.1`, which builds wheels with
+`uv build --wheel --package <pkg>` (see `docs/dense_1000-fix.md`).
+dbxcarta now pins `==0.6.1`. The `==0.6` versions referenced below are
+left unchanged as the record of what was tested and run at the time.
+
 ## What was tested and run
 
 Workspace `azure-rk-knight`, catalog `graph-enriched-lakehouse`, schema

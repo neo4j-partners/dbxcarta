@@ -8,7 +8,6 @@ collect them unless integration tests are explicitly requested.
 
 from __future__ import annotations
 
-import base64
 import os
 from pathlib import Path
 from collections.abc import Iterator
@@ -41,14 +40,15 @@ def ws(_load_integration_env: None):
 def neo4j_driver(ws) -> Iterator:
     from neo4j import GraphDatabase
 
+    from dbxcarta.spark.databricks import read_workspace_secret
+
     scope = os.environ["DATABRICKS_SECRET_SCOPE"]
-
-    def _secret(key: str) -> str:
-        return base64.b64decode(ws.secrets.get_secret(scope=scope, key=key).value).decode()
-
     driver = GraphDatabase.driver(
-        _secret("NEO4J_URI"),
-        auth=(_secret("NEO4J_USERNAME"), _secret("NEO4J_PASSWORD")),
+        read_workspace_secret(ws, scope, "NEO4J_URI"),
+        auth=(
+            read_workspace_secret(ws, scope, "NEO4J_USERNAME"),
+            read_workspace_secret(ws, scope, "NEO4J_PASSWORD"),
+        ),
     )
     yield driver
     driver.close()
