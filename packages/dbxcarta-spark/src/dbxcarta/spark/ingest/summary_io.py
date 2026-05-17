@@ -32,7 +32,7 @@ def load_summary_from_volume(
     volume_path: str,
     *,
     run_id: str | None = None,
-) -> dict | None:
+) -> dict[str, Any] | None:
     """Load a run summary JSON from a UC Volume (the file emitted by `emit_json`).
 
     `emit_json` writes `{job_name}_{run_id}_{ts}.json` files. With `run_id`

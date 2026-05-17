@@ -48,7 +48,7 @@ def _check_node_counts(
         NodeLabel.TABLE: counts.get("tables"),
         NodeLabel.COLUMN: counts.get("columns"),
     }
-    _cypher: dict[NodeLabel, tuple[str, dict]] = {
+    _cypher: dict[NodeLabel, tuple[str, dict[str, Any]]] = {
         NodeLabel.DATABASE: (
             f"MATCH (n:{NodeLabel.DATABASE}) WHERE n.id IN $catalog_ids"
             " RETURN count(n) AS cnt",

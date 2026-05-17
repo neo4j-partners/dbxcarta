@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -124,7 +125,7 @@ def test_preset_spec_from_environment(monkeypatch: pytest.MonkeyPatch) -> None:
 _LAYER_KEY = "DBXCARTA_TEST_LAYER_KEY"
 
 
-def _write_env(path, key: str, value: str) -> None:
+def _write_env(path: Path, key: str, value: str) -> None:
     path.write_text(f"{key}={value}\n", encoding="utf-8")
 
 
@@ -142,9 +143,9 @@ def test_resolve_cli_option_wins_over_env_var(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     cli_overlay = tmp_path / "cli.env"
-    cli_overlay.write_text("X=1\n", encoding="utf-8")
+    _write_env(cli_overlay, "X", "1")
     env_overlay = tmp_path / "env.env"
-    env_overlay.write_text("X=2\n", encoding="utf-8")
+    _write_env(env_overlay, "X", "2")
     monkeypatch.setenv(_bootstrap._ENV_FILE_KEY, str(env_overlay))
 
     files, argv = _bootstrap.resolve_env_files(
@@ -159,7 +160,7 @@ def test_resolve_env_var_used_when_no_cli_option(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     env_overlay = tmp_path / "env.env"
-    env_overlay.write_text("X=2\n", encoding="utf-8")
+    _write_env(env_overlay, "X", "2")
     monkeypatch.setenv(_bootstrap._ENV_FILE_KEY, str(env_overlay))
 
     files, argv = _bootstrap.resolve_env_files(["spec"])
@@ -198,17 +199,16 @@ def test_load_precedence_process_over_overlay_over_base(
     _write_env(base, _LAYER_KEY, "from_base")
     _write_env(overlay, _LAYER_KEY, "from_overlay")
 
+    # load_dotenv mutates os.environ directly, outside monkeypatch's
+    # tracking, so the key is popped explicitly to keep tests isolated.
     try:
         # Process env wins over both.
         monkeypatch.setenv(_LAYER_KEY, "from_process")
         _bootstrap.load_env_files([overlay, base])
-        import os
-
         assert os.environ[_LAYER_KEY] == "from_process"
 
         # Without a process value, overlay wins over base.
         monkeypatch.delenv(_LAYER_KEY, raising=False)
-        os.environ.pop(_LAYER_KEY, None)
         _bootstrap.load_env_files([overlay, base])
         assert os.environ[_LAYER_KEY] == "from_overlay"
 
@@ -218,8 +218,6 @@ def test_load_precedence_process_over_overlay_over_base(
         _bootstrap.load_env_files([base])
         assert os.environ[_LAYER_KEY] == "from_base"
     finally:
-        import os
-
         os.environ.pop(_LAYER_KEY, None)
 
 

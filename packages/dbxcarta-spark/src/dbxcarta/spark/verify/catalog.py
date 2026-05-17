@@ -20,6 +20,16 @@ if TYPE_CHECKING:
 _COMPLEX_TYPE_FAMILIES = ("STRUCT", "ARRAY", "MAP", "VARIANT", "INTERVAL")
 
 
+def _sql_str_list(values: list[str]) -> str:
+    """Render a list of strings as SQL string literals with quotes escaped.
+
+    `repr()` emits Python repr quoting (double quotes / backslash escapes for
+    values containing a single quote), which is not a valid SQL string
+    literal. Doubling embedded single quotes is the correct SQL escaping.
+    """
+    return ", ".join("'" + v.replace("'", "''") + "'" for v in values)
+
+
 def check(
     driver: "Driver",
     summary: dict[str, Any],
@@ -62,7 +72,7 @@ def _check_id_normalization(
     out: list[Violation] = []
     schemas = summary.get("schemas") or []
     schema_filter = (
-        f" AND table_schema IN ({', '.join(repr(s) for s in schemas)})" if schemas else ""
+        f" AND table_schema IN ({_sql_str_list(schemas)})" if schemas else ""
     )
 
     rows = _exec(ws, warehouse_id, (
@@ -127,7 +137,7 @@ def _check_complex_type_round_trip(
     out: list[Violation] = []
     schemas = summary.get("schemas") or []
     schema_filter = (
-        f" AND table_schema IN ({', '.join(repr(s) for s in schemas)})" if schemas else ""
+        f" AND table_schema IN ({_sql_str_list(schemas)})" if schemas else ""
     )
     with driver.session() as s:
         for prefix in _COMPLEX_TYPE_FAMILIES:

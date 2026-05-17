@@ -126,5 +126,5 @@ def generate_value_id(column_id: str, value: object) -> str:
     The value portion is md5-hashed so long strings, booleans, and repeated
     literal samples produce compact stable ids under their owning Column id.
     """
-    digest = hashlib.md5(str(value).encode()).hexdigest()
+    digest = hashlib.md5(str(value).encode(), usedforsecurity=False).hexdigest()
     return f"{column_id}.{digest}"

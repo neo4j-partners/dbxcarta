@@ -126,15 +126,6 @@ class _RunnerKwargs(TypedDict):
     scripts_dir: str
     cli_command: str
     secret_keys: list[str]
-    env_file: Path | None
-
-
-# Resolved once at import from sys.argv (--env-file) or DBXCARTA_ENV_FILE.
-# Passing it into the Runner is what makes `upload`/`submit-entrypoint`
-# layer the overlay on the base and ship overlay-only keys; the runner's
-# own from_env_file enforces overlay-then-base precedence and hard-errors
-# on a missing overlay.
-_ACTIVE_OVERLAY: Path | None = select_overlay_path()
 
 
 _RUNNER_KWARGS: _RunnerKwargs = {
@@ -143,7 +134,6 @@ _RUNNER_KWARGS: _RunnerKwargs = {
     "scripts_dir": "scripts",
     "cli_command": "uv run dbxcarta",
     "secret_keys": ["NEO4J_URI", "NEO4J_USERNAME", "NEO4J_PASSWORD"],
-    "env_file": _ACTIVE_OVERLAY,
 }
 
 # Shared runner for generic pass-through commands, the client path, and
@@ -168,6 +158,7 @@ def _ingest_runner() -> Runner:
                 name="neo4j connector",
             )
         ],
+        env_file=runner.env_file,
     )
 
 
@@ -180,12 +171,11 @@ def main() -> None:
     - `dbxcarta submit-entrypoint {ingest|client}` submits the wheel entrypoint.
     - All other invocations dispatch to databricks_job_runner.Runner.
     """
-    if _ACTIVE_OVERLAY is not None:
+    overlay = select_overlay_path()
+    runner.env_file = overlay
+    if overlay is not None:
         # Path only, never resolved values, so no secret reaches logs.
-        print(
-            f"dbxcarta: active env overlay: {_ACTIVE_OVERLAY}",
-            file=sys.stderr,
-        )
+        print(f"dbxcarta: active env overlay: {overlay}", file=sys.stderr)
 
     if sys.argv[1:2] == ["verify"]:
         sys.exit(_handle_verify(sys.argv[2:]))
@@ -222,17 +212,30 @@ def _handle_upload() -> int:
     return 0
 
 
-def _handle_verify(argv: list[str]) -> int:
-    import argparse
+def _load_env(argv: list[str]) -> tuple[list[str] | None, int]:
+    """Resolve and load the overlay/base env files, stripping the option.
 
+    Returns ``(cleaned_argv, 0)`` on success, or ``(None, 2)`` after
+    printing an :class:`EnvFileError` so the caller returns the code.
+    """
     from dbxcarta.spark.env import EnvFileError, load_env_files, resolve_env_files
 
     try:
-        env_files, argv = resolve_env_files(argv)
+        env_files, cleaned = resolve_env_files(argv)
     except EnvFileError as exc:
         print(f"error: {exc}", file=sys.stderr)
-        return 2
+        return None, 2
     load_env_files(env_files)
+    return cleaned, 0
+
+
+def _handle_verify(argv: list[str]) -> int:
+    import argparse
+
+    cleaned, code = _load_env(argv)
+    if cleaned is None:
+        return code
+    argv = cleaned
 
     parser = argparse.ArgumentParser(prog="dbxcarta verify")
     parser.add_argument(
@@ -280,14 +283,10 @@ def _handle_preset(argv: list[str]) -> int:
     import argparse
     import os
 
-    from dbxcarta.spark.env import EnvFileError, load_env_files, resolve_env_files
-
-    try:
-        env_files, argv = resolve_env_files(argv)
-    except EnvFileError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 2
-    load_env_files(env_files)
+    cleaned, code = _load_env(argv)
+    if cleaned is None:
+        return code
+    argv = cleaned
 
     parser = argparse.ArgumentParser(prog="dbxcarta preset")
     parser.add_argument("spec", help="Preset import spec in 'package.module:attr' form.")

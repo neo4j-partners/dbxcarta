@@ -53,58 +53,66 @@ def resolve_env_files(argv: list[str]) -> tuple[list[Path], list[str]]:
     return [overlay, _BASE_ENV_FILE], cleaned_argv
 
 
+def _select_overlay(argv: list[str]) -> tuple[str | None, list[str]]:
+    """Resolve the selected overlay value and strip the CLI option.
+
+    ``--env-file`` on *argv* wins over the ``DBXCARTA_ENV_FILE``
+    environment variable. Returns ``(value_or_None, cleaned_argv)``. A
+    bare or empty ``--env-file`` is a hard :class:`EnvFileError`, since
+    silently ignoring a malformed selection reintroduces the
+    wrong-catalog risk.
+    """
+    cli_value, cleaned_argv = _extract_env_file_option(argv)
+    selected = cli_value
+    if selected is None:
+        selected = os.environ.get(_ENV_FILE_KEY) or None
+    return selected, cleaned_argv
+
+
 def _extract_env_file_option(argv: list[str]) -> tuple[str | None, list[str]]:
     """Pull ``--env-file VALUE`` / ``--env-file=VALUE`` out of *argv*.
 
-    Returns ``(value_or_None, argv_without_the_option)`` so the existing
-    per-command argparse parsers never see the option. A bare
-    ``--env-file`` with no value is a hard error, since silently ignoring
-    a malformed selection reintroduces the wrong-catalog risk.
+    The option is stripped so the per-command argparse parsers never
+    see it.
     """
     value: str | None = None
     remaining: list[str] = []
     i = 0
     while i < len(argv):
         arg = argv[i]
-        if arg == "--env-file":
+        if arg == _ENV_FILE_OPT:
             if i + 1 >= len(argv):
-                raise EnvFileError("--env-file requires a path argument")
+                raise EnvFileError(f"{_ENV_FILE_OPT} requires a path argument")
             value = argv[i + 1]
             i += 2
             continue
-        if arg.startswith("--env-file="):
+        if arg.startswith(f"{_ENV_FILE_OPT}="):
             value = arg.split("=", 1)[1]
             i += 1
             continue
         remaining.append(arg)
         i += 1
     if value is not None and not value:
-        raise EnvFileError("--env-file requires a non-empty path argument")
+        raise EnvFileError(f"{_ENV_FILE_OPT} requires a non-empty path argument")
     return value, remaining
 
 
 def select_overlay_path(argv: list[str] | None = None) -> Path | None:
     """Return the selected overlay path, or ``None``, without side effects.
 
-    Pure selection for constructing the runner: it does not strip argv,
-    load files, or check existence. Existence is enforced downstream by
-    :func:`resolve_env_files` (the ``verify``/``preset`` loader) and by
-    the runner's ``from_env_file`` (the submit path), so a nonexistent
-    overlay is still a hard error wherever it is actually consumed.
-
-    Selection precedence matches :func:`resolve_env_files`: ``--env-file``
-    on *argv* over ``DBXCARTA_ENV_FILE``. A malformed ``--env-file`` is
-    treated as no selection here; the consuming path's own parser raises
-    the clean error rather than failing at import.
+    Pure selection for the stderr banner and runner construction: it
+    does not strip argv, load files, or check existence. Existence is
+    enforced downstream by :func:`resolve_env_files` (the
+    ``verify``/``preset`` loader) and by the runner's ``from_env_file``
+    (the submit path), so a nonexistent overlay is still a hard error
+    wherever it is actually consumed. A malformed ``--env-file`` is
+    swallowed here so the consuming path raises the clean error.
     """
     args = sys.argv[1:] if argv is None else argv
     try:
-        cli_value, _ = _extract_env_file_option(args)
+        selected, _ = _select_overlay(args)
     except EnvFileError:
-        cli_value = None
-    selected = cli_value
-    if selected is None:
-        selected = os.environ.get(_ENV_FILE_KEY) or None
+        return None
     return Path(selected) if selected else None
 
 
