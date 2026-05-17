@@ -5,7 +5,13 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING
 
-from neo4j import GraphDatabase
+try:
+    from neo4j import GraphDatabase
+except ModuleNotFoundError as exc:  # pragma: no cover - dependency guard
+    raise ModuleNotFoundError(
+        "dbxcarta-client graph retrieval requires Neo4j. Install the client "
+        "package with the 'graph' extra: pip install 'dbxcarta-client[graph]'"
+    ) from exc
 
 from dbxcarta.client.ids import schema_from_node_id
 from dbxcarta.client.neo4j_utils import neo4j_credentials

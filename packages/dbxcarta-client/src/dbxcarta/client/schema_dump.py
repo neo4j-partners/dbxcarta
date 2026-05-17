@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
-from neo4j import GraphDatabase
+try:
+    from neo4j import GraphDatabase
+except ModuleNotFoundError as exc:  # pragma: no cover - dependency guard
+    raise ModuleNotFoundError(
+        "dbxcarta-client schema dump requires Neo4j. Install the client "
+        "package with the 'graph' extra: pip install 'dbxcarta-client[graph]'"
+    ) from exc
 
 from dbxcarta.client.neo4j_utils import neo4j_credentials
 from dbxcarta.client.settings import ClientSettings

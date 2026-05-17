@@ -5,7 +5,7 @@ description = "Reference dbxcarta preset for the Finance Genie Lakehouse example
 authors = [{ name = "Ryan Knight" }]
 requires-python = ">=3.12"
 dependencies = [
-    "dbxcarta-client",
+    "dbxcarta-client[graph]",
     "dbxcarta-spark",
     "databricks-sdk>=0.40",
     "python-dotenv",

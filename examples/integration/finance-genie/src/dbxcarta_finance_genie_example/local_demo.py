@@ -14,10 +14,9 @@ from dotenv import load_dotenv
 from dbxcarta.client import parse_sql
 from dbxcarta.client.compare import compare_result_sets
 from dbxcarta.client.databricks import build_workspace_client
-from dbxcarta.client.embed import embed_questions
 from dbxcarta.client.executor import fetch_rows, preflight_warehouse
+from dbxcarta.client.graph_rag import build_graph_rag_context
 from dbxcarta.client.local_generation import generate_sql_local
-from dbxcarta.client.prompt import graph_rag_prompt
 from dbxcarta.client.questions import Question, load_questions
 from dbxcarta.client.schema_dump import fetch_schema_dump
 from dbxcarta.client.settings import ClientSettings
@@ -214,38 +213,24 @@ def run_graph_rag_question(
     compare_reference: bool = True,
     show_prompt: bool = False,
 ) -> DemoResult:
-    """Run one graph_rag local demo question end to end."""
+    """Run one graph_rag local demo question end to end.
+
+    Retrieval and prompt assembly come from the shared client seam so this
+    demo cannot drift from the evaluation harness. Only the local Model
+    Serving call, the read-only guard, the reference comparison, and the
+    printing are demo-specific.
+    """
     preflight_warehouse(ws, settings.databricks_warehouse_id)
 
-    embeddings, embed_error = embed_questions(
-        ws,
-        settings.dbxcarta_embed_endpoint,
-        [question],
-    )
-    if embeddings is None:
-        raise RuntimeError(f"embedding failed: {embed_error}")
-
-    from dbxcarta.client.graph_retriever import GraphRetriever
-
-    retriever = GraphRetriever(settings)
-    try:
-        bundle = retriever.retrieve(question, embeddings[0])
-    finally:
-        retriever.close()
-
-    context_text = bundle.to_text()
-    prompt = graph_rag_prompt(
-        question,
-        settings.dbxcarta_catalog,
-        settings.schemas_list,
-        context_text,
-    )
+    context = build_graph_rag_context(ws, settings, question)
     if show_prompt:
         print("prompt:")
-        print(prompt)
+        print(context.prompt)
         print()
 
-    raw_sql = generate_sql_local(ws, settings.dbxcarta_chat_endpoint, prompt)
+    raw_sql = generate_sql_local(
+        ws, settings.dbxcarta_chat_endpoint, context.prompt
+    )
     generated_sql, parse_ok = parse_sql(raw_sql)
     if not parse_ok or not generated_sql:
         raise RuntimeError(f"generated response was not valid SQL: {raw_sql!r}")
@@ -282,8 +267,8 @@ def run_graph_rag_question(
 
     return DemoResult(
         question=question,
-        context_ids=bundle.seed_ids,
-        context_text=context_text,
+        context_ids=context.seed_ids,
+        context_text=context.context_text,
         generated_sql=generated_sql,
         columns=cols or [],
         rows=rows,

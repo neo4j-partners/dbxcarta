@@ -154,11 +154,19 @@ model.
 
 ### 9. Run dbxcarta against the schemapile catalog
 
-The `.env.generated` file from step 7 supplies `DBXCARTA_SCHEMAS`. Source
-it together with `.env` (or copy the line into `.env`) and proceed with
-the standard dbxcarta flow from the repo root:
+dbxcarta loads config in two layers: the repo-root `.env` is the shared
+base (Databricks infra + Neo4j secrets, never edited per integration),
+and this directory's committed, secret-free `dbxcarta-overlay.env` is
+the SchemaPile overlay (dbxcarta-scoped values only). Selecting it is
+one flag — no root `.env` edit. Copy the `DBXCARTA_SCHEMAS` line that
+step 7 wrote into `.env.generated` into `dbxcarta-overlay.env` first
+(it ships blank otherwise), then run the standard flow from the repo
+root with `--env-file` (or export `DBXCARTA_ENV_FILE` once to the same
+path and drop the flag):
 
 ```bash
+OVERLAY=examples/integration/schemapile/dbxcarta-overlay.env
+
 # Confirm the preset resolves and shows the expected overlay.
 uv run dbxcarta preset dbxcarta_schemapile_example:preset --print-env
 
@@ -169,12 +177,16 @@ SCHEMAPILE_QUESTIONS_FILE=examples/integration/schemapile/questions.json \
 # Build and submit the ingest job.
 uv run dbxcarta upload --wheel
 uv run dbxcarta upload --all
-uv run dbxcarta submit-entrypoint ingest
-uv run dbxcarta verify
+uv run dbxcarta submit-entrypoint ingest --env-file "$OVERLAY"
+uv run dbxcarta verify --env-file "$OVERLAY"
 
 # Run the client evaluation arms.
-uv run dbxcarta submit-entrypoint client
+uv run dbxcarta submit-entrypoint client --env-file "$OVERLAY"
 ```
+
+This overlay is the dbxcarta CLI overlay only. It is distinct from
+`./.env` / `./.env.sample`, which configure the standalone SchemaPile
+tooling (slice/candidate/materialize) and never layer.
 
 ## Supporting scripts
 

@@ -133,14 +133,32 @@ Expected Gold (optional) tables:
 
 ### 3. Configure dbxcarta
 
-Print the recommended dbxcarta overlay:
+dbxcarta loads config in two layers. The repo-root `.env` is the shared
+**base**: Databricks infra and the Neo4j secrets, never edited per
+integration. This directory's committed, secret-free
+`dbxcarta-overlay.env` is the Finance Genie **overlay**: only the
+dbxcarta-scoped values (medallion catalogs, schemas, volume, summary,
+sample/embedding flags, client arms). Selecting it is one flag — no
+root `.env` edit, ever:
+
+```bash
+uv run dbxcarta submit-entrypoint ingest \
+  --env-file examples/integration/finance-genie/dbxcarta-overlay.env
+```
+
+or export `DBXCARTA_ENV_FILE` once to the same path. Precedence is
+process env over overlay over base. With no `--env-file` and no
+`DBXCARTA_ENV_FILE`, only the base `.env` loads, exactly as before.
+
+To regenerate the overlay values from the preset:
 
 ```bash
 uv run dbxcarta preset dbxcarta_finance_genie_example:preset --print-env
 ```
 
-Copy those values into `dbxcarta/.env`, or use this directory's `.env.sample`
-as the reference.
+This file (`dbxcarta-overlay.env`) is the dbxcarta CLI overlay only. It
+is distinct from `./.env` / `./.env.sample`, which are the self-contained
+config for the standalone local demo (section 10) and never layer.
 
 ### 4. Check readiness
 
@@ -178,24 +196,32 @@ uv run dbxcarta upload --wheel
 uv run dbxcarta upload --all
 ```
 
+> Every `dbxcarta` command in steps 6–9 takes the same overlay. The
+> examples below pass `--env-file` explicitly; alternatively
+> `export DBXCARTA_ENV_FILE=examples/integration/finance-genie/dbxcarta-overlay.env`
+> once and drop the flag.
+
 ### 8. Build the semantic layer
 
 Submit the installed wheel's ingest entrypoint:
 
 ```bash
-uv run dbxcarta submit-entrypoint ingest
+uv run dbxcarta submit-entrypoint ingest \
+  --env-file examples/integration/finance-genie/dbxcarta-overlay.env
 ```
 
 Verify the result:
 
 ```bash
-uv run dbxcarta verify
+uv run dbxcarta verify \
+  --env-file examples/integration/finance-genie/dbxcarta-overlay.env
 ```
 
 ### 9. Run the client evaluation
 
 ```bash
-uv run dbxcarta submit-entrypoint client
+uv run dbxcarta submit-entrypoint client \
+  --env-file examples/integration/finance-genie/dbxcarta-overlay.env
 ```
 
 ### 10. Run the local CLI demo

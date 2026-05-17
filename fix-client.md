@@ -172,6 +172,90 @@ the codebase or adding a second package to version and release.
 ## Suggested order
 
 Fix 1 and Fix 2 are independent and can land separately. Fix 2 is smaller and
-lower risk, so it can go first. Fix 1 is the more valuable change because it
+lower risk, so it goes first. Fix 1 is the more valuable change because it
 removes a real source of behavioral drift between the demo and the evaluation
 harness.
+
+---
+
+## Implementation plan
+
+### Fix 2: Neo4j optional extra
+
+- [x] Move `neo4j>=5.0` from `dependencies` to an optional `graph` group in
+      `packages/dbxcarta-client/pyproject.toml`.
+- [x] Guard the top-level Neo4j import in `graph_retriever.py` with an
+      actionable `ModuleNotFoundError` that names the `graph` extra.
+- [x] Guard the top-level Neo4j import in `schema_dump.py` the same way.
+- [x] Update the three example project files to depend on
+      `dbxcarta-client[graph]`.
+- [x] Add a package docstring to the client init that documents the base
+      surface versus the `graph` extra.
+
+### Fix 1: shared graph_rag retrieval-and-prompt seam
+
+- [x] Add a new client module `graph_rag.py` with an immutable
+      `GraphRagContext` result and a transport-neutral
+      `build_graph_rag_context` function that stops before any model call,
+      accepts an optional precomputed embedding, and accepts an optional
+      caller-owned retriever.
+- [x] Export the new seam from the client package init.
+- [x] Refactor `local_demo.py::run_graph_rag_question` to obtain context and
+      prompt from the seam and keep only the demo-specific model call,
+      read-only guard, reference comparison, and printing.
+- [x] Refactor `eval/arms.py::_run_graph_rag_arm` to obtain each question's
+      context and prompt from the seam inside the existing threaded loop while
+      keeping batch generation, the reference cache, traces, and summary.
+- [x] Add a unit test asserting the seam returns a prompt containing the
+      rendered context for a stubbed retriever and does not close a
+      caller-owned retriever.
+- [x] Run the client test suite and confirm it is green.
+
+---
+
+## Status / progress
+
+| Item | Status |
+|---|---|
+| Fix 2: pyproject extra | Done |
+| Fix 2: import guards | Done |
+| Fix 2: example dependencies | Done |
+| Fix 2: package docstring | Done |
+| Fix 1: `graph_rag.py` seam | Done |
+| Fix 1: init export | Done |
+| Fix 1: demo refactor | Done |
+| Fix 1: harness refactor | Done |
+| Fix 1: unit test | Done |
+| Test suite | Green (see notes) |
+
+### Notes
+
+All items implemented and verified.
+
+- Client test suite: `163 passed` (`tests/client`), including the new
+  `tests/client/test_graph_rag.py`.
+- Cross-cutting check: `tests/client/test_graph_rag.py tests/boundary
+  tests/examples/finance-genie` together `27 passed`.
+- Import sanity: `import dbxcarta.client` exposes `GraphRagContext` and
+  `build_graph_rag_context` alongside the existing public names;
+  `dbxcarta_finance_genie_example.local_demo` and
+  `dbxcarta.client.eval.arms` import cleanly after the refactor.
+- No behavior change to either graph_rag path: the seam performs the exact
+  embed, retrieve, render, and prompt steps both call sites previously
+  inlined; the harness keeps batch generation, the reference cache, traces,
+  and summary, and reuses one shared retriever across the threaded loop
+  (the seam does not close a caller-owned retriever).
+- The harness's batch embedding plus the embedding-count alignment guard are
+  unchanged; the seam receives the pre-computed per-question embedding.
+- Neo4j is no longer in the base dependency closure; the `graph` extra adds
+  it. `graph_retriever.py` and `schema_dump.py` raise an actionable
+  `ModuleNotFoundError` naming the extra when Neo4j is absent. All three
+  example projects now depend on `dbxcarta-client[graph]`.
+- Type check clean: `uv run mypy -p dbxcarta.client` reports `Success: no
+  issues found in 25 source files`. (mypy is in the `test` dependency group;
+  install it with `uv sync --group test`.) The check surfaced one defect in
+  the new seam: it closed a `retriever` typed as the `Retriever` ABC, which
+  declared only `retrieve`. Fixed by adding a documented no-op `close()`
+  default to the `Retriever` ABC. `GraphRetriever` (the only concrete
+  implementation) already overrode `close()`; the default is non-breaking
+  for any future lightweight retriever.

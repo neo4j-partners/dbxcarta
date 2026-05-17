@@ -254,8 +254,8 @@ def _run_graph_rag_arm(
     staging_table: str,
 ) -> None:
     from dbxcarta.client.generation import generate_sql_batch
+    from dbxcarta.client.graph_rag import build_graph_rag_context
     from dbxcarta.client.graph_retriever import GraphRetriever
-    from dbxcarta.client.prompt import graph_rag_prompt
     from dbxcarta.client.trace import (
         RetrievalTrace,
         chosen_schemas_from_columns,
@@ -263,9 +263,6 @@ def _run_graph_rag_arm(
         emit_retrieval_traces,
         schema_scores_from_seeds,
     )
-
-    catalog = settings.dbxcarta_catalog
-    schemas = settings.schemas_list
 
     texts = [q.question for q in questions]
     embeddings, embed_error = _embed_questions(ws, settings.dbxcarta_embed_endpoint, texts)
@@ -284,31 +281,41 @@ def _run_graph_rag_arm(
     try:
         # Retrieval is I/O-bound and per-question independent; the Neo4j
         # driver is thread-safe and retrieve() opens its own session per
-        # call. Submit all, collect by question_id, then build prompts and
-        # traces by iterating `questions` in original order so the output is
-        # identical to the serial path. A worker exception propagates and
-        # aborts the run (retriever closed in the finally below).
-        bundles: dict[str, Any] = {}
+        # call. Each worker runs the shared retrieval-and-prompt seam with
+        # the pre-computed embedding and the shared retriever (the seam does
+        # not close a caller-owned retriever). Collect by question_id, then
+        # build traces by iterating `questions` in original order so the
+        # output is identical to the serial path. A worker exception
+        # propagates and aborts the run (retriever closed in the finally
+        # below).
+        contexts: dict[str, Any] = {}
         with ThreadPoolExecutor(
             max_workers=_retrieval_concurrency()
         ) as executor:
             future_to_qid = {
                 executor.submit(
-                    retriever.retrieve, q.question, emb
+                    build_graph_rag_context,
+                    ws,
+                    settings,
+                    q.question,
+                    embedding=emb,
+                    retriever=retriever,
                 ): q.question_id
                 for q, emb in zip(questions, embeddings)
             }
             for future, qid in future_to_qid.items():
-                bundles[qid] = future.result()
+                contexts[qid] = future.result()
 
         questions_with_prompts = []
         traces: dict[str, RetrievalTrace] = {}
         for q in questions:
             qid = q.question_id
-            bundle = bundles[qid]
-            context_text = bundle.to_text()
-            prompt = graph_rag_prompt(q.question, catalog, schemas, context_text)
-            questions_with_prompts.append({"question_id": qid, "prompt": prompt})
+            context = contexts[qid]
+            bundle = context.bundle
+            context_text = context.context_text
+            questions_with_prompts.append(
+                {"question_id": qid, "prompt": context.prompt}
+            )
 
             final_col_ids = [c.column_id for c in bundle.columns if c.column_id]
             sch_scores = schema_scores_from_seeds(

@@ -8,13 +8,15 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "databricks-sdk>=0.40",
-    "neo4j>=5.0",
     "pydantic>=2",
     "pydantic-settings>=2",
     "requests",
 ]
 
 [project.optional-dependencies]
+# Graph retrieval and the Neo4j schema dump. The base install covers question
+# loading, SQL parsing, and result-set comparison and does not need Neo4j.
+graph = ["neo4j>=5.0"]
 test = ["pytest"]
 
 [project.scripts]

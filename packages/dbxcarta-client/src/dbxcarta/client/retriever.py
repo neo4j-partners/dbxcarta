@@ -111,3 +111,12 @@ class Retriever(ABC):
     @abstractmethod
     def retrieve(self, question: str, embedding: list[float]) -> ContextBundle:
         ...
+
+    def close(self) -> None:
+        """Release any held resources.
+
+        No-op by default. Implementations that hold a connection (e.g. the
+        Neo4j-backed ``GraphRetriever``) override this. The shared graph_rag
+        seam closes a retriever it constructs itself.
+        """
+

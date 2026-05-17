@@ -14,20 +14,11 @@ from dbxcarta.spark.verify import Violation
 
 if TYPE_CHECKING:
     from databricks.sdk import WorkspaceClient
+    from databricks.sdk.service.sql import StatementParameterListItem
     from neo4j import Driver
 
 
 _COMPLEX_TYPE_FAMILIES = ("STRUCT", "ARRAY", "MAP", "VARIANT", "INTERVAL")
-
-
-def _sql_str_list(values: list[str]) -> str:
-    """Render a list of strings as SQL string literals with quotes escaped.
-
-    `repr()` emits Python repr quoting (double quotes / backslash escapes for
-    values containing a single quote), which is not a valid SQL string
-    literal. Doubling embedded single quotes is the correct SQL escaping.
-    """
-    return ", ".join("'" + v.replace("'", "''") + "'" for v in values)
 
 
 def check(
@@ -49,10 +40,57 @@ def check(
     return out
 
 
-def _exec(ws: "WorkspaceClient", warehouse_id: str, statement: str) -> list[list[Any]]:
-    """Execute a SQL statement; return data_array rows or [] if no result."""
+def _str_param(name: str, value: str) -> StatementParameterListItem:
+    """Build a STRING-typed bound parameter for the Statement Execution API."""
+    from databricks.sdk.service.sql import StatementParameterListItem
+
+    return StatementParameterListItem(name=name, value=value, type="STRING")
+
+
+def _columns_table(catalog: str) -> str:
+    """Back-quoted columns-table name bound via IDENTIFIER(:tbl).
+
+    Each part is back-quoted so a catalog whose name is not a simple
+    identifier still resolves, matching both the prior interpolated form
+    (which back-quoted the catalog) and the documented IDENTIFIER canonical
+    example. The value still travels as a bound parameter, never
+    interpolated, so this only affects name resolution, not injection.
+    """
+    return f"`{catalog}`.`information_schema`.`columns`"
+
+
+def _schema_filter(
+    schemas: list[str],
+) -> tuple[str, list[StatementParameterListItem]]:
+    """Build a bound `table_schema IN (...)` fragment, one marker per schema.
+
+    Returns an empty fragment and no parameters when the list is empty, which
+    preserves the prior unfiltered behavior.
+    """
+    if not schemas:
+        return "", []
+    markers = ", ".join(f":s{i}" for i in range(len(schemas)))
+    params = [_str_param(f"s{i}", s) for i, s in enumerate(schemas)]
+    return f" AND table_schema IN ({markers})", params
+
+
+def _exec(
+    ws: "WorkspaceClient",
+    warehouse_id: str,
+    statement: str,
+    parameters: list[StatementParameterListItem] | None = None,
+) -> list[list[Any]]:
+    """Execute a SQL statement; return data_array rows or [] if no result.
+
+    When `parameters` is supplied, values travel to the warehouse as bound
+    parameter markers rather than interpolated text, so no value can alter
+    the statement structure.
+    """
     result = ws.statement_execution.execute_statement(
-        warehouse_id=warehouse_id, statement=statement, wait_timeout="30s",
+        warehouse_id=warehouse_id,
+        statement=statement,
+        wait_timeout="30s",
+        parameters=parameters,
     )
     if result.result is None:
         return []
@@ -71,16 +109,14 @@ def _check_id_normalization(
     Spark SQL id_expr equivalent byte-for-byte."""
     out: list[Violation] = []
     schemas = summary.get("schemas") or []
-    schema_filter = (
-        f" AND table_schema IN ({_sql_str_list(schemas)})" if schemas else ""
-    )
+    schema_filter, schema_params = _schema_filter(schemas)
 
     rows = _exec(ws, warehouse_id, (
-        f"SELECT table_catalog, table_schema, table_name, column_name"
-        f" FROM `{catalog}`.information_schema.columns"
+        "SELECT table_catalog, table_schema, table_name, column_name"
+        " FROM IDENTIFIER(:tbl)"
         f" WHERE table_schema != 'information_schema'{schema_filter}"
-        f" LIMIT 500"
-    ))
+        " LIMIT 500"
+    ), [_str_param("tbl", _columns_table(catalog)), *schema_params])
     if rows:
         sample = random.sample(rows, min(50, len(rows)))
         missing: list[str] = []
@@ -99,11 +135,11 @@ def _check_id_normalization(
             ))
 
     sql_rows = _exec(ws, warehouse_id, (
-        f"SELECT table_catalog, table_schema, table_name, column_name,"
-        f" lower(translate(concat_ws('.', table_catalog, table_schema, table_name, column_name), ' -', '__')) AS sql_id"
-        f" FROM `{catalog}`.information_schema.columns"
-        f" LIMIT 100"
-    ))
+        "SELECT table_catalog, table_schema, table_name, column_name,"
+        " lower(translate(concat_ws('.', table_catalog, table_schema, table_name, column_name), ' -', '__')) AS sql_id"
+        " FROM IDENTIFIER(:tbl)"
+        " LIMIT 100"
+    ), [_str_param("tbl", _columns_table(catalog))])
     mismatches: list[tuple[str, str]] = []
     for row in sql_rows:
         table_catalog, table_schema, table_name, column_name, sql_id = row
@@ -136,17 +172,19 @@ def _check_complex_type_round_trip(
     """
     out: list[Violation] = []
     schemas = summary.get("schemas") or []
-    schema_filter = (
-        f" AND table_schema IN ({_sql_str_list(schemas)})" if schemas else ""
-    )
+    schema_filter, schema_params = _schema_filter(schemas)
     with driver.session() as s:
         for prefix in _COMPLEX_TYPE_FAMILIES:
             rows = _exec(ws, warehouse_id, (
-                f"SELECT table_catalog, table_schema, table_name, column_name, data_type"
-                f" FROM `{catalog}`.information_schema.columns"
-                f" WHERE upper(data_type) LIKE '{prefix}%'{schema_filter}"
-                f" LIMIT 1"
-            ))
+                "SELECT table_catalog, table_schema, table_name, column_name, data_type"
+                " FROM IDENTIFIER(:tbl)"
+                f" WHERE upper(data_type) LIKE :prefix{schema_filter}"
+                " LIMIT 1"
+            ), [
+                _str_param("tbl", _columns_table(catalog)),
+                _str_param("prefix", f"{prefix}%"),
+                *schema_params,
+            ])
             if not rows:
                 continue
             table_catalog, table_schema, table_name, column_name, data_type = rows[0]
