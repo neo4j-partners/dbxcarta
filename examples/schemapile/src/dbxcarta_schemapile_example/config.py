@@ -140,7 +140,7 @@ def _required(env: Mapping[str, str], key: str) -> str:
     val = env.get(key, "").strip()
     if not val:
         raise ValueError(
-            f"{key} is not set; check examples/integration/schemapile/.env"
+            f"{key} is not set; check examples/schemapile/.env"
         )
     return val
 

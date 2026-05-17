@@ -20,7 +20,7 @@ _DEFAULT_ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Upload examples/integration/finance-genie/questions.json to "
+            "Upload examples/finance-genie/questions.json to "
             "DBXCARTA_CLIENT_QUESTIONS."
         )
     )

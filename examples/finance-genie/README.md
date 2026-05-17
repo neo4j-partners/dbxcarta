@@ -9,7 +9,7 @@ dbxcarta as a library.
 ## What lives here, and why
 
 ```
-examples/integration/finance-genie/
+examples/finance-genie/
 ├── pyproject.toml                                         # standalone package
 ├── README.md                                              # this file
 ├── .env.sample                                            # operator overlay reference
@@ -110,7 +110,7 @@ Run these commands from the dbxcarta repo unless a step says otherwise.
 
 ```bash
 uv sync
-uv pip install -e examples/integration/finance-genie/
+uv pip install -e examples/finance-genie/
 ```
 
 ### 2. Prepare Finance Genie
@@ -143,7 +143,7 @@ root `.env` edit, ever:
 
 ```bash
 uv run dbxcarta submit-entrypoint ingest \
-  --env-file examples/integration/finance-genie/dbxcarta-overlay.env
+  --env-file examples/finance-genie/dbxcarta-overlay.env
 ```
 
 or export `DBXCARTA_ENV_FILE` once to the same path. Precedence is
@@ -198,7 +198,7 @@ uv run dbxcarta upload --all
 
 > Every `dbxcarta` command in steps 6–9 takes the same overlay. The
 > examples below pass `--env-file` explicitly; alternatively
-> `export DBXCARTA_ENV_FILE=examples/integration/finance-genie/dbxcarta-overlay.env`
+> `export DBXCARTA_ENV_FILE=examples/finance-genie/dbxcarta-overlay.env`
 > once and drop the flag.
 
 ### 8. Build the semantic layer
@@ -207,21 +207,21 @@ Submit the installed wheel's ingest entrypoint:
 
 ```bash
 uv run dbxcarta submit-entrypoint ingest \
-  --env-file examples/integration/finance-genie/dbxcarta-overlay.env
+  --env-file examples/finance-genie/dbxcarta-overlay.env
 ```
 
 Verify the result:
 
 ```bash
 uv run dbxcarta verify \
-  --env-file examples/integration/finance-genie/dbxcarta-overlay.env
+  --env-file examples/finance-genie/dbxcarta-overlay.env
 ```
 
 ### 9. Run the client evaluation
 
 ```bash
 uv run dbxcarta submit-entrypoint client \
-  --env-file examples/integration/finance-genie/dbxcarta-overlay.env
+  --env-file examples/finance-genie/dbxcarta-overlay.env
 ```
 
 ### 10. Run the local CLI demo
@@ -234,18 +234,18 @@ the parent dbxcarta repo's `.env`. Copy the sample and fill in your
 workspace, warehouse, chat endpoint, and Neo4j credentials:
 
 ```bash
-cp examples/integration/finance-genie/.env.sample examples/integration/finance-genie/.env
-# edit examples/integration/finance-genie/.env
+cp examples/finance-genie/.env.sample examples/finance-genie/.env
+# edit examples/finance-genie/.env
 ```
 
 Then run any of the demo subcommands from anywhere (they resolve `.env`
 relative to the package, not the current working directory):
 
 ```bash
-uv run --directory examples/integration/finance-genie python -m dbxcarta_finance_genie_example.local_demo preflight
-uv run --directory examples/integration/finance-genie python -m dbxcarta_finance_genie_example.local_demo questions
-uv run --directory examples/integration/finance-genie python -m dbxcarta_finance_genie_example.local_demo ask --question-id fg_q01 --show-context
-uv run --directory examples/integration/finance-genie python -m dbxcarta_finance_genie_example.local_demo sql "SELECT COUNT(*) FROM \`graph-enriched-lakehouse\`.\`graph-enriched-schema\`.accounts"
+uv run --directory examples/finance-genie python -m dbxcarta_finance_genie_example.local_demo preflight
+uv run --directory examples/finance-genie python -m dbxcarta_finance_genie_example.local_demo questions
+uv run --directory examples/finance-genie python -m dbxcarta_finance_genie_example.local_demo ask --question-id fg_q01 --show-context
+uv run --directory examples/finance-genie python -m dbxcarta_finance_genie_example.local_demo sql "SELECT COUNT(*) FROM \`graph-enriched-lakehouse\`.\`graph-enriched-schema\`.accounts"
 ```
 
 The local demo allows only `SELECT`, `WITH`, and `EXPLAIN` statements.

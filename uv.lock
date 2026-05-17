@@ -324,7 +324,7 @@ provides-extras = ["graph", "test"]
 [[package]]
 name = "dbxcarta-dense-schema-example"
 version = "0.1.0"
-source = { editable = "examples/integration/dense-schema" }
+source = { editable = "examples/dense-schema" }
 dependencies = [
     { name = "databricks-sdk" },
     { name = "dbxcarta-client", extra = ["graph"] },
@@ -354,7 +354,7 @@ provides-extras = ["test"]
 [[package]]
 name = "dbxcarta-finance-genie-example"
 version = "0.1.0"
-source = { editable = "examples/integration/finance-genie" }
+source = { editable = "examples/finance-genie" }
 dependencies = [
     { name = "databricks-sdk" },
     { name = "dbxcarta-client", extra = ["graph"] },
@@ -380,7 +380,7 @@ provides-extras = ["test"]
 [[package]]
 name = "dbxcarta-schemapile-example"
 version = "0.1.0"
-source = { editable = "examples/integration/schemapile" }
+source = { editable = "examples/schemapile" }
 dependencies = [
     { name = "databricks-sdk" },
     { name = "dbxcarta-client", extra = ["graph"] },
@@ -460,9 +460,9 @@ test = [
 [package.metadata]
 requires-dist = [
     { name = "dbxcarta-client", editable = "packages/dbxcarta-client" },
-    { name = "dbxcarta-dense-schema-example", editable = "examples/integration/dense-schema" },
-    { name = "dbxcarta-finance-genie-example", editable = "examples/integration/finance-genie" },
-    { name = "dbxcarta-schemapile-example", editable = "examples/integration/schemapile" },
+    { name = "dbxcarta-dense-schema-example", editable = "examples/dense-schema" },
+    { name = "dbxcarta-finance-genie-example", editable = "examples/finance-genie" },
+    { name = "dbxcarta-schemapile-example", editable = "examples/schemapile" },
     { name = "dbxcarta-spark", editable = "packages/dbxcarta-spark" },
 ]
 

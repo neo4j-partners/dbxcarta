@@ -4,7 +4,7 @@
 
 Run the full Finance Genie dbxcarta pipeline from artifact build through
 client evaluation, on the committed overlay
-`examples/integration/finance-genie/dbxcarta-overlay.env`, while the
+`examples/finance-genie/dbxcarta-overlay.env`, while the
 schemapile and dense-schema demos may also be running.
 
 ## Isolation assessment
@@ -85,13 +85,13 @@ All commands run from the repo root. Each `dbxcarta` command takes the
 overlay; export it once to drop the repeated flag:
 
 ```bash
-export DBXCARTA_ENV_FILE=examples/integration/finance-genie/dbxcarta-overlay.env
+export DBXCARTA_ENV_FILE=examples/finance-genie/dbxcarta-overlay.env
 ```
 
 1. **Sync and install the preset**
    ```bash
    uv sync
-   uv pip install -e examples/integration/finance-genie/
+   uv pip install -e examples/finance-genie/
    ```
 
 2. **Check readiness** (resolves issue 3 before any submit)
@@ -136,9 +136,9 @@ export DBXCARTA_ENV_FILE=examples/integration/finance-genie/dbxcarta-overlay.env
 
 9. **Optional: local read-only demo**
    ```bash
-   cp examples/integration/finance-genie/.env.sample examples/integration/finance-genie/.env
+   cp examples/finance-genie/.env.sample examples/finance-genie/.env
    # edit warehouse, chat endpoint, Neo4j creds
-   uv run --directory examples/integration/finance-genie \
+   uv run --directory examples/finance-genie \
      python -m dbxcarta_finance_genie_example.local_demo preflight
    ```
 

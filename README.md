@@ -259,16 +259,16 @@ the relevant dbxcarta distributions as normal pip dependencies and exposes a
 module-level `preset` object. The Spark package provides the preset protocol and
 loader; examples own their concrete preset implementations.
 
-- `examples/integration/finance-genie/` pairs dbxcarta with Finance Genie on a three-catalog medallion layout. Finance Genie writes raw business tables to a bronze and silver catalog and graph-enriched features to a gold catalog (`graph-enriched-finance-bronze`, `-silver`, `-gold`); dbxcarta folds all three into one Neo4j semantic layer via `DBXCARTA_CATALOGS` and tags each table's tier via `DBXCARTA_LAYER_MAP`. Run summaries and the generation cache land in a separate ops catalog (`dbxcarta-catalog`).
-- `examples/integration/schemapile/` materializes a reproducible SchemaPile slice as Delta tables, writes the generated UC schema list to `.env.generated`, generates a SQL-validated question set, and exposes `dbxcarta_schemapile_example:preset`.
-- `examples/integration/dense-schema/` generates a synthetic 500- or 1000-table single schema for stress testing schema-context retrieval. It shares the same preset pattern and exposes `dbxcarta_dense_schema_example:preset`.
+- `examples/finance-genie/` pairs dbxcarta with Finance Genie on a three-catalog medallion layout. Finance Genie writes raw business tables to a bronze and silver catalog and graph-enriched features to a gold catalog (`graph-enriched-finance-bronze`, `-silver`, `-gold`); dbxcarta folds all three into one Neo4j semantic layer via `DBXCARTA_CATALOGS` and tags each table's tier via `DBXCARTA_LAYER_MAP`. Run summaries and the generation cache land in a separate ops catalog (`dbxcarta-catalog`).
+- `examples/schemapile/` materializes a reproducible SchemaPile slice as Delta tables, writes the generated UC schema list to `.env.generated`, generates a SQL-validated question set, and exposes `dbxcarta_schemapile_example:preset`.
+- `examples/dense-schema/` generates a synthetic 500- or 1000-table single schema for stress testing schema-context retrieval. It shares the same preset pattern and exposes `dbxcarta_dense_schema_example:preset`.
 - `examples/demos/` is reserved for walkthroughs that are not migration-gate consumers.
 
 ### Preset workflow
 
 1. Install the example package alongside dbxcarta:
    ```bash
-   uv pip install -e examples/integration/finance-genie/
+   uv pip install -e examples/finance-genie/
    ```
 
 2. Print the environment overlay the preset provides:
@@ -289,11 +289,11 @@ loader; examples own their concrete preset implementations.
 **Generated examples** (schemapile, dense-schema) follow the same pattern, but the materializer owns the source schemas. The preset reads `DBXCARTA_SCHEMAS` at command runtime, so you must set that variable before running any preset command:
 
 ```bash
-uv pip install -e examples/integration/schemapile/
-# Source or copy examples/integration/schemapile/.env.generated first so DBXCARTA_SCHEMAS is set.
+uv pip install -e examples/schemapile/
+# Source or copy examples/schemapile/.env.generated first so DBXCARTA_SCHEMAS is set.
 uv run dbxcarta preset dbxcarta_schemapile_example:preset --print-env
 
-uv pip install -e examples/integration/dense-schema/
+uv pip install -e examples/dense-schema/
 # Set DBXCARTA_SCHEMAS to the generated dense schema, e.g. dense_500.
 uv run dbxcarta preset dbxcarta_dense_schema_example:preset --print-env
 ```
@@ -302,8 +302,8 @@ Keep the generated overlay in the environment (or copy its `DBXCARTA_SCHEMAS=...
 
 See the example READMEs for the full setup flows:
 
-- [`examples/integration/finance-genie/README.md`](examples/integration/finance-genie/README.md)
-- [`examples/integration/schemapile/README.md`](examples/integration/schemapile/README.md)
+- [`examples/finance-genie/README.md`](examples/finance-genie/README.md)
+- [`examples/schemapile/README.md`](examples/schemapile/README.md)
 
 ## Quickstart
 
@@ -526,7 +526,7 @@ Each integration writes its run artifacts to an ops plane: a run summary table, 
 ```bash
 uv run scripts/clean-dbxcarta.py \
   --profile azure-rk-knight \
-  --env-file examples/integration/finance-genie/dbxcarta-overlay.env
+  --env-file examples/finance-genie/dbxcarta-overlay.env
 ```
 
 It first reads the workspace and prints every table and volume path it will delete, then waits for a `y/n` answer before touching anything. It drops the ops tables (`dbxcarta_run_summary`, `client_retrieval`, every `client_staging_*`) and empties the ops volume contents, including the embedding ledger. The schema and the volume object itself are kept. Pass `-y`/`--yes` to skip the prompt in automation, or `--warehouse-id` to override warehouse selection.

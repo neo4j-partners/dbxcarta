@@ -24,7 +24,7 @@ from dbxcarta.client.settings import ClientSettings
 DEFAULT_QUESTIONS = Path(__file__).resolve().with_name("questions.json")
 # Anchor .env lookup to the example package root so the demo never inherits
 # the parent dbxcarta repo's .env. parents[2] resolves to
-# examples/integration/finance-genie/
+# examples/finance-genie/
 # (local_demo.py -> dbxcarta_finance_genie_example -> src -> finance-genie).
 DEMO_ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 _READ_ONLY_SQL_RE = re.compile(r"^\s*(SELECT|WITH|EXPLAIN)\b", re.IGNORECASE)

@@ -13,7 +13,7 @@ first-class integration consumer.
 ## What lives here
 
 ```
-examples/integration/schemapile/
+examples/schemapile/
 ├── pyproject.toml
 ├── README.md
 ├── .env.sample
@@ -51,7 +51,7 @@ Run from the dbxcarta repo unless a step says otherwise.
 
 ```bash
 uv sync
-uv pip install -e examples/integration/schemapile/
+uv pip install -e examples/schemapile/
 ```
 
 ### 2. Get the upstream SchemaPile data
@@ -67,7 +67,7 @@ git clone https://github.com/amsterdata/schemapile.git ~/projects/schemapile
 ### 3. Configure the example .env
 
 ```bash
-cd examples/integration/schemapile
+cd examples/schemapile
 cp .env.sample .env
 # Edit .env and fill in:
 #   SCHEMAPILE_REPO=~/projects/schemapile
@@ -84,7 +84,7 @@ catalog (e.g. `graph-enriched-lakehouse`).
 Requires catalog-create privilege on the workspace.
 
 ```bash
-cd examples/integration/schemapile
+cd examples/schemapile
 uv run dbxcarta-schemapile-bootstrap
 ```
 
@@ -132,7 +132,7 @@ filename, primary key list, and foreign key list are recorded as Delta
 table properties on every table so the trace from a UC table to its
 schemapile origin is always one query away.
 
-The step writes `examples/integration/schemapile/.env.generated` with the
+The step writes `examples/schemapile/.env.generated` with the
 `DBXCARTA_SCHEMAS=...` line that the dbxcarta runner needs.
 
 ### 8. Generate and validate the question set
@@ -165,13 +165,13 @@ root with `--env-file` (or export `DBXCARTA_ENV_FILE` once to the same
 path and drop the flag):
 
 ```bash
-OVERLAY=examples/integration/schemapile/dbxcarta-overlay.env
+OVERLAY=examples/schemapile/dbxcarta-overlay.env
 
 # Confirm the preset resolves and shows the expected overlay.
 uv run dbxcarta preset dbxcarta_schemapile_example:preset --print-env
 
 # Upload the generated question set to the example volume.
-SCHEMAPILE_QUESTIONS_FILE=examples/integration/schemapile/questions.json \
+SCHEMAPILE_QUESTIONS_FILE=examples/schemapile/questions.json \
   uv run dbxcarta preset dbxcarta_schemapile_example:preset --upload-questions
 
 # Build and submit the ingest job.

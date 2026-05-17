@@ -5,7 +5,7 @@ the foreign-key list, and the sample-value list.
 
 Run from the example directory so the .env overlay is picked up:
 
-    uv run --directory examples/integration/schemapile python scripts/dump_question_context.py \\
+    uv run --directory examples/schemapile python scripts/dump_question_context.py \\
         > ../../docs/schemapile/questions-schema.md
 
 Configuration comes from the existing ClientSettings overlay
@@ -111,7 +111,7 @@ SchemaPile question-generation prompt iteration:
 This file is reproducible; regenerate with:
 
 ```
-uv run --directory examples/integration/schemapile python scripts/dump_question_context.py \\
+uv run --directory examples/schemapile python scripts/dump_question_context.py \\
     > docs/schemapile/questions-schema.md
 ```
 

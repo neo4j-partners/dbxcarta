@@ -14,8 +14,8 @@ Before writing or changing Spark code, read `docs/reference/best-practices.md`. 
 dbxcarta loads env config in two layers. See `docs/proposals/env-layering.md`.
 
 - The repo-root `.env` is the shared **base**: Databricks infra (profile, compute, workspace, warehouse, secret scope), shared chat/embedding endpoints, and the Neo4j secrets. It is gitignored and **never edited per integration**.
-- Each integration ships a committed, secret-free `examples/integration/<name>/dbxcarta-overlay.env` holding only the dbxcarta-scoped keys (catalog/catalogs/layer-map/schemas, volume, summary, sample/embedding flags, client arms).
-- Select an integration with one flag: `uv run dbxcarta <cmd> --env-file examples/integration/<name>/dbxcarta-overlay.env`, or export `DBXCARTA_ENV_FILE` to that path. `--env-file` wins over `DBXCARTA_ENV_FILE`.
+- Each integration ships a committed, secret-free `examples/<name>/dbxcarta-overlay.env` holding only the dbxcarta-scoped keys (catalog/catalogs/layer-map/schemas, volume, summary, sample/embedding flags, client arms).
+- Select an integration with one flag: `uv run dbxcarta <cmd> --env-file examples/<name>/dbxcarta-overlay.env`, or export `DBXCARTA_ENV_FILE` to that path. `--env-file` wins over `DBXCARTA_ENV_FILE`.
 - Precedence, lowest to highest: base `.env` → overlay → real exported process env. With no overlay selected, only the base `.env` loads (unchanged behavior). A selected overlay that does not resolve is a hard error, never a silent base-only fallback.
 - Do not put `NEO4J_*` or any secret in an overlay (overlays are committed). Do not write integration-scoped values back into the root `.env`.
-- The `examples/integration/<name>/.env` and `.env.sample` files are the **separate** self-contained config for that integration's standalone tooling (local demo, slice/materialize). They never layer and are not the dbxcarta CLI overlay.
+- The `examples/<name>/.env` and `.env.sample` files are the **separate** self-contained config for that integration's standalone tooling (local demo, slice/materialize). They never layer and are not the dbxcarta CLI overlay.

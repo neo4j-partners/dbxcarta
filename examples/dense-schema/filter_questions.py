@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Filter and deduplicate question batch files, producing a clean questions JSON for upload.
 
-Usage (from examples/integration/dense-schema/):
+Usage (from examples/dense-schema/):
     python filter_questions.py                        # default: drops single_table_filter, deduplicates
     python filter_questions.py --keep-all-shapes      # deduplication only
     python filter_questions.py --batch-dir .cache/questions_500 --output questions_500_clean.json

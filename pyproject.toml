@@ -36,9 +36,9 @@ dbxcarta-schemapile-example = { workspace = true }
 members = [
     "packages/dbxcarta-client",
     "packages/dbxcarta-spark",
-    "examples/integration/dense-schema",
-    "examples/integration/finance-genie",
-    "examples/integration/schemapile",
+    "examples/dense-schema",
+    "examples/finance-genie",
+    "examples/schemapile",
 ]
 
 [tool.pytest.ini_options]

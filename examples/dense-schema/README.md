@@ -12,7 +12,7 @@ consumer.
 ## What lives here
 
 ```text
-examples/integration/dense-schema/
+examples/dense-schema/
 ├── pyproject.toml
 ├── .env.sample
 ├── filter_questions.py
@@ -31,7 +31,7 @@ Run these commands from the dbxcarta repo unless a step says otherwise.
 
 ```bash
 uv sync
-uv pip install -e examples/integration/dense-schema/
+uv pip install -e examples/dense-schema/
 ```
 
 Generate the synthetic schema locally:

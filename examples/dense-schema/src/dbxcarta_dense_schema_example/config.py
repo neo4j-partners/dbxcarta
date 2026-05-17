@@ -74,6 +74,6 @@ def _required(env: Mapping[str, str], key: str) -> str:
     val = env.get(key, "").strip()
     if not val:
         raise ValueError(
-            f"{key} is not set; check examples/integration/dense-schema/.env"
+            f"{key} is not set; check examples/dense-schema/.env"
         )
     return val

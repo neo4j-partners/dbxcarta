@@ -27,7 +27,7 @@ uv run python scripts/dump_question_context.py \
 Or from the repo root:
 
 ```bash
-uv run --directory examples/integration/schemapile python scripts/dump_question_context.py \
+uv run --directory examples/schemapile python scripts/dump_question_context.py \
     > docs/schemapile/questions-schema.md
 ```
 
@@ -62,9 +62,9 @@ The script uses `dbxcarta.client.ClientSettings`, which reads the same
 variables the runtime client uses. The two `.env` files in the example
 directory are sufficient:
 
-- `examples/integration/schemapile/.env` — workspace credentials, catalog name,
+- `examples/schemapile/.env` — workspace credentials, catalog name,
   warehouse id, volume/summary paths, Neo4j credentials.
-- `examples/integration/schemapile/.env.generated` — `DBXCARTA_SCHEMAS=...`
+- `examples/schemapile/.env.generated` — `DBXCARTA_SCHEMAS=...`
   written by the materialize step. The script loads this as an
   overlay so the schema list reflects what is actually in UC.
 
