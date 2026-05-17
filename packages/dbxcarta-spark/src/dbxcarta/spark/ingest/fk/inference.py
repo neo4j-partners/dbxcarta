@@ -510,8 +510,8 @@ def infer_metadata_edges(
 #
 # Adopted shape (`prefilter_cosine`, spike PASS): the exact structural
 # pre-filter (same catalog/schema, :KeyColumn, not self) is applied FIRST,
-# then the survivors are scored with core `vector.similarity.cosine` (built
-# in since Neo4j 5.18 — no GDS plugin) under ORDER BY score DESC LIMIT k.
+# then the survivors are scored with core `vector.similarity.cosine`, built
+# in since Neo4j 5.18 with no GDS plugin, under ORDER BY score DESC LIMIT k.
 # A same-schema key can never be truncated away, so the bug is closed by
 # construction. The `keycolumn_embedding` vector index is unused under this
 # shape (the compare is exact, not index-approximate); it is left created
@@ -521,7 +521,7 @@ def infer_metadata_edges(
 # `__K__` is interpolated upstream (the connector cannot bind a `query`
 # parameter); it is the settings-validated `dbxcarta_semantic_k` int,
 # re-coerced with `int()` at substitution, never user input. The WHERE
-# filter uses `catalog`/`schema` — the contract node property names, NOT
+# filter uses `catalog`/`schema`, the contract node property names, NOT
 # `table_catalog`/`table_schema` (those exist only in the embedding-text
 # input expressions; filtering on them would match nothing).
 _SEMANTIC_NN_CYPHER = """
@@ -549,19 +549,20 @@ def semantic_nn_pairs(
     settings: "SparkIngestSettings",
     k: int,
 ) -> "DataFrame":
-    """Per-source nearest-neighbor candidate pairs from the key-like index.
+    """Per-source nearest-neighbor candidate pairs by pre-filter then cosine.
 
     Replaces *only* candidate generation: instead of the src×tgt cartesian +
     in-Spark cosine recompute, one server-side Cypher (`_SEMANTIC_NN_CYPHER`,
     `k` interpolated) walks the already-loaded `:Column` nodes and, per
     source, applies the exact structural pre-filter (same catalog/schema,
     `:KeyColumn`, not self) *before* scoring the survivors with core
-    `vector.similarity.cosine` (`prefilter_cosine` — spike-verified; the
-    global-top-k `queryNodes` and unparsable `SEARCH` forms were rejected,
-    see `_SEMANTIC_NN_CYPHER`). A same-schema target can never be truncated
+    `vector.similarity.cosine` (the spike-verified `prefilter_cosine`
+    shape; the global-top-k `queryNodes` and unparsable `SEARCH` forms
+    were rejected, see `_SEMANTIC_NN_CYPHER`). A same-schema target can
+    never be truncated
     out of a global top-k, so the recall bug is closed by construction.
     Returns `(source_id, target_id, score)`. The read goes through the
-    connector `query` option — no DataFrame rows are pushed in and nothing
+    connector `query` option: no DataFrame rows are pushed in and nothing
     is collected to the driver. `score` is the same cosine the old Spark
     path computed; `infer_semantic_edges` owns the deterministic filter
     pipeline and clamps it into confidence.
@@ -590,8 +591,11 @@ def infer_semantic_edges(
     """Spark-native semantic FK inference over nearest-neighbor candidates.
 
     Candidate generation is now the injected `nn_pairs`
-    (`source_id, target_id, score`) from `semantic_nn_pairs` — the per-source
-    vector SEARCH against the key-like index. This function stays the owner
+    (`source_id, target_id, score`) from `semantic_nn_pairs`: the exact
+    structural pre-filter (same catalog/schema, `:KeyColumn`, not self)
+    followed by core `vector.similarity.cosine` over the survivors, not a
+    vector SEARCH and not the `keycolumn_embedding` index. This function
+    stays the owner
     of the deterministic correctness pipeline: it joins the pair back to
     `columns_frame` for both sides, enforces same-(catalog, schema), target
     PK-like (`pk_gate`), type compatibility, the not-both-named-`id` guard,

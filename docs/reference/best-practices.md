@@ -30,13 +30,13 @@ Databricks lists a specific set of batch-optimized models for production inferen
 
 Source: [Use `ai_query` — Supported models](https://docs.databricks.com/aws/en/large-language-models/ai-query#supported-models).
 
-### 4. Materialize any DataFrame with `ai_query` before using it twice
+### 4. Materialize any DataFrame with `ai_query` before any second action reads it
 
 Spark transformations are lazy. An `ai_query` column is just an expression until an action triggers evaluation. Every action against the same DataFrame evaluates the expression again, which means the endpoint is hit again, which means tokens are billed again. This is the single biggest latent cost trap in the pipeline.
 
 Two downstream actions exist by default: the failure-rate aggregation, and the Neo4j Spark Connector write. If a ledger is added (Stage 7), that is a third.
 
-**How we apply it:** the pipeline writes the enriched node DataFrame to a Delta staging table once, then reads it back for the failure-rate aggregation and the Neo4j write. Delta is preferred over `.cache()` / `.persist()` because inference spend dwarfs I/O and because a materialized Delta table survives executor loss without re-inferencing.
+**How we apply it:** the pipeline embeds and writes nodes in per-table-range batches. Each batch materializes its enriched node DataFrame to a short-lived per-(chunk, label) Delta table, reads that back for the failure-rate aggregation and the Neo4j write, then deletes the table immediately after that batch's Neo4j write. There is no single global staging table reused across the run; the embed-once guarantee holds per batch because the `ai_query` column is evaluated once into the transient table before any second action reads it. Delta is preferred over `.cache()` / `.persist()` because inference spend dwarfs I/O and because a materialized Delta table survives executor loss without re-inferencing.
 
 Source: derived from Spark lazy-evaluation semantics and `ai_query` billing behavior (tokens charged per invocation). No single vendor doc states this in one place; see the Spark programming guide on [RDD persistence and lazy evaluation](https://spark.apache.org/docs/latest/rdd-programming-guide.html#rdd-persistence) as background.
 
