@@ -98,6 +98,7 @@ def _settings() -> SimpleNamespace:
         databricks_warehouse_id="warehouse",
         dbxcarta_client_timeout_sec=30,
         dbxcarta_summary_table="cat.s.run_summary",
+        dbxcarta_client_refresh=False,
     )
 
 
@@ -178,7 +179,8 @@ def test_graph_rag_preserves_question_order_after_parallel_retrieval(
             self.closed = True
 
     def fake_generate_sql_batch(
-        _spark, _endpoint, questions_with_prompts, _staging_table, _arm
+        _spark, _endpoint, questions_with_prompts, _staging_table, _arm,
+        *, refresh=False,
     ):
         recorded_prompt_ids.extend(
             item["question_id"] for item in questions_with_prompts

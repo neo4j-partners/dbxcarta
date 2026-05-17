@@ -1,0 +1,1 @@
+[dense] wrote 500 tables (904 FK edges) to .cache/candidates_500.json

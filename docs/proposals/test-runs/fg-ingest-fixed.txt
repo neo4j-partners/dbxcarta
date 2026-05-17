@@ -9,7 +9,7 @@ Submitting job
   Script:   /Users/ryan.knight@neo4j.com/dbxcarta/scripts/_dbxrunner_bootstrap.py
   Run name: dbxcarta: ingest
 ---
-  Run ID:   155880467925191
+  Run ID:   675870212694723
   Waiting for completion...
 Traceback (most recent call last):
   File "/Users/ryanknight/projects/databricks/dbxcarta/.venv/bin/dbxcarta", line 10, in <module>
@@ -18,7 +18,7 @@ Traceback (most recent call last):
   File "/Users/ryanknight/projects/databricks/dbxcarta/packages/dbxcarta-spark/src/dbxcarta/spark/cli.py", line 176, in main
     sys.exit(_handle_submit_entrypoint(sys.argv[2:]))
              ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
-  File "/Users/ryanknight/projects/databricks/dbxcarta/packages/dbxcarta-spark/src/dbxcarta/spark/cli.py", line 337, in _handle_submit_entrypoint
+  File "/Users/ryanknight/projects/databricks/dbxcarta/packages/dbxcarta-spark/src/dbxcarta/spark/cli.py", line 338, in _handle_submit_entrypoint
     _submit_bootstrap_entrypoint(
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
         args.entrypoint,
@@ -29,7 +29,7 @@ Traceback (most recent call last):
         ^^^^^^^^^^^^^^^^^^^^^
     )
     ^
-  File "/Users/ryanknight/projects/databricks/dbxcarta/packages/dbxcarta-spark/src/dbxcarta/spark/cli.py", line 392, in _submit_bootstrap_entrypoint
+  File "/Users/ryanknight/projects/databricks/dbxcarta/packages/dbxcarta-spark/src/dbxcarta/spark/cli.py", line 393, in _submit_bootstrap_entrypoint
     submit_runner.submit_bootstrap(
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
         bootstrap,

@@ -6,7 +6,7 @@ import re
 from typing import TYPE_CHECKING, Any
 
 from dbxcarta.spark.contract import NodeLabel, generate_value_id
-from dbxcarta.spark.verify import Violation, scoped_catalog, single_value
+from dbxcarta.spark.verify import Violation, scoped_catalogs, single_value
 
 if TYPE_CHECKING:
     from neo4j import Driver
@@ -15,12 +15,18 @@ if TYPE_CHECKING:
 _HEX32 = re.compile(r"^[0-9a-f]{32}$")
 
 
-def check(driver: "Driver", summary: dict[str, Any], *, sample_limit: int) -> list[Violation]:
+def check(
+    driver: "Driver",
+    summary: dict[str, Any],
+    *,
+    sample_limit: int,
+    catalogs: list[str] | None = None,
+) -> list[Violation]:
     counts = summary.get("row_counts") or {}
     if counts.get("value_nodes", 0) == 0:
         return []
     out: list[Violation] = []
-    out.extend(_check_value_count(driver, summary))
+    out.extend(_check_value_count(driver, summary, catalogs=catalogs))
     out.extend(_check_sampling_accounting(summary))
     out.extend(_check_parent_column_type(driver))
     out.extend(_check_relationship_integrity(driver, sample_limit=sample_limit))
@@ -28,15 +34,19 @@ def check(driver: "Driver", summary: dict[str, Any], *, sample_limit: int) -> li
     return out
 
 
-def _check_value_count(driver: "Driver", summary: dict[str, Any]) -> list[Violation]:
+def _check_value_count(
+    driver: "Driver", summary: dict[str, Any], *, catalogs: list[str] | None = None
+) -> list[Violation]:
     expected = (summary.get("row_counts") or {}).get("value_nodes")
     if expected is None:
         return []
-    _, prefix = scoped_catalog(summary)
+    _, prefixes = scoped_catalogs(summary, catalogs)
     with driver.session() as s:
         actual = single_value(s.run(
-            f"MATCH (n:{NodeLabel.VALUE}) WHERE n.id STARTS WITH $prefix RETURN count(n) AS cnt",
-            prefix=prefix,
+            f"MATCH (n:{NodeLabel.VALUE})"
+            " WHERE any(p IN $prefixes WHERE n.id STARTS WITH p)"
+            " RETURN count(n) AS cnt",
+            prefixes=prefixes,
         ), "cnt")
     if actual != expected:
         return [Violation(

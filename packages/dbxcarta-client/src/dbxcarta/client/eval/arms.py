@@ -203,6 +203,7 @@ def _run_llm_arm(
         questions_with_prompts,
         staging_table,
         arm,
+        refresh=settings.dbxcarta_client_refresh,
     )
 
     for q in questions:
@@ -347,6 +348,7 @@ def _run_graph_rag_arm(
         questions_with_prompts,
         staging_table,
         "graph_rag",
+        refresh=settings.dbxcarta_client_refresh,
     )
 
     for q in questions:

@@ -1,4 +1,4 @@
-"""Neo4j schema dump: read all columns for the configured catalog/schemas."""
+"""Neo4j schema dump: read all columns across the configured catalogs/schemas."""
 
 from __future__ import annotations
 
@@ -8,16 +8,18 @@ from dbxcarta.client.neo4j_utils import neo4j_credentials
 from dbxcarta.client.settings import ClientSettings
 
 _CYPHER = """
-MATCH (db:Database {name: $catalog})-[:HAS_SCHEMA]->(s:Schema)
+MATCH (db:Database)-[:HAS_SCHEMA]->(s:Schema)
       -[:HAS_TABLE]->(t:Table)-[:HAS_COLUMN]->(c:Column)
-WHERE size($schemas) = 0 OR s.name IN $schemas
-RETURN s.name AS schema_name,
+WHERE db.name IN $catalogs
+  AND (size($schemas) = 0 OR s.name IN $schemas)
+RETURN db.name AS catalog_name,
+       s.name AS schema_name,
        t.name  AS table_name,
        c.name  AS column_name,
        c.data_type AS data_type,
        c.comment   AS comment,
        c.ordinal_position AS pos
-ORDER BY s.name, t.name, c.ordinal_position
+ORDER BY db.name, s.name, t.name, c.ordinal_position
 """
 
 
@@ -26,12 +28,13 @@ def fetch_schema_dump(settings: ClientSettings) -> str:
     uri, username, password = neo4j_credentials(settings)
     driver = GraphDatabase.driver(uri, auth=(username, password))
 
+    catalogs = settings.resolved_catalogs
     rows: list[dict] = []
     try:
         with driver.session() as session:
             result = session.run(
                 _CYPHER,
-                catalog=settings.dbxcarta_catalog,
+                catalogs=catalogs,
                 schemas=settings.schemas_list,
             )
             rows = result.data()
@@ -41,11 +44,11 @@ def fetch_schema_dump(settings: ClientSettings) -> str:
     if not rows:
         raise RuntimeError(
             "Neo4j returned no columns for "
-            f"catalog={settings.dbxcarta_catalog!r} schemas={settings.schemas_list!r}. "
+            f"catalogs={catalogs!r} schemas={settings.schemas_list!r}. "
             "Run the server pipeline first to populate the graph."
         )
 
-    text = _format_schema(rows, settings.dbxcarta_catalog)
+    text = _format_schema(rows)
     max_chars = settings.dbxcarta_schema_dump_max_chars
     if max_chars > 0 and len(text) > max_chars:
         cut = text.rfind("\n", 0, max_chars)
@@ -53,13 +56,17 @@ def fetch_schema_dump(settings: ClientSettings) -> str:
     return text
 
 
-def _format_schema(rows: list[dict], catalog: str) -> str:
-    """Render column rows as a structured schema block for prompt insertion."""
+def _format_schema(rows: list[dict]) -> str:
+    """Render column rows as a structured schema block for prompt insertion.
+
+    Each table is qualified by its own ``catalog_name`` so a multi-catalog
+    dump (bronze/silver/gold) yields correct three-part names.
+    """
     lines: list[str] = []
     current_table: str | None = None
 
     for row in rows:
-        fqt = f"{catalog}.{row['schema_name']}.{row['table_name']}"
+        fqt = f"{row['catalog_name']}.{row['schema_name']}.{row['table_name']}"
         if fqt != current_table:
             if current_table is not None:
                 lines.append("")

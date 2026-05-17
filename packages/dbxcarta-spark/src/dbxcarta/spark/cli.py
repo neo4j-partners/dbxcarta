@@ -242,6 +242,7 @@ def _handle_verify(argv: list[str]) -> int:
             ws=ws,
             warehouse_id=settings.databricks_warehouse_id,
             catalog=settings.dbxcarta_catalog,
+            catalogs=settings.resolved_catalogs(),
             sample_limit=settings.dbxcarta_sample_limit,
         )
     finally:

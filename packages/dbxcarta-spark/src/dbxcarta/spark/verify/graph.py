@@ -9,50 +9,68 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from dbxcarta.spark.contract import CONTRACT_VERSION, NodeLabel
-from dbxcarta.spark.verify import Violation, scoped_catalog, single_value
+from dbxcarta.spark.verify import Violation, scoped_catalogs, single_value
 
 if TYPE_CHECKING:
     from neo4j import Driver
 
 
-def check(driver: "Driver", summary: dict[str, Any]) -> list[Violation]:
+def check(
+    driver: "Driver", summary: dict[str, Any], *, catalogs: list[str] | None = None
+) -> list[Violation]:
     out: list[Violation] = []
-    out.extend(_check_node_counts(driver, summary))
+    out.extend(_check_node_counts(driver, summary, catalogs=catalogs))
     out.extend(_check_contract_version(driver))
     out.extend(_check_relationship_integrity(driver))
     return out
 
 
-def _check_node_counts(driver: "Driver", summary: dict[str, Any]) -> list[Violation]:
+def _check_node_counts(
+    driver: "Driver", summary: dict[str, Any], *, catalogs: list[str] | None = None
+) -> list[Violation]:
     """Neo4j node counts match what the job reported writing.
 
-    Queries are scoped to the current catalog so a shared Neo4j instance
-    holding data from multiple catalogs does not produce false positives.
+    Queries are scoped to every resolved catalog so a shared Neo4j instance
+    holding data from multiple catalogs does not produce false positives, and
+    so a multi-catalog run is checked against its aggregate summary totals
+    rather than one catalog's subset.
     """
-    catalog, prefix = scoped_catalog(summary)
+    catalog_ids, prefixes = scoped_catalogs(summary, catalogs)
     counts = summary.get("row_counts") or {}
+    # The job writes exactly one Database node per resolved catalog
+    # (`schema_graph.build_database_nodes`). ExtractCounts has no `databases`
+    # field, so `row_counts` never carries one and trusting it would default
+    # to 1 and mismatch every multi-catalog run. The resolved-catalog count is
+    # the contract; fall back to the legacy default only when it is unknown.
     expected = {
-        NodeLabel.DATABASE: counts.get("databases", 1),
+        NodeLabel.DATABASE: len(catalog_ids) or counts.get("databases", 1),
         NodeLabel.SCHEMA: counts.get("schemas"),
         NodeLabel.TABLE: counts.get("tables"),
         NodeLabel.COLUMN: counts.get("columns"),
     }
     _cypher: dict[NodeLabel, tuple[str, dict]] = {
         NodeLabel.DATABASE: (
-            f"MATCH (n:{NodeLabel.DATABASE}) WHERE n.id = $catalog RETURN count(n) AS cnt",
-            {"catalog": catalog},
+            f"MATCH (n:{NodeLabel.DATABASE}) WHERE n.id IN $catalog_ids"
+            " RETURN count(n) AS cnt",
+            {"catalog_ids": catalog_ids},
         ),
         NodeLabel.SCHEMA: (
-            f"MATCH (n:{NodeLabel.SCHEMA}) WHERE n.id STARTS WITH $prefix RETURN count(n) AS cnt",
-            {"prefix": prefix},
+            f"MATCH (n:{NodeLabel.SCHEMA})"
+            " WHERE any(p IN $prefixes WHERE n.id STARTS WITH p)"
+            " RETURN count(n) AS cnt",
+            {"prefixes": prefixes},
         ),
         NodeLabel.TABLE: (
-            f"MATCH (n:{NodeLabel.TABLE}) WHERE n.id STARTS WITH $prefix RETURN count(n) AS cnt",
-            {"prefix": prefix},
+            f"MATCH (n:{NodeLabel.TABLE})"
+            " WHERE any(p IN $prefixes WHERE n.id STARTS WITH p)"
+            " RETURN count(n) AS cnt",
+            {"prefixes": prefixes},
         ),
         NodeLabel.COLUMN: (
-            f"MATCH (n:{NodeLabel.COLUMN}) WHERE n.id STARTS WITH $prefix RETURN count(n) AS cnt",
-            {"prefix": prefix},
+            f"MATCH (n:{NodeLabel.COLUMN})"
+            " WHERE any(p IN $prefixes WHERE n.id STARTS WITH p)"
+            " RETURN count(n) AS cnt",
+            {"prefixes": prefixes},
         ),
     }
     out: list[Violation] = []

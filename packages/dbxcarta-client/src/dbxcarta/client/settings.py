@@ -16,6 +16,12 @@ class ClientSettings(BaseSettings):
 
     # Shared with server
     dbxcarta_catalog: str
+    # Comma-separated multi-catalog list, mirroring the server's
+    # DBXCARTA_CATALOGS. Blank falls back to the single dbxcarta_catalog so
+    # single-catalog examples are unaffected. Used to make the schema_dump
+    # baseline cover every ingested catalog (bronze/silver/gold), not just the
+    # primary anchor; the graph_rag arm is already catalog-qualified per node.
+    dbxcarta_catalogs: str = ""
     dbxcarta_schemas: str = ""
     databricks_warehouse_id: str
     databricks_secret_scope: str = "dbxcarta-neo4j"
@@ -32,8 +38,16 @@ class ClientSettings(BaseSettings):
     dbxcarta_client_questions: str = ""  # defaults to {volume_path}/questions.json
     dbxcarta_client_arms: str = "no_context,schema_dump,graph_rag"
     dbxcarta_client_top_k: int = 5
+    # Force re-inference even when a matching cached staging table exists.
+    # The cache keys on (endpoint, arm, ordered question prompts); set this
+    # when the endpoint's underlying model changed but the prompts did not.
+    dbxcarta_client_refresh: bool = False
     dbxcarta_client_timeout_sec: int = 30
-    dbxcarta_schema_dump_max_chars: int = 0  # 0 = no limit
+    # Tail-truncate the schema_dump prompt. 0 = no limit. Default 7500 chars
+    # (~2k tokens at ~3.7 chars/token for dense schema text) makes schema_dump
+    # a token-matched fairness baseline against graph_rag's retrieved context
+    # rather than a full multi-catalog dump.
+    dbxcarta_schema_dump_max_chars: int = 7500
     # 0 = no cap; set to 10-20 for dense single-schema fixtures to prevent
     # REFERENCES expansion from returning dozens of neighbor tables
     dbxcarta_client_max_expansion_tables: int = 0
@@ -51,6 +65,15 @@ class ClientSettings(BaseSettings):
     @classmethod
     def _validate_catalog(cls, v: str) -> str:
         return validate_identifier(v)
+
+    @field_validator("dbxcarta_catalogs")
+    @classmethod
+    def _validate_catalogs(cls, v: str) -> str:
+        for part in v.split(","):
+            name = part.strip()
+            if name:
+                validate_identifier(name, label="catalog")
+        return v
 
     @field_validator("dbxcarta_summary_table")
     @classmethod
@@ -95,6 +118,16 @@ class ClientSettings(BaseSettings):
                 f"{self.databricks_volume_path}/questions.json"
             )
         return self
+
+    @property
+    def resolved_catalogs(self) -> list[str]:
+        """Catalogs the graph spans, order-preserving and de-duplicated.
+
+        Falls back to the single dbxcarta_catalog when dbxcarta_catalogs is
+        blank, preserving single-catalog behavior.
+        """
+        listed = [c.strip() for c in self.dbxcarta_catalogs.split(",") if c.strip()]
+        return list(dict.fromkeys(listed)) or [self.dbxcarta_catalog]
 
     @property
     def schemas_list(self) -> list[str]:

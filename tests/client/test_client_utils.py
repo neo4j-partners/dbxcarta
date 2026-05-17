@@ -101,9 +101,10 @@ def test_resolve_staging_table_rejects_invalid_identifier():
 # _format_schema
 # ---------------------------------------------------------------------------
 
-def _rows(*specs):
+def _rows(*specs, catalog="cat"):
     return [
         {
+            "catalog_name": catalog,
             "schema_name": s,
             "table_name": t,
             "column_name": c,
@@ -120,27 +121,36 @@ def test_format_schema_groups_by_table():
         ("s", "t1", "name", "STRING", ""),
         ("s", "t2", "val", "INT", None),
     )
-    text = _format_schema(rows, "cat")
+    text = _format_schema(rows)
     assert "cat.s.t1" in text
     assert "cat.s.t2" in text
     assert "\n\n" in text  # blank line between tables
 
 
+def test_format_schema_qualifies_each_row_by_its_own_catalog():
+    rows = _rows(("s", "t", "id", "INT", ""), catalog="silver") + _rows(
+        ("s", "g", "id", "INT", ""), catalog="gold"
+    )
+    text = _format_schema(rows)
+    assert "silver.s.t" in text
+    assert "gold.s.g" in text
+
+
 def test_format_schema_appends_comment():
     rows = _rows(("s", "t", "id", "INT", "primary key"))
-    text = _format_schema(rows, "cat")
+    text = _format_schema(rows)
     assert "— primary key" in text
 
 
 def test_format_schema_omits_blank_comment():
     rows = _rows(("s", "t", "id", "INT", ""))
-    text = _format_schema(rows, "cat")
+    text = _format_schema(rows)
     assert "—" not in text
 
 
 def test_format_schema_omits_none_comment():
     rows = _rows(("s", "t", "id", "INT", None))
-    text = _format_schema(rows, "cat")
+    text = _format_schema(rows)
     assert "—" not in text
 
 

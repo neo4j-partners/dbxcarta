@@ -1,12 +1,20 @@
 """Regression tests for catalog-scoped verify checks.
 
-The verify node/edge/value count checks scope their Cypher to the current
-catalog so a shared Neo4j instance is not a source of false positives. Node
-ids are normalized through ``contract.generate_id`` (lowercased; spaces and
-hyphens become underscores). The scoping predicate must apply the same
-normalization: a regression where it compared the raw ``summary["catalog"]``
-against ``n.id`` made every scoped count read 0 whenever the catalog or schema
-name contained a hyphen, so a fully correct ingest failed the verify gate.
+The verify node/edge/value count checks scope their Cypher to the resolved
+catalog set so a shared Neo4j instance is not a source of false positives, and
+so a multi-catalog run is checked against its aggregate summary totals rather
+than one catalog's subset.
+
+Two properties are pinned here:
+
+1. Id normalization: node ids go through ``contract.generate_id`` (lowercased;
+   spaces and hyphens become underscores). The scoping predicate must apply
+   the same normalization, or a hyphenated catalog reads every scoped count as
+   0 and a correct ingest fails the verify gate.
+2. Multi-catalog scope: when ``settings.resolved_catalogs()`` lists more than
+   one catalog, the count invariants must sum across all of them. Scoping to
+   only the single primary catalog made every aggregate count mismatch on
+   every multi-catalog run.
 """
 
 from __future__ import annotations
@@ -28,6 +36,11 @@ _REL_SRC = re.compile(r"\(src:(\w+)\)-\[r:(\w+)\]")
 _CATALOG = "graph-enriched-lakehouse"
 _SCHEMA = "graph-enriched-schema"
 
+# A medallion-style multi-catalog set (the production Finance Genie shape).
+_BRONZE = "graph-enriched-finance-bronze"
+_SILVER = "graph-enriched-finance-silver"
+_GOLD = "graph-enriched-finance-gold"
+
 
 class _Result:
     def __init__(self, cnt: int) -> None:
@@ -35,6 +48,10 @@ class _Result:
 
     def single(self):
         return {"cnt": self._cnt}
+
+
+def _any_prefix(node_id: str, prefixes) -> bool:
+    return any(node_id.startswith(p) for p in (prefixes or []))
 
 
 class _Session:
@@ -51,19 +68,22 @@ class _Session:
     def run(self, cypher: str, **params):
         if "count(r)" in cypher:
             rel = _REL_SRC.search(cypher).group(2)
-            prefix = params.get("prefix")
+            prefixes = params.get("prefixes")
             cnt = sum(
                 1
                 for rt, sid in self._rels
-                if rt == rel and (prefix is None or sid.startswith(prefix))
+                if rt == rel and _any_prefix(sid, prefixes)
             )
             return _Result(cnt)
         label = _NODE_LABEL.search(cypher).group(1)
-        if "catalog" in params:
-            cnt = sum(1 for lb, nid in self._nodes if lb == label and nid == params["catalog"])
-        elif "prefix" in params:
+        if "catalog_ids" in params:
+            ids = set(params["catalog_ids"])
+            cnt = sum(1 for lb, nid in self._nodes if lb == label and nid in ids)
+        elif "prefixes" in params:
             cnt = sum(
-                1 for lb, nid in self._nodes if lb == label and nid.startswith(params["prefix"])
+                1
+                for lb, nid in self._nodes
+                if lb == label and _any_prefix(nid, params["prefixes"])
             )
         else:
             cnt = sum(1 for lb, _ in self._nodes if lb == label)
@@ -89,15 +109,33 @@ def test_scoped_catalog_empty_summary():
     assert verify.scoped_catalog({}) == ("", ".")
 
 
-def _graph_nodes():
-    db_id = generate_id(_CATALOG)
-    schema_id = generate_id(_CATALOG, _SCHEMA)
-    tables = ["orders", "customers"]
+def test_scoped_catalogs_falls_back_to_single_when_list_empty():
+    ids, prefixes = verify.scoped_catalogs({"catalog": _CATALOG}, None)
+    assert ids == ["graph_enriched_lakehouse"]
+    assert prefixes == ["graph_enriched_lakehouse."]
+    assert verify.scoped_catalogs({"catalog": _CATALOG}, []) == (ids, prefixes)
+
+
+def test_scoped_catalogs_normalizes_every_resolved_catalog():
+    ids, prefixes = verify.scoped_catalogs(
+        {"catalog": _SILVER}, [_BRONZE, _SILVER, _GOLD]
+    )
+    assert ids == [
+        "graph_enriched_finance_bronze",
+        "graph_enriched_finance_silver",
+        "graph_enriched_finance_gold",
+    ]
+    assert prefixes == [i + "." for i in ids]
+
+
+def _graph_nodes(catalog=_CATALOG, schema=_SCHEMA):
+    db_id = generate_id(catalog)
+    schema_id = generate_id(catalog, schema)
     nodes = [("Database", db_id), ("Schema", schema_id)]
-    for t in tables:
-        nodes.append(("Table", generate_id(_CATALOG, _SCHEMA, t)))
+    for t in ["orders", "customers"]:
+        nodes.append(("Table", generate_id(catalog, schema, t)))
     for col in ["id", "name", "total"]:
-        nodes.append(("Column", generate_id(_CATALOG, _SCHEMA, "orders", col)))
+        nodes.append(("Column", generate_id(catalog, schema, "orders", col)))
     return nodes
 
 
@@ -125,6 +163,47 @@ def test_node_counts_still_flag_a_real_mismatch():
     assert "graph.node_count_mismatch.Table" in codes
 
 
+def test_node_counts_pass_for_multi_catalog_aggregate():
+    """A medallion run: 3 catalogs written, summary counts the aggregate.
+
+    Scoping to only the primary (silver) catalog would see 1 Database / 1
+    Schema / 2 Tables / 3 Columns and mismatch the 3/3/6/9 aggregate. With the
+    full resolved-catalog scope the sums match.
+    """
+    nodes = (
+        _graph_nodes(_BRONZE, _SCHEMA)
+        + _graph_nodes(_SILVER, _SCHEMA)
+        + _graph_nodes(_GOLD, _SCHEMA)
+    )
+    summary = {
+        "catalog": _SILVER,
+        "row_counts": {"databases": 3, "schemas": 3, "tables": 6, "columns": 9},
+    }
+    assert (
+        graph_mod._check_node_counts(
+            _Driver(nodes), summary, catalogs=[_BRONZE, _SILVER, _GOLD]
+        )
+        == []
+    )
+
+
+def test_node_counts_multi_catalog_flags_missing_catalog():
+    """If one catalog's nodes are missing, the aggregate still mismatches."""
+    nodes = _graph_nodes(_BRONZE, _SCHEMA) + _graph_nodes(_SILVER, _SCHEMA)
+    summary = {
+        "catalog": _SILVER,
+        "row_counts": {"databases": 3, "schemas": 3, "tables": 6, "columns": 9},
+    }
+    codes = {
+        v.code
+        for v in graph_mod._check_node_counts(
+            _Driver(nodes), summary, catalogs=[_BRONZE, _SILVER, _GOLD]
+        )
+    }
+    assert "graph.node_count_mismatch.Database" in codes
+    assert "graph.node_count_mismatch.Table" in codes
+
+
 def test_references_edge_count_scoped_with_hyphenated_catalog():
     summary = {
         "catalog": _CATALOG,
@@ -136,6 +215,29 @@ def test_references_edge_count_scoped_with_hyphenated_catalog():
     assert references_mod._check_edge_count(driver, summary) == []
 
 
+def test_references_edge_count_multi_catalog_aggregate():
+    """Inferred edges land per-catalog (cross-catalog pairing is blocked); the
+    aggregate REFERENCES total must sum across every resolved catalog."""
+    rels = [
+        ("REFERENCES", generate_id(_BRONZE, _SCHEMA, "orders", "customer_id")),
+        ("REFERENCES", generate_id(_SILVER, _SCHEMA, "orders", "customer_id")),
+        ("REFERENCES", generate_id(_GOLD, _SCHEMA, "orders", "customer_id")),
+    ]
+    summary = {
+        "catalog": _SILVER,
+        "row_counts": {"fk_edges": 0, "fk_inferred_metadata_accepted": 1,
+                       "fk_inferred_semantic_accepted": 2},
+    }
+    assert (
+        references_mod._check_edge_count(
+            _Driver(nodes=(), rels=rels), summary, catalogs=[_BRONZE, _SILVER, _GOLD]
+        )
+        == []
+    )
+    # Scoping to silver alone would see 1, not the aggregate 3 -> mismatch.
+    assert references_mod._check_edge_count(_Driver(nodes=(), rels=rels), summary)
+
+
 def test_value_count_scoped_with_hyphenated_catalog():
     summary = {"catalog": _CATALOG, "row_counts": {"value_nodes": 2}}
     col_id = generate_id(_CATALOG, _SCHEMA, "orders", "status")
@@ -144,6 +246,23 @@ def test_value_count_scoped_with_hyphenated_catalog():
         ("Value", generate_value_id(col_id, "closed")),
     ]
     assert values_mod._check_value_count(_Driver(value_nodes), summary) == []
+
+
+def test_value_count_multi_catalog_aggregate():
+    bronze_col = generate_id(_BRONZE, _SCHEMA, "orders", "status")
+    silver_col = generate_id(_SILVER, _SCHEMA, "orders", "status")
+    value_nodes = [
+        ("Value", generate_value_id(bronze_col, "open")),
+        ("Value", generate_value_id(bronze_col, "closed")),
+        ("Value", generate_value_id(silver_col, "open")),
+    ]
+    summary = {"catalog": _SILVER, "row_counts": {"value_nodes": 3}}
+    assert (
+        values_mod._check_value_count(
+            _Driver(value_nodes), summary, catalogs=[_BRONZE, _SILVER, _GOLD]
+        )
+        == []
+    )
 
 
 if __name__ == "__main__":

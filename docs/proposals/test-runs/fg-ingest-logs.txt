@@ -1,0 +1,208 @@
+Finding latest run matching 'dbxcarta:*'...
+  Found run 155880467925191
+
+Run: dbxcarta: ingest
+  Parent run ID: 155880467925191
+  Result state:  FAILED
+  URL:           https://adb-1098933906466604.4.azuredatabricks.net/?o=1098933906466604#job/497711618968225/run/155880467925191
+---
+Task: run_script (task run ID 193170735469649)
+  Error:
+    RuntimeError: [dbxcarta] verify gate failed: 5 violation(s)
+    verify: run_id=local FAIL (5 violations)
+      [graph.node_count_mismatch.Schema] Schema: Neo4j has 1, run summary reported 3.
+        {'label': 'Schema', '[REDACTED]': 1, 'summary': 3}
+      [graph.node_count_mismatch.Table] Table: Neo4j has 5, run summary reported 12.
+        {'label': 'Table', '[REDACTED]': 5, 'summary': 12}
+      [graph.node_count_mismatch.Column] Column: Neo4j has 24, run summary reported 95.
+        {'label': 'Column', '[REDACTED]': 24, 'summary': 95}
+      [references.edge_count_mismatch] Neo4j has 0 REFERENCES edges; run summary reported 13 (declared + inferred).
+        {'[REDACTED]': 0, 'summary_total': 13}
+      [values.count_mismatch] Neo4j has 25 Value nodes; summary reported 51.
+        {'[REDACTED]': 25, 'summary': 51}
+    [Trace ID: 00-b02e563084844a8d8530c153cf3c2db0-a4ba4c4525ed4b89-00]
+  Trace:
+    [0;31m---------------------------------------------------------------------------[0m
+    [0;31mRuntimeError[0m                              Traceback (most recent call last)
+    File [0;32m~/.ipykernel/2730/command--1-3465315922:8[0m
+    [1;32m      5[0m [38;5;28;01mdel[39;00m sys
+    [1;32m      7[0m [38;5;28;01mwith[39;00m [38;5;28mopen[39m(filename, [38;5;124m"[39m[38;5;124mrb[39m[38;5;124m"[39m) [38;5;28;01mas[39;00m f:
+    [0;32m----> 8[0m   exec([38;5;28mcompile[39m(f[38;5;241m.[39mread(), filename, [38;5;124m'[39m[38;5;124mexec[39m[38;5;124m'[39m))
+    
+    File [0;32m/Workspace/Users/ryan.knight@[REDACTED].com/dbxcarta/scripts/_dbxrunner_bootstrap.py:520[0m
+    [1;32m    516[0m     entry()
+    [1;32m    519[0m [38;5;28;01mif[39;00m [38;5;18m__name__[39m [38;5;241m==[39m [38;5;124m"[39m[38;5;124m__main__[39m[38;5;124m"[39m:
+    [0;32m--> 520[0m     main()
+    
+    File [0;32m/Workspace/Users/ryan.knight@[REDACTED].com/dbxcarta/scripts/_dbxrunner_bootstrap.py:516[0m, in [0;36mmain[0;34m(argv)[0m
+    [1;32m    512[0m sys[38;5;241m.[39margv [38;5;241m=[39m rebuild_argv(argv[[38;5;241m0[39m], inv[38;5;241m.[39mproject_params)
+    [1;32m    513[0m entry [38;5;241m=[39m _resolve_entry_point(
+    [1;32m    514[0m     inv[38;5;241m.[39mconsole_script, inv[38;5;241m.[39mwheel_package, per_run_target
+    [1;32m    515[0m )
+    [0;32m--> 516[0m entry()
+    
+    File [0;32m/local_disk0/tmp/dbxrunner/runs/t-1778973261-2730-4cdcb7fe/site/dbxcarta/spark/entrypoint.py:15[0m, in [0;36mmain[0;34m()[0m
+    [1;32m     13[0m [38;5;28;01mdef[39;00m [38;5;21mmain[39m() [38;5;241m-[39m[38;5;241m>[39m [38;5;28;01mNone[39;00m:
+    [1;32m     14[0m     inject_params()
+    [0;32m---> 15[0m     run_dbxcarta()
+    
+    File [0;32m/local_disk0/tmp/dbxrunner/runs/t-1778973261-2730-4cdcb7fe/site/dbxcarta/spark/run.py:92[0m, in [0;36mrun_dbxcarta[0;34m(settings, spark)[0m
+    [1;32m     89[0m primary_error: [38;5;167;01mBaseException[39;00m [38;5;241m|[39m [38;5;28;01mNone[39;00m [38;5;241m=[39m [38;5;28;01mNone[39;00m
+    [1;32m     91[0m [38;5;28;01mtry[39;00m:
+    [0;32m---> 92[0m     _run(spark, resolved_settings, schema_list, summary)
+    [1;32m     93[0m     summary[38;5;241m.[39mfinish(status[38;5;241m=[39m[38;5;124m"[39m[38;5;124msuccess[39m[38;5;124m"[39m)
+    [1;32m     94[0m [38;5;28;01mexcept[39;00m [38;5;167;01mException[39;00m [38;5;28;01mas[39;00m exc:
+    
+    File [0;32m/local_disk0/tmp/dbxrunner/runs/t-1778973261-2730-4cdcb7fe/site/dbxcarta/spark/run.py:215[0m, in [0;36m_run[0;34m(spark, settings, schema_list, summary)[0m
+    [1;32m    213[0m         _load([REDACTED], driver, settings, extract_result, fk_result, values, summary)
+    [1;32m    214[0m         summary[38;5;241m.[39m[REDACTED]_counts [38;5;241m=[39m query_counts(driver)
+    [0;32m--> 215[0m         _verify(driver, settings, summary)
+    [1;32m    216[0m [38;5;28;01mexcept[39;00m [38;5;167;01mException[39;00m [38;5;28;01mas[39;00m exc:
+    [1;32m    217[0m     run_error [38;5;241m=[39m exc
+    
+    File [0;32m/local_disk0/tmp/dbxrunner/runs/t-1778973261-2730-4cdcb7fe/site/dbxcarta/spark/run.py:294[0m, in [0;36m_verify[0;34m(driver, settings, summary)[0m
+    [1;32m    292[0m     [38;5;28;01mreturn[39;00m
+    [1;32m    293[0m [38;5;28;01mif[39;00m settings[38;5;241m.[39mdbxcarta_verify_gate:
+    [0;32m--> 294[0m     [38;5;28;01mraise[39;00m [38;5;167;01mRuntimeError[39;00m(
+    [1;32m    295[0m         [38;5;124mf[39m[38;5;124m"[39m[38;5;124m[dbxcarta] verify gate failed: [39m[38;5;132;01m{[39;00m[38;5;28mlen[39m(report[38;5;241m.[39mviolations)[38;5;132;01m}[39;00m[38;5;124m violation(s)[39m[38;5;130;01m\n[39;00m[38;5;124m"[39m
+    [1;32m    296[0m         [38;5;241m+[39m report[38;5;241m.[39mformat()
+    [1;32m    297[0m     )
+    [1;32m    298[0m logger[38;5;241m.[39mwarning(
+    [1;32m    299[0m     [38;5;124m"[39m[38;5;124m[dbxcarta] verify reported [39m[38;5;132;01m%d[39;00m[38;5;124m violation(s) (warn-only; set[39m[38;5;124m"[39m
+    [1;32m    300[0m     [38;5;124m"[39m[38;5;124m DBXCARTA_VERIFY_GATE=true to gate):[39m[38;5;130;01m\n[39;00m[38;5;132;01m%s[39;00m[38;5;124m"[39m,
+    [1;32m    301[0m     [38;5;28mlen[39m(report[38;5;241m.[39mviolations), report[38;5;241m.[39mformat(),
+    [1;32m    302[0m )
+    
+    [0;31mRuntimeError[0m: [dbxcarta] verify gate failed: 5 violation(s)
+    verify: run_id=local FAIL (5 violations)
+      [graph.node_count_mismatch.Schema] Schema: Neo4j has 1, run summary reported 3.
+        {'label': 'Schema', '[REDACTED]': 1, 'summary': 3}
+      [graph.node_count_mismatch.Table] Table: Neo4j has 5, run summary reported 12.
+        {'label': 'Table', '[REDACTED]': 5, 'summary': 12}
+      [graph.node_count_mismatch.Column] Column: Neo4j has 24, run summary reported 95.
+        {'label': 'Column', '[REDACTED]': 24, 'summary': 95}
+      [references.edge_count_mismatch] Neo4j has 0 REFERENCES edges; run summary reported 13 (declared + inferred).
+        {'[REDACTED]': 0, 'summary_total': 13}
+      [values.count_mismatch] Neo4j has 25 Value nodes; summary reported 51.
+        {'[REDACTED]': 25, 'summary': 51}
+  Logs:
+      pip: --target /local_disk0/tmp/dbxrunner/runs/t-1778973261-2730-4cdcb7fe/site --force-reinstall --no-deps /local_disk0/tmp/dbxrunner/runs/t-1778973261-2730-4cdcb7fe/wheelsrc/dbxcarta_spark-1.0.0-py3-none-any.whl
+    Processing /local_disk0/tmp/dbxrunner/runs/t-1778973261-2730-4cdcb7fe/wheelsrc/dbxcarta_spark-1.0.0-py3-none-any.whl
+    Installing collected packages: dbxcarta-spark
+    Successfully installed dbxcarta-spark-1.0.0
+      pip: --no-deps databricks-job-runner==0.6.1 [REDACTED]==6.1.0 pytz==2026.1.post1 pydantic==2.13.3 pydantic-core==2.46.3 pydantic-settings==2.14.0 python-dotenv==1.2.2 annotated-types==0.7.0 typing-extensions==4.15.0 typing-inspection==0.4.2
+    
+    
+    
+    [1m[[0m[34;49mnotice[0m[1;39;49m][0m[39;49m A new release of pip is available: [0m[31;49m25.0.1[0m[39;49m -> [0m[32;49m26.1.1[0m
+    [1m[[0m[34;49mnotice[0m[1;39;49m][0m[39;49m To update, run: [0m[32;49mpip install --upgrade pip[0m
+    
+    
+    Collecting databricks-job-runner==0.6.1
+      Downloading databricks_job_runner-0.6.1-py3-none-any.whl.metadata (4.2 kB)
+    Collecting [REDACTED]==6.1.0
+      Downloading [REDACTED]-6.1.0-py3-none-any.whl.metadata (5.3 kB)
+    Collecting pytz==2026.1.post1
+      Downloading pytz-2026.1.post1-py2.py3-none-any.whl.metadata (22 kB)
+    Collecting pydantic==2.13.3
+      Downloading pydantic-2.13.3-py3-none-any.whl.metadata (108 kB)
+    Collecting pydantic-core==2.46.3
+      Downloading pydantic_core-2.46.3-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (6.6 kB)
+    Collecting pydantic-settings==2.14.0
+      Downloading pydantic_settings-2.14.0-py3-none-any.whl.metadata (3.4 kB)
+    Collecting python-dotenv==1.2.2
+      Downloading python_dotenv-1.2.2-py3-none-any.whl.metadata (27 kB)
+    Requirement already satisfied: annotated-types==0.7.0 in /databricks/python3/lib/python3.12/site-packages (0.7.0)
+    Requirement already satisfied: typing-extensions==4.15.0 in /local_disk0/.ephemeral_nfs/cluster_libraries/python/lib/python3.12/site-packages (4.15.0)
+    Requirement already satisfied: typing-inspection==0.4.2 in /local_disk0/.ephemeral_nfs/cluster_libraries/python/lib/python3.12/site-packages (0.4.2)
+    Downloading databricks_job_runner-0.6.1-py3-none-any.whl (45 kB)
+    Downloading [REDACTED]-6.1.0-py3-none-any.whl (325 kB)
+    Downloading pytz-2026.1.post1-py2.py3-none-any.whl (510 kB)
+    Downloading pydantic-2.13.3-py3-none-any.whl (471 kB)
+    Downloading pydantic_core-2.46.3-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (2.1 MB)
+    [?25l   [90m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m [32m0.0/2.1 MB[0m [31m?[0m eta [36m-:--:--[0m
+    [2K   [90m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m [32m2.1/2.1 MB[0m [31m38.0 MB/s[0m eta [36m0:00:00[0m
+    [?25hDownloading pydantic_settings-2.14.0-py3-none-any.whl (60 kB)
+    Downloading python_dotenv-1.2.2-py3-none-any.whl (22 kB)
+    Installing collected packages: pytz, python-dotenv, pydantic-settings, pydantic-core, pydantic, [REDACTED], databricks-job-runner
+      Attempting uninstall: pytz
+        Found existing installation: pytz 2024.1
+        Not uninstalling pytz at /databricks/python3/lib/python3.12/site-packages, outside environment /local_disk0/.ephemeral_nfs/envs/pythonEnv-f1a4ff29-2b13-442c-9c09-6ae1592a4123
+        Can't uninstall 'pytz'. No files were found to uninstall.
+      Attempting uninstall: pydantic-core
+        Found existing installation: pydantic_core 2.46.4
+        Not uninstalling pydantic-core at /local_disk0/.ephemeral_nfs/cluster_libraries/python/lib/python3.12/site-packages, outside environment /local_disk0/.ephemeral_nfs/envs/pythonEnv-f1a4ff29-2b13-442c-9c09-6ae1592a4123
+        Can't uninstall 'pydantic_core'. No files were found to uninstall.
+      Attempting uninstall: pydantic
+        Found existing installation: pydantic 2.13.4
+        Not uninstalling pydantic at /local_disk0/.ephemeral_nfs/cluster_libraries/python/lib/python3.12/site-packages, outside environment /local_disk0/.ephemeral_nfs/envs/pythonEnv-f1a4ff29-2b13-442c-9c09-6ae1592a4123
+        Can't uninstall 'pydantic'. No files were found to uninstall.
+      Attempting uninstall: [REDACTED]
+        Found existing installation: [REDACTED] 6.0.2
+        Not uninstalling [REDACTED] at /local_disk0/.ephemeral_nfs/cluster_libraries/python/lib/python3.12/site-packages, outside environment /local_disk0/.ephemeral_nfs/envs/pythonEnv-f1a4ff29-2b13-442c-9c09-6ae1592a4123
+        Can't uninstall '[REDACTED]'. No files were found to uninstall.
+    Successfully installed databricks-job-runner-0.6.1 [REDACTED]-6.1.0 pydantic-2.13.3 pydantic-core-2.46.3 pydantic-settings-2.14.0 python-dotenv-1.2.2 pytz-2026.1.post1
+    
+    
+    
+    [1m[[0m[34;49mnotice[0m[1;39;49m][0m[39;49m A new release of pip is available: [0m[31;49m25.0.1[0m[39;49m -> [0m[32;49m26.1.1[0m
+    [1m[[0m[34;49mnotice[0m[1;39;49m][0m[39;49m To update, run: [0m[32;49mpip install --upgrade pip[0m
+    
+    
+    BOOTSTRAP_MANIFEST {"wheel_volume_path": "/Volumes/dbxcarta-catalog/finance_genie_ops/dbxcarta-ops/wheels/dbxcarta_spark-stable.whl", "wheel_sha": "02ed691650029c70", "wheel_filename": "dbxcarta_spark-1.0.0-py3-none-any.whl", "per_run_target": "/local_disk0/tmp/dbxrunner/runs/t-1778973261-2730-4cdcb7fe/site", "closure_hash": "2a8c7e20d0d56b50", "smoke_check": "ok (6)", "run_token": "t-1778973261-2730-4cdcb7fe"}
+    [dbxcarta] run_id=local job=dbxcarta status=failure catalog=graph-enriched-finance-silver
+      schemas: 3
+      tables: 12
+      columns: 95
+      fk_declared: 0
+      fk_resolved: 0
+      fk_skipped: 0
+      fk_edges: 0
+      fk_inferred_metadata_accepted: 2
+      fk_inferred_metadata_composite_pk_skipped: 0
+      fk_inferred_semantic_accepted: 11
+      fk_inferred_semantic_composite_pk_skipped: 0
+      candidate_columns: 19
+      sampled_columns: 15
+      skipped_columns: 4
+      skipped_schemas: 0
+      cardinality_failed_tables: 0
+      cardinality_wall_clock_ms: 3456
+      sample_wall_clock_ms: 1261
+      value_nodes: 51
+      has_value_edges: 51
+      cardinality_min: 1
+      cardinality_p25: 2
+      cardinality_p50: 3
+      cardinality_p75: 7
+      cardinality_p95: 23322
+      cardinality_max: 23322
+      [REDACTED]/Database: 3
+      [REDACTED]/Schema: 3
+      [REDACTED]/Table: 12
+      [REDACTED]/Column: 95
+      [REDACTED]/Value: 51
+      [REDACTED]/HAS_SCHEMA: 3
+      [REDACTED]/HAS_TABLE: 12
+      [REDACTED]/HAS_COLUMN: 95
+      [REDACTED]/HAS_VALUE: 51
+      [REDACTED]/REFERENCES: 13
+      verify: ok=False violations=5
+        [graph.node_count_mismatch.Schema] Schema: Neo4j has 1, run summary reported 3.
+        [graph.node_count_mismatch.Table] Table: Neo4j has 5, run summary reported 12.
+        [graph.node_count_mismatch.Column] Column: Neo4j has 24, run summary reported 95.
+        [references.edge_count_mismatch] Neo4j has 0 REFERENCES edges; run summary reported 13 (declared + inferred).
+        [values.count_mismatch] Neo4j has 25 Value nodes; summary reported 51.
+      error: [dbxcarta] verify gate failed: 5 violation(s)
+    verify: run_id=local FAIL (5 violations)
+      [graph.node_count_mismatch.Schema] Schema: Neo4j has 1, run summary reported 3.
+        {'label': 'Schema', '[REDACTED]': 1, 'summary': 3}
+      [graph.node_count_mismatch.Table] Table: Neo4j has 5, run summary reported 12.
+        {'label': 'Table', '[REDACTED]': 5, 'summary': 12}
+      [graph.node_count_mismatch.Column] Column: Neo4j has 24, run summary reported 95.
+        {'label': 'Column', '[REDACTED]': 24, 'summary': 95}
+      [references.edge_count_mismatch] Neo4j has 0 REFERENCES edges; run summary reported 13 (declared + inferred).
+        {'[REDACTED]': 0, 'summary_total': 13}
+      [values.count_mismatch] Neo4j has 25 Value nodes; summary reported 51.
+        {'[REDACTED]': 25, 'summary': 51}
+

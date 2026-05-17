@@ -9,7 +9,7 @@ Submitting job
   Script:   /Users/ryan.knight@neo4j.com/dbxcarta/scripts/_dbxrunner_bootstrap.py
   Run name: dbxcarta: ingest
 ---
-  Run ID:   155880467925191
+  Run ID:   428471113651885
   Waiting for completion...
 Traceback (most recent call last):
   File "/Users/ryanknight/projects/databricks/dbxcarta/.venv/bin/dbxcarta", line 10, in <module>

@@ -277,10 +277,13 @@ def _verify(driver: "Driver", settings: SparkIngestSettings, summary: RunSummary
         neo4j_driver=driver,
         ws=ws,
         warehouse_id=settings.databricks_warehouse_id,
-        # KNOWN LIMITATION (tracked in SparkIngestSettings.dbxcarta_catalogs):
-        # verify keys off the single primary catalog. In a multi-catalog run
-        # the other resolved catalogs are written but NOT post-write verified.
+        # The count invariants (graph node counts, REFERENCES, Value) scope to
+        # every resolved catalog so a multi-catalog run is checked against its
+        # aggregate summary totals. `catalog` remains the single primary for
+        # the deferred information_schema sampling in verify.catalog (tracked
+        # in SparkIngestSettings.dbxcarta_catalogs as part-2).
         catalog=settings.dbxcarta_catalog,
+        catalogs=settings.resolved_catalogs(),
         sample_limit=settings.dbxcarta_sample_limit,
     )
     summary.verify = VerifyResult(

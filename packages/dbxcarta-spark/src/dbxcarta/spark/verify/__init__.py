@@ -49,6 +49,33 @@ def scoped_catalog(summary: dict[str, Any]) -> tuple[str, str]:
     return catalog_id, catalog_id + "."
 
 
+def scoped_catalogs(
+    summary: dict[str, Any], catalogs: list[str] | None
+) -> tuple[list[str], list[str]]:
+    """Return ``(catalog_ids, id_prefixes)`` for the full resolved-catalog set.
+
+    A multi-catalog run (``dbxcarta_catalogs``) writes every resolved catalog
+    into one graph, but ``RunSummary.row_counts`` are aggregate totals across
+    all of them. The count invariants must therefore scope to every resolved
+    catalog, not just the primary, or they read one catalog's subset and
+    mismatch the aggregate summary on every run.
+
+    ``catalogs`` is ``settings.resolved_catalogs()``. When it is falsy (the
+    historical single-catalog callers and the direct-call unit tests), this
+    falls back to the single ``summary["catalog"]`` so behavior is unchanged.
+    Ids are normalized through ``contract.generate_id`` exactly as
+    ``scoped_catalog`` does, for the same hyphen/space reason.
+    """
+    from dbxcarta.spark.contract import generate_id
+
+    names = [c for c in (catalogs or []) if c]
+    if not names:
+        single = summary.get("catalog") or ""
+        names = [single] if single else []
+    ids = [generate_id(c) for c in names]
+    return ids, [i + "." for i in ids]
+
+
 @dataclass
 class Report:
     run_id: str
@@ -77,8 +104,17 @@ def verify_run(
     warehouse_id: str,
     catalog: str,
     sample_limit: int,
+    catalogs: list[str] | None = None,
 ) -> Report:
-    """Run every verify check against the given run summary; return one Report."""
+    """Run every verify check against the given run summary; return one Report.
+
+    ``catalog`` is the single primary catalog (still all the deferred
+    information_schema sampling in ``catalog`` covers). ``catalogs`` is the
+    full ``settings.resolved_catalogs()`` set; the count invariants scope to
+    it so a multi-catalog run is verified against its aggregate summary
+    totals. When ``catalogs`` is None the count checks fall back to the single
+    ``summary["catalog"]``.
+    """
     from dbxcarta.spark.verify import catalog as catalog_mod
     from dbxcarta.spark.verify import graph as graph_mod
     from dbxcarta.spark.verify import references as references_mod
@@ -88,9 +124,11 @@ def verify_run(
     violations: list[Violation] = []
 
     violations.extend(_check_summary_shape(summary))
-    violations.extend(graph_mod.check(neo4j_driver, summary))
-    violations.extend(references_mod.check(neo4j_driver, summary))
-    violations.extend(values_mod.check(neo4j_driver, summary, sample_limit=sample_limit))
+    violations.extend(graph_mod.check(neo4j_driver, summary, catalogs=catalogs))
+    violations.extend(references_mod.check(neo4j_driver, summary, catalogs=catalogs))
+    violations.extend(
+        values_mod.check(neo4j_driver, summary, sample_limit=sample_limit, catalogs=catalogs)
+    )
     violations.extend(catalog_mod.check(neo4j_driver, summary, ws=ws, warehouse_id=warehouse_id, catalog=catalog))
 
     return Report(run_id=run_id, violations=violations)
@@ -111,4 +149,11 @@ def _check_summary_shape(summary: dict[str, Any]) -> list[Violation]:
     return out
 
 
-__all__ = ["Violation", "Report", "single_value", "scoped_catalog", "verify_run"]
+__all__ = [
+    "Violation",
+    "Report",
+    "single_value",
+    "scoped_catalog",
+    "scoped_catalogs",
+    "verify_run",
+]

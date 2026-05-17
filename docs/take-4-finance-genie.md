@@ -132,6 +132,58 @@ Databricks job kept running for roughly 35 minutes. The timeout is not
 a job failure. Run status must be confirmed from the Databricks job
 run, not the client exit.
 
+### 6. Take-4 rerun failed at the first Neo4j node write
+
+With `DBXCARTA_VERIFY_GATE=false`, runner 0.6.1, the Neo4j DB wiped,
+and a freshly published wheel, the rerun got past verify but failed
+in 166s at the first node write, `write_node(... NodeLabel.DATABASE)`
+in `run.py:335`, with:
+
+```
+[DELTA_SCHEMA_CHANGE_SINCE_ANALYSIS] The schema of your Delta table
+has changed in an incompatible way since your DataFrame or DeltaTable
+object was created. Latest schema is missing field(s): name,
+embedding, contract_version, embedding_text_hash, embedding_model,
+embedded_at, embedding_error, id
+```
+
+Extraction itself succeeded: `schemas: 3`, `tables: 12`,
+`columns: 95`, semantic FK accepted 11, value nodes 51. The failure
+is in the embed-stage to Neo4j-write handoff, not in reading the
+medallion catalogs.
+
+Mechanism. The embed+stage step writes each label's embedded nodes
+to `<staging_root>/<label>_nodes` as Delta with
+`mode("overwrite").option("overwriteSchema", "true")`, then reads the
+table back and writes that DataFrame to Neo4j (`staging.py:115`,
+`stage_embedded_nodes`). The staging root resolves to the sibling
+`staging` directory under the summary volume,
+`/Volumes/dbxcarta-catalog/finance_genie_ops/dbxcarta-ops/dbxcarta/staging`.
+That directory already exists from prior schemapile and dense_500
+runs. `DELTA_SCHEMA_CHANGE_SINCE_ANALYSIS` means the read-back
+DataFrame's plan was analyzed against one schema and the Delta
+table's latest schema differed at write execution: a stale or
+incompatible staging table at that path, where `truncate_staging_root`
+is meant to clear the whole root once per run.
+
+Contributing factor to evaluate. The built wheel was produced from
+the current working tree, which carries a large uncommitted
+changeset, not part of the Take-4 medallion work: `run.py`,
+`verify/__init__.py`, `verify/graph.py`, `verify/references.py`,
+`verify/values.py`, and client files. The ingest wheel must be built
+from a known-good tree before drawing conclusions about staging.
+
+Status: BLOCKED pending a decision. Candidate next steps, to be
+chosen with the user, not applied unilaterally:
+
+1. Clear the stale `…/dbxcarta/staging` Delta directory the same way
+   Neo4j was wiped, then rerun. Lowest-risk if staging is meant to be
+   per-run transient.
+2. Build the ingest wheel from a clean tree (stash or revert the
+   unrelated uncommitted spark/client changes) so the run reflects
+   the Take-4 code only, then rerun.
+3. Both: clean tree and cleared staging.
+
 ## What to do better next time
 
 - Provision the ops volume as part of preset setup or a preflight
@@ -150,58 +202,82 @@ run, not the client exit.
 - Capture the run summary and verify report as artifacts for every
   run so postmortems do not depend on scrollback.
 
+## Rerun status (2026-05-16)
+
+Decisions locked for this rerun:
+
+- `DBXCARTA_VERIFY_GATE=false`. Verify stays single-catalog-anchored
+  per decision D4, so it runs warn-only and does not fail the job.
+- Neo4j target wiped by the user before this rerun, so contract-version
+  and count checks are meaningful for a clean finance-only load.
+
+Progress is tracked inline in the checklist below. Each item is marked
+done with a short result note as it completes.
+
 ## Checklist: run and test everything
 
 ### A. Code and unit tests
 
-- [ ] `uv sync`
-- [ ] `uv pip install -e examples/integration/finance-genie/`
-- [ ] `uv run pytest -q` in the dbxcarta repo: full suite green.
-- [ ] Runner repo, if changed: `uv run --with pytest pytest -q` green.
-- [ ] Confirm `databricks-job-runner` pin matches the published
-      version in `packages/dbxcarta-spark/pyproject.toml` and `uv.lock`,
-      and that `.venv` resolved to it.
+- [x] `uv sync`. Resolved 46 packages.
+- [x] `uv pip install -e examples/integration/finance-genie/`.
+      Installed `dbxcarta-finance-genie-example==0.1.0`.
+- [x] `uv run --with pytest pytest -q` in the dbxcarta repo: 451
+      passed, 1 skipped, 6 deselected.
+- [x] Runner repo: `uv run --with pytest pytest -q` green, 46 passed.
+- [x] Confirmed `databricks-job-runner` pinned `==0.6.1` in
+      `packages/dbxcarta-spark/pyproject.toml` and `uv.lock` resolves
+      `databricks-job-runner v0.6.1`.
 
 ### B. Workspace and configuration
 
-- [ ] `manage_workspace(action="switch", profile="azure-rk-knight")`.
-- [ ] `dbxcarta preset dbxcarta_finance_genie_example:preset --print-env`
-      and reconcile `.env` against it.
-- [ ] Decide and set `DBXCARTA_VERIFY_GATE`. Use `false` while verify
-      is single-catalog-anchored and the ingest is multi-catalog.
-- [ ] Confirm `DBXCARTA_CATALOGS` and `DBXCARTA_LAYER_MAP` list all
-      three catalogs with the correct layers.
+- [x] Switched to profile `azure-rk-knight`
+      (`adb-1098933906466604.4.azuredatabricks.net`).
+- [x] `dbxcarta preset ... --print-env` matches `.env`.
+- [x] `DBXCARTA_VERIFY_GATE=false` set in `.env`.
+- [x] `DBXCARTA_CATALOGS` and `DBXCARTA_LAYER_MAP` list all three
+      catalogs with bronze/silver/gold layers.
 
 ### C. Source data and infrastructure
 
-- [ ] Enrichment pipeline has populated silver and gold. Bronze
-      populated by the GDS notebooks.
-- [ ] Catalogs and the shared schema exist with all 12 tables:
-      4 bronze, 5 silver, 3 gold.
-- [ ] Ops volume `dbxcarta-catalog.finance_genie_ops.dbxcarta-ops`
+- [x] Silver and gold populated; bronze populated by the GDS
+      notebooks. All present (see next item).
+- [x] All 12 tables present in `graph-enriched-schema`: 4 bronze
+      (`account_features`, `account_graph_features`,
+      `account_similarity_pairs`, `training_dataset`), 5 silver
+      (`accounts`, `merchants`, `transactions`, `account_links`,
+      `account_labels`), 3 gold (`gold_accounts`,
+      `gold_account_similarity_pairs`, `gold_fraud_ring_communities`).
+- [x] Ops volume `dbxcarta-catalog.finance_genie_ops.dbxcarta-ops`
       exists.
-- [ ] Neo4j target is clean or dedicated for this run.
-- [ ] `setup_secrets.sh --profile azure-rk-knight` confirms the Neo4j
-      secret scope and keys.
+- [x] Neo4j target wiped by the user before this rerun.
+- [x] `setup_secrets.sh` is not present in any local repo, but the
+      `dbxcarta-neo4j` secret scope exists with `NEO4J_URI`,
+      `NEO4J_USERNAME`, `NEO4J_PASSWORD`, unchanged from the prior
+      successful write.
 
 ### D. Readiness and artifacts
 
-- [ ] `dbxcarta preset ... --check-ready --strict-optional`: status
-      ready, required and optional both ready.
-- [ ] `dbxcarta preset ... --upload-questions`: succeeds.
-- [ ] `dbxcarta upload --wheel`: builds and publishes the
-      `dbxcarta-spark` and `dbxcarta-client` stable wheels and uploads
-      scripts.
+- [x] `--check-ready --strict-optional`: status ready, 8 expected
+      tables present, required and optional both ready.
+- [x] `--upload-questions`: `questions.json` present in the ops
+      volume `dbxcarta/` path.
+- [x] `dbxcarta upload --wheel`: built and published
+      `dbxcarta_spark-stable.whl` and `dbxcarta_client-stable.whl`
+      via the runner 0.6.1 `--package` build, scripts uploaded.
 
 ### E. Ingest
 
-- [ ] `dbxcarta submit-entrypoint ingest`.
-- [ ] Find the run with `manage_job_runs(action="list")`, then poll the
-      run to a terminal state instead of trusting the client exit.
-- [ ] On terminal state, read `manage_job_runs(action="get_output")`
-      for the run summary and verify report.
-- [ ] Confirm the run summary shows `schemas: 3`, `tables: 12`, and a
-      non-zero column count.
+- [x] `dbxcarta submit-entrypoint ingest` submitted. Run
+      `209429536888785` (job `562911796534570`).
+- [x] Polled to terminal state: `INTERNAL_ERROR` / `FAILED` after
+      166s. Task run `1007639542952392`.
+- [x] Read `get_output`. Extraction succeeded (`schemas: 3`,
+      `tables: 12`, `columns: 95`, semantic FK accepted 11, value
+      nodes 51). `DBXCARTA_VERIFY_GATE=false` and
+      `databricks-job-runner==0.6.1` confirmed in run params.
+- [ ] BLOCKED. The run failed at the first Neo4j node write
+      (Database, `run.py:335`), not at verify. See Issue 6 below;
+      awaiting a decision before the next rerun.
 
 ### F. Verify
 

@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from dbxcarta.spark.contract import NodeLabel, RelType
-from dbxcarta.spark.verify import Violation, scoped_catalog, single_value
+from dbxcarta.spark.verify import Violation, scoped_catalogs, single_value
 
 if TYPE_CHECKING:
     from neo4j import Driver
@@ -33,28 +33,35 @@ def _expected_edge_total(summary: dict[str, Any]) -> int:
     )
 
 
-def check(driver: "Driver", summary: dict[str, Any]) -> list[Violation]:
+def check(
+    driver: "Driver", summary: dict[str, Any], *, catalogs: list[str] | None = None
+) -> list[Violation]:
     out: list[Violation] = []
-    out.extend(_check_edge_count(driver, summary))
+    out.extend(_check_edge_count(driver, summary, catalogs=catalogs))
     out.extend(_check_accounting(summary))
     return out
 
 
-def _check_edge_count(driver: "Driver", summary: dict[str, Any]) -> list[Violation]:
+def _check_edge_count(
+    driver: "Driver", summary: dict[str, Any], *, catalogs: list[str] | None = None
+) -> list[Violation]:
     """Neo4j's REFERENCES edge count must match declared + inferred FKs from
     the summary. A mismatch implies the Spark Connector dropped rows where an
     endpoint Column node did not exist.
 
-    Scoped via the source Column's id prefix so a shared Neo4j instance with
-    data from multiple catalogs does not produce false positives.
+    Scoped via the source Column's id prefix across every resolved catalog so
+    a multi-catalog run is checked against its aggregate summary total, not
+    one catalog's subset, and a shared Neo4j instance does not produce false
+    positives.
     """
-    _, prefix = scoped_catalog(summary)
+    _, prefixes = scoped_catalogs(summary, catalogs)
     expected = _expected_edge_total(summary)
     with driver.session() as s:
         edges = single_value(s.run(
             f"MATCH (src:{NodeLabel.COLUMN})-[r:{RelType.REFERENCES}]->()"
-            f" WHERE src.id STARTS WITH $prefix RETURN count(r) AS cnt",
-            prefix=prefix,
+            " WHERE any(p IN $prefixes WHERE src.id STARTS WITH p)"
+            " RETURN count(r) AS cnt",
+            prefixes=prefixes,
         ), "cnt")
     if edges != expected:
         return [Violation(

@@ -1,0 +1,111 @@
+Finding latest run matching 'dbxcarta:*'...
+  Found run 766218515658718
+
+Run: dbxcarta: ingest
+  Parent run ID: 766218515658718
+  Result state:  SUCCESS
+  URL:           https://adb-1098933906466604.4.azuredatabricks.net/?o=1098933906466604#job/36136777882525/run/766218515658718
+---
+Task: run_script (task run ID 819605456303087)
+  Logs:
+      pip: --target /local_disk0/tmp/dbxrunner/runs/t-1778980271-36730-dde3254e/site --force-reinstall --no-deps /local_disk0/tmp/dbxrunner/runs/t-1778980271-36730-dde3254e/wheelsrc/dbxcarta_spark-1.0.0-py3-none-any.whl
+    Processing /local_disk0/tmp/dbxrunner/runs/t-1778980271-36730-dde3254e/wheelsrc/dbxcarta_spark-1.0.0-py3-none-any.whl
+    Installing collected packages: dbxcarta-spark
+    Successfully installed dbxcarta-spark-1.0.0
+      pip: --no-deps databricks-job-runner==0.6.1 [REDACTED]==6.1.0 pytz==2026.1.post1 pydantic==2.13.3 pydantic-core==2.46.3 pydantic-settings==2.14.0 python-dotenv==1.2.2 annotated-types==0.7.0 typing-extensions==4.15.0 typing-inspection==0.4.2
+    
+    
+    
+    [1m[[0m[34;49mnotice[0m[1;39;49m][0m[39;49m A new release of pip is available: [0m[31;49m25.0.1[0m[39;49m -> [0m[32;49m26.1.1[0m
+    [1m[[0m[34;49mnotice[0m[1;39;49m][0m[39;49m To update, run: [0m[32;49mpip install --upgrade pip[0m
+    
+    
+    Collecting databricks-job-runner==0.6.1
+      Using cached databricks_job_runner-0.6.1-py3-none-any.whl.metadata (4.2 kB)
+    Collecting [REDACTED]==6.1.0
+      Using cached [REDACTED]-6.1.0-py3-none-any.whl.metadata (5.3 kB)
+    Collecting pytz==2026.1.post1
+      Using cached pytz-2026.1.post1-py2.py3-none-any.whl.metadata (22 kB)
+    Collecting pydantic==2.13.3
+      Using cached pydantic-2.13.3-py3-none-any.whl.metadata (108 kB)
+    Collecting pydantic-core==2.46.3
+      Using cached pydantic_core-2.46.3-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (6.6 kB)
+    Collecting pydantic-settings==2.14.0
+      Using cached pydantic_settings-2.14.0-py3-none-any.whl.metadata (3.4 kB)
+    Collecting python-dotenv==1.2.2
+      Using cached python_dotenv-1.2.2-py3-none-any.whl.metadata (27 kB)
+    Requirement already satisfied: annotated-types==0.7.0 in /databricks/python3/lib/python3.12/site-packages (0.7.0)
+    Requirement already satisfied: typing-extensions==4.15.0 in /local_disk0/.ephemeral_nfs/cluster_libraries/python/lib/python3.12/site-packages (4.15.0)
+    Requirement already satisfied: typing-inspection==0.4.2 in /local_disk0/.ephemeral_nfs/cluster_libraries/python/lib/python3.12/site-packages (0.4.2)
+    Using cached databricks_job_runner-0.6.1-py3-none-any.whl (45 kB)
+    Using cached [REDACTED]-6.1.0-py3-none-any.whl (325 kB)
+    Using cached pytz-2026.1.post1-py2.py3-none-any.whl (510 kB)
+    Using cached pydantic-2.13.3-py3-none-any.whl (471 kB)
+    Using cached pydantic_core-2.46.3-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (2.1 MB)
+    Using cached pydantic_settings-2.14.0-py3-none-any.whl (60 kB)
+    Using cached python_dotenv-1.2.2-py3-none-any.whl (22 kB)
+    Installing collected packages: pytz, python-dotenv, pydantic-settings, pydantic-core, pydantic, [REDACTED], databricks-job-runner
+      Attempting uninstall: pytz
+        Found existing installation: pytz 2024.1
+        Not uninstalling pytz at /databricks/python3/lib/python3.12/site-packages, outside environment /local_disk0/.ephemeral_nfs/envs/pythonEnv-e4961e8b-8e18-46ae-9f5e-da8f7a20e9c5
+        Can't uninstall 'pytz'. No files were found to uninstall.
+      Attempting uninstall: pydantic-core
+        Found existing installation: pydantic_core 2.46.4
+        Not uninstalling pydantic-core at /local_disk0/.ephemeral_nfs/cluster_libraries/python/lib/python3.12/site-packages, outside environment /local_disk0/.ephemeral_nfs/envs/pythonEnv-e4961e8b-8e18-46ae-9f5e-da8f7a20e9c5
+        Can't uninstall 'pydantic_core'. No files were found to uninstall.
+      Attempting uninstall: pydantic
+        Found existing installation: pydantic 2.13.4
+        Not uninstalling pydantic at /local_disk0/.ephemeral_nfs/cluster_libraries/python/lib/python3.12/site-packages, outside environment /local_disk0/.ephemeral_nfs/envs/pythonEnv-e4961e8b-8e18-46ae-9f5e-da8f7a20e9c5
+        Can't uninstall 'pydantic'. No files were found to uninstall.
+      Attempting uninstall: [REDACTED]
+        Found existing installation: [REDACTED] 6.0.2
+        Not uninstalling [REDACTED] at /local_disk0/.ephemeral_nfs/cluster_libraries/python/lib/python3.12/site-packages, outside environment /local_disk0/.ephemeral_nfs/envs/pythonEnv-e4961e8b-8e18-46ae-9f5e-da8f7a20e9c5
+        Can't uninstall '[REDACTED]'. No files were found to uninstall.
+    Successfully installed databricks-job-runner-0.6.1 [REDACTED]-6.1.0 pydantic-2.13.3 pydantic-core-2.46.3 pydantic-settings-2.14.0 python-dotenv-1.2.2 pytz-2026.1.post1
+    
+    
+    
+    [1m[[0m[34;49mnotice[0m[1;39;49m][0m[39;49m A new release of pip is available: [0m[31;49m25.0.1[0m[39;49m -> [0m[32;49m26.1.1[0m
+    [1m[[0m[34;49mnotice[0m[1;39;49m][0m[39;49m To update, run: [0m[32;49mpip install --upgrade pip[0m
+    
+    
+    BOOTSTRAP_MANIFEST {"wheel_volume_path": "/Volumes/dbxcarta-catalog/finance_genie_ops/dbxcarta-ops/wheels/dbxcarta_spark-stable.whl", "wheel_sha": "e764045f7b7c5ddc", "wheel_filename": "dbxcarta_spark-1.0.0-py3-none-any.whl", "per_run_target": "/local_disk0/tmp/dbxrunner/runs/t-1778980271-36730-dde3254e/site", "closure_hash": "2a8c7e20d0d56b50", "smoke_check": "ok (6)", "run_token": "t-1778980271-36730-dde3254e"}
+    [dbxcarta] run_id=local job=dbxcarta status=success catalog=graph-enriched-finance-silver
+      schemas: 3
+      tables: 12
+      columns: 95
+      fk_declared: 0
+      fk_resolved: 0
+      fk_skipped: 0
+      fk_edges: 0
+      fk_inferred_metadata_accepted: 2
+      fk_inferred_metadata_composite_pk_skipped: 0
+      fk_inferred_semantic_accepted: 11
+      fk_inferred_semantic_composite_pk_skipped: 0
+      candidate_columns: 19
+      sampled_columns: 15
+      skipped_columns: 4
+      skipped_schemas: 0
+      cardinality_failed_tables: 0
+      cardinality_wall_clock_ms: 1981
+      sample_wall_clock_ms: 861
+      value_nodes: 51
+      has_value_edges: 51
+      cardinality_min: 1
+      cardinality_p25: 2
+      cardinality_p50: 3
+      cardinality_p75: 7
+      cardinality_p95: 23322
+      cardinality_max: 23322
+      [REDACTED]/Database: 3
+      [REDACTED]/Schema: 3
+      [REDACTED]/Table: 12
+      [REDACTED]/Column: 95
+      [REDACTED]/Value: 51
+      [REDACTED]/HAS_SCHEMA: 3
+      [REDACTED]/HAS_TABLE: 12
+      [REDACTED]/HAS_COLUMN: 95
+      [REDACTED]/HAS_VALUE: 51
+      [REDACTED]/REFERENCES: 13
+      verify: ok=True violations=0
+

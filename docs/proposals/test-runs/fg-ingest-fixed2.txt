@@ -1,0 +1,21 @@
+  Params:   32 env values from .env
+Checking cluster 0515-141455-wb8qxgo2...
+  Cluster: RUNNING
+Running preflight checks
+---
+  [ok]   neo4j connector
+
+Submitting job
+  Script:   /Users/ryan.knight@neo4j.com/dbxcarta/scripts/_dbxrunner_bootstrap.py
+  Run name: dbxcarta: ingest
+---
+  Run ID:   766218515658718
+  Waiting for completion...
+
+  Result:   SUCCESS
+  URL:      https://adb-1098933906466604.4.azuredatabricks.net/?o=1098933906466604#job/36136777882525/run/766218515658718
+
+Job complete.
+
+Next steps:
+  View logs:          uv run dbxcarta logs 766218515658718
