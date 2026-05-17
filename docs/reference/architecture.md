@@ -151,6 +151,15 @@ mode, so logical size stays at one run's worth of rows per arm; Delta retains
 tombstoned files until a `VACUUM`, and at evaluation scale that is a deliberate
 non-decision rather than a missing retention policy.
 
+The scores are only trustworthy if the grader is. When a generated query is
+correct but the harness grades it wrong, the fix is the grader, never a prompt
+instruction that steers the model toward what the grader happens to accept.
+Prompt changes must make the SQL better on its own terms; shaping output to
+conform to a grader artifact inflates the number while the capability it claims
+to measure does not move, which defeats the entire point of running the four
+arms against a matched budget. A grader limitation is a grader bug and is
+tracked as one.
+
 ## What this architecture costs
 
 A semantic layer that lives outside Unity Catalog is only as current as the last

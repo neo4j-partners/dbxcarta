@@ -33,8 +33,8 @@ def main() -> int:
         ),
     )
     parser.add_argument(
-        "--dotenv", type=Path, default=Path(".env"),
-        help="Path to the .env file to load (default: .env)",
+        "--dotenv", type=Path, default=Path(__file__).resolve().parents[2] / ".env",
+        help="Path to the .env file to load (default: example directory .env)",
     )
     parser.add_argument(
         "--drop-all",

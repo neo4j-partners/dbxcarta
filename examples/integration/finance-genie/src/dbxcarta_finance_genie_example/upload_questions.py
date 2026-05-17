@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 
 
 DEFAULT_SOURCE = Path(__file__).resolve().with_name("questions.json")
+_DEFAULT_ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 
 
 def parse_args() -> argparse.Namespace:
@@ -25,8 +26,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--env-file",
-        default=".env",
-        help="Path to the dbxcarta env file to load. Defaults to .env.",
+        default=str(_DEFAULT_ENV_FILE),
+        help="Path to the dbxcarta env file to load. Defaults to example directory .env.",
     )
     parser.add_argument(
         "--source",

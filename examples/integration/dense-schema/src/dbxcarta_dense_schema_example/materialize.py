@@ -77,7 +77,7 @@ class MaterializeStats:
 
 def main() -> int:
     parser = argparse.ArgumentParser(prog="dbxcarta-dense-materialize")
-    parser.add_argument("--dotenv", type=Path, default=Path(".env"))
+    parser.add_argument("--dotenv", type=Path, default=Path(__file__).resolve().parents[2] / ".env")
     parser.add_argument("--warehouse-id", type=str, default=None)
     parser.add_argument("--workers", type=int, default=_DEFAULT_WORKERS,
                         help="parallel worker threads for table creation (default: 20)")

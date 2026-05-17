@@ -64,7 +64,7 @@ class ValidationOutcome:
 
 def main() -> int:
     parser = argparse.ArgumentParser(prog="dbxcarta-dense-generate-questions")
-    parser.add_argument("--dotenv", type=Path, default=Path(".env"))
+    parser.add_argument("--dotenv", type=Path, default=Path(__file__).resolve().parents[2] / ".env")
     parser.add_argument("--output", type=Path, default=Path("questions.json"))
     parser.add_argument(
         "--cache-dir",

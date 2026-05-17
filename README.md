@@ -1,10 +1,55 @@
-# dbxcarta
+# dbxcarta: Neo4j Semantic Layer for Databricks Unity Catalog
 
 *Inspired by [neocarta](https://github.com/neo4j-field/neocarta).*
 
-dbxcarta builds a semantic layer over Unity Catalog in Neo4j. Unity Catalog publishes tables, columns, and declared constraints but not meaning: which tables sit near a question, which relationships exist beyond declared foreign keys, which medallion layer holds the trustworthy version of an entity. dbxcarta turns that flat metadata into a graph a question can traverse, where similarity is an embedding distance, a relationship is a confidence-scored edge, and every table carries its medallion layer. Text2SQL agents, MCP tools, and schema-aware RAG pipelines query the graph at runtime to retrieve the slice they need before generating SQL.
+## Overview
 
-The semantic-layer thesis, the three storage planes (data, semantic layer, ops), and the validation model are documented in [`docs/reference/architecture.md`](docs/reference/architecture.md), the canonical architecture reference.
+Unity Catalog publishes tables, columns, and declared constraints but not
+meaning: which tables sit near a question, which relationships exist beyond
+declared foreign keys, which medallion layer holds the trustworthy version of an
+entity. dbxcarta builds a semantic layer over Unity Catalog in Neo4j that turns
+that flat metadata into a graph a question can traverse, where similarity is an
+embedding distance, a relationship is a confidence-scored edge, and every table
+carries its medallion layer. Text2SQL agents, MCP tools, and schema-aware RAG
+pipelines query the graph at runtime to retrieve the slice they need before
+generating SQL.
+
+```
+┌───────────────┐   ┌──────────────────────┐   ┌──────────────────────┐   ┌──────────────────────┐   ┌───────────────┐
+│ Unity Catalog │──►│ dbxcarta-spark       │──►│ Neo4j semantic layer │──►│ dbxcarta-client      │──►│ SQL / answer  │
+│ flat metadata │   │ build: extract,      │   │ typed nodes, vectors,│   │ query: embed,        │   │ generated     │
+│               │   │ embed, infer FKs     │   │ confidence-scored FKs│   │ vector + graph fetch │   │ result        │
+└───────────────┘   └──────────────────────┘   └──────────────────────┘   └──────────────────────┘   └───────────────┘
+```
+
+The semantic-layer thesis, the three storage planes (data, semantic layer, ops),
+and the validation model are documented in
+[`docs/reference/architecture.md`](docs/reference/architecture.md), the
+canonical architecture reference.
+
+## Packages
+
+dbxcarta is split into separate Spark and client packages. There is no
+top-level `dbxcarta` import surface; consumers import the layer they need.
+
+| Capability | Distribution | Import path | Console script |
+|------------|--------------|-------------|----------------|
+| Databricks Spark ingest, graph contract, IDs, validators, verification, preset runner | `dbxcarta-spark` | `dbxcarta.spark` | `dbxcarta`, `dbxcarta-ingest` |
+| Retrieval runtime and Text2SQL eval harness | `dbxcarta-client` | `dbxcarta.client` | `dbxcarta-client`, `dbxcarta-embed-probe` |
+
+**Layer responsibilities:**
+
+- **Spark** owns the concrete Unity Catalog ingest implementation, the graph contract, verification, Databricks validators, preset capability protocols, and the operational CLI.
+- **Client** owns retrieval primitives and the Text2SQL eval harness.
+
+This repository uses a clean boundary cutover. Old top-level imports are deleted
+instead of re-exported; see [Migration notes](#migration-notes).
+
+## dbxcarta-spark
+
+The Spark package owns the concrete Unity Catalog ingest implementation, the
+graph contract, verification, Databricks validators, the preset capability
+protocols, and the operational CLI. It builds the Neo4j semantic layer.
 
 **What the build pipeline does:**
 
@@ -14,15 +59,11 @@ The semantic-layer thesis, the three storage planes (data, semantic layer, ops),
 - Discovers foreign keys from declared constraints plus metadata and semantic inference, each edge scored by confidence
 - Writes the result to Neo4j as typed nodes with vector properties
 
-**What happens at query time:**
+### Graph schema
 
-- A client embeds a user question
-- Runs a similarity search to find the most relevant schema nodes
-- Follows graph relationships to expand that seed set into a full schema subgraph: columns, values, and foreign-key references in one retrieval step before the LLM call
-
-## Graph schema
-
-The graph follows a stable, typed schema:
+The graph schema is the stable typed contract the build pipeline writes and the
+client traverses: ingest produces exactly these node labels and relationship
+types, and retrieval relies on them being present and shaped this way.
 
 **Nodes:** `Database`, `Schema`, `Table`, `Column`, `Value`
 
@@ -39,20 +80,42 @@ Each node carries:
 - An `embedding` vector for semantic similarity search (where applicable)
 - For `Table` nodes under graph contract v1.1, a `layer` property recording the medallion tier (`bronze`, `silver`, `gold`) derived from the configured `catalog:layer` map
 
-## Use dbxcarta as a library
+![dbxcarta Graph Schema](docs/assets/graph-schema.png)
 
-dbxcarta is split into separate Spark and client packages. There is no
-top-level `dbxcarta` import surface; consumers import the layer they need.
+Editable source: [`docs/assets/graph-schema.excalidraw`](docs/assets/graph-schema.excalidraw).
 
-| Capability | Distribution | Import path | Console script |
-|------------|--------------|-------------|----------------|
-| Databricks Spark ingest, graph contract, IDs, validators, verification, preset runner | `dbxcarta-spark` | `dbxcarta.spark` | `dbxcarta`, `dbxcarta-ingest` |
-| Retrieval runtime and Text2SQL eval harness | `dbxcarta-client` | `dbxcarta.client` | `dbxcarta-client` |
+### Build time: pipeline writes the graph
 
-**Layer responsibilities:**
+Unity Catalog metadata flows through a single Spark job that extracts, embeds, and loads every enabled node label into Neo4j. Embeddings are generated inside Spark via `ai_query` and materialized to a Delta staging table before the Neo4j write, so the embedding call happens exactly once per run.
 
-- **Spark** owns the concrete Unity Catalog ingest implementation, the graph contract, verification, Databricks validators, preset capability protocols, and the operational CLI.
-- **Client** owns retrieval primitives and the Text2SQL eval harness.
+```
+┌──────────────────────────────────────────── BUILD TIME ────────────────────────────────────────────┐
+│                                                                                                    │
+│  ┌──────────────────┐   ┌──────────────────┐   ┌──────────────────┐   ┌──────────────────┐      │
+│  │ Unity Catalog    │──►│ Preflight        │──►│ Extract          │──►│ Transform        │      │
+│  │ information_schema│   │ permission check │   │ SQL to DataFrames│   │ typed graph rows │      │
+│  └──────────────────┘   └──────────────────┘   └──────────────────┘   └──────────────────┘      │
+│                                                                            │                       │
+│                                                                            ▼                       │
+│  ┌──────────────────┐   ┌──────────────────┐   ┌──────────────────┐                                │
+│  │ Neo4j (Aura)     │◄──│ Delta Staging    │◄──│ Embed            │                                │
+│  │ MERGE + indexes  │   │ materialized rows│   │ ai_query/label   │                                │
+│  └──────────────────┘   └──────────────────┘   └──────────────────┘                                │
+│                                                                                                    │
+└────────────────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Pipeline stages:**
+
+- **Unity Catalog:** reads source metadata from `information_schema` across every catalog in `DBXCARTA_CATALOGS` (falling back to the single `DBXCARTA_CATALOG` anchor), including tables, columns, schemas, and sampled values
+- **Preflight:** checks grants, endpoint access, and required configuration before the Spark job does any expensive work
+- **Extract:** unions Unity Catalog metadata from each resolved catalog into Spark DataFrames for every enabled node and relationship type
+- **Transform:** shapes raw metadata into stable graph rows with typed labels, catalog-qualified dotted IDs, descriptions, relationship keys, and the `Table.layer` tier derived from `DBXCARTA_LAYER_MAP`
+- **Embed:** calls `ai_query` inside Spark for each enabled label; row-level failures are captured instead of aborting the whole run
+- **Delta Staging:** materializes enriched rows once so validation, summaries, and Neo4j writes reuse the same embedding results
+- **Neo4j:** writes nodes and relationships with `MERGE`, then creates or updates the vector indexes used at query time
+
+### Use as a library
 
 Code running with Databricks Spark access can construct `SparkIngestSettings` and call the ingest implementation directly:
 
@@ -73,28 +136,100 @@ settings = SparkIngestSettings(
 run_dbxcarta(settings=settings)
 ```
 
-`dbxcarta_catalog` is the single anchor catalog used for preflight, verify, and ops provisioning. `dbxcarta_catalogs` lists every catalog folded into one graph; leave it blank for a single-catalog build, where it falls back to the anchor. `dbxcarta_layer_map` carries `catalog:layer` pairs that set the `Table.layer` property; a catalog absent from the map yields a null layer. The summary table's catalog and schema determine the ops catalog, which is kept separate from the data catalogs being mapped.
+`dbxcarta_catalog` is the single anchor catalog used for preflight, verify, and ops provisioning. `dbxcarta_catalogs` lists every catalog folded into one graph and is the default model: a build normally spans several catalogs. A single-catalog build remains fully supported; leave `dbxcarta_catalogs` blank and it falls back to the anchor catalog. `dbxcarta_layer_map` carries `catalog:layer` pairs that set the `Table.layer` property; a catalog absent from the map yields a null layer. The summary table's catalog and schema determine the ops catalog, which is kept separate from the data catalogs being mapped.
 
 The no-argument form, `run_dbxcarta()`, is the Databricks wheel entrypoint. It loads `SparkIngestSettings` from environment variables and runs the same pipeline.
 
-## Examples and presets
+### Design principles
 
-Companion examples show how to package reusable configuration and demo data for
-known upstream projects. Each example is its own Python package that depends on
-the relevant dbxcarta distributions as normal pip dependencies and exposes a
-module-level `preset` object. The Spark package provides the preset protocol and
-loader; examples own their concrete preset implementations.
+Everything runs inside Databricks: no external orchestrators, no local execution, no service accounts.
 
-**Available examples:**
+- **Single submission:** one installed wheel entrypoint (`dbxcarta-ingest`, submitted with `dbxcarta submit-entrypoint ingest`) drives the whole pipeline in one Databricks Job. Scope is controlled by per-label embedding flags in `.env`.
+- **Spark:** extraction and transformation use PySpark DataFrames, so the pipeline scales to large catalogs without single-process bottlenecks.
+- **Model Serving:** embeddings are generated in Spark via `ai_query` against a Databricks-hosted foundation model endpoint (`databricks-gte-large-en` by default), with `failOnError => false` so row-level failures are counted rather than thrown.
+- **Materialize-once:** enriched node DataFrames are written to a Delta staging table between transform and load, so the failure-rate aggregation and the Neo4j write both consume the staged rows without re-invoking `ai_query`.
+- **Neo4j Spark Connector:** bulk, partitioned writes from DataFrames. Relationship writes default to `coalesce(1)` to avoid endpoint-node lock contention on Aura, configurable via `DBXCARTA_REL_WRITE_PARTITIONS` (raise only with production evidence); `batch.size` is tuned via `DBXCARTA_NEO4J_BATCH_SIZE`.
+- **Preflight:** grants and serving-endpoint permissions required by the enabled flags are checked before any extract runs; missing permissions fail the run fast.
+- **Secrets:** Neo4j credentials live in a Databricks secret scope and are injected at job time, not read from a local file.
+- **Metadata source:** Unity Catalog `information_schema` only; no pluggable multi-source connector layer.
+- **Run observability:** every run emits a `RunSummary` to stdout, a timestamped JSON file in a UC Volume, and a row appended to a Delta table so history is queryable via SQL. The summary records per-label embedding attempts, successes, and failure rates alongside the threshold and the endpoint used.
+- **`databricks-job-runner`:** CLI wrapper around the Databricks SDK that handles upload, submit, and cleanup.
 
-- `examples/integration/finance-genie/` pairs dbxcarta with Finance Genie on a three-catalog medallion layout. Finance Genie writes raw business tables to a bronze and silver catalog and graph-enriched features to a gold catalog (`graph-enriched-finance-bronze`, `-silver`, `-gold`); dbxcarta folds all three into one Neo4j semantic layer via `DBXCARTA_CATALOGS` and tags each table's tier via `DBXCARTA_LAYER_MAP`. Run summaries and the generation cache land in a separate ops catalog (`dbxcarta-catalog`).
-- `examples/integration/schemapile/` materializes a reproducible SchemaPile slice as Delta tables, writes the generated UC schema list to `.env.generated`, generates a SQL-validated question set, and exposes `dbxcarta_schemapile_example:preset`.
-- `examples/integration/dense-schema/` generates a synthetic 500- or 1000-table single schema for stress testing schema-context retrieval. It shares the same preset pattern and exposes `dbxcarta_dense_schema_example:preset`.
-- `examples/demos/` is reserved for walkthroughs that are not migration-gate consumers.
+See `docs/reference/best-practices.md` for the design rules (Spark / Databricks, Neo4j Spark Connector, project-level principles) that shape the pipeline.
 
-### Preset workflow
+## dbxcarta-client
 
-A **preset** is a reusable configuration adapter published by an external package. It bundles three things together:
+The client package owns retrieval primitives and the Text2SQL eval harness. It
+queries the Neo4j semantic layer the Spark package built.
+
+**What happens at query time:**
+
+- A client embeds a user question
+- Runs a similarity search to find the most relevant schema nodes
+- Follows graph relationships to expand that seed set into a full schema subgraph: columns, values, and foreign-key references in one retrieval step before the LLM call
+
+### Query time: client retrieves schema context
+
+A client performs two steps: a vector similarity search to find the most relevant nodes, then a graph traversal to expand that seed set into a full schema subgraph. The combination delivers both semantic relevance and structural completeness: the LLM receives the right tables and their columns, values, and relationships.
+
+```
+┌──────────────────────────────────────────── QUERY TIME ────────────────────────────────────────────┐
+│                                                                                                    │
+│  ┌──────────────────┐   ┌──────────────────┐   ┌──────────────────┐   ┌──────────────────┐      │
+│  │ User Question    │──►│ Client           │──►│ Embed Question   │──►│ Vector Search    │      │
+│  │ natural language │   │ Text2SQL/MCP/RAG │   │ query vector     │   │ top-k graph nodes│      │
+│  └──────────────────┘   └──────────────────┘   └──────────────────┘   └──────────────────┘      │
+│                                                                            │                       │
+│                                                                            ▼                       │
+│  ┌──────────────────┐   ┌──────────────────┐   ┌──────────────────┐                                │
+│  │ SQL / Answer     │◄──│ LLM              │◄──│ Graph Traversal  │                                │
+│  │ generated result │   │ combined context │   │ schema subgraph  │                                │
+│  └──────────────────┘   └──────────────────┘   └──────────────────┘                                │
+│                                                                                                    │
+└────────────────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Query stages:**
+
+- **User Question:** starts as a natural-language request from a Text2SQL, MCP, or schema-aware RAG workflow
+- **Client:** coordinates retrieval by embedding the question, querying Neo4j, assembling context, and calling the LLM
+- **Embed Question:** converts the user question into the same vector space used by table, column, and value embeddings
+- **Vector Search:** finds the most semantically relevant `Table`, `Column`, and `Value` nodes using cosine similarity and Neo4j vector indexes
+- **Graph Traversal:** expands the top-k seed nodes through `HAS_COLUMN`, `HAS_VALUE`, and `REFERENCES` relationships
+- **LLM:** receives the combined schema context and produces the final SQL or answer
+- **SQL / Answer:** returns the generated query or response to the calling workflow
+
+### Demo client details
+
+The client is a batch evaluation job that proves the semantic layer earns its place. It runs each question through up to four arms selected by `DBXCARTA_CLIENT_ARMS`, scored the same way (parsed, executed, non-empty, matched against a reference result):
+
+- **`reference`** executes the ground-truth SQL to establish the correct result.
+- **`no_context`** gives the model only the catalog name, the floor.
+- **`schema_dump`** pastes a bounded schema pulled from the graph across every resolved catalog, capped by `DBXCARTA_SCHEMA_DUMP_MAX_CHARS` (default 7500, roughly 2K tokens) so it is a token-matched control rather than a paste-everything strawman.
+- **`graph_rag`** is the semantic layer in use: vector-seed plus confidence-ranked `REFERENCES` expansion. It justifies the build pipeline only if it beats `schema_dump` at the matched budget and both clear `no_context`.
+
+Each model-calling arm batches generation through `ai_query` and materializes it to a `client_staging_<arm>` Delta table in the ops catalog that doubles as a cache, keyed by a hash of the endpoint, arm, and prompts. An unchanged re-run skips inference; set `DBXCARTA_CLIENT_REFRESH=true` to force regeneration when the endpoint's model changed but the prompts did not. See [`docs/reference/architecture.md`](docs/reference/architecture.md) for the validation rationale.
+
+In the quickstart the client runs the `graph_rag` arm against `tests/fixtures/demo_questions.json` after that file is uploaded to `DATABRICKS_VOLUME_PATH`.
+
+The question set exercises:
+
+- Cross-schema joins (`sales` to `inventory` and `sales` to `hr`)
+- Self-referential FKs
+- Composite FK paths
+- Intra-schema event analytics
+
+For your own catalog, upload a replacement questions JSON file to the UC Volume and point `DBXCARTA_CLIENT_QUESTIONS` at it.
+
+## Presets and examples
+
+### What a preset is
+
+A **preset** is a reusable configuration adapter published by an external
+package and referenced by an import-path spec like `your_pkg.module:preset`. The
+left side is a Python module path; the right side is the name of the `preset`
+object within that module. The CLI resolves this at runtime by importing the
+module and reading the object. A preset bundles three things together:
 
 1. **Environment overlay:** the set of environment variables needed to run dbxcarta against a specific upstream project or schema
 2. **Readiness check** (optional): logic to verify the expected tables and resources exist before running ingest
@@ -104,9 +239,9 @@ A **preset** is a reusable configuration adapter published by an external packag
 
 Without a preset, every developer running dbxcarta against the same upstream project (such as Finance Genie) must manually collect and maintain the correct environment variables. A preset packages that knowledge once and makes it repeatable. Install the example package, then reference the preset by import path instead of managing env vars by hand.
 
-**How a preset is identified:**
-
-A preset is referenced by its import path, for example `your_pkg.module:preset`. The left side is a Python module path; the right side is the name of the `preset` object within that module. The CLI resolves this at runtime by importing the module and reading the object.
+Optional readiness and question-upload hooks live in `dbxcarta.spark.presets`
+for CLI and demo integrations; they do not require the Spark package to depend
+on the client runtime.
 
 **The preset interface:**
 
@@ -116,7 +251,20 @@ A preset is referenced by its import path, for example `your_pkg.module:preset`.
 | `readiness(ws, warehouse_id)` | No | `--check-ready` | Checks that expected tables and resources are present in the workspace |
 | `upload_questions(ws)` | No | `--upload-questions` | Uploads the preset's demo question set to the configured UC Volume |
 
-**Step-by-step workflow:**
+### Available examples
+
+Companion examples show how to package reusable configuration and demo data for
+known upstream projects. Each example is its own Python package that depends on
+the relevant dbxcarta distributions as normal pip dependencies and exposes a
+module-level `preset` object. The Spark package provides the preset protocol and
+loader; examples own their concrete preset implementations.
+
+- `examples/integration/finance-genie/` pairs dbxcarta with Finance Genie on a three-catalog medallion layout. Finance Genie writes raw business tables to a bronze and silver catalog and graph-enriched features to a gold catalog (`graph-enriched-finance-bronze`, `-silver`, `-gold`); dbxcarta folds all three into one Neo4j semantic layer via `DBXCARTA_CATALOGS` and tags each table's tier via `DBXCARTA_LAYER_MAP`. Run summaries and the generation cache land in a separate ops catalog (`dbxcarta-catalog`).
+- `examples/integration/schemapile/` materializes a reproducible SchemaPile slice as Delta tables, writes the generated UC schema list to `.env.generated`, generates a SQL-validated question set, and exposes `dbxcarta_schemapile_example:preset`.
+- `examples/integration/dense-schema/` generates a synthetic 500- or 1000-table single schema for stress testing schema-context retrieval. It shares the same preset pattern and exposes `dbxcarta_dense_schema_example:preset`.
+- `examples/demos/` is reserved for walkthroughs that are not migration-gate consumers.
+
+### Preset workflow
 
 1. Install the example package alongside dbxcarta:
    ```bash
@@ -156,43 +304,6 @@ See the example READMEs for the full setup flows:
 
 - [`examples/integration/finance-genie/README.md`](examples/integration/finance-genie/README.md)
 - [`examples/integration/schemapile/README.md`](examples/integration/schemapile/README.md)
-
-## Migration notes
-
-This repository uses a clean boundary cutover. Old top-level imports are deleted instead of re-exported.
-
-| Old path | New path |
-|----------|----------|
-| `from dbxcarta import run_dbxcarta` | `from dbxcarta.spark import run_dbxcarta` |
-| `from dbxcarta import Settings` | `from dbxcarta.spark import SparkIngestSettings` |
-| `from dbxcarta import run_client` | `from dbxcarta.client.eval import run_client` |
-| `dbxcarta.contract` | `dbxcarta.spark.contract` |
-| `dbxcarta.databricks` | `dbxcarta.spark.databricks` for operational helpers; `dbxcarta.client.databricks` for client workflow helpers |
-| `dbxcarta.verify` | `dbxcarta.spark.verify` |
-| `dbxcarta.ingest.*` | `dbxcarta.spark.ingest.*` |
-| `dbxcarta.ingest.pipeline` | `dbxcarta.spark.run` |
-| `dbxcarta.client.client` | `dbxcarta.client.eval.run` |
-| `dbxcarta.entrypoints.ingest` | `dbxcarta.spark.entrypoint` |
-| `dbxcarta.entrypoints.client` | `dbxcarta.client.eval.entrypoint` |
-| `dbxcarta.presets` module file | `dbxcarta.spark.presets` and `dbxcarta.spark.loader` |
-
-The `dbxcarta` and `dbxcarta-ingest` commands are registered by
-`dbxcarta-spark`; `dbxcarta-client` is registered by `dbxcarta-client`.
-
-## Public API and version contract
-
-External projects depend on the distribution that matches the capability they use. The public surfaces are:
-
-- **Spark:** `SparkIngestSettings`, `run_dbxcarta`, graph contract enums and constants, Databricks identifier/path validators, preset loading, `verify_run`, and the `dbxcarta` / `dbxcarta-ingest` wheel entrypoints
-- **Client:** retrieval primitives, SQL parsing and read-only guards, result comparison, `ClientSettings`, and the `dbxcarta.client.eval` harness
-
-A preset is a small configuration adapter published by an external package and
-referenced by an import-path spec like `your_pkg.module:preset`. Optional
-readiness and question-upload hooks live in `dbxcarta.spark.presets` for CLI
-and demo integrations; they do not require the Spark package to depend on the
-client runtime.
-
-Removing or renaming a public name above is a breaking change. Adding a new name is additive. Implementation modules below a layer remain internal unless documented here.
 
 ## Quickstart
 
@@ -302,95 +413,6 @@ Remove the demo schemas when you are done:
 uv run python scripts/run_demo.py --teardown
 ```
 
-## Architecture
-
-[`docs/reference/architecture.md`](docs/reference/architecture.md) is the canonical architecture reference: the semantic-layer thesis, the three storage planes (read-only data catalogs, the Neo4j semantic layer, and the isolated ops catalog), and how the validation harness proves the layer. The two diagrams below stay focused on the operational build-time and query-time flows.
-
-### Graph schema
-
-![dbxcarta Graph Schema](docs/assets/graph-schema.png)
-
-Editable source: [`docs/assets/graph-schema.excalidraw`](docs/assets/graph-schema.excalidraw).
-
-### Build time: pipeline writes the graph
-
-Unity Catalog metadata flows through a single Spark job that extracts, embeds, and loads every enabled node label into Neo4j. Embeddings are generated inside Spark via `ai_query` and materialized to a Delta staging table before the Neo4j write, so the embedding call happens exactly once per run.
-
-```
-┌──────────────────────────────────────────── BUILD TIME ────────────────────────────────────────────┐
-│                                                                                                    │
-│  ┌──────────────────┐   ┌──────────────────┐   ┌──────────────────┐   ┌──────────────────┐      │
-│  │ Unity Catalog    │──►│ Preflight        │──►│ Extract          │──►│ Transform        │      │
-│  │ information_schema│   │ permission check │   │ SQL to DataFrames│   │ typed graph rows │      │
-│  └──────────────────┘   └──────────────────┘   └──────────────────┘   └──────────────────┘      │
-│                                                                            │                       │
-│                                                                            ▼                       │
-│  ┌──────────────────┐   ┌──────────────────┐   ┌──────────────────┐                                │
-│  │ Neo4j (Aura)     │◄──│ Delta Staging    │◄──│ Embed            │                                │
-│  │ MERGE + indexes  │   │ materialized rows│   │ ai_query/label   │                                │
-│  └──────────────────┘   └──────────────────┘   └──────────────────┘                                │
-│                                                                                                    │
-└────────────────────────────────────────────────────────────────────────────────────────────────────┘
-```
-
-**Pipeline stages:**
-
-- **Unity Catalog:** reads source metadata from `information_schema` across every catalog in `DBXCARTA_CATALOGS` (falling back to the single `DBXCARTA_CATALOG` anchor), including tables, columns, schemas, and sampled values
-- **Preflight:** checks grants, endpoint access, and required configuration before the Spark job does any expensive work
-- **Extract:** unions Unity Catalog metadata from each resolved catalog into Spark DataFrames for every enabled node and relationship type
-- **Transform:** shapes raw metadata into stable graph rows with typed labels, catalog-qualified dotted IDs, descriptions, relationship keys, and the `Table.layer` tier derived from `DBXCARTA_LAYER_MAP`
-- **Embed:** calls `ai_query` inside Spark for each enabled label; row-level failures are captured instead of aborting the whole run
-- **Delta Staging:** materializes enriched rows once so validation, summaries, and Neo4j writes reuse the same embedding results
-- **Neo4j:** writes nodes and relationships with `MERGE`, then creates or updates the vector indexes used at query time
-
-### Query time: client retrieves schema context
-
-A client performs two steps: a vector similarity search to find the most relevant nodes, then a graph traversal to expand that seed set into a full schema subgraph. The combination delivers both semantic relevance and structural completeness: the LLM receives the right tables and their columns, values, and relationships.
-
-```
-┌──────────────────────────────────────────── QUERY TIME ────────────────────────────────────────────┐
-│                                                                                                    │
-│  ┌──────────────────┐   ┌──────────────────┐   ┌──────────────────┐   ┌──────────────────┐      │
-│  │ User Question    │──►│ Client           │──►│ Embed Question   │──►│ Vector Search    │      │
-│  │ natural language │   │ Text2SQL/MCP/RAG │   │ query vector     │   │ top-k graph nodes│      │
-│  └──────────────────┘   └──────────────────┘   └──────────────────┘   └──────────────────┘      │
-│                                                                            │                       │
-│                                                                            ▼                       │
-│  ┌──────────────────┐   ┌──────────────────┐   ┌──────────────────┐                                │
-│  │ SQL / Answer     │◄──│ LLM              │◄──│ Graph Traversal  │                                │
-│  │ generated result │   │ combined context │   │ schema subgraph  │                                │
-│  └──────────────────┘   └──────────────────┘   └──────────────────┘                                │
-│                                                                                                    │
-└────────────────────────────────────────────────────────────────────────────────────────────────────┘
-```
-
-**Query stages:**
-
-- **User Question:** starts as a natural-language request from a Text2SQL, MCP, or schema-aware RAG workflow
-- **Client:** coordinates retrieval by embedding the question, querying Neo4j, assembling context, and calling the LLM
-- **Embed Question:** converts the user question into the same vector space used by table, column, and value embeddings
-- **Vector Search:** finds the most semantically relevant `Table`, `Column`, and `Value` nodes using cosine similarity and Neo4j vector indexes
-- **Graph Traversal:** expands the top-k seed nodes through `HAS_COLUMN`, `HAS_VALUE`, and `REFERENCES` relationships
-- **LLM:** receives the combined schema context and produces the final SQL or answer
-- **SQL / Answer:** returns the generated query or response to the calling workflow
-
-## Design
-
-Everything runs inside Databricks: no external orchestrators, no local execution, no service accounts.
-
-- **Single submission:** one installed wheel entrypoint (`dbxcarta-ingest`, submitted with `dbxcarta submit-entrypoint ingest`) drives the whole pipeline in one Databricks Job. Scope is controlled by per-label embedding flags in `.env`.
-- **Spark:** extraction and transformation use PySpark DataFrames, so the pipeline scales to large catalogs without single-process bottlenecks.
-- **Model Serving:** embeddings are generated in Spark via `ai_query` against a Databricks-hosted foundation model endpoint (`databricks-gte-large-en` by default), with `failOnError => false` so row-level failures are counted rather than thrown.
-- **Materialize-once:** enriched node DataFrames are written to a Delta staging table between transform and load, so the failure-rate aggregation and the Neo4j write both consume the staged rows without re-invoking `ai_query`.
-- **Neo4j Spark Connector:** bulk, partitioned writes from DataFrames. Relationship writes default to `coalesce(1)` to avoid endpoint-node lock contention on Aura, configurable via `DBXCARTA_REL_WRITE_PARTITIONS` (raise only with production evidence); `batch.size` is tuned via `DBXCARTA_NEO4J_BATCH_SIZE`.
-- **Preflight:** grants and serving-endpoint permissions required by the enabled flags are checked before any extract runs; missing permissions fail the run fast.
-- **Secrets:** Neo4j credentials live in a Databricks secret scope and are injected at job time, not read from a local file.
-- **Metadata source:** Unity Catalog `information_schema` only; no pluggable multi-source connector layer.
-- **Run observability:** every run emits a `RunSummary` to stdout, a timestamped JSON file in a UC Volume, and a row appended to a Delta table so history is queryable via SQL. The summary records per-label embedding attempts, successes, and failure rates alongside the threshold and the endpoint used.
-- **`databricks-job-runner`:** CLI wrapper around the Databricks SDK that handles upload, submit, and cleanup.
-
-See `docs/reference/best-practices.md` for the design rules (Spark / Databricks, Neo4j Spark Connector, project-level principles) that shape the pipeline.
-
 ## Configuration
 
 All pipeline and client behavior is controlled by `.env`. Copy `.env.sample`, fill in the placeholders, and use the comments in that file as the configuration reference. The sample is organized by:
@@ -404,28 +426,6 @@ All pipeline and client behavior is controlled by `.env`. Copy `.env.sample`, fi
 - Embeddings
 - Neo4j write tuning
 - Client settings
-
-## Demo Client Details
-
-The client is a batch evaluation job that proves the semantic layer earns its place. It runs each question through up to four arms selected by `DBXCARTA_CLIENT_ARMS`, scored the same way (parsed, executed, non-empty, matched against a reference result):
-
-- **`reference`** executes the ground-truth SQL to establish the correct result.
-- **`no_context`** gives the model only the catalog name, the floor.
-- **`schema_dump`** pastes a bounded schema pulled from the graph across every resolved catalog, capped by `DBXCARTA_SCHEMA_DUMP_MAX_CHARS` (default 7500, roughly 2K tokens) so it is a token-matched control rather than a paste-everything strawman.
-- **`graph_rag`** is the semantic layer in use: vector-seed plus confidence-ranked `REFERENCES` expansion. It justifies the build pipeline only if it beats `schema_dump` at the matched budget and both clear `no_context`.
-
-Each model-calling arm batches generation through `ai_query` and materializes it to a `client_staging_<arm>` Delta table in the ops catalog that doubles as a cache, keyed by a hash of the endpoint, arm, and prompts. An unchanged re-run skips inference; set `DBXCARTA_CLIENT_REFRESH=true` to force regeneration when the endpoint's model changed but the prompts did not. See [`docs/reference/architecture.md`](docs/reference/architecture.md) for the validation rationale.
-
-In the quickstart the client runs the `graph_rag` arm against `tests/fixtures/demo_questions.json` after that file is uploaded to `DATABRICKS_VOLUME_PATH`.
-
-The question set exercises:
-
-- Cross-schema joins (`sales` to `inventory` and `sales` to `hr`)
-- Self-referential FKs
-- Composite FK paths
-- Intra-schema event analytics
-
-For your own catalog, upload a replacement questions JSON file to the UC Volume and point `DBXCARTA_CLIENT_QUESTIONS` at it.
 
 ## Automated end-to-end test
 
@@ -518,3 +518,34 @@ Supply-chain note: `upload --wheel` currently combines version bumping, building
 - `--upload` — uploads `scripts/*.py` before submitting, replacing a separate `upload --all` step.
 - `--no-wait` — returns immediately with the run ID.
 - `--compute {cluster,serverless}` — overrides `DATABRICKS_COMPUTE_MODE` for this run.
+
+## Public API and version contract
+
+External projects depend on the distribution that matches the capability they use. The public surfaces are:
+
+- **Spark:** `SparkIngestSettings`, `run_dbxcarta`, graph contract enums and constants, Databricks identifier/path validators, preset loading, `verify_run`, and the `dbxcarta` / `dbxcarta-ingest` wheel entrypoints
+- **Client:** retrieval primitives, SQL parsing and read-only guards, result comparison, `ClientSettings`, and the `dbxcarta.client.eval` harness
+
+The `dbxcarta` and `dbxcarta-ingest` commands are registered by
+`dbxcarta-spark`; `dbxcarta-client` is registered by `dbxcarta-client`.
+
+Removing or renaming a public name above is a breaking change. Adding a new name is additive. Implementation modules below a layer remain internal unless documented here.
+
+## Migration notes
+
+This repository uses a clean boundary cutover. Old top-level imports are deleted instead of re-exported.
+
+| Old path | New path |
+|----------|----------|
+| `from dbxcarta import run_dbxcarta` | `from dbxcarta.spark import run_dbxcarta` |
+| `from dbxcarta import Settings` | `from dbxcarta.spark import SparkIngestSettings` |
+| `from dbxcarta import run_client` | `from dbxcarta.client.eval import run_client` |
+| `dbxcarta.contract` | `dbxcarta.spark.contract` |
+| `dbxcarta.databricks` | `dbxcarta.spark.databricks` for operational helpers; `dbxcarta.client.databricks` for client workflow helpers |
+| `dbxcarta.verify` | `dbxcarta.spark.verify` |
+| `dbxcarta.ingest.*` | `dbxcarta.spark.ingest.*` |
+| `dbxcarta.ingest.pipeline` | `dbxcarta.spark.run` |
+| `dbxcarta.client.client` | `dbxcarta.client.eval.run` |
+| `dbxcarta.entrypoints.ingest` | `dbxcarta.spark.entrypoint` |
+| `dbxcarta.entrypoints.client` | `dbxcarta.client.eval.entrypoint` |
+| `dbxcarta.presets` module file | `dbxcarta.spark.presets` and `dbxcarta.spark.loader` |

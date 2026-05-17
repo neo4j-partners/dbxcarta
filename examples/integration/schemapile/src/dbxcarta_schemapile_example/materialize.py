@@ -110,14 +110,14 @@ def main() -> int:
         ),
     )
     parser.add_argument(
-        "--dotenv", type=Path, default=Path(".env"),
-        help="Path to the .env file to load (default: .env)",
+        "--dotenv", type=Path, default=Path(__file__).resolve().parents[2] / ".env",
+        help="Path to the .env file to load (default: example directory .env)",
     )
     parser.add_argument(
         "--env-out",
         type=Path,
-        default=Path(".env.generated"),
-        help="Path to write the generated DBXCARTA_SCHEMAS overlay (default: .env.generated)",
+        default=Path(__file__).resolve().parents[2] / ".env.generated",
+        help="Path to write the generated DBXCARTA_SCHEMAS overlay (default: example directory .env.generated)",
     )
     parser.add_argument(
         "--warehouse-id",
