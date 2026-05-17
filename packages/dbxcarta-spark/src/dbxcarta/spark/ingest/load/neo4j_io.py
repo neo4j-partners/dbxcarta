@@ -142,6 +142,38 @@ def delete_stale_values(
     )
 
 
+def remove_stale_key_columns(
+    driver: "Driver",
+    catalogs: list[str],
+    schemas: list[str],
+) -> None:
+    """Strip the :KeyColumn label from every node in the run's scope.
+
+    `write_key_columns` only ever MERGE-*adds* :KeyColumn; a column that
+    stopped being key-like between runs would keep the label forever and
+    still pollute the same-schema pre-filtered candidate set the semantic FK
+    query scans (review #4). Clearing the label across this run's
+    catalogs/schemas before the chunk loop re-applies it to the *current*
+    key-like set makes the label a per-run computed property, not an
+    append-only sticker. Scoped exactly like `delete_stale_values` (bounded
+    catalog/schema config scalars, never a per-column id list — best-
+    practices §5); the per-chunk `write_key_columns` then re-adds it.
+    """
+    with driver.session() as session:
+        session.run(
+            f"MATCH (c:{NodeLabel.COLUMN.value}:{KEY_COLUMN_LABEL}) "
+            "WHERE c.catalog IN $catalogs "
+            "AND (size($schemas) = 0 OR c.schema IN $schemas) "
+            f"REMOVE c:{KEY_COLUMN_LABEL}",
+            catalogs=catalogs,
+            schemas=schemas,
+        )
+    logger.info(
+        "[dbxcarta] cleared stale :%s labels in run scope",
+        KEY_COLUMN_LABEL,
+    )
+
+
 def query_counts(driver: "Driver") -> dict[str, int]:
     """Post-load Cypher count probes. Keyed by enum .value for JSON serializability."""
     counts: dict[str, int] = {}
@@ -191,6 +223,7 @@ def write_rel(
 __all__ = [
     "bootstrap_constraints",
     "delete_stale_values",
+    "remove_stale_key_columns",
     "query_counts",
     "write_node",
     "write_rel",

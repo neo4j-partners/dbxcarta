@@ -1,8 +1,9 @@
 """Spark-native semantic FK inference (`fk.inference`).
 
 Candidate generation now comes from the injectable nearest-neighbor seam
-(`semantic_nn_pairs`, a per-source vector SEARCH against the key-like index
-in production). These tests feed a canned `(source_id, target_id, score)`
+(`semantic_nn_pairs`, a per-source exact structural pre-filter then
+`vector.similarity.cosine` over the survivors in production). These tests
+feed a canned `(source_id, target_id, score)`
 frame straight into `infer_semantic_edges` — the deterministic correctness
 pipeline — so the suite runs with no Neo4j. The hand-crafted vectors (see
 conftest `phase4_vectors`) give exact cosines: buyer_ref→customers.id 0.88,
@@ -114,10 +115,11 @@ def _cos(a: list[float], b: list[float]) -> float:
 
 def _nn_pairs(spark, vectors: dict[str, list[float]]):
     """Stand in for `semantic_nn_pairs`: every ordered (src, tgt) pair with
-    its exact cosine. The real per-source SEARCH returns the top-k key-like
-    neighbors; here the deterministic pipeline applies the key-like /
-    catalog-schema / threshold filters, so an unfiltered all-pairs frame is
-    the strongest input (it proves the filters, not the index, do the work).
+    its exact cosine. The real per-source query pre-filters then returns the
+    top-k key-like neighbors by cosine; here the deterministic pipeline
+    applies the key-like / catalog-schema / threshold filters, so an
+    unfiltered all-pairs frame is the strongest input (it proves the
+    filters, not the candidate query, do the work).
     """
     ids = list(vectors)
     rows = [

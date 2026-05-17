@@ -35,6 +35,7 @@ from dbxcarta.spark.ingest.load.neo4j_io import (
     bootstrap_constraints,
     delete_stale_values,
     query_counts,
+    remove_stale_key_columns,
     write_key_columns,
     write_node,
     write_rel,
@@ -214,6 +215,18 @@ def _run(
                 else None
             )
 
+            # Clear prior-run :KeyColumn labels in this run's scope before
+            # the chunk loop re-applies them to the current key-like set
+            # (review #4). Without this a column that stopped being key-like
+            # keeps the label and still pollutes the same-schema candidate
+            # set the semantic FK pre-filter scans.
+            if keylike_ids is not None:
+                remove_stale_key_columns(
+                    driver,
+                    settings.resolved_catalogs(),
+                    schema_list,
+                )
+
             # Sample distinct values BEFORE the chunk loop so each Value
             # slice can embed+write alongside its Column slice in the same
             # batched pass. Sampling-only now: no Neo4j write or stale purge
@@ -316,34 +329,40 @@ def _stale_value_cleanup(
     values: ValueResult,
     summary: RunSummary,
 ) -> None:
-    """Drop prior-run Values and warn on a suspicious empty sample.
+    """Drop prior-run Values, unless a suspicious empty sample makes the
+    delete unsafe.
 
     The scoped server-side delete keys on the contract-1.3 Value run-stamp:
     any Value within this run's catalogs/schemas whose `last_run` predates
     the run start was not refreshed by the per-chunk writes and is stale.
 
-    When the value path ran and found candidate columns but produced zero
-    Value nodes, that is far more likely a silent sampling failure
-    (unreadable schemas, cardinality wipeout) than a catalog with genuinely
-    no sampleable values, so it is recorded loudly on the summary.
+    Safety gate (review #6): when the value path ran and found candidate
+    columns but produced zero Value nodes, that is far more likely a silent
+    sampling failure (unreadable schemas, cardinality wipeout) than a
+    catalog with genuinely no sampleable values. Deleting here would wipe
+    every prior-run Value because *this* run wrote none — so the delete is
+    skipped entirely and the failure recorded loudly instead. No run
+    failure and no new setting: a healthy next run heals the staleness.
     """
-    delete_stale_values(
-        driver,
-        summary.started_at.isoformat(),
-        settings.resolved_catalogs(),
-        schema_list,
-    )
-
     stats = values.sample_stats
     if stats.value_nodes == 0 and stats.candidate_columns > 0:
         msg = (
             f"value path produced 0 Value nodes from"
             f" {stats.candidate_columns} candidate column(s):"
             f" sampling likely failed silently (unreadable schemas or"
-            f" cardinality wipeout) rather than no sampleable values"
+            f" cardinality wipeout) rather than no sampleable values;"
+            f" stale-Value delete SKIPPED to avoid wiping prior-run Values"
         )
         summary.value_sampling_warning = msg
         logger.warning("[dbxcarta] %s", msg)
+        return
+
+    delete_stale_values(
+        driver,
+        summary.started_at.isoformat(),
+        settings.resolved_catalogs(),
+        schema_list,
+    )
 
 
 def _verify(driver: "Driver", settings: SparkIngestSettings, summary: RunSummary) -> None:

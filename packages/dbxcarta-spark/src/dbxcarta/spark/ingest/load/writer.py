@@ -54,30 +54,27 @@ def write_nodes_multi(
 
 
 def read_query(
-    spark: "SparkSession",
-    config: Neo4jConfig,
-    cypher: str,
-    parameters: dict[str, object] | None = None,
+    spark: "SparkSession", config: Neo4jConfig, cypher: str,
 ) -> "DataFrame":
     """Run a server-side Cypher read through the connector `query` option.
 
     The connector executes `cypher` entirely on the Neo4j side and streams
     the result rows back as a DataFrame — no DataFrame rows are pushed into
-    the read and nothing is collected to the driver. Bind values are passed
-    via per-key `query.parameter.<name>` options (the connector's documented
-    parameterization for the `query` read mode). `partitions` /
+    the read and nothing is collected to the driver. No bind parameters: the
+    Neo4j Spark Connector does not parameterize a `query` read (its only
+    documented injection point is the separate `script` option), so the one
+    bound value the semantic read needs — `k` — is interpolated into the
+    Cypher upstream as a trusted, settings-validated int. `partitions` /
     `query.count` are intentionally not set: the default single-partition
     read is correct, and partitioning is the only batching lever to add
     later if a result set ever warrants it.
     """
-    reader = (
+    return (
         spark.read.format(_FORMAT)
         .options(**config._base_opts())
         .option("query", cypher)
+        .load()
     )
-    for name, value in (parameters or {}).items():
-        reader = reader.option(f"query.parameter.{name}", str(value))
-    return reader.load()
 
 
 def write_relationship(
