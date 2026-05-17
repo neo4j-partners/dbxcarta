@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from neo4j import GraphDatabase
 
-from dbxcarta.client.ids import catalog_from_node_id, schema_from_node_id
+from dbxcarta.client.ids import schema_from_node_id
 from dbxcarta.client.neo4j_utils import neo4j_credentials
 from dbxcarta.client.retriever import ColumnEntry, ContextBundle, JoinLine, Retriever
 from dbxcarta.client.settings import ClientSettings
@@ -79,6 +79,17 @@ _JOIN_COLUMN_IDS_CYPHER = (
     "  AND COALESCE(r.confidence, 1.0) >= $threshold "
     "RETURN DISTINCT other.id AS col_id"
 )
+
+
+def _normalize_id_part(name: str) -> str:
+    """Normalize one identifier part to the form ingest stores in node ids.
+
+    Mirrors ``dbxcarta.spark.contract.generate_id``: lowercase, then spaces
+    and hyphens to underscores. Node ids are normalized this way while the
+    ``.name`` property keeps the true Unity Catalog name, so any comparison
+    against an id-derived part must normalize the configured name first.
+    """
+    return name.lower().replace(" ", "_").replace("-", "_")
 
 
 def _question_tokens(question: str) -> list[str]:
@@ -157,6 +168,15 @@ class GraphRetriever(Retriever):
                 raw_tbl_seed_pairs, configured_schemas
             )
             selected_schemas = _select_schemas(col_seed_pairs, tbl_seed_pairs)
+            # _select_schemas returns normalized id parts. Map them back to the
+            # configured true names so the `.name`-filtered fetch and lexical
+            # queries get the real (possibly hyphenated) schema names.
+            _selected_norm = {_normalize_id_part(s) for s in selected_schemas}
+            selected_true = (
+                [s for s in configured_schemas if _normalize_id_part(s) in _selected_norm]
+                if _selected_norm and configured_schemas
+                else selected_schemas
+            )
             active_col_seed_pairs = (
                 _filter_seed_pairs_to_schemas(col_seed_pairs, selected_schemas)
                 if selected_schemas
@@ -178,7 +198,7 @@ class GraphRetriever(Retriever):
             ref_tbl_ids = _references_table_ids_ranked(
                 session, active_col_seeds, threshold, max_expansion, embedding, alpha
             )
-            fetch_schemas = selected_schemas or configured_schemas
+            fetch_schemas = selected_true or configured_schemas
             lexical_tbl_ids = _lexical_table_ids(session, question, fetch_schemas)
             lexical_col_tbl_ids = _lexical_column_table_ids(
                 session, question, fetch_schemas
@@ -211,7 +231,7 @@ class GraphRetriever(Retriever):
             tbl_seed_ids=tbl_seeds,
             tbl_seed_scores=tbl_seed_scores,
             expansion_tbl_ids=expansion_tbl_ids,
-            selected_schemas=selected_schemas,
+            selected_schemas=selected_true,
             join_lines=join_lines,
         )
 
@@ -246,7 +266,9 @@ def _filter_seed_pairs_to_schemas(
 ) -> list[tuple[str, float]]:
     if not schemas:
         return seed_pairs
-    allowed = set(schemas)
+    # schema_from_node_id returns the normalized id part, so the configured
+    # (true) schema names must be normalized to the same space to match.
+    allowed = {_normalize_id_part(s) for s in schemas}
     return [
         (node_id, score)
         for node_id, score in seed_pairs
@@ -445,10 +467,12 @@ def _fetch_columns(
         return []
     result = session.run(
         "UNWIND $tids AS tid "
-        "MATCH (s:Schema)-[:HAS_TABLE]->(t:Table {id: tid}) "
+        "MATCH (db:Database)-[:HAS_SCHEMA]->(s:Schema)-[:HAS_TABLE]->"
+        "(t:Table {id: tid}) "
         "MATCH (t)-[:HAS_COLUMN]->(c:Column) "
         "WHERE size($schemas) = 0 OR s.name IN $schemas "
-        "RETURN s.name AS schema_name, t.name AS table_name, "
+        "RETURN db.name AS catalog_name, s.name AS schema_name, "
+        "       t.name AS table_name, "
         "       c.id AS col_id, c.name AS col_name, c.data_type AS data_type, "
         "       c.comment AS comment, c.ordinal_position AS pos "
         "ORDER BY schema_name, table_name, pos",
@@ -457,10 +481,12 @@ def _fetch_columns(
     )
     entries: list[ColumnEntry] = []
     for row in result:
-        # Catalog is authoritative per node id (ingest builds ids
-        # catalog-qualified); the graph spans multiple catalogs, so it
-        # cannot come from a single configured catalog.
-        catalog = catalog_from_node_id(row["col_id"]) or ""
+        # Catalog, schema, and table come from the authoritative `.name`
+        # properties via the Database walk. Node ids are normalized
+        # (hyphens to underscores) and would yield a nonexistent catalog;
+        # the graph spans multiple catalogs, so Database.name per node is
+        # what reconstructs a correct, executable FQN.
+        catalog = row["catalog_name"] or ""
         fqt = f"`{catalog}`.`{row['schema_name']}`.`{row['table_name']}`"
         entries.append(ColumnEntry(
             table_fqn=fqt,

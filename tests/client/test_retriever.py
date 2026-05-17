@@ -276,13 +276,14 @@ def test_select_schemas_empty_seeds() -> None:
     assert _select_schemas([], []) == []
 
 
-def test_fetch_columns_uses_catalog_from_column_id() -> None:
+def test_fetch_columns_uses_catalog_name_from_database_node() -> None:
     class SessionStub:
         def run(self, _query, **kwargs):
             assert kwargs["tids"] == ["bronze.sales.orders", "gold.sales.orders"]
             assert kwargs["schemas"] == ["sales"]
             return [
                 {
+                    "catalog_name": "bronze",
                     "schema_name": "sales",
                     "table_name": "orders",
                     "col_id": "bronze.sales.orders.id",
@@ -292,6 +293,7 @@ def test_fetch_columns_uses_catalog_from_column_id() -> None:
                     "pos": 1,
                 },
                 {
+                    "catalog_name": "gold",
                     "schema_name": "sales",
                     "table_name": "orders",
                     "col_id": "gold.sales.orders.id",
@@ -311,6 +313,62 @@ def test_fetch_columns_uses_catalog_from_column_id() -> None:
     assert [column.table_fqn for column in columns] == [
         "`bronze`.`sales`.`orders`",
         "`gold`.`sales`.`orders`",
+    ]
+
+
+def test_fetch_columns_emits_true_hyphenated_name_not_normalized_id() -> None:
+    """Regression: the FQN must use Database.name, not the normalized id.
+
+    Ingest normalizes hyphens to underscores in node ids while .name keeps
+    the true catalog/schema. Building the FQN from the id produced a
+    nonexistent catalog and every graph_rag query failed
+    TABLE_OR_VIEW_NOT_FOUND.
+    """
+
+    class SessionStub:
+        def run(self, _query, **kwargs):
+            return [
+                {
+                    "catalog_name": "graph-enriched-finance-silver",
+                    "schema_name": "graph-enriched-schema",
+                    "table_name": "accounts",
+                    "col_id": (
+                        "graph_enriched_finance_silver."
+                        "graph_enriched_schema.accounts.account_id"
+                    ),
+                    "col_name": "account_id",
+                    "data_type": "BIGINT",
+                    "comment": "",
+                    "pos": 1,
+                },
+            ]
+
+    columns = _fetch_columns(
+        SessionStub(),
+        ["graph_enriched_finance_silver.graph_enriched_schema.accounts"],
+        ["graph-enriched-schema"],
+    )
+
+    assert columns[0].table_fqn == (
+        "`graph-enriched-finance-silver`."
+        "`graph-enriched-schema`.`accounts`"
+    )
+
+
+def test_filter_seed_pairs_matches_hyphenated_configured_schema() -> None:
+    """Regression: a hyphenated configured schema must select normalized-id seeds.
+
+    schema_from_node_id yields the normalized id part
+    (graph_enriched_schema); the configured name is hyphenated
+    (graph-enriched-schema). Without normalization every vector seed was
+    dropped and seed-driven expansion was dead.
+    """
+    pairs = [
+        ("graph_enriched_finance_silver.graph_enriched_schema.accounts.id", 0.9),
+        ("other_cat.other_schema.t.c", 0.5),
+    ]
+    assert _filter_seed_pairs_to_schemas(pairs, ["graph-enriched-schema"]) == [
+        ("graph_enriched_finance_silver.graph_enriched_schema.accounts.id", 0.9),
     ]
 
 

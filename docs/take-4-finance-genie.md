@@ -173,16 +173,25 @@ changeset, not part of the Take-4 medallion work: `run.py`,
 `verify/values.py`, and client files. The ingest wheel must be built
 from a known-good tree before drawing conclusions about staging.
 
-Status: BLOCKED pending a decision. Candidate next steps, to be
-chosen with the user, not applied unilaterally:
+Resolution applied (user-directed):
 
-1. Clear the stale `…/dbxcarta/staging` Delta directory the same way
-   Neo4j was wiped, then rerun. Lowest-risk if staging is meant to be
-   per-run transient.
-2. Build the ingest wheel from a clean tree (stash or revert the
-   unrelated uncommitted spark/client changes) so the run reflects
-   the Take-4 code only, then rerun.
-3. Both: clean tree and cleared staging.
+- The stale `…/dbxcarta/staging` Delta directory was confirmed to
+  hold prior-run `column_nodes, database_nodes, schema_nodes,
+  table_nodes, value_nodes` and was recursively removed.
+- The unrelated uncommitted spark/client changeset was committed by
+  the user (HEAD `6201b89`), so the ingest wheel now builds from a
+  clean tree with the latest code.
+- `.env` was reconciled back to the finance-genie medallion overlay
+  (it had reverted to the schemapile/dense_500 overlay) with
+  `DBXCARTA_VERIFY_GATE=false`.
+- Wheels rebuilt and republished, scripts uploaded, readiness ready,
+  ingest resubmitted.
+- First resubmit aborted client-side at the maven preflight: the
+  `.env` compute block had also reverted to the schemapile cluster
+  `1029-205109-yca7gn2n` ("Small Spark 4.0"), which lacks the Neo4j
+  connector. `DATABRICKS_CLUSTER_ID` repointed to the dedicated
+  `0515-141455-wb8qxgo2` ("Small Spark 4.0 - DBXCarta"), the cluster
+  the earlier successful-extraction run used. Resubmitted.
 
 ## What to do better next time
 
@@ -213,6 +222,11 @@ Decisions locked for this rerun:
 
 Progress is tracked inline in the checklist below. Each item is marked
 done with a short result note as it completes.
+
+Outcome so far: sections A through F are complete and green. The
+ingest run `852936506066184` loaded all 3 catalogs / 12 tables / 95
+columns into a wiped Neo4j and verify passed with zero violations.
+Section G (client evaluation) is running.
 
 ## Checklist: run and test everything
 
@@ -267,33 +281,224 @@ done with a short result note as it completes.
 
 ### E. Ingest
 
-- [x] `dbxcarta submit-entrypoint ingest` submitted. Run
-      `209429536888785` (job `562911796534570`).
-- [x] Polled to terminal state: `INTERNAL_ERROR` / `FAILED` after
-      166s. Task run `1007639542952392`.
-- [x] Read `get_output`. Extraction succeeded (`schemas: 3`,
-      `tables: 12`, `columns: 95`, semantic FK accepted 11, value
-      nodes 51). `DBXCARTA_VERIFY_GATE=false` and
-      `databricks-job-runner==0.6.1` confirmed in run params.
-- [ ] BLOCKED. The run failed at the first Neo4j node write
-      (Database, `run.py:335`), not at verify. See Issue 6 below;
-      awaiting a decision before the next rerun.
+- [x] `dbxcarta submit-entrypoint ingest`. After Issue 6 was
+      resolved (cleared staging, clean committed tree, finance-genie
+      `.env`, DBXCarta cluster), the clean run is
+      `852936506066184` (job `969189156517451`), task run
+      `848429190360666`.
+- [x] Polled to terminal state: `TERMINATED` / `SUCCESS`, ~248s.
+- [x] Read `get_output`: run summary `status=success`.
+- [x] Run summary confirms `schemas: 3`, `tables: 12`,
+      `columns: 95`, value nodes 51, semantic FK 11 + metadata FK 2.
+      Neo4j counts: Database 3, Schema 3, Table 12, Column 95,
+      Value 51, HAS_SCHEMA 3, HAS_TABLE 12, HAS_COLUMN 95,
+      HAS_VALUE 51, REFERENCES 13.
 
 ### F. Verify
 
-- [ ] `dbxcarta verify` against the latest success summary.
-- [ ] If verify is single-catalog-anchored, expect scope mismatches
-      for schema, table, column, and references counts. Treat them as
-      warn-only artifacts of decision D4, not data loss.
-- [ ] Confirm this run's nodes carry `contract_version` `1.1`. Any
-      non-`1.1` nodes are stale prior-run data, not this run.
+- [x] Inline verify in the ingest job: `ok=True violations=0`.
+- [x] Standalone `dbxcarta verify`: `OK (0 violations)`.
+- [x] The D4 single-catalog-anchored caveat no longer applies: the
+      committed verify code aggregates count invariants across all
+      resolved catalogs (`run.py` now passes
+      `catalogs=settings.resolved_catalogs()`), so the multi-catalog
+      run verifies clean with zero scope mismatches.
+- [x] Neo4j was wiped before the run and verify (which includes the
+      contract-version invariant) passed with zero violations, so all
+      nodes are this run's at `contract_version` `1.1`.
 
 ### G. Client evaluation
 
-- [ ] `dbxcarta submit-entrypoint client`.
-- [ ] Poll the run to terminal state and read its output.
-- [ ] Review per-arm accuracy across `no_context`, `schema_dump`, and
-      `graph_rag`.
+- [x] `dbxcarta submit-entrypoint client` submitted (serverless).
+- [x] Polled to terminal state and read output: run
+      `321469996458442` (task `21901960124707`),
+      `TERMINATED` / `SUCCESS`.
+- [x] Reviewed per-arm accuracy across `no_context`, `schema_dump`,
+      and `graph_rag`. All 12 questions attempted and parsed on every
+      arm. Execution and correctness:
+
+      | Arm | attempted | parsed | executed | exec rate | correct rate |
+      | --- | --- | --- | --- | --- | --- |
+      | `no_context` | 12 | 12 | 2 | 16.7% | 100.0% (2/2) |
+      | `schema_dump` | 12 | 12 | 12 | 100.0% | 83.3% (10/12) |
+      | `graph_rag` | 12 | 12 | 0 | 0.0% | 0.0% (0/12) |
+
+- [x] `graph_rag` 0/12 root-caused, fixed, and re-verified
+      end-to-end. The fix run `938043512057347` brings `graph_rag`
+      to 12/12 executed and 100% correct. See G.1, G.1.1, and
+      G.1.2.
+
+### G.1 Finding: graph_rag executed 0 of 12
+
+`graph_rag` parsed all 12 generated SQL statements but executed
+none, so its correctness is 0%. This is a total-failure anomaly,
+not a quality gap: `schema_dump` over the same graph data executed
+all 12 and was 83.3% correct, and `no_context` executed cleanly on
+the 2 it attempted. A 12/12 parse with 0/12 execute points at the
+graph_rag context or its emitted SQL (for example wrong or
+backtick/medallion-qualified table identifiers from the graph
+context) rather than at the model or the harness.
+
+Artifacts pulled from
+`…/dbxcarta/runs/dbxcarta_client_local_20260517T013831Z.json`
+make the root cause concrete. Two stacked defects:
+
+1. **graph_rag retrieved zero context for all 12 questions.**
+   Every graph_rag `ArmResult` has `context_ids: []`. The arm
+   injected no graph context at all, so the model answered each
+   question blind. This is the primary defect: the graph retriever
+   returns nothing against the medallion graph.
+2. **Wrong catalog identifier as the downstream symptom.** With no
+   context naming the real catalog, the model guessed an
+   underscored name. Every graph_rag query failed with
+   `[TABLE_OR_VIEW_NOT_FOUND]` on
+   `` `graph_enriched_finance_silver`.`graph-enriched-schema`.<t> ``.
+   The real catalog is `graph-enriched-finance-silver` with
+   hyphens. The working arms prove the target is fine:
+   `no_context` and `schema_dump` both emit the correct
+   `` `graph-enriched-finance-silver`.`graph-enriched-schema`.<t> ``
+   and execute. `schema_dump` gets the hyphenated name because the
+   dumped schema text contains it literally; graph_rag never saw
+   it because its context was empty.
+
+### G.1.1 Root cause (pinned)
+
+Direct Neo4j inspection of this run's graph confirms the mechanism.
+Ingest normalizes identifiers when it builds node `id`s but
+preserves the true Unity Catalog names in the `.name` property:
+
+| Node | `.id` (normalized) | `.name` (true) |
+| --- | --- | --- |
+| Database | `graph_enriched_finance_silver` | `graph-enriched-finance-silver` |
+| Schema | `graph_enriched_finance_silver.graph_enriched_schema` | `graph-enriched-schema` |
+| Table | `…​.graph_enriched_schema.transactions` | `transactions` |
+
+This normalization is by design. `contract.generate_id`
+lowercases each part and replaces spaces and hyphens with
+underscores, and `verify/catalog.py` has an id-normalization
+invariant, so the id is deliberately lossy and `.name` is the
+authoritative identifier. All 95 columns and 12 tables carry
+embeddings and all five vector indexes are `ONLINE`, so the
+embedding store is healthy.
+
+The graph_rag retriever has two defects, both from reading the
+normalized `id` where it must read the true `.name`:
+
+- **Defect A (breaks every emitted query).**
+  `graph_retriever._fetch_columns` builds the table FQN as
+  `` `{catalog}`.`{schema}`.`{table}` `` where `catalog` comes from
+  `catalog_from_node_id(col_id)`, the normalized id component
+  `graph_enriched_finance_silver`. Schema and table come from the
+  true `.name`. The result is the exact failing identifier seen in
+  every artifact:
+  `` `graph_enriched_finance_silver`.`graph-enriched-schema`.`accounts` ``.
+  The catalog segment is the underscored, nonexistent name; the
+  model copies the context verbatim, so every query fails
+  `[TABLE_OR_VIEW_NOT_FOUND]`. `no_context` and `schema_dump` are
+  unaffected because they take the catalog from `.env`, not from
+  the graph.
+- **Defect B (kills vector-seed expansion).**
+  `_filter_seed_pairs_to_schemas`, `_select_schemas`, and
+  `_normalized_schema_scores` derive a seed's schema with
+  `schema_from_node_id`, which returns the normalized
+  `graph_enriched_schema`, then compare it against the configured
+  schema name `graph-enriched-schema` (hyphens, from
+  `DBXCARTA_SCHEMAS`). The comparison never matches, so every
+  vector seed is dropped and seed-driven expansion (parent tables,
+  FK walk, join criteria) is dead. The lexical fallback still works
+  because it filters on the true `s.name`, which is why a
+  wrongly-qualified query was still produced rather than a fully
+  empty prompt.
+
+Net: any deployment whose catalog or schema name contains a hyphen
+(or space or uppercase) breaks graph_rag, because every such name
+normalizes to a different id than its true `.name`. The
+finance-genie medallion catalogs are the first hyphenated names to
+exercise this path; prior schemapile/dense runs used already-normal
+names so id and `.name` coincided and the bug was latent.
+
+### G.1.2 Fix (implemented)
+
+The fix is in the client retriever, not ingest. Ingest
+normalization is intentional and verify-guarded; `.name` is the
+contract's authoritative identifier and the retriever must use it.
+
+- **Defect A.** Stop reconstructing the catalog from the node id.
+  Resolve the true catalog from the graph: extend the
+  `_fetch_columns` Cypher to walk
+  `(db:Database)-[:HAS_SCHEMA]->(s:Schema)-[:HAS_TABLE]->(t:Table)`
+  and return `db.name` as the catalog, building the FQN from
+  `db.name`, `s.name`, `t.name`. The other column-/value-fetch
+  paths that surface table identifiers get the same treatment.
+- **Defect B.** Make the schema-scope comparison normalization-safe.
+  Either normalize the configured schema names with the same rule
+  as `contract.generate_id` before comparing to id-derived schema,
+  or resolve each seed's true schema `.name` from the graph and
+  compare against the configured (true) names. The first option is
+  smaller and keeps the comparison in id-space; the second removes
+  id-derived names from scoping entirely and is more robust.
+- **Regression guard.** Add a fixture with a hyphenated catalog and
+  schema so id-vs-name divergence is exercised. A unit test asserts
+  the emitted FQN uses `.name` and that hyphenated configured
+  schemas still select seeds.
+
+Decision (locked): Defect B uses option 1, normalize the configured
+schema names to id-space with the `contract.generate_id` rule and
+compare in normalized space. Defect A resolves the true catalog
+from `Database.name` via the graph walk.
+
+Implemented in `packages/dbxcarta-client/src/dbxcarta/client/graph_retriever.py`:
+
+- Added `_normalize_id_part`, mirroring `contract.generate_id`
+  (lowercase, spaces and hyphens to underscores).
+- Defect A: `_fetch_columns` Cypher now walks
+  `(db:Database)-[:HAS_SCHEMA]->(s:Schema)-[:HAS_TABLE]->(t:Table)`
+  and returns `db.name AS catalog_name`. The FQN is built from
+  `db.name`, `s.name`, `t.name`; the `catalog_from_node_id` import
+  and its use were removed.
+- Defect B: `_filter_seed_pairs_to_schemas` normalizes the
+  configured schema names before comparing to the id-derived
+  schema. `retrieve()` maps the normalized `_select_schemas` output
+  back to the configured true names (`selected_true`) so the
+  `.name`-filtered fetch and lexical queries and the
+  `ContextBundle.selected_schemas` carry the real hyphenated names.
+- Regression guards in `tests/client/test_retriever.py`: a
+  hyphenated-name `_fetch_columns` test asserting the FQN uses
+  `.name` not the normalized id, and a `_filter_seed_pairs_to_schemas`
+  test asserting a hyphenated configured schema selects
+  normalized-id seeds. The pre-existing
+  `test_fetch_columns_uses_catalog_from_column_id` was updated to the
+  corrected `catalog_name` contract.
+
+Validation:
+
+- Full suite green: 453 passed, 1 skipped, 6 deselected.
+- Read-only live check against the run's Neo4j: with the configured
+  hyphenated schema, `_fetch_columns` emits
+  `` `graph-enriched-finance-silver`.`graph-enriched-schema`.<t> ``
+  (the executable form the working arms use), and
+  `_filter_seed_pairs_to_schemas` keeps 4/4 real normalized seed
+  ids (previously 0/4).
+
+End-to-end proof (run `938043512057347`, SUCCESS): after
+republishing the client wheel with the fix and rerunning the
+client arm against the same Neo4j, `graph_rag` recovered fully.
+
+| Arm | executed | exec rate | correct rate |
+| --- | --- | --- | --- |
+| `no_context` | 2/12 | 16.7% | 100.0% (2/2) |
+| `schema_dump` | 12/12 | 100.0% | 83.3% (10/12) |
+| `graph_rag` (pre-fix, run `321469996458442`) | 0/12 | 0.0% | 0.0% (0/12) |
+| `graph_rag` (post-fix, run `938043512057347`) | 12/12 | 100.0% | 100.0% (12/12) |
+
+Artifacts in
+`…/dbxcarta/runs/dbxcarta_client_local_20260517T020424Z.json`
+confirm both defects are closed: every graph_rag result now has a
+non-empty context (10 context ids per question, was 0) and emits
+the executable hyphenated FQN, for example
+`` SELECT COUNT(*) FROM `graph-enriched-finance-silver`.`graph-enriched-schema`.`accounts` ``.
+graph_rag is now the top arm at 100% correct, ahead of
+`schema_dump` at 83.3%.
 
 ### H. Local demo, optional
 

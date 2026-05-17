@@ -1,5 +1,0 @@
-scope: graph-enriched-finance-silver,graph-enriched-finance-gold.graph-enriched-schema
-present expected tables: 8
-required tables: ready
-optional tables: ready
-status: ready

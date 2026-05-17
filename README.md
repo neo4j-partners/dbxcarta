@@ -2,12 +2,16 @@
 
 *Inspired by [neocarta](https://github.com/neo4j-field/neocarta).*
 
-dbxcarta builds a metadata knowledge graph in Neo4j from Unity Catalog. The graph serves as a semantic layer for GraphRAG workflows: Text2SQL agents, MCP tools, and schema-aware RAG pipelines query the graph at runtime to retrieve the schema context they need before generating SQL.
+dbxcarta builds a semantic layer over Unity Catalog in Neo4j. Unity Catalog publishes tables, columns, and declared constraints but not meaning: which tables sit near a question, which relationships exist beyond declared foreign keys, which medallion layer holds the trustworthy version of an entity. dbxcarta turns that flat metadata into a graph a question can traverse, where similarity is an embedding distance, a relationship is a confidence-scored edge, and every table carries its medallion layer. Text2SQL agents, MCP tools, and schema-aware RAG pipelines query the graph at runtime to retrieve the slice they need before generating SQL.
+
+The semantic-layer thesis, the three storage planes (data, semantic layer, ops), and the validation model are documented in [`docs/reference/architecture.md`](docs/reference/architecture.md), the canonical architecture reference.
 
 **What the build pipeline does:**
 
-- Extracts Unity Catalog metadata: table names, column descriptions, comments, and sampled values
+- Extracts Unity Catalog metadata across one or more catalogs: table names, column descriptions, comments, and sampled values
+- Tags every table with its medallion layer from a `catalog:layer` map, so bronze, silver, and gold fold into one graph
 - Embeds each piece using a Databricks foundation model
+- Discovers foreign keys from declared constraints plus metadata and semantic inference, each edge scored by confidence
 - Writes the result to Neo4j as typed nodes with vector properties
 
 **What happens at query time:**
@@ -27,12 +31,13 @@ The graph follows a stable, typed schema:
 - `(:Schema)-[:HAS_TABLE]->(:Table)`
 - `(:Table)-[:HAS_COLUMN]->(:Column)`
 - `(:Column)-[:HAS_VALUE]->(:Value)`
-- `(:Column)-[:REFERENCES]->(:Column)` — from declared and inferred foreign keys
+- `(:Column)-[:REFERENCES]->(:Column)`, from declared and inferred foreign keys, each carrying a `confidence` score that retrieval uses to rank and threshold join paths
 
 Each node carries:
-- A stable dotted `id` such as `catalog.schema.table.column`
+- A stable dotted `id` such as `catalog.schema.table.column`, catalog-qualified so a graph spanning multiple catalogs reconstructs full names per node
 - A `description`
 - An `embedding` vector for semantic similarity search (where applicable)
+- For `Table` nodes under graph contract v1.1, a `layer` property recording the medallion tier (`bronze`, `silver`, `gold`) derived from the configured `catalog:layer` map
 
 ## Use dbxcarta as a library
 
@@ -55,16 +60,20 @@ Code running with Databricks Spark access can construct `SparkIngestSettings` an
 from dbxcarta.spark import SparkIngestSettings, run_dbxcarta
 
 settings = SparkIngestSettings(
-    dbxcarta_catalog="analytics",
+    dbxcarta_catalog="analytics_silver",
+    dbxcarta_catalogs="analytics_bronze,analytics_silver,analytics_gold",
+    dbxcarta_layer_map="analytics_bronze:bronze,analytics_silver:silver,analytics_gold:gold",
     dbxcarta_schemas="finance,customer_success",
     dbxcarta_summary_volume="/Volumes/analytics/ops/dbxcarta/summaries",
-    dbxcarta_summary_table="analytics.ops.dbxcarta_runs",
+    dbxcarta_summary_table="analytics_ops.dbxcarta.dbxcarta_runs",
     dbxcarta_include_embeddings_tables=True,
     dbxcarta_include_embeddings_columns=True,
 )
 
 run_dbxcarta(settings=settings)
 ```
+
+`dbxcarta_catalog` is the single anchor catalog used for preflight, verify, and ops provisioning. `dbxcarta_catalogs` lists every catalog folded into one graph; leave it blank for a single-catalog build, where it falls back to the anchor. `dbxcarta_layer_map` carries `catalog:layer` pairs that set the `Table.layer` property; a catalog absent from the map yields a null layer. The summary table's catalog and schema determine the ops catalog, which is kept separate from the data catalogs being mapped.
 
 The no-argument form, `run_dbxcarta()`, is the Databricks wheel entrypoint. It loads `SparkIngestSettings` from environment variables and runs the same pipeline.
 
@@ -78,7 +87,7 @@ loader; examples own their concrete preset implementations.
 
 **Available examples:**
 
-- `examples/integration/finance-genie/` pairs dbxcarta with Finance Genie. Finance Genie creates the finance Lakehouse tables and Gold graph-enriched features; dbxcarta creates the Neo4j semantic layer over those tables.
+- `examples/integration/finance-genie/` pairs dbxcarta with Finance Genie on a three-catalog medallion layout. Finance Genie writes raw business tables to a bronze and silver catalog and graph-enriched features to a gold catalog (`graph-enriched-finance-bronze`, `-silver`, `-gold`); dbxcarta folds all three into one Neo4j semantic layer via `DBXCARTA_CATALOGS` and tags each table's tier via `DBXCARTA_LAYER_MAP`. Run summaries and the generation cache land in a separate ops catalog (`dbxcarta-catalog`).
 - `examples/integration/schemapile/` materializes a reproducible SchemaPile slice as Delta tables, writes the generated UC schema list to `.env.generated`, generates a SQL-validated question set, and exposes `dbxcarta_schemapile_example:preset`.
 - `examples/integration/dense-schema/` generates a synthetic 500- or 1000-table single schema for stress testing schema-context retrieval. It shares the same preset pattern and exposes `dbxcarta_dense_schema_example:preset`.
 - `examples/demos/` is reserved for walkthroughs that are not migration-gate consumers.
@@ -295,6 +304,8 @@ uv run python scripts/run_demo.py --teardown
 
 ## Architecture
 
+[`docs/reference/architecture.md`](docs/reference/architecture.md) is the canonical architecture reference: the semantic-layer thesis, the three storage planes (read-only data catalogs, the Neo4j semantic layer, and the isolated ops catalog), and how the validation harness proves the layer. The two diagrams below stay focused on the operational build-time and query-time flows.
+
 ### Graph schema
 
 ![dbxcarta Graph Schema](docs/assets/graph-schema.png)
@@ -324,10 +335,10 @@ Unity Catalog metadata flows through a single Spark job that extracts, embeds, a
 
 **Pipeline stages:**
 
-- **Unity Catalog:** reads source metadata from `information_schema`, including tables, columns, schemas, and sampled values
+- **Unity Catalog:** reads source metadata from `information_schema` across every catalog in `DBXCARTA_CATALOGS` (falling back to the single `DBXCARTA_CATALOG` anchor), including tables, columns, schemas, and sampled values
 - **Preflight:** checks grants, endpoint access, and required configuration before the Spark job does any expensive work
-- **Extract:** queries Unity Catalog metadata into Spark DataFrames for each enabled node and relationship type
-- **Transform:** shapes raw metadata into stable graph rows with typed labels, dotted IDs, descriptions, and relationship keys
+- **Extract:** unions Unity Catalog metadata from each resolved catalog into Spark DataFrames for every enabled node and relationship type
+- **Transform:** shapes raw metadata into stable graph rows with typed labels, catalog-qualified dotted IDs, descriptions, relationship keys, and the `Table.layer` tier derived from `DBXCARTA_LAYER_MAP`
 - **Embed:** calls `ai_query` inside Spark for each enabled label; row-level failures are captured instead of aborting the whole run
 - **Delta Staging:** materializes enriched rows once so validation, summaries, and Neo4j writes reuse the same embedding results
 - **Neo4j:** writes nodes and relationships with `MERGE`, then creates or updates the vector indexes used at query time
@@ -396,7 +407,16 @@ All pipeline and client behavior is controlled by `.env`. Copy `.env.sample`, fi
 
 ## Demo Client Details
 
-The client is a batch evaluation job for the Neo4j semantic layer. In the quickstart it runs the `graph_rag` arm against `tests/fixtures/demo_questions.json` after that file is uploaded to `DATABRICKS_VOLUME_PATH`.
+The client is a batch evaluation job that proves the semantic layer earns its place. It runs each question through up to four arms selected by `DBXCARTA_CLIENT_ARMS`, scored the same way (parsed, executed, non-empty, matched against a reference result):
+
+- **`reference`** executes the ground-truth SQL to establish the correct result.
+- **`no_context`** gives the model only the catalog name, the floor.
+- **`schema_dump`** pastes a bounded schema pulled from the graph across every resolved catalog, capped by `DBXCARTA_SCHEMA_DUMP_MAX_CHARS` (default 7500, roughly 2K tokens) so it is a token-matched control rather than a paste-everything strawman.
+- **`graph_rag`** is the semantic layer in use: vector-seed plus confidence-ranked `REFERENCES` expansion. It justifies the build pipeline only if it beats `schema_dump` at the matched budget and both clear `no_context`.
+
+Each model-calling arm batches generation through `ai_query` and materializes it to a `client_staging_<arm>` Delta table in the ops catalog that doubles as a cache, keyed by a hash of the endpoint, arm, and prompts. An unchanged re-run skips inference; set `DBXCARTA_CLIENT_REFRESH=true` to force regeneration when the endpoint's model changed but the prompts did not. See [`docs/reference/architecture.md`](docs/reference/architecture.md) for the validation rationale.
+
+In the quickstart the client runs the `graph_rag` arm against `tests/fixtures/demo_questions.json` after that file is uploaded to `DATABRICKS_VOLUME_PATH`.
 
 The question set exercises:
 
@@ -424,7 +444,7 @@ For your own catalog, upload a replacement questions JSON file to the UC Volume 
 | `DATABRICKS_PROFILE` | Databricks CLI profile for auth |
 | `DATABRICKS_CLUSTER_ID` or `DATABRICKS_COMPUTE_MODE=serverless` | Compute for the pipeline job |
 | `DATABRICKS_WAREHOUSE_ID` | SQL warehouse used for schema setup |
-| `DBXCARTA_CATALOG` | Must be `dbxcarta-catalog` |
+| `DBXCARTA_CATALOG` | The autotest provisions its fixture schemas and ops artifacts in one catalog and requires `dbxcarta-catalog`. This is the autotest harness's own single-catalog convention, not the general model: a normal build separates data catalogs from the ops catalog (see [`docs/reference/architecture.md`](docs/reference/architecture.md)). |
 | `DBXCARTA_SUMMARY_VOLUME` | UC Volume path where `RunSummary` JSON and autotest results are written |
 
 **Run:**
