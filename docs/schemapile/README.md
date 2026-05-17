@@ -7,6 +7,6 @@ is useful outside the active proposal queue.
 refresh it after a SchemaPile ingest run:
 
 ```bash
-uv run --directory examples/schemapile python scripts/dump_question_context.py \
+uv run --directory examples/integration/schemapile python scripts/dump_question_context.py \
     > docs/schemapile/questions-schema.md
 ```

@@ -12,16 +12,16 @@ Confirms:
 Submit:
     dbxcarta submit run_spike_ai_query.py
 """
-from dbxcarta.entrypoints._bootstrap import inject_params
+from dbxcarta.spark.env import inject_params
 
 inject_params()
 
-import os
+import os  # noqa: E402
 
-from pyspark.sql import Row, SparkSession
-from pyspark.sql.functions import expr
+from pyspark.sql import Row, SparkSession  # noqa: E402
+from pyspark.sql.functions import expr  # noqa: E402
 
-from dbxcarta.databricks import validate_serving_endpoint_name
+from dbxcarta.spark.databricks import validate_serving_endpoint_name  # noqa: E402
 
 ENDPOINT = validate_serving_endpoint_name(
     os.environ.get("DBXCARTA_EMBEDDING_ENDPOINT", "databricks-gte-large-en")
@@ -38,7 +38,10 @@ def main() -> None:
     oversized = "x " * 20000
     probes = [
         Row(label="identifier", text="sales.orders"),
-        Row(label="sentence", text="Customer order line items with status and fulfillment timestamps"),
+        Row(
+            label="sentence",
+            text="Customer order line items with status and fulfillment timestamps",
+        ),
         Row(label="empty", text=""),
         Row(label="oversized", text=oversized),
         Row(label="null_input", text=None),

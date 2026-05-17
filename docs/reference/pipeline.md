@@ -355,6 +355,44 @@ It writes nodes first.
 
 Then it writes relationships.
 
+### The Write Boundary Is Fail-Closed
+
+The Neo4j connector saves *every* column a DataFrame still has as a node
+property. So the safe question is not "what should we drop?" It is "what is
+allowed in?"
+
+Before any node DataFrame is written, `run._project` keeps only the columns
+that are declared for that node label in `contract.NODE_PROPERTIES`.
+
+```text
++----------------------+
+| node DataFrame       |
+| id, name, comment,   |
+| embedding,           |
+| embedding_text,      |  <-- transform helpers still riding along
+| embedding_text_hash, |
+| table_catalog ...    |
++----------------------+
+        |
+        v
++--------------------------------+
+| run._project(df, label)        |
+| keep only NODE_PROPERTIES[label] |
++--------------------------------+
+        |
+        v
++----------------------+
+| node written to Neo4j|
+| id, name, comment,   |
+| embedding            |
++----------------------+
+```
+
+This is an allowlist, not a denylist. A new helper column added in some
+future transform cannot leak into the graph by accident, because it was
+never on the allowlist. And if a *declared* property is missing,
+`_project` raises instead of silently writing a half-built node.
+
 ```text
 +------------------+
 | write nodes      |
@@ -414,6 +452,42 @@ The summary records useful facts:
 - How many foreign keys were found.
 - How many embeddings were attempted and succeeded.
 - Whether verification passed.
+
+## Key Design Principles
+
+These are the rules that keep the graph clean. They were learned the hard
+way, by fixing a leak where transform-only columns ended up as node
+properties in Neo4j.
+
+**One source of truth for graph shape.** Every node label has its property
+list in `contract.NODE_PROPERTIES`. Every label has its embedding-text
+recipe in `contract.EMBEDDING_TEXT_EXPR`. If you want to change what a node
+looks like, you change `contract.py` and nowhere else.
+
+**Allowlist, never denylist.** The write step keeps the declared columns. It
+does not try to remember every junk column to drop. A denylist rots the
+moment someone adds a new helper column; an allowlist does not.
+
+**Helper columns are transform inputs, not graph data.** Columns like
+`table_catalog`, `table_schema`, and `table_name` exist only so the builder
+can compute ids and embedding text. The builder drops them as soon as it is
+done. They never reach the write boundary.
+
+**Embedding bookkeeping lives in Delta, not the graph.** The text hash, the
+model name, and the embedded-at timestamp matter for the re-embedding
+ledger. They are kept in the Delta staging table and the ledger. The graph
+only carries the `embedding` vector itself.
+
+**Embedding text is computed once, in the builder.** Each node builder
+attaches one `embedding_text` column from `contract.EMBEDDING_TEXT_EXPR`.
+The hash and the `ai_query` input both come from that same column, so the
+ledger never churns from a hash/embed mismatch. The write boundary strips
+`embedding_text` like any other helper.
+
+**Structure is edges, not properties.** A column belongs to a table because
+a `HAS_COLUMN` edge says so, not because the node carries a `table_name`
+string. Keeping membership in edges is what lets the helper columns be
+dropped safely.
 
 ## The Pipeline as One Simple Story
 

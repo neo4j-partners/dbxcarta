@@ -56,6 +56,16 @@ Source: derived from Spark lazy-evaluation semantics and the driver memory const
 
 **How we apply it:** `columns_df` is `.cache()`d in the extract stage. Sample-values candidate discovery is a pure in-memory filter over this cached DataFrame rather than a fresh UC read.
 
+### 7. Express rule logic as native Spark; never as a Python UDF
+
+Catalyst optimizes only what it can see. A Python UDF, including a vectorized `pandas_udf`, is opaque to the optimizer: it blocks predicate pushdown and whole-stage codegen, and it pays Arrow JVM-to-Python serialization on every batch. Across a large or n²-shaped join, that overhead dominates the query.
+
+Most logic that looks like it needs a UDF is driven by small static tables: a suffix list, a type-class map, a score table, a stopword set. Those expand into native `Column` expressions and broadcast-join lookups at plan-construction time. The governing rule: Python builds the plan, Spark evaluates every row. A UDF is justified only when the per-row logic genuinely cannot be expressed with Catalyst expressions or higher-order array functions, and that bar is rarely met for metadata, string, or vector-math rules.
+
+**How we apply it:** FK discovery is native DataFrame joins. Name-match stem and plural rules are generated as `Column` expressions by looping the static suffix list once while the plan is built. Type compatibility and the score table are broadcast-join lookups. Comment-token overlap uses `split`, `filter`, and `array_intersect`. Semantic cosine keeps persisted vectors unchanged and computes `dot / (norm(a) * norm(b))` with `aggregate` and `zip_with`. No `pandas_udf` anywhere in the FK path. See `docs/proposals/fix-spark-v3.md` for the full design.
+
+Source: derived from Spark Catalyst optimization semantics; see the [Spark SQL performance tuning guide](https://spark.apache.org/docs/latest/sql-performance-tuning.html) and the PySpark guidance that Python UDFs are a black box to the optimizer.
+
 ## Neo4j Spark Connector
 
 ### 1. `coalesce(1)` for relationships, `repartition(N, id)` for nodes
@@ -64,7 +74,7 @@ Neo4j write lock contention is the concern the connector docs warn about. Relati
 
 **How we apply it:**
 
-- **Relationship writes** — every relationship DataFrame is `.coalesce(1)` before the Neo4j write. No exceptions; relationships always lock two nodes.
+- **Relationship writes** — every relationship DataFrame defaults to `.coalesce(1)` before the Neo4j write, because relationships always lock both endpoint nodes. The default is configurable via `DBXCARTA_REL_WRITE_PARTITIONS` (default `1`, which is exactly `coalesce(1)`); a value `> 1` repartitions for parallel writes and must only be raised with production evidence that Neo4j tolerates the added endpoint-lock contention. The single-partition default is the safe baseline and the correctness reasoning above holds for it.
 - **Node writes** — every node DataFrame is `.repartition(N, "id")` before the Neo4j write, where `N` comes from `DBXCARTA_NEO4J_NODE_PARTITIONS` (default `4`). This is a standing rule, not a benchmark-gated optimization; no measurement is required to prove it's safe because the partitioning guarantees disjoint lock keys.
 
 Tuning `N` is a throughput question, not a correctness question.

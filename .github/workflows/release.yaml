@@ -19,24 +19,33 @@ jobs:
       version: ${{ steps.get-version.outputs.version }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           token: ${{ secrets.GIT_PUSH_PAT }}
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
 
       - name: Bump version
-        run: uv version --bump ${{ inputs.bump_type }}
+        run: |
+          uv version --bump ${{ inputs.bump_type }} --frozen
+          version=$(uv version --short)
+          uv version --package dbxcarta-client "$version" --frozen
+          uv version --package dbxcarta-spark "$version" --frozen
+          uv version --package dbxcarta-dense-schema-example "$version" --frozen
+          uv version --package dbxcarta-finance-genie-example "$version" --frozen
+          uv version --package dbxcarta-schemapile-example "$version" --frozen
+          uv lock
+          uv lock --check
 
       - name: Get version
         id: get-version
         run: echo version=`uv version --short` >> "$GITHUB_OUTPUT"
 
-      - uses: EndBug/add-and-commit@v9
+      - uses: EndBug/add-and-commit@a94899bca583c204427a224a7af87c02f9b325d5 # v9
         with:
           author_name: dbxcarta GitHub Action
           author_email: noreply@github.com
           message: Bump version to ${{ steps.get-version.outputs.version }}
-          add: "pyproject.toml"
+          add: "pyproject.toml packages/*/pyproject.toml examples/integration/*/pyproject.toml uv.lock"
           tag: ${{ steps.get-version.outputs.version }}

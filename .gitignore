@@ -138,3 +138,4 @@ worklog/
 .mcp.json
 outputs/
 examples/**/.cache/
+docs/proposals/
