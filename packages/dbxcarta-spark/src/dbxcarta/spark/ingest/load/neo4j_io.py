@@ -11,7 +11,17 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from dbxcarta.spark.contract import NodeLabel, REFERENCES_PROPERTIES, RelType
-from dbxcarta.spark.ingest.load.writer import write_nodes, write_relationship
+from dbxcarta.spark.ingest.load.writer import (
+    write_nodes,
+    write_nodes_multi,
+    write_relationship,
+)
+
+# Second label applied to key-like FK target columns (in addition to
+# :Column). Not a NodeLabel enum member: it carries no separate identity
+# (MERGE stays on the :Column id) and only exists to scope the dedicated
+# FK-discovery vector index away from the client's all-:Column index.
+KEY_COLUMN_LABEL = "KeyColumn"
 
 if TYPE_CHECKING:
     from neo4j import Driver
@@ -64,6 +74,15 @@ def bootstrap_constraints(driver: "Driver", settings: "SparkIngestSettings") -> 
             f"FOR (n:{NodeLabel.COLUMN.value}) ON (n.data_type)"
         )
 
+        # RANGE index over the contract-1.3 Value run-stamp. The scoped
+        # stale-Value delete keys on `last_run < datetime($run_start)`; this
+        # index turns that predicate into a bounded range scan instead of a
+        # full :Value label sweep at the dense-catalog target.
+        session.run(
+            f"CREATE INDEX {NodeLabel.VALUE.value.lower()}_last_run "
+            f"IF NOT EXISTS FOR (n:{NodeLabel.VALUE.value}) ON (n.last_run)"
+        )
+
         for enabled, label in embedding_label_flags:
             if enabled:
                 session.run(
@@ -73,23 +92,54 @@ def bootstrap_constraints(driver: "Driver", settings: "SparkIngestSettings") -> 
                     f" `vector.similarity_function`: 'cosine'}}}}"
                 )
 
+        # Dedicated FK-discovery vector index over the key-like target
+        # subset (:KeyColumn). Separate from column_embedding (which the
+        # client RAG retriever seeds from any :Column and must keep its
+        # full scope): a nearest-neighbour query against this index can
+        # only return real key targets, so nothing is post-filtered away.
+        if settings.dbxcarta_include_embeddings_columns:
+            session.run(
+                f"CREATE VECTOR INDEX {KEY_COLUMN_LABEL.lower()}_embedding"
+                f" IF NOT EXISTS FOR (n:{KEY_COLUMN_LABEL}) ON n.embedding "
+                f"OPTIONS {{indexConfig: {{`vector.dimensions`: {dim},"
+                f" `vector.similarity_function`: 'cosine'}}}}"
+            )
+
     logger.info("[dbxcarta] neo4j constraints and indexes bootstrapped")
 
 
-def purge_stale_values(driver: "Driver", col_ids: list[str]) -> None:
-    """Delete Value nodes attached to columns the current run will replace."""
-    if not col_ids:
-        return
+def delete_stale_values(
+    driver: "Driver",
+    run_start_iso: str,
+    catalogs: list[str],
+    schemas: list[str],
+) -> None:
+    """Delete Value nodes left over from a prior run, scoped to this run.
 
+    A single server-side Cypher delete: any :Value within the run's
+    catalogs (and schemas, when schema-scoped) whose `last_run` predates
+    this run's start was not refreshed by the per-chunk Value writes and is
+    therefore stale. Replaces the old driver-collected `IN $col_ids` purge,
+    which paged catalog-scale column ids back to the driver
+    (best-practices §5). Keyed on the contract-1.3 `last_run`/`catalog`/
+    `schema` Value properties; the `:Value(last_run)` RANGE index makes the
+    predicate a bounded index scan rather than a label sweep.
+    """
     with driver.session() as session:
         session.run(
-            f"MATCH (c:{NodeLabel.COLUMN.value})-[:{RelType.HAS_VALUE.value}]->"
-            f"(v:{NodeLabel.VALUE.value}) "
-            "WHERE c.id IN $col_ids "
+            f"MATCH (v:{NodeLabel.VALUE.value}) "
+            "WHERE v.catalog IN $catalogs "
+            "AND (size($schemas) = 0 OR v.schema IN $schemas) "
+            "AND v.last_run < datetime($run_start) "
             "DETACH DELETE v",
-            col_ids=col_ids,
+            catalogs=catalogs,
+            schemas=schemas,
+            run_start=run_start_iso,
         )
-    logger.info("[dbxcarta] purged stale Values for %d columns", len(col_ids))
+    logger.info(
+        "[dbxcarta] deleted stale Values older than run start %s",
+        run_start_iso,
+    )
 
 
 def query_counts(driver: "Driver") -> dict[str, int]:
@@ -112,6 +162,17 @@ def write_node(df: "DataFrame", neo4j: "Neo4jConfig", label: NodeLabel) -> None:
     write_nodes(df, neo4j, label.value)
 
 
+def write_key_columns(df: "DataFrame", neo4j: "Neo4jConfig") -> None:
+    """Re-write the key-like Column subset with the extra :KeyColumn label.
+
+    `df` is the already-projected Column frame filtered to key-like targets.
+    MERGE stays on the :Column id, so this only adds :KeyColumn to nodes the
+    column write already created and refreshes their properties — idempotent,
+    a re-run heals.
+    """
+    write_nodes_multi(df, neo4j, (NodeLabel.COLUMN.value, KEY_COLUMN_LABEL))
+
+
 def write_rel(
     df: "DataFrame",
     neo4j: "Neo4jConfig",
@@ -129,7 +190,7 @@ def write_rel(
 
 __all__ = [
     "bootstrap_constraints",
-    "purge_stale_values",
+    "delete_stale_values",
     "query_counts",
     "write_node",
     "write_rel",

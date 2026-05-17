@@ -48,6 +48,9 @@ from dbxcarta.spark.ingest.fk.metadata import (
 if TYPE_CHECKING:
     from pyspark.sql import Column, DataFrame, SparkSession
 
+    from dbxcarta.spark.ingest.load.writer import Neo4jConfig
+    from dbxcarta.spark.settings import SparkIngestSettings
+
 
 # Inference frames are projected onto the canonical REFERENCES schema via
 # schema_graph.to_references_rel at each strategy's exit — the schema contract
@@ -493,84 +496,86 @@ def infer_metadata_edges(
 
 # --- Semantic strategy ------------------------------------------------------
 
-def build_value_overlap(
-    candidates_df: "DataFrame",
-    value_node_df: "DataFrame | None",
-    has_value_df: "DataFrame | None",
-) -> "DataFrame | None":
-    """Asymmetric sampled-value overlap ratio per candidate pair.
+# Locked per-source nearest-neighbor SEARCH skeleton (proposal Q8). Exact
+# `SEARCH … WHERE` / `LIMIT $k` / `CALL (s) { … }` syntax verification
+# against the deployed Neo4j version is an explicit Phase 6 acceptance task;
+# the scoped-subquery and in-index `SEARCH` forms are version-gated and the
+# older `CALL { WITH s … }` form may be required. The WHERE filter uses
+# `catalog`/`schema` — the contract node property names, NOT
+# `table_catalog`/`table_schema` (those exist only in the embedding-text
+# input expressions; filtering on them would silently match nothing).
+_SEMANTIC_NN_CYPHER = """
+MATCH (s:Column)
+WHERE s.embedding IS NOT NULL
+CALL (s) {
+  MATCH (t:KeyColumn)
+  SEARCH t IN (VECTOR INDEX keycolumn_embedding FOR s.embedding LIMIT $k)
+       SCORE AS score
+  WHERE t.catalog = s.catalog
+    AND t.schema  = s.schema
+    AND t.id <> s.id
+  RETURN t.id AS target_id, score
+}
+RETURN s.id AS source_id, target_id, score
+""".strip()
 
-    `ratio = |src_values ∩ tgt_values| / |src_values|` — the denominator is
-    the *source* column's sampled-distinct count (not the target's, not the
-    union), reproducing `ValueIndex.overlap_ratio`. Returns a frame of
-    `(source_id, target_id, ratio)` or None when no values were sampled.
+
+def semantic_nn_pairs(
+    spark: "SparkSession",
+    neo4j: "Neo4jConfig",
+    columns_frame: "DataFrame",
+    settings: "SparkIngestSettings",
+    k: int,
+) -> "DataFrame":
+    """Per-source nearest-neighbor candidate pairs from the key-like index.
+
+    Replaces *only* candidate generation: instead of the src×tgt cartesian +
+    in-Spark cosine recompute, one server-side Cypher (the locked
+    `_SEMANTIC_NN_CYPHER`) walks the already-loaded `:Column` nodes and runs
+    a per-source vector `SEARCH` against the dedicated `keycolumn_embedding`
+    index, pre-filtered to the same catalog/schema, returning
+    `(source_id, target_id, score)`. The read goes through the connector
+    `query` option — no DataFrame rows are pushed in and nothing is
+    collected to the driver. `keycolumn_embedding` uses cosine, so `score`
+    is the same cosine the old Spark path computed; `infer_semantic_edges`
+    owns the deterministic filter pipeline and clamps it into confidence.
+
+    `columns_frame`/`settings` are accepted so this stays the single
+    injectable seam with a stable signature (`discovery.run_fk_discovery`
+    holds both at the call site, and the deterministic pipeline downstream
+    consumes `columns_frame`); the server-side query itself needs neither.
     """
-    from pyspark.sql import functions as F
+    from dbxcarta.spark.ingest.load.writer import read_query
 
-    if value_node_df is None or has_value_df is None:
-        return None
-
-    col_vals = (
-        has_value_df.alias("h")
-        .join(value_node_df.alias("v"), F.col("h.target_id") == F.col("v.id"))
-        .select(F.col("h.source_id").alias("col_id"), F.col("v.value").alias("val"))
-        .distinct()
-    )
-    src_size = col_vals.groupBy("col_id").agg(
-        F.count(F.lit(1)).alias("src_size"),
-    )
-
-    sv = col_vals.select(
-        F.col("col_id").alias("source_id"), F.col("val").alias("s_val"),
-    )
-    tv = col_vals.select(
-        F.col("col_id").alias("target_id"), F.col("val").alias("t_val"),
-    )
-    pairs = candidates_df.select("source_id", "target_id").distinct()
-    inter = (
-        pairs.join(sv, "source_id")
-        .join(tv, "target_id")
-        .filter(F.col("s_val") == F.col("t_val"))
-        .groupBy("source_id", "target_id")
-        .agg(F.count(F.lit(1)).alias("inter"))
-    )
-    return (
-        inter.join(
-            src_size.select(
-                F.col("col_id").alias("source_id"),
-                F.col("src_size"),
-            ),
-            "source_id",
-        )
-        .withColumn("ratio", F.col("inter") / F.col("src_size"))
-        .select("source_id", "target_id", "ratio")
-    )
+    return read_query(spark, neo4j, _SEMANTIC_NN_CYPHER, {"k": k})
 
 
 def infer_semantic_edges(
     columns_frame: "DataFrame",
     pk_gate: "DataFrame",
     prior_edges_df: "DataFrame | None",
-    value_node_df: "DataFrame | None",
-    has_value_df: "DataFrame | None",
+    nn_pairs: "DataFrame",
     *,
     threshold: float = 0.85,
     floor: float = 0.80,
     cap: float = 0.90,
-    value_bonus: float = 0.05,
-    overlap_threshold: float = 0.5,
 ) -> tuple["DataFrame", CoarseFKCounts]:
-    """Spark-native semantic FK inference.
+    """Spark-native semantic FK inference over nearest-neighbor candidates.
 
-    Pre-filters candidates by same-(catalog, schema), embeddings on both
-    sides, target PK-like, type compatibility, and the prior-pair anti-join
-    (declared ∪ metadata) before any vector math. Cosine is computed in-join
-    over the embedding arrays with native higher-order functions; the
-    persisted vector is never normalized or mutated.
+    Candidate generation is now the injected `nn_pairs`
+    (`source_id, target_id, score`) from `semantic_nn_pairs` — the per-source
+    vector SEARCH against the key-like index. This function stays the owner
+    of the deterministic correctness pipeline: it joins the pair back to
+    `columns_frame` for both sides, enforces same-(catalog, schema), target
+    PK-like (`pk_gate`), type compatibility, the not-both-named-`id` guard,
+    and the prior-pair anti-join (declared ∪ metadata), keeps only neighbors
+    above the similarity bar, and clamps the surviving `score` into the
+    floor/cap confidence band. No value-overlap term: confidence is the
+    floor/cap-clamped raw similarity with no value-derived bonus.
     """
     from pyspark.sql import functions as F
 
-    cf = columns_frame.filter(F.col("embedding").isNotNull())
+    cf = columns_frame
 
     src = _select_as(
         cf,
@@ -580,7 +585,6 @@ def infer_semantic_edges(
             "column": "s_column",
             "col_id": "source_id",
             "canon": "s_canon",
-            "embedding": "s_emb",
         },
     )
     tgt = _select_as(
@@ -595,21 +599,26 @@ def infer_semantic_edges(
             "column": "t_column",
             "col_id": "target_id",
             "canon": "t_canon",
-            "embedding": "t_emb",
         },
     )
 
-    cand = src.join(
-        tgt,
-        (F.col("s_catalog") == F.col("t_catalog"))
-        & (F.col("s_schema") == F.col("t_schema"))
-        & (F.col("source_id") != F.col("target_id"))
-        & (F.col("s_canon") == F.col("t_canon"))
-        & ~(
-            (F.lower(F.col("s_column")) == F.lit("id"))
-            & (F.lower(F.col("t_column")) == F.lit("id"))
-        ),
-        "inner",
+    # nn_pairs is the only candidate source. The join to src/tgt resolves the
+    # deterministic per-column attributes; the pk_gate inner join on the tgt
+    # side enforces key-like even if a seam ever returns a non-key target.
+    cand = (
+        nn_pairs.select("source_id", "target_id", "score")
+        .join(src, "source_id")
+        .join(tgt, "target_id")
+        .filter(
+            (F.col("s_catalog") == F.col("t_catalog"))
+            & (F.col("s_schema") == F.col("t_schema"))
+            & (F.col("source_id") != F.col("target_id"))
+            & (F.col("s_canon") == F.col("t_canon"))
+            & ~(
+                (F.lower(F.col("s_column")) == F.lit("id"))
+                & (F.lower(F.col("t_column")) == F.lit("id"))
+            )
+        )
     )
 
     if prior_edges_df is not None:
@@ -623,88 +632,13 @@ def infer_semantic_edges(
             "left_anti",
         )
 
-    # id↔id rescue. The blunt term in `cand` above keeps the id↔id cartesian
-    # out of cosine and value-overlap, but it also erases the legitimate 1:1
-    # shared-PK split (user.id → user_profile.id). Semantic has no
-    # attenuation curve to damp generic id↔id fanout, so the separating
-    # signal is value containment. Re-admit ONLY the id↔id subset that passes
-    # value overlap: build the small id↔id set separately (mirroring the
-    # `cand` prefilter — same catalog/schema, type-compatible, distinct
-    # columns, prior anti-join — with the id↔id condition required instead of
-    # excluded), gate it on `build_value_overlap`, and union survivors back
-    # before cosine. This is a second scoped invocation of the overlap
-    # *function*, not a shared frame with the post-cosine one (a shared
-    # pre-cosine overlap over the full candidate set is materially more
-    # expensive). Value-gated by design: when no values were sampled
-    # `build_value_overlap` returns None and the rescue cannot fire — a
-    # genuine 1:1 split is then dropped from the semantic path, which is
-    # accepted because there is no containment signal to separate it from
-    # generic id↔id noise and the declared path still covers declared FKs.
-    id_cand = src.join(
-        tgt,
-        (F.col("s_catalog") == F.col("t_catalog"))
-        & (F.col("s_schema") == F.col("t_schema"))
-        & (F.col("source_id") != F.col("target_id"))
-        & (F.col("s_canon") == F.col("t_canon"))
-        & (F.lower(F.col("s_column")) == F.lit("id"))
-        & (F.lower(F.col("t_column")) == F.lit("id")),
-        "inner",
-    )
-    if prior_edges_df is not None:
-        id_cand = id_cand.join(
-            prior,
-            (F.col("source_id") == F.col("_p_s"))
-            & (F.col("target_id") == F.col("_p_t")),
-            "left_anti",
-        )
-    id_overlap = build_value_overlap(id_cand, value_node_df, has_value_df)
-    if id_overlap is not None:
-        rescued = id_cand.join(
-            id_overlap.filter(F.col("ratio") >= F.lit(overlap_threshold)),
-            ["source_id", "target_id"],
-            "left_semi",
-        )
-        cand = cand.unionByName(rescued)
+    above = cand.filter(F.col("score") >= F.lit(threshold))
+    conf = F.least(F.lit(cap), F.greatest(F.lit(floor), F.col("score")))
 
-    dot = F.aggregate(
-        F.zip_with(F.col("s_emb"), F.col("t_emb"), lambda x, y: x * y),
-        F.lit(0.0), lambda acc, z: acc + z,
-    )
-    na = F.aggregate(
-        F.transform(F.col("s_emb"), lambda x: x * x),
-        F.lit(0.0), lambda acc, z: acc + z,
-    )
-    nb = F.aggregate(
-        F.transform(F.col("t_emb"), lambda x: x * x),
-        F.lit(0.0), lambda acc, z: acc + z,
-    )
-    sim = (
-        F.when((na == F.lit(0.0)) | (nb == F.lit(0.0)), F.lit(0.0))
-        .otherwise(dot / (F.sqrt(na) * F.sqrt(nb)))
-    )
-    scored = cand.withColumn("_sim", sim).filter(F.col("_sim") >= F.lit(threshold))
-
-    base_conf = F.least(F.lit(cap), F.greatest(F.lit(floor), F.col("_sim")))
-    scored = scored.withColumn("_base_conf", base_conf)
-
-    overlap = build_value_overlap(scored, value_node_df, has_value_df)
-    if overlap is not None:
-        scored = scored.join(overlap, ["source_id", "target_id"], "left")
-        corroborated = F.coalesce(F.col("ratio"), F.lit(0.0)) >= F.lit(overlap_threshold)
-        conf = F.when(
-            corroborated,
-            F.least(F.lit(cap), F.greatest(F.lit(floor), F.col("_base_conf") + F.lit(value_bonus))),
-        ).otherwise(F.col("_base_conf"))
-        scored = scored.withColumn("_corr", corroborated).withColumn("_conf", conf)
-    else:
-        scored = scored.withColumn("_corr", F.lit(False)).withColumn(
-            "_conf", F.col("_base_conf"),
-        )
-
-    edges = sg.to_references_rel(scored.select(
+    edges = sg.to_references_rel(above.select(
         F.col("source_id"),
         F.col("target_id"),
-        F.round(F.col("_conf"), 4).alias("confidence"),
+        F.round(conf, 4).alias("confidence"),
         F.lit(EdgeSource.SEMANTIC.value).alias("source"),
         F.lit(None).cast("string").alias("criteria"),
     ))

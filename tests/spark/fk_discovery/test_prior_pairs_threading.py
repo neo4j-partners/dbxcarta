@@ -112,7 +112,13 @@ def test_semantic_skips_declared_and_metadata_prior_pairs(local_spark) -> None:
     cf = build_columns_frame(_columns(local_spark), nodes)
     pk_gate, _ = build_pk_gate(cf, _constraints(local_spark))
     prior = local_spark.createDataFrame([_EDGE], schema=["source_id", "target_id"])
-    edges_df, _counts = infer_semantic_edges(cf, pk_gate, prior, None, None)
+    # NN seam returns the prior pair at perfect score; the anti-join must
+    # still drop it.
+    nn_pairs = local_spark.createDataFrame(
+        [(_EDGE[0], _EDGE[1], 1.0)],
+        schema=["source_id", "target_id", "score"],
+    )
+    edges_df, _counts = infer_semantic_edges(cf, pk_gate, prior, nn_pairs)
     rows = edges_df.collect()
     emitted = {(r["source_id"], r["target_id"]) for r in rows}
     assert _EDGE not in emitted

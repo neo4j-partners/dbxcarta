@@ -120,12 +120,13 @@ Outcome: the preset resolves its environment and questions are uploaded.
 Completion criteria: env prints without error, upload confirmed at the volume
 path.
 
-### Phase 6 — Ingest
+### Phase 6 — Ingest — BLOCKED
 Outcome: ingest completes against the materialized schema.
-- [ ] Ingest entrypoint submitted and run to completion
-- [ ] Ingest run reports success
+- [x] Ingest entrypoint submitted (exactly once, run 972346919275274)
+- [ ] Ingest run run to completion — NOT MET (TERMINATED/CANCELED, USER_CANCELED, externally cancelled at ~39 min)
+- [ ] Ingest run reports success — NOT MET
 Completion criteria: ingest stage finishes with no failure and produces its
-expected outputs.
+expected outputs. BLOCKED: run externally cancelled before completion.
 
 ### Phase 7 — Client evaluation
 Outcome: the client evaluation runs end to end and produces a run summary.
@@ -134,12 +135,13 @@ Outcome: the client evaluation runs end to end and produces a run summary.
 Completion criteria: client stage finishes with no failure and a run summary
 is recorded.
 
-### Phase 8 — Final verification
+### Phase 8 — Final verification — FAIL
 Outcome: the whole chain is confirmed green.
-- [ ] All phases marked Complete in the work log
-- [ ] Final pass/fail verdict written with evidence
+- [ ] All phases marked Complete in the work log — NOT MET (Phase 6 Blocked)
+- [x] Final pass/fail verdict written with evidence — verdict: **FAIL**
 Completion criteria: every prior phase is Complete, or the exact failing
-phase and error are documented.
+phase and error are documented. Phase 6 (Ingest) is Blocked; the exact
+command and full error are documented in the Work Log. Final verdict: FAIL.
 
 ## Completion Criteria (Overall)
 
@@ -174,3 +176,6 @@ Complete / Blocked), command run, and result or error.
 | 2026-05-16 22:21 | 6 | Note | launch hygiene | A second relaunch was started before confirming the first was alive; detected two concurrent ingest submissions. Killed the duplicate (TaskStop bloetvw4d + kill of its process tree). Single canonical ingest run (started 22:17) preserved and continues. No pipeline source modified. |
 | 2026-05-16 22:30 | 6 | Reset | human reset Neo4j; both prior ingest runs CANCELED | Human reset the Neo4j database (graph clean) and re-approved the Neo4j write. Verified via `manage_job_runs list active_only=true`: prior concurrent runs 224671539465633 and 573408380447221 both TERMINATED/CANCELED by user. No ingest active. Starting fresh single submission. |
 | 2026-05-16 22:33 | 6 | In progress | `DBXCARTA_ENV_FILE=examples/integration/dense-schema/.env uv run dbxcarta submit-entrypoint ingest --compute cluster --no-wait` (from repo root) | Submitted EXACTLY ONCE. Preflight: cluster 0515-141455-wb8qxgo2 RUNNING, neo4j connector [ok]. Run ID 972346919275274 (job 608393747307679). Verified via `manage_job_runs list active_only=true`: EXACTLY ONE run "dbxcarta: ingest" in RUNNING state (972346919275274); all other ingest runs TERMINATED. Monitoring single run to completion by polling run_id state. No resubmission. |
+| 2026-05-16 23:12 | 6 | Blocked | (same single submission: `DBXCARTA_ENV_FILE=examples/integration/dense-schema/.env uv run dbxcarta submit-entrypoint ingest --compute cluster --no-wait`) — terminal state of run 972346919275274 | BLOCKED. The single canonical ingest run 972346919275274 (job 608393747307679) ran RUNNING from 22:33 to 23:12 (~39 min, cluster 0515-141455-wb8qxgo2 healthy/RUNNING the entire time, no error state, log surface showed bootstrap smoke_check ok) and then TERMINATED with result_state=**CANCELED**. Full terminal detail (`databricks jobs get-run 972346919275274`): `life_cycle_state=TERMINATED, result_state=CANCELED, state_message="Run cancelled by user", user_cancelled_or_timedout=True, termination_details={"code":"USER_CANCELED","message":"Run cancelled by user","type":"SUCCESS"}`. start_time=1778992384087 end_time=1778994742291. The cancellation was EXTERNAL — the verification agent issued NO cancel/kill against this run and made exactly ONE ingest submission (no duplicates; pre-submit `manage_job_runs list active_only=true` confirmed zero active ingest runs, post-submit confirmed exactly one RUNNING). Three independent watchers (monitor ban70bcra, extended monitor bw1fqd3qm, background waiter bjdvvikdo) all independently reported the identical USER_CANCELED terminal. Phase 6 success criterion (single ingest run reaches TERMINATED/SUCCESS) NOT met. Per verification rules: marking Blocked, STOPPING, not resubmitting ingest, not proceeding to Phase 7/8. Neo4j graph-count verification not performed (precondition — a successful ingest — was not met). No pipeline source modified. |
+| 2026-05-16 23:12 | 7 | Not started | — | Phase 7 (client evaluation) NOT started. Precondition is a successful Phase 6 ingest with a populated Neo4j graph; Phase 6 is Blocked, so per the stop rule Phase 7 was not attempted. |
+| 2026-05-16 23:12 | 8 | FAIL | final verdict | **OVERALL VERDICT: FAIL.** Phases 1–5 Complete with evidence (recorded above). Phase 6 (Ingest) BLOCKED: the single, exactly-once ingest submission (run_id 972346919275274) was externally cancelled (USER_CANCELED, "Run cancelled by user", user_cancelled_or_timedout=True) at ~39 min RUNNING, before producing any ingest output; it never reached SUCCESS. No second submission was ever made; no duplicate runs; the agent issued no cancel. Phase 7 not started (Phase-6 precondition unmet). Per Completion Criteria, any phase that cannot complete makes the run a FAIL with an actionable record. Actionable next step for a human: re-run the same single invocation `DBXCARTA_ENV_FILE=examples/integration/dense-schema/.env uv run dbxcarta submit-entrypoint ingest --compute cluster` and ensure the run is NOT cancelled externally; if it self-cancels, inspect cluster 0515-141455-wb8qxgo2 and the Neo4j Spark Connector path. No pipeline source modified (verification only). |

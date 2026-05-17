@@ -18,7 +18,6 @@ import logging
 import os
 from typing import TYPE_CHECKING
 
-import dbxcarta.spark.ingest.transform.sample_values as sv
 from dbxcarta.spark.contract import (
     CONTRACT_VERSION,
     NODE_PROPERTIES,
@@ -27,24 +26,28 @@ from dbxcarta.spark.contract import (
     RelType,
 )
 from dbxcarta.spark.ingest.extract import ExtractResult, extract
-from dbxcarta.spark.ingest.fk.discovery import FKDiscoveryResult, run_fk_discovery
+from dbxcarta.spark.ingest.fk.discovery import (
+    FKDiscoveryResult,
+    key_like_target_ids,
+    run_fk_discovery,
+)
 from dbxcarta.spark.ingest.load.neo4j_io import (
     bootstrap_constraints,
-    purge_stale_values,
+    delete_stale_values,
     query_counts,
+    write_key_columns,
     write_node,
     write_rel,
 )
 from dbxcarta.spark.ingest.preflight import preflight
 from dbxcarta.spark.settings import SparkIngestSettings
 from dbxcarta.spark.ingest.transform.embed_stage import (
-    check_thresholds,
-    transform_embeddings,
+    embedded_batch,
+    finalize_embedding_summary,
 )
 from dbxcarta.spark.ingest.transform.staging import (
     resolve_ledger_path,
-    resolve_staging_path,
-    truncate_staging_root,
+    resolve_transient_root,
 )
 from dbxcarta.spark.ingest.transform.value_stage import (
     ValueResult,
@@ -132,7 +135,7 @@ def _build_summary(run_id: str, settings: SparkIngestSettings, schema_list: list
         schemas=schema_list,
         embeddings=EmbeddingCounts(
             model=settings.dbxcarta_embedding_endpoint,
-            failure_threshold=settings.dbxcarta_embedding_failure_threshold,
+            failure_threshold=settings.dbxcarta_embedding_failure_max,
             flags=flags,
         ),
     )
@@ -166,9 +169,12 @@ def _run(
 ) -> None:
     """Execute the ingest workflow after settings and summary are initialized.
 
-    This method owns resource ordering: preflight and staging cleanup happen
-    before the Neo4j driver opens, graph constraints are bootstrapped before
-    writes, and cached extraction DataFrames are unpersisted after verification.
+    This method owns resource ordering: preflight and transient/ledger path
+    resolution happen before the Neo4j driver opens, graph constraints are
+    bootstrapped before writes, node embedding + node writes are batched by
+    table range (each batch's transient materialization deleted as soon as it
+    is written), and cached extraction DataFrames are unpersisted after
+    verification.
     """
     from databricks.sdk.runtime import dbutils
     from neo4j import GraphDatabase
@@ -185,9 +191,8 @@ def _run(
     )
 
     preflight(spark, settings)
-    staging_path = resolve_staging_path(settings)
+    transient_root = resolve_transient_root(settings)
     ledger_path = resolve_ledger_path(settings)
-    truncate_staging_root(staging_path)
 
     run_error: BaseException | None = None
     try:
@@ -195,22 +200,71 @@ def _run(
             bootstrap_constraints(driver, settings)
 
             extract_result = extract(spark, settings, schema_list, summary)
-            transform_embeddings(settings, extract_result, staging_path, ledger_path, summary)
-            values = transform_sample_values(
-                spark, settings, schema_list, extract_result,
-                staging_path, ledger_path, summary,
+
+            # Key-like FK target set, computed before the node-write loop so
+            # the :KeyColumn label is applied as part of node loading,
+            # independent of run_fk_discovery. Only needed when columns are
+            # embedded (semantic FK requires column embeddings); None
+            # otherwise skips the second-label pass entirely.
+            keylike_ids = (
+                key_like_target_ids(
+                    spark, settings, schema_list, extract_result,
+                )
+                if settings.dbxcarta_include_embeddings_columns
+                else None
             )
-            check_thresholds(settings, summary)
+
+            # Sample distinct values BEFORE the chunk loop so each Value
+            # slice can embed+write alongside its Column slice in the same
+            # batched pass. Sampling-only now: no Neo4j write or stale purge
+            # happens here.
+            values = transform_sample_values(
+                spark, settings, schema_list, extract_result, summary,
+            )
+
+            # Node embedding + node writes are batched by table range here;
+            # the per-chunk Value slice rides along when the value path is
+            # active. Relationship writes stay in _load and run after FK
+            # discovery, MERGE-matching the nodes this loop already wrote.
+            _embed_and_write_node_chunks(
+                spark, neo4j, settings, extract_result,
+                ledger_path, transient_root, keylike_ids, summary,
+                values.value_node_df if values else None,
+            )
+            # Schema/Database are per-schema / per-catalog scale, not
+            # table-scale: embed (if enabled) and write once, outside the loop.
+            _write_label_nodes(
+                extract_result.database_df, NodeLabel.DATABASE, neo4j,
+                settings, ledger_path, transient_root, "all", summary,
+                settings.dbxcarta_include_embeddings_databases,
+            )
+            _write_label_nodes(
+                extract_result.schema_node_df, NodeLabel.SCHEMA, neo4j,
+                settings, ledger_path, transient_root, "all", summary,
+                settings.dbxcarta_include_embeddings_schemas,
+            )
+
+            # Scoped stale-Value cleanup: one server-side delete after every
+            # Value slice for this run has been written. Runs on every
+            # value-path run (not only when this run sampled something) so a
+            # run whose columns vanished still drops their Values. Replaces
+            # the old driver-collected `IN $col_ids` purge (best-practices
+            # §5).
+            if values is not None:
+                _stale_value_cleanup(
+                    driver, settings, schema_list, values, summary,
+                )
+
+            # Per-batch counts accumulated across every chunk and the
+            # value stage; fill the derived reporting rates once here (the
+            # slot the removed check_thresholds gate used to occupy).
+            finalize_embedding_summary(summary)
 
             fk_result = run_fk_discovery(
-                spark, settings, schema_list, extract_result,
-                values.sample_stats if values else None,
-                values.value_node_df if values else None,
-                values.has_value_df if values else None,
-                summary,
+                spark, settings, schema_list, extract_result, neo4j, summary,
             )
 
-            _load(neo4j, driver, settings, extract_result, fk_result, values, summary)
+            _load(neo4j, settings, extract_result, fk_result, values, summary)
             summary.neo4j_counts = query_counts(driver)
             _verify(driver, settings, summary)
     except Exception as exc:
@@ -253,6 +307,43 @@ def _run(
                 else:
                     raise
     logger.info("[dbxcarta] neo4j counts: %s", summary.neo4j_counts)
+
+
+def _stale_value_cleanup(
+    driver: "Driver",
+    settings: SparkIngestSettings,
+    schema_list: list[str],
+    values: ValueResult,
+    summary: RunSummary,
+) -> None:
+    """Drop prior-run Values and warn on a suspicious empty sample.
+
+    The scoped server-side delete keys on the contract-1.3 Value run-stamp:
+    any Value within this run's catalogs/schemas whose `last_run` predates
+    the run start was not refreshed by the per-chunk writes and is stale.
+
+    When the value path ran and found candidate columns but produced zero
+    Value nodes, that is far more likely a silent sampling failure
+    (unreadable schemas, cardinality wipeout) than a catalog with genuinely
+    no sampleable values, so it is recorded loudly on the summary.
+    """
+    delete_stale_values(
+        driver,
+        summary.started_at.isoformat(),
+        settings.resolved_catalogs(),
+        schema_list,
+    )
+
+    stats = values.sample_stats
+    if stats.value_nodes == 0 and stats.candidate_columns > 0:
+        msg = (
+            f"value path produced 0 Value nodes from"
+            f" {stats.candidate_columns} candidate column(s):"
+            f" sampling likely failed silently (unreadable schemas or"
+            f" cardinality wipeout) rather than no sampleable values"
+        )
+        summary.value_sampling_warning = msg
+        logger.warning("[dbxcarta] %s", msg)
 
 
 def _verify(driver: "Driver", settings: SparkIngestSettings, summary: RunSummary) -> None:
@@ -305,56 +396,169 @@ def _verify(driver: "Driver", settings: SparkIngestSettings, summary: RunSummary
     )
 
 
+def _write_label_nodes(
+    df: "DataFrame",
+    label: NodeLabel,
+    neo4j: Neo4jConfig,
+    settings: SparkIngestSettings,
+    ledger_path: str,
+    transient_root: str,
+    batch_tag: str,
+    summary: RunSummary,
+    embed_enabled: bool,
+    keylike_ids: "DataFrame | None" = None,
+) -> None:
+    """Write one label's node frame to Neo4j, embedding-once when enabled.
+
+    When `embed_enabled`, the frame is embedded and frozen to a transient
+    per-(batch, label) Delta path inside `embedded_batch`: the per-batch
+    failure-count gate and this MERGE write both read that single ai_query
+    pass, and the transient is deleted as soon as the batch is written. When
+    embedding is off, the built frame is projected and written directly.
+    `_project` is the fail-closed boundary in both arms.
+
+    `keylike_ids` (only passed for the Column label) is the distinct
+    `col_id` frame of key-like FK targets. When present, the embedded
+    key-like subset is re-written with the extra `:KeyColumn` label inside
+    the same `embedded_batch` context, reusing the single ai_query pass so
+    the dedicated FK-discovery vector index is populated without a second
+    embedding. MERGE stays on the `:Column` id (idempotent; a re-run heals).
+    """
+    if embed_enabled:
+        from pyspark.sql.functions import broadcast
+
+        with embedded_batch(
+            df, label, settings, ledger_path, transient_root, batch_tag, summary,
+        ) as staged:
+            write_node(_project(staged, label), neo4j, label)
+            if keylike_ids is not None:
+                key_subset = staged.join(
+                    broadcast(keylike_ids),
+                    staged["id"] == keylike_ids["col_id"],
+                    "left_semi",
+                )
+                write_key_columns(_project(key_subset, label), neo4j)
+    else:
+        write_node(_project(df, label), neo4j, label)
+
+
+def _embed_and_write_node_chunks(
+    spark: "SparkSession",
+    neo4j: Neo4jConfig,
+    settings: SparkIngestSettings,
+    extract_result: ExtractResult,
+    ledger_path: str,
+    transient_root: str,
+    keylike_ids: "DataFrame | None",
+    summary: RunSummary,
+    value_node_df: "DataFrame | None" = None,
+) -> None:
+    """Embed + write Table, Column, and Value nodes batched by table range.
+
+    The bounded list of distinct `(table_catalog, table_schema, table_name)`
+    triples is collected to the driver (O(tables) tiny identifiers, not the
+    catalog-scale columns/values §5 forbids) and chunked by
+    `dbxcarta_embedding_batch_tables`. Each chunk filters the already-built
+    Table/Column/Value node frames on their now-declared
+    `catalog`/`schema`/(table) properties via a broadcast left-semi join,
+    embeds once into a transient per-(chunk, label) materialization, gates on
+    the per-batch failure count, and writes straight to Neo4j (MERGE on id; a
+    re-run heals a partial run).
+
+    `keylike_ids` is threaded to the Column write only: its key-like subset
+    is re-written with the extra `:KeyColumn` label from the same embedded
+    batch, so the dedicated FK-discovery index is filled in this one pass.
+
+    `value_node_df` (the un-embedded sampled Value frame, or None when the
+    value path is off) is sliced to the same table range and written here so
+    each Value slice embeds alongside its Column slice rather than in a
+    separate global pass. Every Value row is stamped with `last_run` =
+    `summary.started_at` so the post-loop scoped delete can drop any Value a
+    prior run left behind. The slice goes through `_write_label_nodes`
+    unconditionally: an empty per-chunk slice is a harmless no-op write, and
+    the post-loop delete is what reconciles vanished columns.
+    """
+    from pyspark.sql.functions import broadcast, lit
+
+    table_flag = settings.dbxcarta_include_embeddings_tables
+    column_flag = settings.dbxcarta_include_embeddings_columns
+    batch_size = settings.dbxcarta_embedding_batch_tables
+
+    rows = (
+        extract_result.tables_df
+        .select("table_catalog", "table_schema", "table_name")
+        .distinct()
+        .collect()
+    )
+    triples = [
+        (r["table_catalog"], r["table_schema"], r["table_name"]) for r in rows
+    ]
+
+    def _filter_to_chunk(
+        df: "DataFrame", keys: "DataFrame", table_col: str,
+    ) -> "DataFrame":
+        cond = (
+            (df["catalog"] == keys["_k_cat"])
+            & (df["schema"] == keys["_k_sch"])
+            & (df[table_col] == keys["_k_tab"])
+        )
+        return df.join(keys, cond, "left_semi")
+
+    for start in range(0, len(triples), batch_size):
+        idx = start // batch_size
+        chunk = triples[start:start + batch_size]
+        tag = f"b{idx}"
+        logger.info(
+            "[dbxcarta] embedding batch %s: %d table(s)", tag, len(chunk),
+        )
+        # Build the broadcast key frame once per chunk and reuse it for the
+        # Table/Column/Value semi-joins. createDataFrame is a driver action;
+        # building it once per chunk (not once per label) avoids three
+        # identical tiny frames per batch.
+        keys = broadcast(
+            spark.createDataFrame(chunk, ["_k_cat", "_k_sch", "_k_tab"]),
+        )
+        _write_label_nodes(
+            _filter_to_chunk(extract_result.table_node_df, keys, "name"),
+            NodeLabel.TABLE, neo4j, settings, ledger_path, transient_root,
+            tag, summary, table_flag,
+        )
+        _write_label_nodes(
+            _filter_to_chunk(extract_result.column_node_df, keys, "table"),
+            NodeLabel.COLUMN, neo4j, settings, ledger_path, transient_root,
+            tag, summary, column_flag, keylike_ids,
+        )
+        if value_node_df is not None:
+            value_slice = _filter_to_chunk(
+                value_node_df, keys, "table",
+            ).withColumn("last_run", lit(summary.started_at))
+            _write_label_nodes(
+                value_slice, NodeLabel.VALUE, neo4j, settings, ledger_path,
+                transient_root, tag, summary,
+                settings.dbxcarta_include_embeddings_values,
+            )
+
+
 def _load(
     neo4j: Neo4jConfig,
-    driver: "Driver",
     settings: SparkIngestSettings,
     extract_result: ExtractResult,
     fk_result: FKDiscoveryResult,
     values: ValueResult | None,
     summary: RunSummary,
 ) -> None:
-    """Write extracted, inferred, and sampled graph artifacts to Neo4j.
+    """Write inferred and sampled *relationships* to Neo4j.
 
-    Node writes omit coalesce(1) so the connector can parallelize at
-    `batch_size`. Relationship writes are partitioned by `_rel_partition`
+    Node writes (Database/Schema/Table/Column batched, Value in the value
+    stage) already ran before FK discovery; this step only writes
+    relationships. Relationship writes are partitioned by `_rel_partition`
     per `dbxcarta_rel_write_partitions`: the default of 1 coalesces to a
     single partition (byte-for-byte identical to the historical write, the
     safe default for Neo4j lock contention); a higher value repartitions
-    for tuned parallel relationship writes.
+    for tuned parallel relationship writes. Every relationship MERGE-matches
+    nodes the earlier node writes already created.
     """
-    candidate_col_ids = sv.get_candidate_col_ids(extract_result.columns_df)
-    purge_stale_values(driver, candidate_col_ids)
-
-    # Database nodes are one per resolved catalog; use the settings-derived
-    # catalog count instead of a logging-only count() action on database_df.
-    logger.info(
-        "[dbxcarta] writing nodes: Database (%d)",
-        len(settings.resolved_catalogs()),
-    )
-    write_node(_project(extract_result.database_df, NodeLabel.DATABASE), neo4j, NodeLabel.DATABASE)
-
-    logger.info("[dbxcarta] writing nodes: Schema (%d)", summary.extract.schemas)
-    write_node(
-        _project(extract_result.schema_node_df, NodeLabel.SCHEMA),
-        neo4j, NodeLabel.SCHEMA,
-    )
-
-    logger.info("[dbxcarta] writing nodes: Table (%d)", summary.extract.tables)
-    write_node(
-        _project(extract_result.table_node_df, NodeLabel.TABLE),
-        neo4j, NodeLabel.TABLE,
-    )
-
-    logger.info("[dbxcarta] writing nodes: Column (%d)", summary.extract.columns)
-    write_node(
-        _project(extract_result.column_node_df, NodeLabel.COLUMN),
-        neo4j, NodeLabel.COLUMN,
-    )
-
     if values is not None and values.sample_stats.value_nodes > 0:
-        logger.info("[dbxcarta] writing nodes: Value (%d)", values.sample_stats.value_nodes)
-        write_node(_project(values.value_node_df, NodeLabel.VALUE), neo4j, NodeLabel.VALUE)
         logger.info("[dbxcarta] writing relationships: HAS_VALUE (%d)", values.sample_stats.has_value_edges)
         write_rel(
             _rel_partition(values.has_value_df, settings.dbxcarta_rel_write_partitions), neo4j,

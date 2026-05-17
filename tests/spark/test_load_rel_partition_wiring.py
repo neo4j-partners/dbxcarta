@@ -58,8 +58,6 @@ def test_every_relationship_write_is_routed_through_rel_partition(
     monkeypatch.setattr(pipeline, "write_rel", fake_write_rel)
     monkeypatch.setattr(pipeline, "write_node", lambda *a, **k: None)
     monkeypatch.setattr(pipeline, "_project", lambda df, label: df)
-    monkeypatch.setattr(pipeline, "purge_stale_values", lambda *a, **k: None)
-    monkeypatch.setattr(pipeline.sv, "get_candidate_col_ids", lambda df: [])
 
     extract_result = SimpleNamespace(
         columns_df="columns_df",
@@ -84,7 +82,7 @@ def test_every_relationship_write_is_routed_through_rel_partition(
     summary = SimpleNamespace(extract=SimpleNamespace(schemas=0, tables=0, columns=0))
 
     pipeline._load(
-        neo4j=object(), driver=object(), settings=settings,
+        neo4j=object(), settings=settings,
         extract_result=extract_result, fk_result=fk_result,
         values=values, summary=summary,
     )

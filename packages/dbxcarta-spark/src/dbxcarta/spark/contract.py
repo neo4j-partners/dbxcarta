@@ -13,7 +13,20 @@ from enum import StrEnum
 # 1.1 adds the additive Table node `layer` property (bronze/silver/gold),
 # derived at ingest from a configurable catalog->layer map. Readers treat a
 # missing `layer` as null.
-CONTRACT_VERSION = "1.1"
+# 1.2 makes structural identity first-class: Table nodes gain `catalog`,
+# `schema`; Column nodes gain `catalog`, `schema`, `table`. Previously the
+# only structural signal was the HAS_* edges plus an opaque hashed `id`, so
+# every consumer needing "which catalog/schema/table does this node belong
+# to" (batch-by-table-range, FK locality, the semantic-FK same-schema
+# pre-filter) had to re-join the cached information_schema frames. Additive
+# and readers treat the new properties as authoritative scalar identity.
+# 1.3 stamps every Value node with `last_run` (the run-start timestamp),
+# `catalog`, and `schema`. This replaces the driver-collected stale-Value
+# purge (which paged catalog-scale column ids back to the driver) with a
+# single scoped server-side Cypher delete keyed on `last_run` < run-start
+# within the run's catalogs/schemas. Additive; readers treat the new
+# properties as authoritative.
+CONTRACT_VERSION = "1.3"
 
 DEFAULT_EMBEDDING_ENDPOINT = "databricks-gte-large-en"
 
@@ -66,20 +79,30 @@ REFERENCES_PROPERTIES: tuple[str, ...] = ("confidence", "source", "criteria")
 # information_schema helper columns, the transient `embedding_text`, and the
 # embedding bookkeeping `embedding_text_hash` / `embedding_model` /
 # `embedded_at` / `embedding_error` — is staging/ledger-only and never a
-# graph property. Structural membership (catalog/schema/table) stays
-# edge-based and is deliberately not duplicated here as scalar properties.
+# graph property. Structural membership is ALSO edge-based (the HAS_* rels),
+# but as of contract 1.2 the catalog/schema/table identity of Table and
+# Column nodes is additionally carried as authoritative scalar properties:
+# the `id` is an opaque hash, so re-deriving structure from edges or the
+# cached information_schema frames on every consumer (batching, FK locality,
+# the semantic-FK same-schema pre-filter) was the actual smell. The edges
+# and these scalars agree by construction (both derive from the same
+# information_schema row).
 NODE_PROPERTIES: dict[NodeLabel, tuple[str, ...]] = {
     NodeLabel.DATABASE: ("id", "name", "contract_version", "embedding"),
     NodeLabel.SCHEMA: ("id", "name", "comment", "contract_version", "embedding"),
     NodeLabel.TABLE: (
-        "id", "name", "layer", "comment", "table_type", "created",
-        "last_altered", "contract_version", "embedding",
+        "id", "name", "catalog", "schema", "layer", "comment", "table_type",
+        "created", "last_altered", "contract_version", "embedding",
     ),
     NodeLabel.COLUMN: (
-        "id", "name", "data_type", "is_nullable", "ordinal_position",
-        "comment", "contract_version", "embedding",
+        "id", "name", "catalog", "schema", "table", "data_type",
+        "is_nullable", "ordinal_position", "comment", "contract_version",
+        "embedding",
     ),
-    NodeLabel.VALUE: ("id", "value", "count", "contract_version", "embedding"),
+    NodeLabel.VALUE: (
+        "id", "value", "count", "catalog", "schema", "last_run",
+        "contract_version", "embedding",
+    ),
 }
 
 

@@ -63,8 +63,8 @@ def test_env_overlay_validates_against_settings() -> None:
         dbxcarta_infer_semantic=True,
         dbxcarta_embedding_endpoint=env["DBXCARTA_EMBEDDING_ENDPOINT"],
         dbxcarta_embedding_dimension=int(env["DBXCARTA_EMBEDDING_DIMENSION"]),
-        dbxcarta_embedding_failure_threshold=float(
-            env["DBXCARTA_EMBEDDING_FAILURE_THRESHOLD"]
+        dbxcarta_embedding_failure_max=int(
+            env["DBXCARTA_EMBEDDING_FAILURE_MAX"]
         ),
     )
     assert settings.dbxcarta_catalog == "graph-enriched-finance-silver"
@@ -86,7 +86,7 @@ def test_env_overlay_pins_known_keys() -> None:
     assert env["DBXCARTA_INJECT_CRITERIA"] == "false"
     assert env["DBXCARTA_CLIENT_ARMS"] == "no_context,schema_dump,graph_rag"
     assert env["DBXCARTA_INFER_SEMANTIC"] == "true"
-    assert env["DBXCARTA_EMBEDDING_FAILURE_THRESHOLD"] == "0.10"
+    assert env["DBXCARTA_EMBEDDING_FAILURE_MAX"] == "0"
     assert env["DBXCARTA_CLIENT_QUESTIONS"].endswith("/dbxcarta/questions.json")
 
 

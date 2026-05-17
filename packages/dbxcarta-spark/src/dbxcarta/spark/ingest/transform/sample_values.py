@@ -26,7 +26,6 @@ _SCHEMA_PROBE_LIMIT = 3
 
 @dataclass
 class SampleStats:
-    candidate_col_ids: list[str]
     candidate_columns: int
     sampled_columns: int
     skipped_columns: int
@@ -56,17 +55,6 @@ class TableCandidate:
         return f"`{self.catalog}`.`{self.schema_name}`.`{self.table_name}`"
 
 
-def get_candidate_col_ids(columns_df: "DataFrame") -> list[str]:
-    """Return column IDs for all STRING/BOOLEAN columns in the DataFrame.
-
-    Used by the pipeline to scope the stale-Value purge even when
-    DBXCARTA_INCLUDE_VALUES is disabled — derives IDs from the cached
-    columns_df without re-probing UC schemas.
-    """
-    candidates = _candidates_from_columns_df(columns_df, [])
-    return [cid for cand in candidates for cid in cand.column_ids]
-
-
 def sample(
     spark: "SparkSession",
     columns_df: "DataFrame",
@@ -80,8 +68,9 @@ def sample(
 
     Returns (value_node_df, has_value_rel_df, stats, cache_handle). DataFrames
     may be empty when no qualifying values are found; check stats.value_nodes
-    before writing. stats.candidate_col_ids is used by the pipeline for
-    stale-value purge.
+    before writing. value_node_df carries `catalog`/`schema` (the run-stamp
+    scoped delete keys on them); `table` rides along so the per-chunk Value
+    write can be filtered to the same table range as its Column write.
 
     cache_handle is the cached sampled-value DataFrame on the success path, or
     None when nothing was cached (no rows, or zero value nodes — that path
@@ -101,6 +90,9 @@ def sample(
         StructField("id", StringType(), nullable=False),
         StructField("value", StringType()),
         StructField("count", LongType()),
+        StructField("catalog", StringType()),
+        StructField("schema", StringType()),
+        StructField("table", StringType()),
         StructField("contract_version", StringType()),
         StructField("embedding_text", StringType()),
     ])
@@ -114,11 +106,6 @@ def sample(
 
     candidates, skipped_schemas = _filter_readable_schemas(spark, candidates)
 
-    # candidate_col_ids: post-schema-probe, pre-cardinality-filter.
-    # Covers all drift cases including columns filtered out by cardinality this
-    # run that had Value nodes from a prior run.
-    candidate_col_ids = [cid for cand in candidates for cid in cand.column_ids]
-
     t0 = time.perf_counter_ns()
     sampled_candidates, cardinality_values, cardinality_failed = _cardinality_filter(
         spark, candidates, cardinality_threshold, stack_chunk_size,
@@ -131,7 +118,6 @@ def sample(
     sample_wall_ms = (time.perf_counter_ns() - t0) // 1_000_000
 
     stats = SampleStats(
-        candidate_col_ids=candidate_col_ids,
         candidate_columns=total_candidate_cols,
         sampled_columns=sampled_cols,
         skipped_columns=total_candidate_cols - sampled_cols,
@@ -165,6 +151,9 @@ def sample(
             vid_expr.alias("id"),
             col("val").alias("value"),
             col("cnt").alias("count"),
+            col("tbl_catalog").alias("catalog"),
+            col("tbl_schema").alias("schema"),
+            col("tbl_name").alias("table"),
             lit(CONTRACT_VERSION).alias("contract_version"),
             col("val").alias("embedding_text"),
         )
@@ -334,14 +323,20 @@ def _sample_values(
         for chunk_index, chunk_cols in enumerate(_chunk(cand.column_names, chunk_size)):
             try:
                 query = _sample_query(cand.fq(), chunk_cols)
-                chunk_df = spark.sql(query).withColumn(
-                    "col_id",
-                    id_expr_from_columns(
-                        lit(cand.catalog),
-                        lit(cand.schema_name),
-                        lit(cand.table_name),
-                        col("col_name"),
-                    ),
+                chunk_df = (
+                    spark.sql(query)
+                    .withColumn(
+                        "col_id",
+                        id_expr_from_columns(
+                            lit(cand.catalog),
+                            lit(cand.schema_name),
+                            lit(cand.table_name),
+                            col("col_name"),
+                        ),
+                    )
+                    .withColumn("tbl_catalog", lit(cand.catalog))
+                    .withColumn("tbl_schema", lit(cand.schema_name))
+                    .withColumn("tbl_name", lit(cand.table_name))
                 )
                 dfs.append(chunk_df)
             except (AnalysisException, Py4JJavaError) as exc:

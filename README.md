@@ -519,6 +519,18 @@ Supply-chain note: `upload --wheel` currently combines version bumping, building
 - `--no-wait` — returns immediately with the run ID.
 - `--compute {cluster,serverless}` — overrides `DATABRICKS_COMPUTE_MODE` for this run.
 
+### Clean up a project
+
+Each integration writes its run artifacts to an ops plane: a run summary table, the per-arm client staging/retrieval tables, and a volume holding `runs/`, `staging/`, and the embedding-reuse `ledger/`. To reset one integration, point `scripts/clean-dbxcarta.py` at that integration's overlay env file. The ops location is read from `DBXCARTA_SUMMARY_TABLE` and `DATABRICKS_VOLUME_PATH` in the overlay, so the same script cleans any project:
+
+```bash
+uv run scripts/clean-dbxcarta.py \
+  --profile azure-rk-knight \
+  --env-file examples/integration/finance-genie/dbxcarta-overlay.env
+```
+
+It first reads the workspace and prints every table and volume path it will delete, then waits for a `y/n` answer before touching anything. It drops the ops tables (`dbxcarta_run_summary`, `client_retrieval`, every `client_staging_*`) and empties the ops volume contents, including the embedding ledger. The schema and the volume object itself are kept. Pass `-y`/`--yes` to skip the prompt in automation, or `--warehouse-id` to override warehouse selection.
+
 ## Public API and version contract
 
 External projects depend on the distribution that matches the capability they use. The public surfaces are:

@@ -1,30 +1,38 @@
 """Embedding transform stage.
 
-Owns the materialize-once embed+stage step (with optional ledger reuse) and
-the post-embedding failure-rate gate. The per-label embedding-text
-expressions are no longer here: each node builder attaches a single
-`embedding_text` column from the one source of truth
+Owns one primitive: embed a single batch's node frame *once* and freeze it
+to a transient Delta materialization, so the per-batch failure-count check
+and the Neo4j node write both read the same result and ai_query is invoked
+exactly once. There is no whole-catalog staging table and no failure-rate
+gate: the run orchestrator drives node embedding + the Neo4j write in
+batches by table range, and `embedded_batch` enforces a configurable
+per-batch failure *count* before the batch is allowed to be written.
+
+The per-label embedding-text expressions are not here: each node builder
+attaches a single `embedding_text` column from the one source of truth
 (contract.EMBEDDING_TEXT_EXPR), and this stage simply hashes and embeds it.
-``run.py`` calls ``transform_embeddings`` / ``check_thresholds``; the
-sample-values stage calls ``embed_label`` to embed Value nodes through the
-same path.
 """
 
 from __future__ import annotations
 
+import contextlib
 import logging
+from collections.abc import Iterator
 from typing import TYPE_CHECKING
 
 import dbxcarta.spark.ingest.transform.embeddings as emb
 from dbxcarta.spark.contract import NodeLabel
-from dbxcarta.spark.ingest.extract import ExtractResult
 from dbxcarta.spark.ingest.summary import RunSummary
 from dbxcarta.spark.ingest.transform.ledger import (
     read_ledger,
     split_by_ledger,
     upsert_ledger,
 )
-from dbxcarta.spark.ingest.transform.staging import stage_embedded_nodes
+from dbxcarta.spark.ingest.transform.staging import (
+    delete_transient,
+    materialize_transient,
+    transient_path,
+)
 from dbxcarta.spark.settings import SparkIngestSettings
 
 if TYPE_CHECKING:
@@ -33,153 +41,143 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def embed_label(
-    df: "DataFrame", label: NodeLabel,
-    settings: SparkIngestSettings, staging_path: str, ledger_path: str,
+@contextlib.contextmanager
+def embedded_batch(
+    df: "DataFrame",
+    label: NodeLabel,
+    settings: SparkIngestSettings,
+    ledger_path: str,
+    transient_root: str,
+    batch_tag: str,
     summary: RunSummary,
-) -> "DataFrame":
-    """Embed `df` for `label` (reading its builder-attached `embedding_text`
-    column), stage to Delta once, and record failure stats into `summary`."""
-    return _embed_and_stage(
-        df, label, settings, staging_path, ledger_path, summary,
+) -> "Iterator[DataFrame]":
+    """Embed one batch's `df` for `label`, freeze it, and yield the result.
+
+    `df` carries a builder-attached `embedding_text` column; the hash and the
+    ai_query input both derive from it, so the ledger never churns from a
+    hash/embed mismatch. When DBXCARTA_LEDGER_ENABLED, rows whose
+    embedding_text_hash and model already exist in the per-label ledger are
+    served from the ledger (no ai_query call); only misses call the endpoint
+    and the ledger is then upserted with the new vectors (excluding errors).
+    The ledger is keyed by text-hash + model, so a per-batch call already
+    scopes the read and the upsert — there is no global ledger read.
+
+    The embedded frame is written to a transient Delta path and read back so
+    the caller's Neo4j write and the failure-count check both consume one
+    ai_query pass. Per-batch attempts/successes/ledger-hits accumulate into
+    `summary`; if this batch's failure count exceeds
+    DBXCARTA_EMBEDDING_FAILURE_MAX the run fails *before* the batch is
+    yielded (so nothing is written). The transient path is always deleted on
+    exit, success or failure, so nothing accumulates across batches.
+    """
+    enriched = _embed_with_ledger(df, label, settings, ledger_path, summary)
+    path = transient_path(transient_root, label, batch_tag)
+    staged = materialize_transient(enriched, path)
+    try:
+        _accumulate_and_gate(staged, label, settings, summary)
+        if settings.dbxcarta_ledger_enabled:
+            upsert_ledger(staged, ledger_path, label)
+        yield staged
+    finally:
+        delete_transient(path)
+
+
+def finalize_embedding_summary(summary: RunSummary) -> None:
+    """Compute per-label and aggregate failure rates from accumulated counts.
+
+    `embedded_batch` only accumulates raw attempts/successes per label across
+    batches (a per-batch rate is meaningless once batching exists). This is
+    called once after all embedding is done to fill the derived reporting
+    fields the summary/verify wire shape still carries. It is reporting only;
+    nothing gates on it (the gate is the per-batch failure count).
+    """
+    counts = summary.embeddings
+    total_attempts = 0
+    total_successes = 0
+    for label, attempts in counts.attempts.items():
+        successes = counts.successes.get(label, 0)
+        counts.failure_rate_per_label[label] = (
+            (attempts - successes) / attempts if attempts > 0 else 0.0
+        )
+        total_attempts += attempts
+        total_successes += successes
+    counts.aggregate_failure_rate = (
+        (total_attempts - total_successes) / total_attempts
+        if total_attempts > 0
+        else 0.0
     )
 
 
-def transform_embeddings(
-    settings: SparkIngestSettings, extract_result: ExtractResult,
-    staging_path: str, ledger_path: str, summary: RunSummary,
-) -> None:
-    """Enrich node DataFrames with embeddings in-place on `extract_result`.
-
-    Materialize-once: each enabled label is written to a Delta staging table
-    so failure-rate aggregation and the Neo4j write consume the staged data —
-    ai_query is invoked exactly once. Threshold is checked after all labels.
-    """
-    enabled: dict[NodeLabel, bool] = {
-        NodeLabel.TABLE: settings.dbxcarta_include_embeddings_tables,
-        NodeLabel.COLUMN: settings.dbxcarta_include_embeddings_columns,
-        NodeLabel.SCHEMA: settings.dbxcarta_include_embeddings_schemas,
-        NodeLabel.DATABASE: settings.dbxcarta_include_embeddings_databases,
-    }
-    node_dfs: dict[NodeLabel, "DataFrame"] = {
-        NodeLabel.TABLE: extract_result.table_node_df,
-        NodeLabel.COLUMN: extract_result.column_node_df,
-        NodeLabel.SCHEMA: extract_result.schema_node_df,
-        NodeLabel.DATABASE: extract_result.database_df,
-    }
-
-    for label in (NodeLabel.TABLE, NodeLabel.COLUMN, NodeLabel.SCHEMA, NodeLabel.DATABASE):
-        if not enabled[label]:
-            continue
-        node_dfs[label] = embed_label(
-            node_dfs[label], label,
-            settings, staging_path, ledger_path, summary,
-        )
-
-    extract_result.table_node_df = node_dfs[NodeLabel.TABLE]
-    extract_result.column_node_df = node_dfs[NodeLabel.COLUMN]
-    extract_result.schema_node_df = node_dfs[NodeLabel.SCHEMA]
-    extract_result.database_df = node_dfs[NodeLabel.DATABASE]
-
-
-def check_thresholds(settings: SparkIngestSettings, summary: RunSummary) -> None:
-    """Raise RuntimeError if any per-label or aggregate embedding failure
-    rate exceeds the configured threshold.
-
-    Called after embedding transforms but before Neo4j writes so a bad
-    endpoint run does not partially refresh the graph with missing vectors.
-    """
-    threshold = settings.dbxcarta_embedding_failure_threshold
-    for label, rate in summary.embeddings.failure_rate_per_label.items():
-        if rate > threshold:
-            raise RuntimeError(
-                f"[dbxcarta] {label.value} embedding failure rate {rate:.2%} exceeds"
-                f" threshold {threshold:.2%}; aborting before Neo4j write"
-            )
-
-    total_attempts = sum(summary.embeddings.attempts.values())
-    total_successes = sum(summary.embeddings.successes.values())
-    if total_attempts > 0:
-        aggregate_rate = (total_attempts - total_successes) / total_attempts
-        summary.embeddings.aggregate_failure_rate = aggregate_rate
-        if aggregate_rate > threshold:
-            raise RuntimeError(
-                f"[dbxcarta] Aggregate embedding failure rate {aggregate_rate:.2%} exceeds"
-                f" threshold {threshold:.2%}; aborting before Neo4j write"
-            )
-
-
-def _embed_and_stage(
-    df: "DataFrame", label: NodeLabel,
-    settings: SparkIngestSettings, staging_path: str, ledger_path: str,
+def _embed_with_ledger(
+    df: "DataFrame",
+    label: NodeLabel,
+    settings: SparkIngestSettings,
+    ledger_path: str,
     summary: RunSummary,
 ) -> "DataFrame":
-    """Embed df, stage to Delta once, compute failure stats into summary.
-
-    `df` carries a builder-attached `embedding_text` column; the hash and
-    the ai_query input both derive from it, so the ledger never churns from
-    a hash/embed mismatch.
-
-    When DBXCARTA_LEDGER_ENABLED, rows whose embedding_text_hash and model
-    already exist in the per-label ledger are served from the ledger (no
-    ai_query call). Only misses call the endpoint; the ledger is then upserted
-    with the newly-computed vectors (excluding error rows).
-    """
+    """Return df enriched with embedding columns, using the ledger when on."""
     from pyspark.sql.functions import col, lit, sha2
     from pyspark.sql.types import ArrayType, DoubleType
 
     endpoint = settings.dbxcarta_embedding_endpoint
     dimension = settings.dbxcarta_embedding_dimension
 
-    if settings.dbxcarta_ledger_enabled:
-        spark = df.sparkSession
-        ledger_df = read_ledger(spark, ledger_path, label)
+    if not settings.dbxcarta_ledger_enabled:
+        return emb.add_embedding_column(df, endpoint, dimension, label=label.value)
 
-        if ledger_df is not None:
-            df_hashed = df.withColumn("_curr_hash", sha2(col("embedding_text"), 256))
-            hits_df, misses_df = split_by_ledger(df_hashed, ledger_df, endpoint)
-            hit_count = hits_df.count()
-            summary.embeddings.ledger_hits[label] = hit_count
+    ledger_df = read_ledger(df.sparkSession, ledger_path, label)
+    if ledger_df is None:
+        _add_ledger_hits(summary, label, 0)
+        return emb.add_embedding_column(df, endpoint, dimension, label=label.value)
 
-            # `embedding_text` is now a builder column, so it is in
-            # df.columns. The miss branch (add_embedding_column) drops it;
-            # exclude it here too so both unionByName arms — and the Delta
-            # staging schema — match.
-            hit_final = hits_df.select(
-                *[col(c) for c in df.columns if c != "embedding_text"],
-                col("_curr_hash").alias("embedding_text_hash"),
-                col("_led_embedding").cast(ArrayType(DoubleType())).alias("embedding"),
-                lit(None).cast("string").alias("embedding_error"),
-                col("_led_model").alias("embedding_model"),
-                col("_led_embedded_at").alias("embedded_at"),
-            )
+    df_hashed = df.withColumn("_curr_hash", sha2(col("embedding_text"), 256))
+    hits_df, misses_df = split_by_ledger(df_hashed, ledger_df, endpoint)
+    _add_ledger_hits(summary, label, hits_df.count())
 
-            embedded_misses = emb.add_embedding_column(
-                misses_df, endpoint, dimension, label=label.value,
-            )
-            enriched = hit_final.unionByName(embedded_misses)
-        else:
-            summary.embeddings.ledger_hits[label] = 0
-            enriched = emb.add_embedding_column(
-                df, endpoint, dimension, label=label.value,
-            )
-    else:
-        enriched = emb.add_embedding_column(
-            df, endpoint, dimension, label=label.value,
-        )
+    # `embedding_text` is a builder column, so it is in df.columns. The miss
+    # branch (add_embedding_column) drops it; exclude it here too so both
+    # unionByName arms — and the transient schema — match.
+    hit_final = hits_df.select(
+        *[col(c) for c in df.columns if c != "embedding_text"],
+        col("_curr_hash").alias("embedding_text_hash"),
+        col("_led_embedding").cast(ArrayType(DoubleType())).alias("embedding"),
+        lit(None).cast("string").alias("embedding_error"),
+        col("_led_model").alias("embedding_model"),
+        col("_led_embedded_at").alias("embedded_at"),
+    )
+    embedded_misses = emb.add_embedding_column(
+        misses_df, endpoint, dimension, label=label.value,
+    )
+    return hit_final.unionByName(embedded_misses)
 
-    staged = stage_embedded_nodes(enriched, staging_path, label)
-    rate, attempts, successes = emb.compute_failure_stats(staged)
-    summary.embeddings.attempts[label] = attempts
-    summary.embeddings.successes[label] = successes
-    summary.embeddings.failure_rate_per_label[label] = rate
 
-    if settings.dbxcarta_ledger_enabled:
-        upsert_ledger(staged, ledger_path, label)
+def _accumulate_and_gate(
+    staged: "DataFrame",
+    label: NodeLabel,
+    settings: SparkIngestSettings,
+    summary: RunSummary,
+) -> None:
+    """Accumulate this batch's counts and enforce the per-batch failure gate."""
+    _, attempts, successes = emb.compute_failure_stats(staged)
+    failures = attempts - successes
+    counts = summary.embeddings
+    counts.attempts[label] = counts.attempts.get(label, 0) + attempts
+    counts.successes[label] = counts.successes.get(label, 0) + successes
 
     logger.info(
-        "[dbxcarta] %s embeddings: attempts=%d successes=%d failure_rate=%.2f%% ledger_hits=%d",
-        label.value, attempts, successes, rate * 100,
-        summary.embeddings.ledger_hits.get(label, 0),
+        "[dbxcarta] %s batch embeddings: attempts=%d successes=%d failures=%d",
+        label.value, attempts, successes, failures,
     )
-    return staged
+
+    cap = settings.dbxcarta_embedding_failure_max
+    if cap > 0 and failures > cap:
+        raise RuntimeError(
+            f"[dbxcarta] {label.value} batch embedding failure count"
+            f" {failures} exceeds DBXCARTA_EMBEDDING_FAILURE_MAX {cap};"
+            f" aborting before this batch is written to Neo4j"
+        )
+
+
+def _add_ledger_hits(summary: RunSummary, label: NodeLabel, hits: int) -> None:
+    counts = summary.embeddings
+    counts.ledger_hits[label] = counts.ledger_hits.get(label, 0) + hits

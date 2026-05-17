@@ -26,6 +26,7 @@ from dbxcarta.spark.ingest.fk.inference import (
     build_pk_gate,
     infer_metadata_edges,
     infer_semantic_edges,
+    semantic_nn_pairs,
 )
 from dbxcarta.spark.ingest.summary import FKSkipCounts, RunSummary
 
@@ -33,8 +34,8 @@ if TYPE_CHECKING:
     from pyspark.sql import DataFrame, SparkSession
 
     from dbxcarta.spark.ingest.extract import ExtractResult
+    from dbxcarta.spark.ingest.load.writer import Neo4jConfig
     from dbxcarta.spark.settings import SparkIngestSettings
-    from dbxcarta.spark.ingest.transform.sample_values import SampleStats
 
 logger = logging.getLogger(__name__)
 
@@ -65,16 +66,17 @@ def run_fk_discovery(
     settings: "SparkIngestSettings",
     schema_list: list[str],
     extract: "ExtractResult",
-    sample_stats: "SampleStats | None",
-    value_node_df: "DataFrame | None",
-    has_value_df: "DataFrame | None",
+    neo4j: "Neo4jConfig",
     summary: RunSummary,
 ) -> FKDiscoveryResult:
     """Run declared → metadata → semantic, threading prior edges in Spark.
 
     Semantic is gated on DBXCARTA_INFER_SEMANTIC and on a catalog-size floor
     (DBXCARTA_SEMANTIC_MIN_TABLES). Column embeddings are required and
-    already validated present by Settings' cross-field validator.
+    already validated present by Settings' cross-field validator. Semantic
+    candidate generation is the per-source nearest-neighbor SEARCH against
+    the key-like vector index (`semantic_nn_pairs`, reading Neo4j via the
+    connector `query` option); there is no sampled-value FK consumer.
     """
     from pyspark import StorageLevel
 
@@ -138,11 +140,12 @@ def run_fk_discovery(
         semantic_out: "DataFrame | None" = None
         semantic_count = 0
         if _should_run_semantic(settings, summary.extract.tables):
-            sv_node_df, sv_has_df = _semantic_value_frames(
-                value_node_df, has_value_df, sample_stats,
+            nn_pairs = semantic_nn_pairs(
+                spark, neo4j, columns_frame, settings,
+                settings.dbxcarta_semantic_k,
             )
             semantic_edges_df, semantic_counts = infer_semantic_edges(
-                columns_frame, pk_gate, prior_edges_df, sv_node_df, sv_has_df,
+                columns_frame, pk_gate, prior_edges_df, nn_pairs,
                 threshold=settings.dbxcarta_semantic_threshold,
             )
             summary.fk_semantic = semantic_counts
@@ -183,26 +186,6 @@ def _union_pairs(
     for f in frames[1:]:
         out = out.unionByName(f)
     return out.distinct()
-
-
-def _semantic_value_frames(
-    value_node_df: "DataFrame | None",
-    has_value_df: "DataFrame | None",
-    sample_stats: "SampleStats | None",
-) -> tuple["DataFrame | None", "DataFrame | None"]:
-    """Pass the sampled-value frames through only when values were sampled.
-
-    None signals "no corroboration signal available" to the semantic
-    overlap join — the value bonus then simply does not apply.
-    """
-    if (
-        value_node_df is None
-        or has_value_df is None
-        or sample_stats is None
-        or sample_stats.value_nodes == 0
-    ):
-        return None, None
-    return value_node_df, has_value_df
 
 
 def _should_run_semantic(settings: "SparkIngestSettings", n_tables: int) -> bool:
@@ -299,3 +282,26 @@ def _constraints_df(
     if schema_list:
         rows = rows.filter(col("table_schema").isin(schema_list))
     return rows
+
+
+def key_like_target_ids(
+    spark: "SparkSession",
+    settings: "SparkIngestSettings",
+    schema_list: list[str],
+    extract: "ExtractResult",
+) -> "DataFrame":
+    """Distinct `col_id` of every key-like FK target.
+
+    The single source of truth for which columns get the `:KeyColumn` label
+    at load time: it reuses the existing key definition
+    (`build_pk_gate`'s `pk_evidence`) rather than introducing a second rule.
+    Returned as a DataFrame and never collected — the caller applies it via
+    a broadcast semi-join, so this stays within best-practices §5 even at
+    the dense-catalog target.
+    """
+    constraints_df = _constraints_df(spark, settings, schema_list)
+    columns_frame = build_columns_frame(
+        extract.columns_df, extract.column_node_df,
+    )
+    pk_gate, _ = build_pk_gate(columns_frame, constraints_df)
+    return pk_gate.select("col_id").distinct()

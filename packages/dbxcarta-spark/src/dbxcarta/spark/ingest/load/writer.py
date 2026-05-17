@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from pyspark.sql import DataFrame
+    from pyspark.sql import DataFrame, SparkSession
 
 _FORMAT = "org.neo4j.spark.DataSource"
 
@@ -30,14 +30,54 @@ class Neo4jConfig:
 
 def write_nodes(df: "DataFrame", config: Neo4jConfig, label: str) -> None:
     """MERGE nodes on id, updating all other properties on match."""
+    write_nodes_multi(df, config, (label,))
+
+
+def write_nodes_multi(
+    df: "DataFrame", config: Neo4jConfig, labels: tuple[str, ...],
+) -> None:
+    """MERGE nodes on id with one or more labels.
+
+    `labels=("Column", "KeyColumn")` writes `:Column:KeyColumn`: because the
+    MERGE key stays `id`, re-writing an already-written `:Column` node simply
+    adds the extra label and refreshes properties (idempotent; re-run heals).
+    """
+    label_opt = "".join(f":{name}" for name in labels)
     (
         df.write.format(_FORMAT)
         .mode("Overwrite")
         .options(**config._base_opts())
-        .option("labels", f":{label}")
+        .option("labels", label_opt)
         .option("node.keys", "id")
         .save()
     )
+
+
+def read_query(
+    spark: "SparkSession",
+    config: Neo4jConfig,
+    cypher: str,
+    parameters: dict[str, object] | None = None,
+) -> "DataFrame":
+    """Run a server-side Cypher read through the connector `query` option.
+
+    The connector executes `cypher` entirely on the Neo4j side and streams
+    the result rows back as a DataFrame — no DataFrame rows are pushed into
+    the read and nothing is collected to the driver. Bind values are passed
+    via per-key `query.parameter.<name>` options (the connector's documented
+    parameterization for the `query` read mode). `partitions` /
+    `query.count` are intentionally not set: the default single-partition
+    read is correct, and partitioning is the only batching lever to add
+    later if a result set ever warrants it.
+    """
+    reader = (
+        spark.read.format(_FORMAT)
+        .options(**config._base_opts())
+        .option("query", cypher)
+    )
+    for name, value in (parameters or {}).items():
+        reader = reader.option(f"query.parameter.{name}", str(value))
+    return reader.load()
 
 
 def write_relationship(

@@ -87,14 +87,12 @@ def test_settings_rejects_non_volume_summary_paths(bad_path: str) -> None:
         )
 
 
-def test_settings_accepts_explicit_staging_and_ledger_volume_paths() -> None:
+def test_settings_accepts_explicit_ledger_volume_path() -> None:
     s = SparkIngestSettings(
         dbxcarta_catalog="main",
-        dbxcarta_staging_path="/Volumes/cat/schema/vol/staging/",
         dbxcarta_ledger_path="/Volumes/cat/schema/vol/ledger/",
         **_BASE_SETTINGS,
     )
-    assert s.dbxcarta_staging_path == "/Volumes/cat/schema/vol/staging"
     assert s.dbxcarta_ledger_path == "/Volumes/cat/schema/vol/ledger"
 
 

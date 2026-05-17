@@ -114,28 +114,55 @@ def test_wrong_shape_row_counted_as_failure(local_spark) -> None:
     assert rate == pytest.approx(2 / 3)
 
 
-def test_per_label_threshold_trips_independently_of_aggregate() -> None:
-    """Mirrors the pipeline threshold loop: any enabled label whose rate
-    exceeds the threshold must raise, even if the aggregate is under.
+def _gate_inputs(local_spark, n_fail: int, n_ok: int, cap: int):
+    """Build (staged_df, settings_stub, summary_stub) for the per-batch gate.
 
-    Replicates pipeline.py's check with a plain dict so the logic is
-    exercised without a full Spark run.
+    `_accumulate_and_gate` only reads `embedding` (null == failure) off the
+    frame, `dbxcarta_embedding_failure_max` off settings, and the attempts/
+    successes dicts off `summary.embeddings`, so lightweight stubs suffice.
     """
-    threshold = 0.05
-    per_label = {"Table": 0.02, "Column": 0.10}
-    attempts = {"Table": 1000, "Column": 100}
-    successes = {"Table": 980, "Column": 90}
+    from types import SimpleNamespace
 
-    tripped = [lbl for lbl, r in per_label.items() if r > threshold]
-    assert tripped == ["Column"]
+    from dbxcarta.spark.ingest.summary import EmbeddingCounts
 
-    total_attempts = sum(attempts.values())
-    total_successes = sum(successes.values())
-    aggregate = (total_attempts - total_successes) / total_attempts
-    assert aggregate < threshold, (
-        "fixture must have aggregate under threshold so this test proves"
-        " per-label trips independently"
-    )
+    rows = [([0.1, 0.2],) for _ in range(n_ok)] + [(None,) for _ in range(n_fail)]
+    df = local_spark.createDataFrame(rows, "embedding array<double>")
+    settings = SimpleNamespace(dbxcarta_embedding_failure_max=cap)
+    summary = SimpleNamespace(embeddings=EmbeddingCounts())
+    return df, settings, summary
+
+
+def test_per_batch_count_gate_trips_when_failures_exceed_cap(local_spark) -> None:
+    """The per-batch gate raises before the batch is written when this
+    batch's failure count exceeds DBXCARTA_EMBEDDING_FAILURE_MAX, and
+    accumulates this batch's attempts/successes onto the summary."""
+    from dbxcarta.spark.contract import NodeLabel
+    from dbxcarta.spark.ingest.transform.embed_stage import _accumulate_and_gate
+
+    df, settings, summary = _gate_inputs(local_spark, n_fail=3, n_ok=7, cap=2)
+    with pytest.raises(RuntimeError, match="DBXCARTA_EMBEDDING_FAILURE_MAX"):
+        _accumulate_and_gate(df, NodeLabel.TABLE, settings, summary)
+    # Counts still accumulate even on the failing batch (raised after the add).
+    assert summary.embeddings.attempts[NodeLabel.TABLE] == 10
+    assert summary.embeddings.successes[NodeLabel.TABLE] == 7
+
+
+def test_per_batch_count_gate_passes_under_cap_and_when_disabled(
+    local_spark,
+) -> None:
+    """Under the cap the gate is silent; cap == 0 disables the gate entirely
+    (mirrors the `0 disables` convention), and per-batch counts accumulate."""
+    from dbxcarta.spark.contract import NodeLabel
+    from dbxcarta.spark.ingest.transform.embed_stage import _accumulate_and_gate
+
+    df, settings, summary = _gate_inputs(local_spark, n_fail=2, n_ok=8, cap=5)
+    _accumulate_and_gate(df, NodeLabel.COLUMN, settings, summary)
+    assert summary.embeddings.attempts[NodeLabel.COLUMN] == 10
+    assert summary.embeddings.successes[NodeLabel.COLUMN] == 8
+
+    df0, settings0, summary0 = _gate_inputs(local_spark, n_fail=9, n_ok=1, cap=0)
+    _accumulate_and_gate(df0, NodeLabel.COLUMN, settings0, summary0)
+    assert summary0.embeddings.successes[NodeLabel.COLUMN] == 1
 
 
 def test_ledger_all_rows_hit_misses_empty(local_spark) -> None:

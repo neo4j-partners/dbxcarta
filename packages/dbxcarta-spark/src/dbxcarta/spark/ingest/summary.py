@@ -218,6 +218,11 @@ class RunSummary:
     neo4j_counts: dict[str, int] = field(default_factory=dict)
     verify: VerifyResult | None = None
     fk_skip: "FKSkipCounts | None" = None
+    # Set to a loud message when the value path ran and found candidate
+    # columns but produced zero Value nodes — a strong signal that sampling
+    # silently failed (unreadable schemas, cardinality wipeout) rather than
+    # the catalog genuinely having no sampleable values. None otherwise.
+    value_sampling_warning: str | None = None
 
     def finish(self, *, status: str, error: str | None = None) -> None:
         """Mark the run terminal and stamp its end time.
@@ -263,6 +268,7 @@ class RunSummary:
             "row_counts": self._build_row_counts(),
             "neo4j_counts": dict(self.neo4j_counts),
             "error": self.error,
+            "value_sampling_warning": self.value_sampling_warning,
             "embedding_model": self.embeddings.model,
             "embedding_flags": self.embeddings.as_flags_map(),
             "embedding_attempts": self.embeddings.as_attempts_map(),

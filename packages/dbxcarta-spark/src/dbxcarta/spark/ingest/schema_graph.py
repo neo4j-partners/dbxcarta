@@ -96,12 +96,15 @@ def build_table_nodes(
         tables_df
         .withColumn("id", id_expr("table_catalog", "table_schema", "table_name"))
         .withColumn("name", col("table_name"))
+        .withColumn("catalog", col("table_catalog"))
+        .withColumn("schema", col("table_schema"))
         .withColumn("layer", layer_expr)
         .withColumn("contract_version", lit(CONTRACT_VERSION))
         .withColumn("embedding_text", expr(EMBEDDING_TEXT_EXPR[NodeLabel.TABLE]))
         .select(
-            "id", "name", "layer", "comment", "table_type", "created",
-            "last_altered", "contract_version", "embedding_text",
+            "id", "name", "catalog", "schema", "layer", "comment",
+            "table_type", "created", "last_altered", "contract_version",
+            "embedding_text",
         )
     )
 
@@ -124,6 +127,9 @@ def build_column_nodes(columns_df: "DataFrame") -> "DataFrame":
         columns_df
         .withColumn("id", id_expr("table_catalog", "table_schema", "table_name", "column_name"))
         .withColumn("name", col("column_name"))
+        .withColumn("catalog", col("table_catalog"))
+        .withColumn("schema", col("table_schema"))
+        .withColumn("table", col("table_name"))
         .withColumn(
             "is_nullable",
             when(col("is_nullable") == "YES", True).when(col("is_nullable") == "NO", False),
@@ -131,8 +137,9 @@ def build_column_nodes(columns_df: "DataFrame") -> "DataFrame":
         .withColumn("contract_version", lit(CONTRACT_VERSION))
         .withColumn("embedding_text", expr(EMBEDDING_TEXT_EXPR[NodeLabel.COLUMN]))
         .select(
-            "id", "name", "data_type", "is_nullable", "ordinal_position",
-            "comment", "contract_version", "embedding_text",
+            "id", "name", "catalog", "schema", "table", "data_type",
+            "is_nullable", "ordinal_position", "comment", "contract_version",
+            "embedding_text",
         )
     )
 

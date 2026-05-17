@@ -1,9 +1,12 @@
-"""UC Volume path resolution and Delta staging-root lifecycle.
+"""UC Volume path resolution and transient per-batch Delta materialization.
 
 Everything in this module is pure path arithmetic or Delta/dbutils I/O —
-no Neo4j driver state and no Unity Catalog metadata query. The staging root
-holds materialized embedding results for the current run only; the ledger root
-is the durable cross-run cache.
+no Neo4j driver state and no Unity Catalog metadata query. There is no
+whole-catalog staging table: each (batch, label) embedding result is written
+to a short-lived transient Delta path purely to invoke ai_query once (the
+failure-count check and the Neo4j write both read it back), then deleted as
+soon as that batch is written. The ledger root is the durable cross-run cache
+and is never truncated.
 """
 
 from __future__ import annotations
@@ -27,7 +30,7 @@ def parse_volume_path(path: str) -> list[str]:
 
     Requires at least /Volumes/<cat>/<schema>/<vol>/<subdir> (5 segments).
     Raises RuntimeError for bare volume roots so neither preflight nor
-    resolve_staging_path silently accepts a path that will fail at runtime.
+    resolve_transient_root silently accepts a path that will fail at runtime.
     """
     try:
         return uc_volume_parts(path)
@@ -40,16 +43,15 @@ def parse_volume_path(path: str) -> list[str]:
         ) from exc
 
 
-def resolve_staging_path(settings: "SparkIngestSettings") -> str:
-    """Return the Delta staging root.
+def resolve_transient_root(settings: "SparkIngestSettings") -> str:
+    """Return the root for short-lived per-batch embedding materializations.
 
-    If DBXCARTA_STAGING_PATH is set, use it verbatim. Otherwise derive a sibling
-    "staging" directory under the same UC volume as DBXCARTA_SUMMARY_VOLUME by
-    stripping the summary subdir.
+    A sibling "staging" directory under the same UC volume as
+    DBXCARTA_SUMMARY_VOLUME. Nothing durable lives here: each
+    `materialize_transient` call writes one subpath and the caller deletes it
+    via `delete_transient` as soon as that batch is written to Neo4j, so the
+    catalog is never piled into one table.
     """
-    configured = settings.dbxcarta_staging_path.strip()
-    if configured:
-        return configured.rstrip("/")
     summary_root = settings.dbxcarta_summary_volume.rstrip("/")
     return f"{uc_volume_parent(summary_root)}/staging"
 
@@ -68,23 +70,18 @@ def resolve_ledger_path(settings: "SparkIngestSettings") -> str:
     return f"{uc_volume_parent(summary_root)}/ledger"
 
 
-def truncate_staging_root(staging_root: str) -> None:
-    """Remove the staging root so each run starts clean.
+def delete_transient(path: str) -> None:
+    """Delete a single transient materialization once its batch is written.
 
-    Overwrite-per-label would leave orphan subdirs when a label's embedding
-    flag flips off between runs; truncating the whole root once per run keeps
-    the staging volume faithful to the current config.
-
-    Probe-first design: check existence via `dbutils.fs.ls` and narrow-catch
-    only on the probe. Any failure from the destructive `rm` call propagates
-    as signal. Different Databricks runtimes wrap a missing path differently,
-    so the probe treats only known missing-path messages as non-existence.
+    Probe-first: check existence via `dbutils.fs.ls` and narrow-catch only on
+    the probe (a missing path is fine — the batch may have had nothing to
+    embed). Any failure from the destructive `rm` itself propagates as signal.
     """
     from databricks.sdk.runtime import dbutils
     from py4j.protocol import Py4JJavaError  # type: ignore[import-untyped]
 
     try:
-        dbutils.fs.ls(staging_root)
+        dbutils.fs.ls(path)
         exists = True
     except Py4JJavaError as exc:
         if not _is_missing_path_error(exc):
@@ -96,10 +93,8 @@ def truncate_staging_root(staging_root: str) -> None:
         exists = False
 
     if exists:
-        dbutils.fs.rm(staging_root, recurse=True)
-        logger.info("[dbxcarta] truncated staging root %s", staging_root)
-    else:
-        logger.info("[dbxcarta] staging root %s not present", staging_root)
+        dbutils.fs.rm(path, recurse=True)
+        logger.info("[dbxcarta] deleted transient materialization %s", path)
 
 
 def _is_missing_path_error(exc: BaseException) -> bool:
@@ -112,20 +107,26 @@ def _is_missing_path_error(exc: BaseException) -> bool:
     )
 
 
-def stage_embedded_nodes(df: "DataFrame", staging_root: str, label: NodeLabel) -> "DataFrame":
-    """Write df to <staging_root>/<label>_nodes as Delta and read back.
+def transient_path(transient_root: str, label: NodeLabel, batch_tag: str) -> str:
+    """Compute the unique transient subpath for one (batch, label)."""
+    return f"{transient_root.rstrip('/')}/{label.value.lower()}_{batch_tag}"
 
-    overwriteSchema is enabled so future column additions don't require a
-    manual drop of the staging table. The returned DataFrame is a fresh read
-    off the staging table, so the failure-rate aggregation and the Neo4j write
-    do not re-invoke ai_query.
+
+def materialize_transient(df: "DataFrame", path: str) -> "DataFrame":
+    """Write df to a transient Delta `path` and read it back.
+
+    This freezes one ai_query pass for a single batch: the failure-count
+    check and the Neo4j node write both consume the returned read-back, so the
+    embedding endpoint is called exactly once per item. The caller deletes
+    `path` via `delete_transient` immediately after the batch is written, so
+    nothing accumulates. overwriteSchema is enabled so a re-used path from an
+    interrupted prior run cannot wedge on a schema diff.
     """
-    out = f"{staging_root.rstrip('/')}/{label.value.lower()}_nodes"
     (
         df.write.format("delta")
         .mode("overwrite")
         .option("overwriteSchema", "true")
-        .save(out)
+        .save(path)
     )
-    logger.info("[dbxcarta] staged %s nodes at %s", label.value, out)
-    return df.sparkSession.read.format("delta").load(out)
+    logger.info("[dbxcarta] materialized transient batch at %s", path)
+    return df.sparkSession.read.format("delta").load(path)

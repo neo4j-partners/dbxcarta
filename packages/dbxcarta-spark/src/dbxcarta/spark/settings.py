@@ -76,11 +76,17 @@ class SparkIngestSettings(BaseSettings):
     dbxcarta_include_embeddings_values: bool = False
     dbxcarta_include_embeddings_schemas: bool = False
     dbxcarta_include_embeddings_databases: bool = False
-    dbxcarta_embedding_failure_threshold: float = 0.05
     dbxcarta_embedding_endpoint: str = DEFAULT_EMBEDDING_ENDPOINT
     dbxcarta_embedding_dimension: int = 1024
-    # Materialize-once between ai_query and downstream actions.
-    dbxcarta_staging_path: str = ""
+    # Node embedding + Neo4j node write are batched by table range so no
+    # whole-catalog staging table is ever materialized. Tables per batch;
+    # small catalogs stay a single batch at the default. >= 1.
+    dbxcarta_embedding_batch_tables: int = 200
+    # Per-batch embedding-failure count gate (replaces the old failure-rate
+    # gate). If a batch produces more than this many rows with a non-null
+    # embedding_error the run fails before that batch is written. 0 = unlimited
+    # (gate disabled), mirroring the dbxcarta_fk_max_columns convention.
+    dbxcarta_embedding_failure_max: int = 0
     # Neo4j Spark Connector batch.size.
     dbxcarta_neo4j_batch_size: int = 20000
     # Relationship write parallelism. 1 (default) coalesces to a single
@@ -101,6 +107,11 @@ class SparkIngestSettings(BaseSettings):
     dbxcarta_infer_semantic: bool = False
     dbxcarta_semantic_min_tables: int = 10
     dbxcarta_semantic_threshold: float = 0.85
+    # Per-source nearest-neighbor fan-out for semantic FK discovery: the
+    # `LIMIT $k` of the per-source vector SEARCH against the key-like target
+    # index. 10 mirrors the plan's "ask for the 10 closest" framing; Phase 6
+    # tunes it against the dense run.
+    dbxcarta_semantic_k: int = 10
     # FK discovery guardrail backstop. 0 (default) means unlimited: the
     # guardrail is disabled and default small-catalog behavior is unchanged.
     # When > 0 and the extracted column count exceeds it, FK discovery is
@@ -213,7 +224,40 @@ class SparkIngestSettings(BaseSettings):
         """Require a UC Volume subpath for JSON summary output."""
         return validate_uc_volume_subpath(v, label="DBXCARTA_SUMMARY_VOLUME")
 
-    @field_validator("dbxcarta_staging_path", "dbxcarta_ledger_path")
+    @field_validator("dbxcarta_embedding_batch_tables")
+    @classmethod
+    def _validate_embedding_batch_tables(cls, v: int) -> int:
+        """Reject < 1: a batch must contain at least one table."""
+        if v < 1:
+            raise ValueError(
+                "DBXCARTA_EMBEDDING_BATCH_TABLES must be >= 1"
+                f" (got {v}); use a large value for a single batch"
+            )
+        return v
+
+    @field_validator("dbxcarta_semantic_k")
+    @classmethod
+    def _validate_semantic_k(cls, v: int) -> int:
+        """Reject < 1: the per-source SEARCH must return at least one neighbor."""
+        if v < 1:
+            raise ValueError(
+                "DBXCARTA_SEMANTIC_K must be >= 1"
+                f" (got {v}); it is the per-source vector SEARCH LIMIT"
+            )
+        return v
+
+    @field_validator("dbxcarta_embedding_failure_max")
+    @classmethod
+    def _validate_embedding_failure_max(cls, v: int) -> int:
+        """Reject negative: 0 means unlimited (gate disabled), > 0 is the cap."""
+        if v < 0:
+            raise ValueError(
+                "DBXCARTA_EMBEDDING_FAILURE_MAX must be >= 0"
+                f" (got {v}); 0 disables the per-batch failure gate"
+            )
+        return v
+
+    @field_validator("dbxcarta_ledger_path")
     @classmethod
     def _validate_optional_volume_subpath(cls, v: str) -> str:
         """Normalize optional UC Volume paths while allowing unset values."""
