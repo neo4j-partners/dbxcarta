@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING, Any
 from dbxcarta.spark.contract import NodeLabel, REFERENCES_PROPERTIES, RelType
 from dbxcarta.spark.ingest.load.writer import (
     write_nodes,
-    write_nodes_multi,
     write_relationship,
 )
 
@@ -142,34 +141,47 @@ def delete_stale_values(
     )
 
 
-def remove_stale_key_columns(
+def apply_key_column_labels(
     driver: "Driver",
     catalogs: list[str],
     schemas: list[str],
 ) -> None:
-    """Strip the :KeyColumn label from every node in the run's scope.
+    """Reconcile the :KeyColumn label from the Column `is_key_like` property.
 
-    `write_key_columns` only ever MERGE-*adds* :KeyColumn; a column that
-    stopped being key-like between runs would keep the label forever and
-    still pollute the same-schema pre-filtered candidate set the semantic FK
-    query scans (review #4). Clearing the label across this run's
-    catalogs/schemas before the chunk loop re-applies it to the *current*
-    key-like set makes the label a per-run computed property, not an
-    append-only sticker. Scoped exactly like `delete_stale_values` (bounded
-    catalog/schema config scalars, never a per-column id list — best-
-    practices §5); the per-chunk `write_key_columns` then re-adds it.
+    One scoped server-side pass over the run's catalogs/schemas: add
+    :KeyColumn to every Column flagged `is_key_like`, and strip it from
+    every Column that is not. The label is a per-run projection of the
+    contract-1.4 `is_key_like` property, never a connector multi-label node
+    write. A connector write of `(:Column:KeyColumn)` compiles to
+    `MERGE (n:Column:KeyColumn {id})`, which matches the full label set:
+    it can never match an existing single-label `:Column` node and instead
+    creates one, colliding with the Column.id uniqueness constraint. Driving
+    the label off a written property and `SET`/`REMOVE` on already-matched
+    nodes avoids that entirely and heals on a re-run. Scoped exactly like
+    `delete_stale_values` (bounded catalog/schema config scalars, never a
+    per-column id list, best-practices §5).
     """
+    scope = (
+        "WHERE c.catalog IN $catalogs "
+        "AND (size($schemas) = 0 OR c.schema IN $schemas) "
+    )
     with driver.session() as session:
         session.run(
-            f"MATCH (c:{NodeLabel.COLUMN.value}:{KEY_COLUMN_LABEL}) "
-            "WHERE c.catalog IN $catalogs "
-            "AND (size($schemas) = 0 OR c.schema IN $schemas) "
+            f"MATCH (c:{NodeLabel.COLUMN.value}) {scope}"
+            "AND c.is_key_like = true "
+            f"SET c:{KEY_COLUMN_LABEL}",
+            catalogs=catalogs,
+            schemas=schemas,
+        )
+        session.run(
+            f"MATCH (c:{NodeLabel.COLUMN.value}:{KEY_COLUMN_LABEL}) {scope}"
+            "AND (c.is_key_like IS NULL OR c.is_key_like = false) "
             f"REMOVE c:{KEY_COLUMN_LABEL}",
             catalogs=catalogs,
             schemas=schemas,
         )
     logger.info(
-        "[dbxcarta] cleared stale :%s labels in run scope",
+        "[dbxcarta] reconciled :%s labels from is_key_like in run scope",
         KEY_COLUMN_LABEL,
     )
 
@@ -194,17 +206,6 @@ def write_node(df: "DataFrame", neo4j: "Neo4jConfig", label: NodeLabel) -> None:
     write_nodes(df, neo4j, label.value)
 
 
-def write_key_columns(df: "DataFrame", neo4j: "Neo4jConfig") -> None:
-    """Re-write the key-like Column subset with the extra :KeyColumn label.
-
-    `df` is the already-projected Column frame filtered to key-like targets.
-    MERGE stays on the :Column id, so this only adds :KeyColumn to nodes the
-    column write already created and refreshes their properties — idempotent,
-    a re-run heals.
-    """
-    write_nodes_multi(df, neo4j, (NodeLabel.COLUMN.value, KEY_COLUMN_LABEL))
-
-
 def write_rel(
     df: "DataFrame",
     neo4j: "Neo4jConfig",
@@ -223,7 +224,7 @@ def write_rel(
 __all__ = [
     "bootstrap_constraints",
     "delete_stale_values",
-    "remove_stale_key_columns",
+    "apply_key_column_labels",
     "query_counts",
     "write_node",
     "write_rel",

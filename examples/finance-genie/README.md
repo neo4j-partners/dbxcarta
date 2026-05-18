@@ -102,6 +102,11 @@ dbxcarta (via this preset) owns:
 - Neo4j semantic-layer writes and vector indexes.
 - GraphRAG schema retrieval and Text2SQL evaluation.
 
+The ops run-summary table (`DBXCARTA_SUMMARY_TABLE`) is created automatically
+on the first ingest from the writer's own schema. It holds run history only,
+not source data, so it is disposable: drop it to reset, and the next run
+recreates it with the current schema.
+
 ## Setup Flow
 
 Run these commands from the dbxcarta repo unless a step says otherwise.

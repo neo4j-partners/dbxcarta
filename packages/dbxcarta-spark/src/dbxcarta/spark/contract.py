@@ -26,7 +26,16 @@ from enum import StrEnum
 # single scoped server-side Cypher delete keyed on `last_run` < run-start
 # within the run's catalogs/schemas. Additive; readers treat the new
 # properties as authoritative.
-CONTRACT_VERSION = "1.3"
+# 1.4 makes Column key-likeness a first-class boolean `is_key_like`
+# property. The `:KeyColumn` label is now a per-run server-side projection
+# of this property (one scoped Cypher SET/REMOVE keyed on it), not a
+# connector multi-label node write: `MERGE (n:Column:KeyColumn {id})`
+# matches the full label set, so it can never match an existing
+# single-label `:Column` node and instead collides with the Column.id
+# uniqueness constraint. Keying the label on a written property closes
+# that collision and is re-run-safe. Additive; readers treat a missing
+# `is_key_like` as false.
+CONTRACT_VERSION = "1.4"
 
 DEFAULT_EMBEDDING_ENDPOINT = "databricks-gte-large-en"
 
@@ -96,8 +105,8 @@ NODE_PROPERTIES: dict[NodeLabel, tuple[str, ...]] = {
     ),
     NodeLabel.COLUMN: (
         "id", "name", "catalog", "schema", "table", "data_type",
-        "is_nullable", "ordinal_position", "comment", "contract_version",
-        "embedding",
+        "is_nullable", "ordinal_position", "comment", "is_key_like",
+        "contract_version", "embedding",
     ),
     NodeLabel.VALUE: (
         "id", "value", "count", "catalog", "schema", "last_run",

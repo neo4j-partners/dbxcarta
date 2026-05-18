@@ -1,13 +1,15 @@
-"""Phase 2 wiring guard: the key-like Column subset is re-written with the
-extra `:KeyColumn` label, and only when it should be.
+"""Wiring guard: the key-like Column subset reaches Neo4j as the
+contract-1.4 `is_key_like` property, and the `:KeyColumn` label is a
+single scoped server-side projection of that property.
 
-`_write_label_nodes` is the single node-write seam. This test proves the
-`:KeyColumn` second-label pass fires exactly when (a) embedding is enabled
-*and* (b) a `keylike_ids` frame was threaded in (Column label only),
-reusing the one `embedded_batch` ai_query pass — and that it stays silent
-otherwise (no keylike frame, or embedding off). It also proves
-`bootstrap_constraints` creates the dedicated `keycolumn_embedding` vector
-index iff column embeddings are enabled.
+Bug 1 was a connector multi-label write (`MERGE (n:Column:KeyColumn
+{id})`) colliding with the Column.id uniqueness constraint. The fix drops
+the split write entirely: the Column frame carries `is_key_like` (true for
+ids in the key-like target set, false otherwise) through the one node
+write, and `apply_key_column_labels` does a scoped `SET`/`REMOVE` off that
+written property after the chunk loop. This test pins both halves and that
+`bootstrap_constraints` still creates the dedicated `keycolumn_embedding`
+vector index iff column embeddings are enabled.
 """
 
 from __future__ import annotations
@@ -20,6 +22,7 @@ import pytest
 import dbxcarta.spark.run as pipeline
 from dbxcarta.spark.contract import NodeLabel
 from dbxcarta.spark.ingest.load import neo4j_io
+from dbxcarta.spark.ingest.load.neo4j_io import KEY_COLUMN_LABEL
 from dbxcarta.spark.settings import SparkIngestSettings
 
 _BASE = {
@@ -29,25 +32,34 @@ _BASE = {
 }
 
 
-class _FakeStaged:
-    """Stands in for the embedded/frozen batch frame.
-
-    `join(..., "left_semi")` is the key-like subset selection; it returns a
-    distinct sentinel so the test can prove the subset (not the full frame)
-    is what reaches `write_key_columns`.
-    """
-
-    def __getitem__(self, key):  # noqa: ANN001
-        return f"staged[{key}]"
-
-    def join(self, other, cond, how):  # noqa: ANN001
-        assert how == "left_semi"
-        return "key_subset"
+def test_augment_is_key_like_defaults_false_when_no_keylike(
+    local_spark,
+) -> None:
+    df = local_spark.createDataFrame(
+        [("a", False), ("b", False)], ["id", "is_key_like"],
+    )
+    out = {
+        r["id"]: r["is_key_like"]
+        for r in pipeline._augment_is_key_like(df, None).collect()
+    }
+    assert out == {"a": False, "b": False}
 
 
-class _FakeKeylike:
-    def __getitem__(self, key):  # noqa: ANN001
-        return f"keylike[{key}]"
+def test_augment_is_key_like_marks_only_targets(local_spark) -> None:
+    df = local_spark.createDataFrame(
+        [("a", False), ("b", False), ("c", False)], ["id", "is_key_like"],
+    )
+    keylike = local_spark.createDataFrame(
+        [("a",), ("c",), ("c",)], ["col_id"],
+    )
+    out = {
+        r["id"]: r["is_key_like"]
+        for r in pipeline._augment_is_key_like(df, keylike).collect()
+    }
+    # Only the key-like ids flip true; duplicate keylike rows do not fan out
+    # the left join (distinct on col_id), and the builder default is
+    # overwritten, not appended.
+    assert out == {"a": True, "b": False, "c": True}
 
 
 def _run_write(monkeypatch, *, embed_enabled, keylike_ids):
@@ -55,23 +67,21 @@ def _run_write(monkeypatch, *, embed_enabled, keylike_ids):
 
     @contextmanager
     def fake_embedded_batch(df, label, *a, **k):  # noqa: ANN001
-        yield _FakeStaged()
+        yield f"staged({df})"
 
     node_writes: list[tuple[object, NodeLabel]] = []
-    key_writes: list[object] = []
+    augment_calls: list[object] = []
+
+    def fake_augment(df, kl):  # noqa: ANN001
+        augment_calls.append(kl)
+        return f"augmented({df})"
 
     monkeypatch.setattr(pipeline, "embedded_batch", fake_embedded_batch)
+    monkeypatch.setattr(pipeline, "_augment_is_key_like", fake_augment)
     monkeypatch.setattr(pipeline, "_project", lambda df, label: df)
     monkeypatch.setattr(
         pipeline, "write_node",
         lambda df, neo4j, label: node_writes.append((df, label)),
-    )
-    monkeypatch.setattr(
-        pipeline, "write_key_columns",
-        lambda df, neo4j: key_writes.append(df),
-    )
-    monkeypatch.setattr(
-        "pyspark.sql.functions.broadcast", lambda df: df,
     )
 
     pipeline._write_label_nodes(
@@ -80,39 +90,79 @@ def _run_write(monkeypatch, *, embed_enabled, keylike_ids):
         batch_tag="b0", summary=object(), embed_enabled=embed_enabled,
         keylike_ids=keylike_ids,
     )
-    return node_writes, key_writes
+    return node_writes, augment_calls
 
 
-def test_keycolumn_subset_rewritten_when_embedded_and_keylike_present(
+def test_column_write_augments_is_key_like_then_single_write(
     monkeypatch,
 ) -> None:
-    node_writes, key_writes = _run_write(
-        monkeypatch, embed_enabled=True, keylike_ids=_FakeKeylike(),
+    keylike = object()
+    node_writes, augment_calls = _run_write(
+        monkeypatch, embed_enabled=True, keylike_ids=keylike,
     )
-    # Primary :Column write of the full embedded frame still happens once.
+    # Exactly one Column node write (no second :KeyColumn write that would
+    # collide with the id uniqueness constraint), and is_key_like was
+    # derived from the threaded keylike frame before the write.
+    assert augment_calls == [keylike]
     assert len(node_writes) == 1
     assert node_writes[0][1] is NodeLabel.COLUMN
-    # The :KeyColumn re-write receives the left-semi subset, not the full
-    # frame — proving it is the key-like targets only.
-    assert key_writes == ["key_subset"]
+    assert "augmented(" in node_writes[0][0]
 
 
-def test_no_keycolumn_write_when_keylike_ids_absent(monkeypatch) -> None:
-    node_writes, key_writes = _run_write(
-        monkeypatch, embed_enabled=True, keylike_ids=None,
+def test_column_write_augments_with_none_when_keylike_absent(
+    monkeypatch,
+) -> None:
+    node_writes, augment_calls = _run_write(
+        monkeypatch, embed_enabled=False, keylike_ids=None,
     )
+    # Non-embed arm still augments (so is_key_like is always written) and
+    # still writes exactly once.
+    assert augment_calls == [None]
     assert len(node_writes) == 1
-    assert key_writes == []
 
 
-def test_no_keycolumn_write_when_embedding_disabled(monkeypatch) -> None:
-    # keylike_ids present but embedding off: no embedded pass exists to
-    # reuse, so the :KeyColumn write must not fire.
-    node_writes, key_writes = _run_write(
-        monkeypatch, embed_enabled=False, keylike_ids=_FakeKeylike(),
+def test_no_write_key_columns_symbol() -> None:
+    # The split multi-label write is gone for good; its reintroduction
+    # would resurrect Bug 1.
+    assert not hasattr(pipeline, "write_key_columns")
+    assert not hasattr(neo4j_io, "write_key_columns")
+
+
+def test_apply_key_column_labels_scoped_set_and_remove() -> None:
+    cyphers: list[tuple[str, dict]] = []
+
+    class _Session:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def run(self, cypher, **kw):  # noqa: ANN001
+            cyphers.append((cypher, kw))
+
+    driver = SimpleNamespace(session=lambda: _Session())
+    neo4j_io.apply_key_column_labels(
+        driver, ["bronze", "silver"], ["sales"],
     )
-    assert len(node_writes) == 1
-    assert key_writes == []
+
+    assert len(cyphers) == 2
+    set_cy, set_kw = cyphers[0]
+    rm_cy, rm_kw = cyphers[1]
+
+    # Statement 1 adds the label to currently-key-like columns; statement 2
+    # strips it from those no longer key-like. Both are scoped to the run's
+    # catalogs/schemas (bounded scalars, never a per-column id list) and
+    # keyed on the written is_key_like property, never a connector write.
+    assert f"SET c:{KEY_COLUMN_LABEL}" in set_cy
+    assert "c.is_key_like = true" in set_cy
+    assert f"REMOVE c:{KEY_COLUMN_LABEL}" in rm_cy
+    assert "c.is_key_like IS NULL OR c.is_key_like = false" in rm_cy
+    for cy in (set_cy, rm_cy):
+        assert "c.catalog IN $catalogs" in cy
+        assert "c.schema IN $schemas" in cy
+    assert set_kw == {"catalogs": ["bronze", "silver"], "schemas": ["sales"]}
+    assert rm_kw == {"catalogs": ["bronze", "silver"], "schemas": ["sales"]}
 
 
 @pytest.mark.parametrize("columns_enabled", [True, False])

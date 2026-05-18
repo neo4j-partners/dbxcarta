@@ -38,9 +38,14 @@ def write_nodes_multi(
 ) -> None:
     """MERGE nodes on id with one or more labels.
 
-    `labels=("Column", "KeyColumn")` writes `:Column:KeyColumn`: because the
-    MERGE key stays `id`, re-writing an already-written `:Column` node simply
-    adds the extra label and refreshes properties (idempotent; re-run heals).
+    Only the single-label form is used (via `write_nodes`). The multi-label
+    form is NOT idempotent against an existing single-label node:
+    `labels=("Column", "KeyColumn")` compiles to
+    `MERGE (n:Column:KeyColumn {id})`, which matches the full label set, so
+    it can never match an existing `:Column` node and instead creates a new
+    one, colliding with the Column.id uniqueness constraint. Adding a second
+    label to already-written nodes is done server-side off a written
+    property (see `neo4j_io.apply_key_column_labels`), never here.
     """
     label_opt = "".join(f":{name}" for name in labels)
     (

@@ -50,4 +50,41 @@ def test_semantic_nn_pairs_against_live_index() -> None:
     # legitimately returns zero rows. Schema proves the locked Cypher's
     # RETURN shape round-trips through the connector `query` read.
     assert set(nn.columns) == {"source_id", "target_id", "score"}
-    nn.limit(1).collect()
+
+    # Recall, not just shape: a known same-schema FK must come back through
+    # the live connector path. The finance-genie graph models
+    # `transactions.account_id` -> `accounts.account_id` (same catalog and
+    # schema, the source is a plain `:Column`, the target a `:KeyColumn`).
+    # Resolve both node ids by table/column name so the assertion survives a
+    # catalog/schema rename, and skip cleanly if pointed at a graph that does
+    # not carry this pair (keeps the test reusable beyond finance-genie).
+    from neo4j import GraphDatabase
+
+    resolve = (
+        "MATCH (t:Table {name: $tbl})-[:HAS_COLUMN]->(c:Column {name: $col}) "
+        "RETURN c.id AS id"
+    )
+    with GraphDatabase.driver(
+        neo4j.uri, auth=(neo4j.username, neo4j.password)
+    ) as driver, driver.session() as session:
+        src_rows = session.run(
+            resolve, tbl="transactions", col="account_id"
+        ).values("id")
+        tgt_rows = session.run(
+            resolve, tbl="accounts", col="account_id"
+        ).values("id")
+    if not src_rows or not tgt_rows:
+        pytest.skip(
+            "graph does not carry transactions.account_id -> "
+            "accounts.account_id; nothing to assert recall against"
+        )
+    source_id = src_rows[0][0]
+    target_id = tgt_rows[0][0]
+
+    pair = nn.where(
+        (nn.source_id == source_id) & (nn.target_id == target_id)
+    ).collect()
+    assert pair, (
+        f"same-schema FK {source_id} -> {target_id} was not recalled "
+        "through the live connector NN path"
+    )

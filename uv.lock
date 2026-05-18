@@ -407,7 +407,7 @@ provides-extras = ["test"]
 
 [[package]]
 name = "dbxcarta-spark"
-version = "1.0.0"
+version = "1.0.1"
 source = { editable = "packages/dbxcarta-spark" }
 dependencies = [
     { name = "databricks-job-runner" },

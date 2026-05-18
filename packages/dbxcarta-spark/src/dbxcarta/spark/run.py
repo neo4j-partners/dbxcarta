@@ -32,11 +32,10 @@ from dbxcarta.spark.ingest.fk.discovery import (
     run_fk_discovery,
 )
 from dbxcarta.spark.ingest.load.neo4j_io import (
+    apply_key_column_labels,
     bootstrap_constraints,
     delete_stale_values,
     query_counts,
-    remove_stale_key_columns,
-    write_key_columns,
     write_node,
     write_rel,
 )
@@ -203,10 +202,14 @@ def _run(
             extract_result = extract(spark, settings, schema_list, summary)
 
             # Key-like FK target set, computed before the node-write loop so
-            # the :KeyColumn label is applied as part of node loading,
-            # independent of run_fk_discovery. Only needed when columns are
-            # embedded (semantic FK requires column embeddings); None
-            # otherwise skips the second-label pass entirely.
+            # each Column slice can carry the contract-1.4 `is_key_like`
+            # boolean (set true for ids in this frame) through the node
+            # write. The :KeyColumn label is then a single scoped server-side
+            # projection of that written property, applied after the loop and
+            # before run_fk_discovery. Only needed when columns are embedded
+            # (semantic FK requires column embeddings); None otherwise leaves
+            # every Column with the default `is_key_like = false` and skips
+            # the relabel pass entirely.
             keylike_ids = (
                 key_like_target_ids(
                     spark, settings, schema_list, extract_result,
@@ -214,18 +217,6 @@ def _run(
                 if settings.dbxcarta_include_embeddings_columns
                 else None
             )
-
-            # Clear prior-run :KeyColumn labels in this run's scope before
-            # the chunk loop re-applies them to the current key-like set
-            # (review #4). Without this a column that stopped being key-like
-            # keeps the label and still pollutes the same-schema candidate
-            # set the semantic FK pre-filter scans.
-            if keylike_ids is not None:
-                remove_stale_key_columns(
-                    driver,
-                    settings.resolved_catalogs(),
-                    schema_list,
-                )
 
             # Sample distinct values BEFORE the chunk loop so each Value
             # slice can embed+write alongside its Column slice in the same
@@ -272,6 +263,20 @@ def _run(
             # value stage; fill the derived reporting rates once here (the
             # slot the removed check_thresholds gate used to occupy).
             finalize_embedding_summary(summary)
+
+            # Reconcile the :KeyColumn label from the now-written
+            # contract-1.4 `is_key_like` Column property: one scoped
+            # server-side SET/REMOVE pass over this run's catalogs/schemas.
+            # Runs before run_fk_discovery so the semantic FK same-schema
+            # pre-filter sees the current key-like set, and only when columns
+            # were embedded (keylike_ids drove the property; otherwise every
+            # Column is is_key_like=false and there is nothing to project).
+            if keylike_ids is not None:
+                apply_key_column_labels(
+                    driver,
+                    settings.resolved_catalogs(),
+                    schema_list,
+                )
 
             fk_result = run_fk_discovery(
                 spark, settings, schema_list, extract_result, neo4j, summary,
@@ -437,28 +442,57 @@ def _write_label_nodes(
     `_project` is the fail-closed boundary in both arms.
 
     `keylike_ids` (only passed for the Column label) is the distinct
-    `col_id` frame of key-like FK targets. When present, the embedded
-    key-like subset is re-written with the extra `:KeyColumn` label inside
-    the same `embedded_batch` context, reusing the single ai_query pass so
-    the dedicated FK-discovery vector index is populated without a second
-    embedding. MERGE stays on the `:Column` id (idempotent; a re-run heals).
+    `col_id` frame of key-like FK targets. When present, the Column frame's
+    contract-1.4 `is_key_like` property is set true for ids in that frame
+    (false otherwise) before the node write, in both the embed and non-embed
+    arms. The `:KeyColumn` label is no longer a connector multi-label write
+    (`MERGE (n:Column:KeyColumn {id})` matches the full label set and
+    collides with the Column.id uniqueness constraint); it is a single
+    scoped server-side projection of this written property, applied once
+    after the chunk loop by `apply_key_column_labels`.
     """
-    if embed_enabled:
-        from pyspark.sql.functions import broadcast
+    if label is NodeLabel.COLUMN:
+        df = _augment_is_key_like(df, keylike_ids)
 
+    if embed_enabled:
         with embedded_batch(
             df, label, settings, ledger_path, transient_root, batch_tag, summary,
         ) as staged:
             write_node(_project(staged, label), neo4j, label)
-            if keylike_ids is not None:
-                key_subset = staged.join(
-                    broadcast(keylike_ids),
-                    staged["id"] == keylike_ids["col_id"],
-                    "left_semi",
-                )
-                write_key_columns(_project(key_subset, label), neo4j)
     else:
         write_node(_project(df, label), neo4j, label)
+
+
+def _augment_is_key_like(
+    df: "DataFrame", keylike_ids: "DataFrame | None",
+) -> "DataFrame":
+    """Set the Column `is_key_like` boolean from the key-like FK target set.
+
+    `keylike_ids is None` (columns not embedded, so no key-like set was
+    computed) leaves the builder default `is_key_like = false`. Otherwise the
+    boolean is derived by a broadcast left-join on the distinct key-like
+    `col_id` frame, never a Python UDF (best-practices §7) and never a
+    driver-collected id list (§5). The builder ships a default `is_key_like`
+    column; it is overwritten here so the written value reflects this run's
+    key-like targets and a re-run heals.
+    """
+    from pyspark.sql.functions import broadcast, col, lit
+
+    if keylike_ids is None:
+        return df.withColumn("is_key_like", lit(False))
+
+    flags = (
+        keylike_ids
+        .select(col("col_id").alias("_kl_id"))
+        .distinct()
+        .withColumn("_kl", lit(True))
+    )
+    return (
+        df.drop("is_key_like")
+        .join(broadcast(flags), df["id"] == flags["_kl_id"], "left")
+        .withColumn("is_key_like", col("_kl").isNotNull())
+        .drop("_kl_id", "_kl")
+    )
 
 
 def _embed_and_write_node_chunks(

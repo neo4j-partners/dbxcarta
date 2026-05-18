@@ -134,12 +134,19 @@ def build_column_nodes(columns_df: "DataFrame") -> "DataFrame":
             "is_nullable",
             when(col("is_nullable") == "YES", True).when(col("is_nullable") == "NO", False),
         )
+        # Default false; the real value is a per-run projection of the
+        # key-like FK target set, joined on at the node-write boundary
+        # (run._write_label_nodes) and read back server-side to drive the
+        # :KeyColumn relabel. The builder cannot know it (constraint and
+        # heuristic evidence is not in scope here), so it ships the
+        # contract-required column with a safe default.
+        .withColumn("is_key_like", lit(False))
         .withColumn("contract_version", lit(CONTRACT_VERSION))
         .withColumn("embedding_text", expr(EMBEDDING_TEXT_EXPR[NodeLabel.COLUMN]))
         .select(
             "id", "name", "catalog", "schema", "table", "data_type",
-            "is_nullable", "ordinal_position", "comment", "contract_version",
-            "embedding_text",
+            "is_nullable", "ordinal_position", "comment", "is_key_like",
+            "contract_version", "embedding_text",
         )
     )
 
