@@ -19,7 +19,7 @@ examples/finance-genie/
 │   ├── local_demo.py                                      # optional read-only local CLI
 │   ├── upload_questions.py                                # optional script
 │   └── questions.json                                     # demo question fixture
-└── tests/
+└── ../../../tests/examples/finance-genie/
     ├── test_preset.py
     └── test_local_demo.py
 ```
@@ -27,20 +27,20 @@ examples/finance-genie/
 The package declares dbxcarta as a normal pip dependency in `pyproject.toml`.
 Inside this repo, `uv` resolves it to the editable parent through
 `[tool.uv.sources]`; from outside, you would pin it like
-`dependencies = ["dbxcarta>=0.2.32"]` and pip would fetch it from your wheel
-index. There is nothing privileged about the example's relationship to
-dbxcarta core.
+`dependencies = ["dbxcarta-spark", "dbxcarta-client"]` and pip would fetch
+those distributions from your wheel index. There is nothing privileged about
+the example's relationship to the dbxcarta workspace.
 
 The Finance Genie settings are normal Python data. A direct library call can
-construct `dbxcarta.Settings` from the package-owned overlay and call
-`run_dbxcarta`:
+construct `SparkIngestSettings` from the package-owned overlay and call the
+Spark ingest implementation:
 
 ```python
-from dbxcarta import Settings, run_dbxcarta
+from dbxcarta.spark import SparkIngestSettings, run_dbxcarta
 from dbxcarta_finance_genie_example import preset
 
 env = preset.env()
-settings = Settings(
+settings = SparkIngestSettings(
     dbxcarta_catalog=env["DBXCARTA_CATALOG"],
     dbxcarta_schemas=env["DBXCARTA_SCHEMAS"],
     dbxcarta_summary_volume=env["DBXCARTA_SUMMARY_VOLUME"],
@@ -102,6 +102,11 @@ dbxcarta (via this preset) owns:
 - Neo4j semantic-layer writes and vector indexes.
 - GraphRAG schema retrieval and Text2SQL evaluation.
 
+The ops run-summary table (`DBXCARTA_SUMMARY_TABLE`) is created automatically
+on the first ingest from the writer's own schema. It holds run history only,
+not source data, so it is disposable: drop it to reset, and the next run
+recreates it with the current schema.
+
 ## Setup Flow
 
 Run these commands from the dbxcarta repo unless a step says otherwise.
@@ -133,14 +138,31 @@ Expected Gold (optional) tables:
 
 ### 3. Configure dbxcarta
 
-Print the recommended dbxcarta overlay:
+dbxcarta loads config in two layers. The repo-root `.env` is the shared
+**base**: Databricks infra and the Neo4j secrets, never edited per
+integration. This directory's committed, secret-free
+`dbxcarta-overlay.env` is the Finance Genie **overlay**: only the
+dbxcarta-scoped values (medallion catalogs, schemas, volume, summary,
+sample/embedding flags, client arms). Select it by exporting
+`DBXCARTA_ENV_FILE` once. No root `.env` edit, ever:
+
+```bash
+export DBXCARTA_ENV_FILE=examples/finance-genie/dbxcarta-overlay.env
+```
+
+Every `dbxcarta` command below then picks it up. Precedence is
+process env over overlay over base. With `DBXCARTA_ENV_FILE` unset,
+only the base `.env` loads, exactly as before.
+
+To regenerate the overlay values from the preset:
 
 ```bash
 uv run dbxcarta preset dbxcarta_finance_genie_example:preset --print-env
 ```
 
-Copy those values into `dbxcarta/.env`, or use this directory's `.env.sample`
-as the reference.
+This file (`dbxcarta-overlay.env`) is the dbxcarta CLI overlay only. It
+is distinct from `./.env` / `./.env.sample`, which are the self-contained
+config for the standalone local demo (section 10) and never layer.
 
 ### 4. Check readiness
 
@@ -177,6 +199,11 @@ This uploads the package's `questions.json` to the path named by
 uv run dbxcarta upload --wheel
 uv run dbxcarta upload --all
 ```
+
+> Every `dbxcarta` command in steps 6–9 reads the overlay from the
+> `DBXCARTA_ENV_FILE` you exported in step 3. If you skipped that,
+> export it now:
+> `export DBXCARTA_ENV_FILE=examples/finance-genie/dbxcarta-overlay.env`.
 
 ### 8. Build the semantic layer
 

@@ -30,7 +30,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
-from dbxcarta.databricks import build_workspace_client
+from dbxcarta.client.databricks import build_workspace_client
 from dbxcarta_schemapile_example.config import SchemaPileConfig, load_config
 from dbxcarta_schemapile_example.materialize import (
     _sanitize_column_name,
@@ -77,8 +77,8 @@ def main() -> int:
         ),
     )
     parser.add_argument(
-        "--dotenv", type=Path, default=Path(".env"),
-        help="Path to the .env file to load (default: .env)",
+        "--dotenv", type=Path, default=Path(__file__).resolve().parents[2] / ".env",
+        help="Path to the .env file to load (default: example directory .env)",
     )
     parser.add_argument(
         "--output",

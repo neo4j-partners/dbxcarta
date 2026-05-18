@@ -58,11 +58,11 @@ stringly-typed counter.
 ## File Layout
 
 ```
-src/dbxcarta/
+packages/dbxcarta-spark/src/dbxcarta/spark/
   contract.py                NodeLabel, RelType, EdgeSource; identifier generation
-  settings.py                Settings (pydantic) + cross-field validators
+  settings.py                SparkIngestSettings + cross-field validators
+  run.py                     run_dbxcarta + _run orchestrator
   ingest/
-    pipeline.py              run_dbxcarta + _run orchestrator
     extract.py               ExtractResult + extract() — pure UC pull
     preflight.py             Pre-run checks (catalog, volume, endpoint)
     summary.py               RunSummary + nominal sub-counter dataclasses

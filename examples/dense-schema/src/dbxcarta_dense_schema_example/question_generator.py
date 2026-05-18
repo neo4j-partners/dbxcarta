@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
-from dbxcarta.databricks import build_workspace_client
+from dbxcarta.client.databricks import build_workspace_client
 from dbxcarta_dense_schema_example.config import DenseSchemaConfig, load_config
 from dbxcarta_dense_schema_example.materialize import _sanitize_name
 from dbxcarta_dense_schema_example.utils import (
@@ -64,7 +64,7 @@ class ValidationOutcome:
 
 def main() -> int:
     parser = argparse.ArgumentParser(prog="dbxcarta-dense-generate-questions")
-    parser.add_argument("--dotenv", type=Path, default=Path(".env"))
+    parser.add_argument("--dotenv", type=Path, default=Path(__file__).resolve().parents[2] / ".env")
     parser.add_argument("--output", type=Path, default=Path("questions.json"))
     parser.add_argument(
         "--cache-dir",

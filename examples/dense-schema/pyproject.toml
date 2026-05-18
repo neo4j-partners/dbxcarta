@@ -5,7 +5,8 @@ description = "Dense single-schema fixture for dbxcarta Phase G evaluation (500/
 authors = [{ name = "Ryan Knight" }]
 requires-python = ">=3.12"
 dependencies = [
-    "dbxcarta>=0.2.32",
+    "dbxcarta-client[graph]",
+    "dbxcarta-spark",
     "databricks-sdk>=0.40",
     "Faker==40.15.0",
     "python-dotenv",
@@ -21,11 +22,12 @@ dbxcarta-dense-materialize = "dbxcarta_dense_schema_example.materialize:main"
 dbxcarta-dense-generate-questions = "dbxcarta_dense_schema_example.question_generator:main"
 
 [build-system]
-requires = ["uv_build>=0.9.3,<0.10.0"]
+requires = ["uv_build>=0.11.0,<0.12.0"]
 build-backend = "uv_build"
 
 [tool.uv.sources]
-dbxcarta = { path = "../..", editable = true }
+dbxcarta-client = { workspace = true }
+dbxcarta-spark = { workspace = true }
 
 [tool.pytest.ini_options]
 addopts = "-m 'not live'"

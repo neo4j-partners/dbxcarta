@@ -15,9 +15,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from dbxcarta import ReadinessReport, validate_identifier
 from dbxcarta.client.questions import load_questions
-from dbxcarta.databricks import quote_identifier
+from dbxcarta.spark.databricks import quote_identifier, validate_identifier
+from dbxcarta.spark.presets import ReadinessReport
 
 if TYPE_CHECKING:
     from databricks.sdk import WorkspaceClient
@@ -37,7 +37,7 @@ class DenseSchemaPreset:
     volume: str = _DEFAULT_VOLUME
     embedding_endpoint: str = "databricks-gte-large-en"
     embedding_dimension: int = 1024
-    embedding_failure_threshold: float = 0.10
+    embedding_failure_max: int = 0
     include_values: bool = True
     sample_limit: int = 10
     sample_cardinality_threshold: int = 50
@@ -100,9 +100,7 @@ class DenseSchemaPreset:
             "DBXCARTA_INFER_SEMANTIC": _bool(self.infer_semantic),
             "DBXCARTA_EMBEDDING_ENDPOINT": self.embedding_endpoint,
             "DBXCARTA_EMBEDDING_DIMENSION": str(self.embedding_dimension),
-            "DBXCARTA_EMBEDDING_FAILURE_THRESHOLD": (
-                f"{self.embedding_failure_threshold}"
-            ),
+            "DBXCARTA_EMBEDDING_FAILURE_MAX": f"{self.embedding_failure_max}",
             "DBXCARTA_CLIENT_QUESTIONS": (
                 f"{volume_path}/dbxcarta/{_QUESTIONS_FILENAME}"
             ),

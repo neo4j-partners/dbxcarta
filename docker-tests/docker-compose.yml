@@ -1,0 +1,58 @@
+# Throwaway Neo4j for the semantic-FK spike.
+#
+# Why this exists: the deployed instance is Neo4j 5.27-aura, which predates
+# both the `SEARCH` clause (2025.06) and the in-index filtered vector index
+# (GA 2026.02). This brings up a current Community instance so
+# `scripts/spikes/neo4j_query_param_spike.py` can settle whether the
+# `search_in_index_filtered` form actually works on a version that supports
+# it — in particular the open question of a correlated outer reference
+# (`t.catalog = s.catalog`) inside the in-index WHERE.
+#
+# Community Edition: Neo4j states the in-index filtered vector search has
+# feature parity across Community, Enterprise, and all Aura tiers, so this
+# proves the syntax/correlated-ref question identically with no license env.
+#
+# Ephemeral by design: no named volumes. `docker compose down` is a clean
+# slate, matching the spike's own create/teardown discipline.
+
+name: dbxcarta-neo4j-spike
+
+services:
+  neo4j:
+    # GA in-index filtered vector search is 2026.02+; 2026.04.0 is the
+    # current published Community patch. Bump to a newer one from
+    # https://hub.docker.com/_/neo4j/tags if this is ever pulled.
+    image: neo4j:2026.04.0
+    container_name: dbxcarta-neo4j-spike
+    ports:
+      - "7474:7474"   # HTTP browser (optional, for eyeballing)
+      - "7687:7687"   # Bolt (what the spike connects to)
+    environment:
+      # Community edition needs no NEO4J_ACCEPT_LICENSE_AGREEMENT.
+      # Password must be >= 8 chars (Neo4j default policy).
+      NEO4J_AUTH: "neo4j/${NEO4J_SPIKE_PASSWORD:-testpassword12}"
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p \"${NEO4J_SPIKE_PASSWORD:-testpassword12}\" 'RETURN 1' || exit 1"]
+      interval: 5s
+      timeout: 10s
+      retries: 40
+      start_period: 30s
+
+  # One-shot: the `SEARCH` clause is Cypher 25, but a fresh instance still
+  # defaults to Cypher 5. Flip the default language once the DB is healthy
+  # so the spike's queries run unmodified (no `CYPHER 25` prefix needed).
+  neo4j-init:
+    image: neo4j:2026.04.0
+    depends_on:
+      neo4j:
+        condition: service_healthy
+    entrypoint:
+      - cypher-shell
+      - -a
+      - "bolt://neo4j:7687"
+      - -u
+      - neo4j
+      - -p
+      - "${NEO4J_SPIKE_PASSWORD:-testpassword12}"
+      - "ALTER DATABASE neo4j SET DEFAULT LANGUAGE CYPHER 25"
+    restart: "no"

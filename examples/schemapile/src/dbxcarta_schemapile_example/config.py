@@ -139,7 +139,9 @@ def load_config(env: Mapping[str, str] | None = None) -> SchemaPileConfig:
 def _required(env: Mapping[str, str], key: str) -> str:
     val = env.get(key, "").strip()
     if not val:
-        raise ValueError(f"{key} is not set; check examples/schemapile/.env")
+        raise ValueError(
+            f"{key} is not set; check examples/schemapile/.env"
+        )
     return val
 
 

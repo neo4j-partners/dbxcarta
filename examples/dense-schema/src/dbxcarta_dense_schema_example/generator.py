@@ -354,7 +354,6 @@ def _generate_all_tables(sub_module_count: int, seed: int) -> list[TableSpec]:
             tables.append(t)
 
         for i, event in enumerate(events):
-            secondary_entity = entities[min(i + 1, len(entities) - 1)]
             t = _event_table(domain, event, anchor, rng, fake)
             tables.append(t)
 

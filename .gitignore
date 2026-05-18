@@ -52,6 +52,11 @@ dmypy.json
 .env.*
 !.env.sample
 !.env.example
+# Locally generated, secret-free CLI overlays (derived from a preset).
+# Committed overlays use the bare `dbxcarta-overlay.env` name; any
+# `*.local.env` / `*-overlay.local.env` is a transient generated artifact.
+*.local.env
+**/dbxcarta-overlay.local.env
 *.pem
 *.key
 *.crt
@@ -138,3 +143,7 @@ worklog/
 .mcp.json
 outputs/
 examples/**/.cache/
+docs/proposals/
+
+# docker-tests: throwaway local Neo4j creds (template is .env.example)
+docker-tests/.env

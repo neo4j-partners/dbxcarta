@@ -2,8 +2,6 @@ name: Publish Python distribution
 
 on:
   push:
-    branches:
-      - main
     tags:
       - "*"
 
@@ -11,31 +9,43 @@ jobs:
   build:
     name: Build distribution
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      attestations: write
+      id-token: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
         with:
           enable-cache: true
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version-file: .python-version
 
-      - name: Build wheel and sdist
-        run: uv build --sdist --wheel
+      - name: Build wheels and sdists
+        # Example packages (dense-schema, finance-genie, schemapile) are workspace
+        # members but are not published to PyPI — only client and spark are released.
+        run: |
+          uv build --package dbxcarta-client
+          uv build --package dbxcarta-spark
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
+        with:
+          subject-path: dist/*.whl
 
       - name: Store distribution packages
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: python-package-distributions
           path: dist/
 
   publish-to-pypi:
     name: PyPI
-    if: startsWith(github.ref, 'refs/tags/')
     needs: build
     runs-on: ubuntu-latest
     environment:
@@ -45,10 +55,10 @@ jobs:
       id-token: write
     steps:
       - name: Download distributions
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: python-package-distributions
           path: dist/
 
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # release/v1

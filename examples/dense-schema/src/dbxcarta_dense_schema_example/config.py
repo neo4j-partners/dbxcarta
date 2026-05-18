@@ -73,5 +73,7 @@ def load_config(env: Mapping[str, str] | None = None) -> DenseSchemaConfig:
 def _required(env: Mapping[str, str], key: str) -> str:
     val = env.get(key, "").strip()
     if not val:
-        raise ValueError(f"{key} is not set; check examples/dense-schema/.env")
+        raise ValueError(
+            f"{key} is not set; check examples/dense-schema/.env"
+        )
     return val

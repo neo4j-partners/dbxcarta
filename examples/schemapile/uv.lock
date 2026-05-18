@@ -214,15 +214,15 @@ wheels = [
 
 [[package]]
 name = "databricks-job-runner"
-version = "0.4.8"
+version = "0.6"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "databricks-sdk" },
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/b8/a4/2eca16546967e0dd1a12d2b5ac04b49318b56ae4c7fb7c5fe6279e885790/databricks_job_runner-0.4.8.tar.gz", hash = "sha256:9daf3a66c48a42aaf89c79d08eefd7efe63d2cfae45a47ce32661bdd88a8ed1f", size = 27802, upload-time = "2026-04-25T01:39:41.905Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/03/4d/0e3d1896bd813ea5bec0cdde1c74180482a5ddaf8af12a53a6fba6d7e308/databricks_job_runner-0.6.tar.gz", hash = "sha256:f9e8335bc7a922b98392aeb314f771a057e40eda7f463d9885ee3333f758b26f", size = 35725, upload-time = "2026-05-16T06:25:10.352Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/5e/8d/a81fb93bbbfa589eb869be0b04dfbcb57d09feb6707de010d9974908c293/databricks_job_runner-0.4.8-py3-none-any.whl", hash = "sha256:0a1681039afe38e7a3a7c565fc827ce6ecbefb74819272f55d7a6162dafa0536", size = 34538, upload-time = "2026-04-25T01:39:40.623Z" },
+    { url = "https://files.pythonhosted.org/packages/89/64/a951248cd20aa8b3fd857bbd2c6d8838db94f370e58400ee52c50f7a789d/databricks_job_runner-0.6-py3-none-any.whl", hash = "sha256:51849efa336268a60eec07f44bda866a30f1ffde50601d35658f744c1954253a", size = 45453, upload-time = "2026-05-16T06:25:08.728Z" },
 ]
 
 [[package]]
@@ -254,7 +254,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "databricks-job-runner", specifier = ">=0.4.8" },
+    { name = "databricks-job-runner", specifier = ">=0.6" },
     { name = "databricks-sdk", specifier = ">=0.40" },
     { name = "mypy", marker = "extra == 'test'" },
     { name = "neo4j", specifier = ">=5.0" },

@@ -10,25 +10,91 @@ permissions:
   contents: read
 
 jobs:
-  validate:
-    name: Validate locked build
+  layer-tests:
+    name: Tests / ${{ matrix.layer }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - layer: core
+            package: dbxcarta-spark
+            tests: tests/core
+          - layer: spark
+            package: dbxcarta-spark
+            extra_package: dbxcarta-client
+            tests: tests/spark
+          - layer: client
+            package: dbxcarta-client
+            tests: tests/client
+          - layer: presets
+            package: dbxcarta-spark
+            tests: tests/presets
+          - layer: boundary
+            package: dbxcarta-spark
+            extra_package: dbxcarta-client
+            tests: tests/boundary
+          - layer: finance-genie
+            package: dbxcarta-finance-genie-example
+            tests: tests/examples/finance-genie
+          - layer: schemapile
+            package: dbxcarta-schemapile-example
+            tests: tests/examples/schemapile
+          - layer: dense-schema
+            package: dbxcarta-dense-schema-example
+            tests: tests/examples/dense-schema
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
         with:
           enable-cache: true
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version-file: .python-version
 
       - name: Set up Java for PySpark tests
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Check lockfile
+        run: uv lock --check
+
+      - name: Sync package test environment
+        run: |
+          args="--package ${{ matrix.package }}"
+          [[ -n "${{ matrix.extra_package }}" ]] && args="$args --package ${{ matrix.extra_package }}"
+          uv sync --frozen $args --extra test --no-default-groups
+
+      - name: Run layer tests
+        run: uv run --no-sync pytest ${{ matrix.tests }}
+
+  validate:
+    name: Validate locked build
+    runs-on: ubuntu-latest
+    needs: layer-tests
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version-file: .python-version
+
+      - name: Set up Java for PySpark tests
+        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
         with:
           distribution: temurin
           java-version: "17"
@@ -37,16 +103,37 @@ jobs:
         run: uv lock --check
 
       - name: Sync frozen test environment
-        run: uv sync --frozen --extra test
+        run: uv sync --frozen --group test --all-packages
 
-      - name: Run unit tests
+      - name: Verify integration tests importable
+        run: uv run pytest tests/integration --collect-only -q || [ $? -eq 5 ]
+
+      - name: Run all tests
         run: uv run pytest
+
+      - name: Type check
+        run: uv run mypy -p dbxcarta.spark -p dbxcarta.client
+
+      - name: Lint
+        run: uvx ruff check .
+
+      - name: Vulnerability scan
+        run: |
+          uv export --frozen --all-packages --no-hashes -o /tmp/all-requirements.txt
+          grep -v "^-e " /tmp/all-requirements.txt > /tmp/requirements.txt
+          uvx pip-audit -r /tmp/requirements.txt
 
       - name: Clean package output
         run: rm -rf dist
 
-      - name: Build package
-        run: uv build --sdist --wheel
+      - name: Build packages
+        run: uv build --all-packages
+
+      - name: Generate SBOM
+        run: |
+          uv export --frozen --all-packages --no-hashes -o /tmp/all-requirements.txt
+          grep -v "^-e " /tmp/all-requirements.txt > /tmp/sbom-requirements.txt
+          uvx --from cyclonedx-bom cyclonedx-py requirements /tmp/sbom-requirements.txt --outfile dist/sbom.cdx.json
 
       - name: Inspect package artifacts
         run: uv run python scripts/security/artifact_audit.py inspect dist
@@ -57,10 +144,11 @@ jobs:
           --output dist/supply-chain-provenance.json
 
       - name: Upload package evidence
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: package-evidence
           path: |
             dist/*.whl
             dist/*.tar.gz
+            dist/sbom.cdx.json
             dist/supply-chain-provenance.json

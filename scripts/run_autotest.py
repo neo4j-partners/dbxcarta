@@ -43,7 +43,7 @@ def _now_iso() -> str:
 
 
 def _make_ws():
-    from dbxcarta.databricks import build_workspace_client
+    from dbxcarta.client.databricks import build_workspace_client
 
     return build_workspace_client()
 
@@ -131,7 +131,6 @@ def run_unit_tests() -> dict:
 def run_schema_setup() -> dict:
     print("\n=== Schema Teardown and Setup ===")
     catalog = os.environ["DBXCARTA_CATALOG"]
-    volume_path = os.environ.get("DATABRICKS_VOLUME_PATH", "")
 
     # Teardown — best-effort (ignore returncode)
     print("  Teardown...")
@@ -276,8 +275,8 @@ def run_assertions(run_summary: dict) -> dict:
 #
 # The fixture (tests/fixtures/setup_test_catalog.sql) is the authoritative
 # source for *declared* FKs. The pipeline also produces *inferred* FK edges
-# via `dbxcarta.ingest.fk.metadata` (column-comment hints) and optionally
-# `dbxcarta.ingest.fk.semantic`; replicating that logic here would just duplicate
+# via `dbxcarta.spark.ingest.fk.metadata` (column-comment hints) and optionally
+# `dbxcarta.spark.ingest.fk.semantic`; replicating that logic here would just duplicate
 # the pipeline. So this step asserts only what the fixture pins down (the
 # declared bucket) and reports the inferred bucket informationally so a
 # regression in inference is visible without being asserted against a
@@ -298,7 +297,7 @@ def _parse_fixture_fks(catalog: str) -> set[tuple[str, str]]:
     """Parse `tests/fixtures/setup_test_catalog.sql` and return the canonical
     set of *declared* `(src_id, dst_id)` REFERENCES edges, normalized via
     `generate_id`."""
-    from dbxcarta.contract import generate_id
+    from dbxcarta.spark.contract import generate_id
 
     fixture_sql = (PROJECT_ROOT / "tests" / "fixtures" / "setup_test_catalog.sql").read_text()
     out: set[tuple[str, str]] = set()

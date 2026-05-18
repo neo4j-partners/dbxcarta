@@ -8,20 +8,30 @@ collect them unless integration tests are explicitly requested.
 
 from __future__ import annotations
 
-import base64
 import os
 from pathlib import Path
-from typing import Iterator
+from collections.abc import Iterator
 
 import pytest
 from dotenv import load_dotenv
 
-load_dotenv(Path(__file__).parent.parent.parent / ".env")
+@pytest.fixture(scope="session", autouse=True)
+def _load_integration_env() -> None:
+    """Load the repo ``.env`` for live integration tests only.
+
+    A module-scoped ``load_dotenv`` would run at collection time and leak
+    the developer's ``.env`` into the whole session's ``os.environ``, which
+    pydantic ``BaseSettings`` constructors elsewhere then read as unset
+    fields. Confining it to an autouse session fixture means it loads only
+    when a test in this directory actually executes — never in the default
+    ``-m "not live"`` unit run, where these tests are deselected.
+    """
+    load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 
 @pytest.fixture(scope="session")
-def ws():
-    from dbxcarta.databricks import build_workspace_client
+def ws(_load_integration_env: None):
+    from dbxcarta.client.databricks import build_workspace_client
 
     return build_workspace_client()
 
@@ -30,14 +40,15 @@ def ws():
 def neo4j_driver(ws) -> Iterator:
     from neo4j import GraphDatabase
 
+    from dbxcarta.spark.databricks import read_workspace_secret
+
     scope = os.environ["DATABRICKS_SECRET_SCOPE"]
-
-    def _secret(key: str) -> str:
-        return base64.b64decode(ws.secrets.get_secret(scope=scope, key=key).value).decode()
-
     driver = GraphDatabase.driver(
-        _secret("NEO4J_URI"),
-        auth=(_secret("NEO4J_USERNAME"), _secret("NEO4J_PASSWORD")),
+        read_workspace_secret(ws, scope, "NEO4J_URI"),
+        auth=(
+            read_workspace_secret(ws, scope, "NEO4J_USERNAME"),
+            read_workspace_secret(ws, scope, "NEO4J_PASSWORD"),
+        ),
     )
     yield driver
     driver.close()
@@ -46,7 +57,7 @@ def neo4j_driver(ws) -> Iterator:
 @pytest.fixture(scope="session")
 def run_summary(ws) -> dict:
     """Load the most recent successful run-summary JSON from the UC Volume."""
-    from dbxcarta.ingest.summary import LoadSummaryError, load_summary_from_volume
+    from dbxcarta.spark.ingest.summary_io import LoadSummaryError, load_summary_from_volume
 
     volume_path = os.environ["DBXCARTA_SUMMARY_VOLUME"]
     try:
