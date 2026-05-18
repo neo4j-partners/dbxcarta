@@ -35,6 +35,7 @@ down in a `finally` regardless of outcome.
 
 from __future__ import annotations
 
+import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -44,6 +45,7 @@ from neo4j import Driver, GraphDatabase
 from neo4j.exceptions import Neo4jError
 
 _INDEX = "spike_kc_idx"
+_FILTER_INDEX = "spike_kc_filter_idx"
 _DIM = 4
 _K = 2
 
@@ -141,7 +143,23 @@ class FormResult:
 
 
 def _repo_env() -> dict[str, str | None]:
-    """Load the repo-root .env (walk up until one is found)."""
+    """Load Neo4j connection config.
+
+    `NEO4J_SPIKE_ENV_FILE`, if set, selects an explicit env file — the
+    `docker-tests/` throwaway 2026.x container uses this to point the spike
+    at localhost instead of the shared repo-root `.env` (which holds the
+    real Neo4j secrets). A set-but-missing path is a hard error, never a
+    silent fall back to the repo `.env`, matching the project's
+    env-layering rule. Unset: unchanged — walk up to the repo-root `.env`.
+    """
+    override = os.environ.get("NEO4J_SPIKE_ENV_FILE")
+    if override:
+        path = Path(override)
+        if not path.is_file():
+            raise FileNotFoundError(
+                f"NEO4J_SPIKE_ENV_FILE set but not a file: {override}"
+            )
+        return dotenv_values(path)
     for parent in Path(__file__).resolve().parents:
         candidate = parent / ".env"
         if candidate.is_file():
@@ -171,6 +189,7 @@ def _setup(driver: Driver) -> None:
 
 def _teardown(driver: Driver) -> None:
     driver.execute_query(f"DROP INDEX {_INDEX} IF EXISTS")
+    driver.execute_query(f"DROP INDEX {_FILTER_INDEX} IF EXISTS")
     driver.execute_query(
         "MATCH (n) WHERE n:__SpikeCol OR n:__SpikeKeyCol DETACH DELETE n"
     )
@@ -211,6 +230,223 @@ def _eval_form(driver: Driver, name: str, template: str) -> FormResult:
     )
 
 
+# In-index filtered SEARCH query-shape variants. All target the same
+# metadata-bearing `_FILTER_INDEX`; each isolates one decision the
+# fix-zombines-v4 Phase 6b remediation actually turns on. {idx}/{k} are the
+# only format substitution points; `$param` is left for the driver to bind.
+# The first key is kept named `search_in_index_filtered` so `_verdict`'s
+# in-index detection (and the recorded memory) stays valid; it is also the
+# shape that maps 1:1 to the shipped per-source NN and the one PROFILEd.
+_IN_INDEX_VARIANTS: dict[str, tuple[str, dict[str, object]]] = {
+    # Correlated outer ref, not-self as a post-filter outside SEARCH.
+    # This is the canonical shape (== shipped per-source NN intent).
+    "search_in_index_filtered": ("""
+MATCH (s:__SpikeCol)
+WHERE s.embedding IS NOT NULL
+CALL (s) {{
+  MATCH (t:__SpikeKeyCol)
+  SEARCH t IN (
+    VECTOR INDEX {idx}
+    FOR s.embedding
+    WHERE t.catalog = s.catalog AND t.schema = s.schema
+    LIMIT {k}
+  ) SCORE AS score
+  WHERE t.id <> s.id
+  RETURN t.id AS target_id, score
+}}
+RETURN s.id AS source_id, target_id, score
+""", {}),
+    # not-self pushed *inside* the in-index WHERE. Question: does the
+    # preview WHERE subset accept an inequality on a correlated ref, and
+    # does it keep a self-hit from consuming a top-k slot (correctness)?
+    "inidx_selfnot_inside": ("""
+MATCH (s:__SpikeCol)
+WHERE s.embedding IS NOT NULL
+CALL (s) {{
+  MATCH (t:__SpikeKeyCol)
+  SEARCH t IN (
+    VECTOR INDEX {idx}
+    FOR s.embedding
+    WHERE t.catalog = s.catalog AND t.schema = s.schema AND t.id <> s.id
+    LIMIT {k}
+  ) SCORE AS score
+  RETURN t.id AS target_id, score
+}}
+RETURN s.id AS source_id, target_id, score
+""", {}),
+    # Filter by $params instead of the correlated `s.*`. This is the
+    # building block for the Phase 6b "batch the NN read per source-table
+    # range / per-partition" candidate: proves param-driven in-index
+    # filtering works so a partition can be driven from the connector.
+    "inidx_param_filter": ("""
+MATCH (s:__SpikeCol)
+WHERE s.embedding IS NOT NULL
+CALL (s) {{
+  MATCH (t:__SpikeKeyCol)
+  SEARCH t IN (
+    VECTOR INDEX {idx}
+    FOR s.embedding
+    WHERE t.catalog = $catalog AND t.schema = $schema
+    LIMIT {k}
+  ) SCORE AS score
+  WHERE t.id <> s.id
+  RETURN t.id AS target_id, score
+}}
+RETURN s.id AS source_id, target_id, score
+""", {"catalog": "c", "schema": "s"}),
+    # No CALL (s) scoped-subquery wrapper. Question: is the wrapper
+    # required, or is the flatter shape valid? Fewer nesting layers can
+    # matter for the connector `query` round-trip and the planner.
+    "inidx_toplevel": ("""
+MATCH (s:__SpikeCol)
+WHERE s.embedding IS NOT NULL
+MATCH (t:__SpikeKeyCol)
+SEARCH t IN (
+  VECTOR INDEX {idx}
+  FOR s.embedding
+  WHERE t.catalog = s.catalog AND t.schema = s.schema
+  LIMIT {k}
+) SCORE AS score
+WHERE t.id <> s.id
+RETURN s.id AS source_id, t.id AS target_id, score
+""", {}),
+}
+
+_PROFILE_VARIANT = "search_in_index_filtered"
+
+
+def _render_profile(node: dict[str, object], depth: int = 0) -> list[str]:
+    """Flatten the driver's structured PROFILE into an indented operator
+    tree. The push-down signal is whether the catalog/schema predicate and
+    the LIMIT ride *inside* a vector-index operator's detail (HNSW
+    push-down) or sit in a separate `Filter`/`Top` operator above a plain
+    vector seek (post-filter)."""
+    op = str(node.get("operatorType", "?"))
+    args = node.get("args", {})
+    args = args if isinstance(args, dict) else {}
+    detail = ""
+    for key in ("Details", "Index", "Expressions"):
+        val = node.get(key) or args.get(key)
+        if val:
+            detail = f"  {key.lower()}={val}"
+            break
+    rows = node.get("rows")
+    db = node.get("dbHits")
+    lines = [f"{'  ' * depth}{op} (rows={rows}, dbHits={db}){detail}"]
+    children = node.get("children", [])
+    if isinstance(children, list):
+        for child in children:
+            if isinstance(child, dict):
+                lines += _render_profile(child, depth + 1)
+    return lines
+
+
+def _eval_in_index_filter(
+    driver: Driver,
+) -> tuple[list[FormResult], str | None]:
+    """Neo4j 2026.01+ in-index filtered SEARCH: query-shape variants + a
+    PROFILE of the canonical shape.
+
+    The catalog+schema predicate is pushed *inside* the VECTOR INDEX
+    clause, so the HNSW traversal itself skips out-of-partition vectors
+    instead of post-filtering survivors. The filtered properties must be
+    declared at index creation with the `WITH [...]` metadata clause; the
+    spike's main index has no such metadata, so this needs its own index.
+    Self-contained: it creates that index once, runs every variant in
+    `_IN_INDEX_VARIANTS`, PROFILEs the canonical shape, and drops the index
+    in a `finally`, leaving the existing `_FORMS` machinery untouched. A
+    creation/parse failure (server older than 2026.01, or a preview-syntax
+    mismatch) is captured as the canonical variant's failure — that is
+    itself the answer to "does in-index filtered SEARCH work here".
+
+    Returns (one FormResult per variant, rendered PROFILE text or None).
+    The PROFILE is None when the index could not be created or the
+    canonical variant did not run, since the plan would be meaningless.
+    """
+    create = (
+        f"CREATE VECTOR INDEX {_FILTER_INDEX} IF NOT EXISTS "
+        "FOR (t:__SpikeKeyCol) ON t.embedding "
+        "WITH [t.catalog, t.schema] "
+        "OPTIONS {indexConfig: {"
+        f"`vector.dimensions`: {_DIM}, "
+        "`vector.similarity_function`: 'cosine'}}"
+    )
+
+    try:
+        driver.execute_query(f"DROP INDEX {_FILTER_INDEX} IF EXISTS")
+        driver.execute_query(create)
+        driver.execute_query("CALL db.awaitIndexes(120)")
+    except Neo4jError as exc:
+        # Index creation itself failing is the verdict: the metadata
+        # `WITH [...]` clause is unsupported on this server. Report it
+        # against the canonical variant so `_verdict` still finds it.
+        msg = "index create: " + (exc.message or str(exc)).splitlines()[0]
+        return (
+            [FormResult(_PROFILE_VARIANT, False, 0, msg, False, 0, msg)],
+            None,
+        )
+
+    results: list[FormResult] = []
+    profile: str | None = None
+    try:
+        for name, (tpl, extra) in _IN_INDEX_VARIANTS.items():
+            bound_ok = interp_ok = False
+            bound_rows = interp_rows = 0
+            bound_err = interp_err = None
+            try:
+                bound_rows = _run(
+                    driver,
+                    tpl.format(idx=_FILTER_INDEX, k="$k"),
+                    {**extra, "k": _K},
+                )
+                bound_ok = True
+            except Neo4jError as exc:
+                bound_err = (exc.message or str(exc)).splitlines()[0]
+            try:
+                interp_rows = _run(
+                    driver,
+                    tpl.format(idx=_FILTER_INDEX, k=str(_K)),
+                    dict(extra),
+                )
+                interp_ok = True
+            except Neo4jError as exc:
+                interp_err = (exc.message or str(exc)).splitlines()[0]
+            results.append(FormResult(
+                name, bound_ok, bound_rows, bound_err,
+                interp_ok, interp_rows, interp_err,
+            ))
+
+        canonical = next(
+            (r for r in results if r.name == _PROFILE_VARIANT), None
+        )
+        if canonical is not None and canonical.interp_ok:
+            tpl, extra = _IN_INDEX_VARIANTS[_PROFILE_VARIANT]
+            cypher = "PROFILE " + tpl.format(idx=_FILTER_INDEX, k=str(_K))
+            try:
+                plan = driver.execute_query(
+                    cypher, parameters_=dict(extra)
+                ).summary.profile
+                if isinstance(plan, dict):
+                    body = "\n".join(_render_profile(plan))
+                else:
+                    body = f"(no structured profile: {plan!r})"
+            except Neo4jError as exc:
+                body = "PROFILE failed: " + (
+                    exc.message or str(exc)
+                ).splitlines()[0]
+            profile = (
+                f"\n=== IN-INDEX FILTER PLAN (PROFILE, {_PROFILE_VARIANT})"
+                " ===\nLook for the catalog/schema predicate and LIMIT "
+                "inside a vector-index operator (HNSW push-down) vs a "
+                "separate Filter/Top above a plain vector seek "
+                f"(post-filter):\n{body}"
+            )
+    finally:
+        driver.execute_query(f"DROP INDEX {_FILTER_INDEX} IF EXISTS")
+
+    return results, profile
+
+
 def _verdict(results: list[FormResult]) -> None:
     print("\n=== VERDICT ===")
     print(
@@ -234,6 +470,24 @@ def _verdict(results: list[FormResult]) -> None:
             "_SEMANTIC_NN_CYPHER must be rewritten to a form that does "
             "(see per-form errors above)."
         )
+    in_index = next(
+        (r for r in results if r.name == "search_in_index_filtered"), None
+    )
+    if in_index is not None:
+        if in_index.interp_ok and in_index.bound_ok:
+            print(
+                "In-index filter (Neo4j 2026.01): WORKS on this server. The "
+                "catalog+schema predicate inside the VECTOR INDEX clause "
+                "parses and runs with a correlated outer `s` reference, so "
+                "the partition filter and top-k push into the HNSW traversal."
+            )
+        else:
+            print(
+                "In-index filter (Neo4j 2026.01): NOT usable on this server "
+                f"({in_index.bound_err or in_index.interp_err}). Either the "
+                "server predates the filtered-vector-index preview or the "
+                "preview WHERE rejects a correlated outer reference."
+            )
 
 
 def main() -> int:
@@ -254,6 +508,8 @@ def main() -> int:
                 _eval_form(driver, name, tpl)
                 for name, tpl in _FORMS.items()
             ]
+            inidx_results, inidx_profile = _eval_in_index_filter(driver)
+            results.extend(inidx_results)
         finally:
             _teardown(driver)
 
@@ -267,6 +523,9 @@ def main() -> int:
         )
         print(f"  bound $k     : {b}")
         print(f"  interpolated : {i}")
+
+    if inidx_profile:
+        print(inidx_profile)
 
     _verdict(results)
     return 0
