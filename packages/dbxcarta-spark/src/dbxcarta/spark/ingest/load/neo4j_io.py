@@ -16,12 +16,6 @@ from dbxcarta.spark.ingest.load.writer import (
     write_relationship,
 )
 
-# Second label applied to key-like FK target columns (in addition to
-# :Column). Not a NodeLabel enum member: it carries no separate identity
-# (MERGE stays on the :Column id) and only exists to scope the dedicated
-# FK-discovery vector index away from the client's all-:Column index.
-KEY_COLUMN_LABEL = "KeyColumn"
-
 if TYPE_CHECKING:
     from neo4j import Driver
     from pyspark.sql import DataFrame
@@ -91,19 +85,6 @@ def bootstrap_constraints(driver: "Driver", settings: "SparkIngestSettings") -> 
                     f" `vector.similarity_function`: 'cosine'}}}}"
                 )
 
-        # Dedicated FK-discovery vector index over the key-like target
-        # subset (:KeyColumn). Separate from column_embedding (which the
-        # client RAG retriever seeds from any :Column and must keep its
-        # full scope): a nearest-neighbour query against this index can
-        # only return real key targets, so nothing is post-filtered away.
-        if settings.dbxcarta_include_embeddings_columns:
-            session.run(
-                f"CREATE VECTOR INDEX {KEY_COLUMN_LABEL.lower()}_embedding"
-                f" IF NOT EXISTS FOR (n:{KEY_COLUMN_LABEL}) ON n.embedding "
-                f"OPTIONS {{indexConfig: {{`vector.dimensions`: {dim},"
-                f" `vector.similarity_function`: 'cosine'}}}}"
-            )
-
     logger.info("[dbxcarta] neo4j constraints and indexes bootstrapped")
 
 
@@ -138,51 +119,6 @@ def delete_stale_values(
     logger.info(
         "[dbxcarta] deleted stale Values older than run start %s",
         run_start_iso,
-    )
-
-
-def apply_key_column_labels(
-    driver: "Driver",
-    catalogs: list[str],
-    schemas: list[str],
-) -> None:
-    """Reconcile the :KeyColumn label from the Column `is_key_like` property.
-
-    One scoped server-side pass over the run's catalogs/schemas: add
-    :KeyColumn to every Column flagged `is_key_like`, and strip it from
-    every Column that is not. The label is a per-run projection of the
-    contract-1.4 `is_key_like` property, never a connector multi-label node
-    write. A connector write of `(:Column:KeyColumn)` compiles to
-    `MERGE (n:Column:KeyColumn {id})`, which matches the full label set:
-    it can never match an existing single-label `:Column` node and instead
-    creates one, colliding with the Column.id uniqueness constraint. Driving
-    the label off a written property and `SET`/`REMOVE` on already-matched
-    nodes avoids that entirely and heals on a re-run. Scoped exactly like
-    `delete_stale_values` (bounded catalog/schema config scalars, never a
-    per-column id list, best-practices §5).
-    """
-    scope = (
-        "WHERE c.catalog IN $catalogs "
-        "AND (size($schemas) = 0 OR c.schema IN $schemas) "
-    )
-    with driver.session() as session:
-        session.run(
-            f"MATCH (c:{NodeLabel.COLUMN.value}) {scope}"
-            "AND c.is_key_like = true "
-            f"SET c:{KEY_COLUMN_LABEL}",
-            catalogs=catalogs,
-            schemas=schemas,
-        )
-        session.run(
-            f"MATCH (c:{NodeLabel.COLUMN.value}:{KEY_COLUMN_LABEL}) {scope}"
-            "AND (c.is_key_like IS NULL OR c.is_key_like = false) "
-            f"REMOVE c:{KEY_COLUMN_LABEL}",
-            catalogs=catalogs,
-            schemas=schemas,
-        )
-    logger.info(
-        "[dbxcarta] reconciled :%s labels from is_key_like in run scope",
-        KEY_COLUMN_LABEL,
     )
 
 
@@ -224,7 +160,6 @@ def write_rel(
 __all__ = [
     "bootstrap_constraints",
     "delete_stale_values",
-    "apply_key_column_labels",
     "query_counts",
     "write_node",
     "write_rel",

@@ -1,7 +1,7 @@
 """Unity Catalog extraction — pure information_schema reads + node/rel DataFrame build.
 
 This module does *only* UC extraction and DataFrame assembly for schemas,
-tables, and columns. FK discovery (declared, metadata, semantic) lives in
+tables, and columns. FK discovery (declared, metadata) lives in
 `dbxcarta.spark.ingest.fk.discovery` and runs against the extracted material.
 Embedding enrichment happens later in the ingestion pipeline, before the Neo4j load.
 """

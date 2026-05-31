@@ -79,9 +79,9 @@ and `HAS_COLUMN` to `Column` nodes, so structure is traversable instead of
 implied by naming. Three enrichments turn that structure into a semantic layer.
 Embeddings on table and column nodes, backed by vector indexes, make "near in
 meaning" a query a question can run. `REFERENCES` edges carry a confidence score
-and are discovered from declared constraints, metadata heuristics, and semantic
-inference, so a join path the catalog never declared is still navigable and
-ranked by how much to trust it. The `layer` property under graph contract v1.1
+and are discovered from declared constraints and metadata heuristics, so a join
+path the catalog never declared is still navigable and ranked by how much to
+trust it. The `layer` property under graph contract v1.1
 records each table's medallion tier, so a retriever can prefer the curated gold
 table over a raw bronze one when both could answer a question.
 
@@ -112,7 +112,7 @@ catalog and nothing else.
 The build path is server-side and runs in Spark. `dbxcarta-spark` reads Unity
 Catalog metadata across the resolved catalogs, builds graph-shaped DataFrames,
 adds embeddings through `ai_query`, samples values, discovers foreign keys
-through declared constraints and metadata and semantic inference, and writes the
+through declared constraints and metadata inference, and writes the
 semantic layer to Neo4j behind a fail-closed boundary, then records its run
 summary in the ops catalog. The pipeline internals are documented in
 [`pipeline.md`](pipeline.md); the rules that constrain it, including why rule
@@ -171,7 +171,7 @@ real time. The single-anchor verify limitation means a multi-catalog build
 trusts that the non-anchor catalogs wrote correctly.
 
 The trajectory the architecture is built for is the layer getting richer.
-Declared keys give the first edges; metadata and semantic inference add the ones
+Declared keys give the first edges; metadata inference adds the ones
 no one declared, each carrying a confidence the retriever can weigh. Embeddings
 make tables findable by meaning rather than by name. The layer property lets the
 retriever prefer the curated answer over the raw one. Each build can encode more

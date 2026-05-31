@@ -210,11 +210,10 @@ These Value nodes can also get embeddings when value embeddings are enabled.
 
 DBxCarta writes `REFERENCES` relationships between columns.
 
-It gets them from three sources:
+It gets them from two sources:
 
 - Declared foreign keys from Unity Catalog constraints.
 - Metadata inference from names, types, primary-key clues, and comments.
-- Semantic inference from column embeddings when enabled.
 
 ### Declared Foreign Keys
 
@@ -262,73 +261,6 @@ result:
 ```
 
 This is like a checklist. Stronger clues produce a higher confidence score.
-
-### Semantic Inference
-
-Semantic inference uses the embeddings from Step 4.
-
-An embedding is a list of numbers that represents the meaning of some text.
-For a column, the text includes the table name, column name, data type, and
-comment.
-
-Example embedding text:
-
-```text
-orders.customer_id | BIGINT | customer identifier
-```
-
-The embedding endpoint turns that text into a vector.
-
-```text
-orders.customer_id text
-        |
-        v
-[0.10, 0.82, 0.04, ...]
-```
-
-Semantic inference compares two column vectors with cosine similarity.
-
-Simple idea:
-
-```text
-orders.customer_id vector      customers.id vector
-        |                              |
-        +-------------+----------------+
-                      |
-                      v
-              cosine similarity
-                      |
-                      v
-              score from 0.0 to 1.0
-```
-
-A higher cosine score means the two column descriptions point in a similar
-direction.
-
-DBxCarta still uses safety gates:
-
-- The target must look like a primary key.
-- The source and target data types must work together.
-- The pair must be new, so it avoids duplicating a declared or metadata edge.
-- The score must be at or above the semantic threshold.
-
-Sampled values can add extra confidence.
-
-Example:
-
-```text
-orders.customer_id values:
-  101, 102, 103
-
-customers.id values:
-  101, 102, 103, 104
-
-value clue:
-  many source values appear in the target column
-```
-
-When enough source values appear in the target values, DBxCarta adds a small
-confidence bonus.
 
 Simple example:
 

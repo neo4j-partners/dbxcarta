@@ -17,25 +17,26 @@ from enum import StrEnum
 # `schema`; Column nodes gain `catalog`, `schema`, `table`. Previously the
 # only structural signal was the HAS_* edges plus an opaque hashed `id`, so
 # every consumer needing "which catalog/schema/table does this node belong
-# to" (batch-by-table-range, FK locality, the semantic-FK same-schema
-# pre-filter) had to re-join the cached information_schema frames. Additive
-# and readers treat the new properties as authoritative scalar identity.
+# to" (batch-by-table-range, FK locality) had to re-join the cached
+# information_schema frames. Additive and readers treat the new properties
+# as authoritative scalar identity.
 # 1.3 stamps every Value node with `last_run` (the run-start timestamp),
 # `catalog`, and `schema`. This replaces the driver-collected stale-Value
 # purge (which paged catalog-scale column ids back to the driver) with a
 # single scoped server-side Cypher delete keyed on `last_run` < run-start
 # within the run's catalogs/schemas. Additive; readers treat the new
 # properties as authoritative.
-# 1.4 makes Column key-likeness a first-class boolean `is_key_like`
-# property. The `:KeyColumn` label is now a per-run server-side projection
-# of this property (one scoped Cypher SET/REMOVE keyed on it), not a
-# connector multi-label node write: `MERGE (n:Column:KeyColumn {id})`
-# matches the full label set, so it can never match an existing
-# single-label `:Column` node and instead collides with the Column.id
-# uniqueness constraint. Keying the label on a written property closes
-# that collision and is re-run-safe. Additive; readers treat a missing
-# `is_key_like` as false.
-CONTRACT_VERSION = "1.4"
+# 1.4 made Column key-likeness a first-class boolean `is_key_like` property
+# with a per-run `:KeyColumn` label projection. Both existed only to serve
+# the semantic-FK same-schema pre-filter and were removed in 1.5.
+# 1.5 removes semantic-similarity FK inference and everything that existed
+# only to support it: the `EdgeSource.SEMANTIC` provenance value, the
+# Column `is_key_like` property, the `:KeyColumn` label, and the
+# `keycolumn_embedding` vector index. Declared and metadata FK inference are
+# unchanged. Column embeddings and the per-label vector indexes used by
+# graph-RAG retrieval are unaffected. Readers of an older graph treat a
+# lingering `is_key_like`/`:KeyColumn`/`semantic` edge as inert.
+CONTRACT_VERSION = "1.5"
 
 DEFAULT_EMBEDDING_ENDPOINT = "databricks-gte-large-en"
 
@@ -64,12 +65,10 @@ class RelType(StrEnum):
 
 class EdgeSource(StrEnum):
     """Provenance tag on REFERENCES edges. DECLARED is the Unity Catalog
-    declared-FK source; INFERRED_METADATA is name/PK heuristic inference;
-    SEMANTIC is embedding cosine similarity."""
+    declared-FK source; INFERRED_METADATA is name/PK heuristic inference."""
 
     DECLARED = "declared"
     INFERRED_METADATA = "inferred_metadata"
-    SEMANTIC = "semantic"
 
 
 # REFERENCES edge properties (additive in contract v1.0). All three are
@@ -92,10 +91,9 @@ REFERENCES_PROPERTIES: tuple[str, ...] = ("confidence", "source", "criteria")
 # but as of contract 1.2 the catalog/schema/table identity of Table and
 # Column nodes is additionally carried as authoritative scalar properties:
 # the `id` is an opaque hash, so re-deriving structure from edges or the
-# cached information_schema frames on every consumer (batching, FK locality,
-# the semantic-FK same-schema pre-filter) was the actual smell. The edges
-# and these scalars agree by construction (both derive from the same
-# information_schema row).
+# cached information_schema frames on every consumer (batching, FK locality)
+# was the actual smell. The edges and these scalars agree by construction
+# (both derive from the same information_schema row).
 NODE_PROPERTIES: dict[NodeLabel, tuple[str, ...]] = {
     NodeLabel.DATABASE: ("id", "name", "contract_version", "embedding"),
     NodeLabel.SCHEMA: ("id", "name", "comment", "contract_version", "embedding"),
@@ -105,7 +103,7 @@ NODE_PROPERTIES: dict[NodeLabel, tuple[str, ...]] = {
     ),
     NodeLabel.COLUMN: (
         "id", "name", "catalog", "schema", "table", "data_type",
-        "is_nullable", "ordinal_position", "comment", "is_key_like",
+        "is_nullable", "ordinal_position", "comment",
         "contract_version", "embedding",
     ),
     NodeLabel.VALUE: (

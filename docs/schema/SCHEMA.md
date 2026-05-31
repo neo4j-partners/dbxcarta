@@ -191,7 +191,6 @@ Foreign-key relationships discovered from one or more sources.
 |---------------------|------------------------------------------------------|
 | `declared`          | Unity Catalog declared foreign-key constraint        |
 | `inferred_metadata` | Name/primary-key heuristic inference                 |
-| `semantic`          | Embedding cosine-similarity inference                |
 
 Readers should treat a missing `confidence`, `source`, or `criteria` property
 as `(1.0, "declared", null)` via COALESCE for backwards compatibility.

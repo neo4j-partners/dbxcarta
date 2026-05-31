@@ -59,9 +59,9 @@ class SparkIngestSettings(BaseSettings):
     dbxcarta_layer_map: str = ""
     # Comma-separated list of bare schema names under each ingested catalog.
     # Blank string means "every schema in the catalog". Whitespace around each
-    # name is stripped. FK inference (metadata and semantic) is restricted to
-    # column pairs within the same (catalog, schema), so listing many schemas
-    # produces disjoint subgraphs by design.
+    # name is stripped. Metadata FK inference is restricted to column pairs
+    # within the same (catalog, schema), so listing many schemas produces
+    # disjoint subgraphs by design.
     dbxcarta_schemas: str = ""
     dbxcarta_summary_volume: str
     dbxcarta_summary_table: str
@@ -99,19 +99,6 @@ class SparkIngestSettings(BaseSettings):
     # Re-embedding ledger: skip ai_query for unchanged nodes.
     dbxcarta_ledger_enabled: bool = False
     dbxcarta_ledger_path: str = ""
-    # Semantic FK discovery.
-    # Default False because column embeddings also default off, and semantic
-    # discovery requires them — the cross-field validator below rejects the
-    # incoherent combination. Deployments that want semantic set both
-    # DBXCARTA_INFER_SEMANTIC=true and DBXCARTA_INCLUDE_EMBEDDINGS_COLUMNS=true.
-    dbxcarta_infer_semantic: bool = False
-    dbxcarta_semantic_min_tables: int = 10
-    dbxcarta_semantic_threshold: float = 0.85
-    # Per-source nearest-neighbor fan-out for semantic FK discovery: the
-    # `LIMIT $k` of the per-source vector SEARCH against the key-like target
-    # index. 10 mirrors the plan's "ask for the 10 closest" framing; Phase 6
-    # tunes it against the dense run.
-    dbxcarta_semantic_k: int = 10
     # FK discovery guardrail backstop. 0 (default) means unlimited: the
     # guardrail is disabled and default small-catalog behavior is unchanged.
     # When > 0 and the extracted column count exceeds it, FK discovery is
@@ -235,17 +222,6 @@ class SparkIngestSettings(BaseSettings):
             )
         return v
 
-    @field_validator("dbxcarta_semantic_k")
-    @classmethod
-    def _validate_semantic_k(cls, v: int) -> int:
-        """Reject < 1: the per-source SEARCH must return at least one neighbor."""
-        if v < 1:
-            raise ValueError(
-                "DBXCARTA_SEMANTIC_K must be >= 1"
-                f" (got {v}); it is the per-source vector SEARCH LIMIT"
-            )
-        return v
-
     @field_validator("dbxcarta_embedding_failure_max")
     @classmethod
     def _validate_embedding_failure_max(cls, v: int) -> int:
@@ -280,9 +256,7 @@ class SparkIngestSettings(BaseSettings):
 
         1. Value embeddings require sample-values to be enabled — there are
            no Value nodes to embed otherwise.
-        2. Semantic FK discovery requires column embeddings to be enabled —
-           cosine similarity needs vectors.
-        3. Every dbxcarta_layer_map catalog must be an ingested catalog —
+        2. Every dbxcarta_layer_map catalog must be an ingested catalog —
            a layer mapped to a never-ingested catalog is silently dead
            config (all-null layers) and is almost always a typo.
         """
@@ -293,15 +267,6 @@ class SparkIngestSettings(BaseSettings):
             raise ValueError(
                 "DBXCARTA_INCLUDE_EMBEDDINGS_VALUES=true requires"
                 " DBXCARTA_INCLUDE_VALUES=true (nothing to embed otherwise)"
-            )
-        if (
-            self.dbxcarta_infer_semantic
-            and not self.dbxcarta_include_embeddings_columns
-        ):
-            raise ValueError(
-                "DBXCARTA_INFER_SEMANTIC=true requires"
-                " DBXCARTA_INCLUDE_EMBEDDINGS_COLUMNS=true"
-                " (semantic FK discovery consumes column embeddings)"
             )
         ingested = set(self.resolved_catalogs())
         unknown = sorted(set(self.layer_map()) - ingested)

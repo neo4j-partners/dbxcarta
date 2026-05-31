@@ -212,7 +212,6 @@ class RunSummary:
     extract: ExtractCounts = field(default_factory=ExtractCounts)
     fk_declared: "DeclaredCounters | None" = None
     fk_metadata: "CoarseFKCounts | None" = None
-    fk_semantic: "CoarseFKCounts | None" = None
     sample_values: SampleValueCounts | None = None
     embeddings: EmbeddingCounts = field(default_factory=EmbeddingCounts)
     neo4j_counts: dict[str, int] = field(default_factory=dict)
@@ -242,8 +241,6 @@ class RunSummary:
             out.update(self.fk_declared.as_row_counts())
         if self.fk_metadata is not None:
             out.update(self.fk_metadata.as_summary_dict("fk_inferred_metadata"))
-        if self.fk_semantic is not None:
-            out.update(self.fk_semantic.as_summary_dict("fk_inferred_semantic"))
         if self.sample_values is not None:
             out.update(self.sample_values.as_row_counts())
         if self.fk_skip is not None:

@@ -1,9 +1,9 @@
 """Shared FK-discovery primitives.
 
-Nominal types and helpers used by all three strategies (declared, metadata,
-semantic). Spark Row → dataclass conversion happens exactly once at the
-pipeline edge via the *.from_row classmethods. Dataclass → Spark tuple
-happens exactly once in schema_graph.
+Nominal types and helpers used by the declared and metadata strategies.
+Spark Row → dataclass conversion happens exactly once at the pipeline edge
+via the *.from_row classmethods. Dataclass → Spark tuple happens exactly
+once in schema_graph.
 """
 
 from __future__ import annotations
@@ -207,7 +207,7 @@ def pk_kind(
     _id-suffixed column) so inference still works on catalogs with no declared
     PKs. The fallback collapses into UNIQUE_OR_HEUR rather than a third
     bucket because metadata scoring only distinguishes declared PKs from
-    weaker uniqueness evidence, and semantic scoring only needs a target gate.
+    weaker uniqueness evidence.
     """
     if tgt.column in pk_index.pk_cols.get(tgt.table_key, frozenset()):
         return PKEvidence.DECLARED_PK

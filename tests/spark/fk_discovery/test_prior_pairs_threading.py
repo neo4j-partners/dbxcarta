@@ -1,8 +1,7 @@
 """Prior-edge suppression threaded as DataFrames across the strategies.
 
-Metadata anti-joins the declared-only edge frame; semantic anti-joins the
-declared ∪ metadata union. Both priors are `(source_id, target_id)`
-DataFrames, never collected.
+Metadata anti-joins the declared-only edge frame. The prior is a
+`(source_id, target_id)` DataFrame, never collected.
 """
 
 from __future__ import annotations
@@ -13,7 +12,6 @@ from dbxcarta.spark.ingest.fk.inference import (
     build_columns_frame,
     build_pk_gate,
     infer_metadata_edges,
-    infer_semantic_edges,
 )
 
 _CAT = "main"
@@ -57,21 +55,6 @@ def _constraints_schema():
     ])
 
 
-def _node_schema():
-    from pyspark.sql.types import (
-        ArrayType,
-        DoubleType,
-        StringType,
-        StructField,
-        StructType,
-    )
-
-    return StructType([
-        StructField("id", StringType(), False),
-        StructField("embedding", ArrayType(DoubleType()), True),
-    ])
-
-
 def _columns(spark):
     rows = [
         (_CAT, _SCHEMA, "customers", "id", "BIGINT", None),
@@ -98,34 +81,6 @@ def test_metadata_skips_declared_prior_pair(local_spark) -> None:
     assert _EDGE not in emitted
 
 
-def test_semantic_skips_declared_and_metadata_prior_pairs(local_spark) -> None:
-    """Semantic receives the declared ∪ metadata union and suppresses any
-    pair in it, even at cosine 1.0."""
-    vec = [1.0] + [0.0] * 1023
-    nodes = local_spark.createDataFrame(
-        [
-            (f"{_CAT}.{_SCHEMA}.customers.id", vec),
-            (f"{_CAT}.{_SCHEMA}.orders.customer_id", vec),
-        ],
-        schema=_node_schema(),
-    )
-    cf = build_columns_frame(_columns(local_spark), nodes)
-    pk_gate, _ = build_pk_gate(cf, _constraints(local_spark))
-    prior = local_spark.createDataFrame([_EDGE], schema=["source_id", "target_id"])
-    # NN seam returns the prior pair at perfect score; the anti-join must
-    # still drop it.
-    nn_pairs = local_spark.createDataFrame(
-        [(_EDGE[0], _EDGE[1], 1.0)],
-        schema=["source_id", "target_id", "score"],
-    )
-    edges_df, _counts = infer_semantic_edges(cf, pk_gate, prior, nn_pairs)
-    rows = edges_df.collect()
-    emitted = {(r["source_id"], r["target_id"]) for r in rows}
-    assert _EDGE not in emitted
-    for r in rows:
-        assert r["source"] == EdgeSource.SEMANTIC.value
-
-
 def test_fk_result_releases_cached_inferred_edges(local_spark) -> None:
     from pyspark.sql.types import DoubleType, StringType, StructField, StructType
 
@@ -140,22 +95,14 @@ def test_fk_result_releases_cached_inferred_edges(local_spark) -> None:
         [("s", "t", 0.9, EdgeSource.INFERRED_METADATA.value, None)],
         schema=edge_schema,
     ).cache()
-    semantic_df = local_spark.createDataFrame(
-        [("s2", "t2", 0.9, EdgeSource.SEMANTIC.value, None)],
-        schema=edge_schema,
-    ).cache()
     metadata_df.count()
-    semantic_df.count()
 
     result = FKDiscoveryResult(
         declared_edges_df=None,
         declared_edge_count=0,
         metadata_edges_df=metadata_df,
         metadata_edge_count=1,
-        semantic_edges_df=semantic_df,
-        semantic_edge_count=1,
     )
     result.unpersist_cached()
 
     assert not metadata_df.storageLevel.useMemory
-    assert not semantic_df.storageLevel.useMemory

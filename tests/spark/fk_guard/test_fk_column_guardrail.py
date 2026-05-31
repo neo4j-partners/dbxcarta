@@ -1,10 +1,10 @@
 """Phase 4: FK column-count guardrail backstop.
 
 Exercises `_fk_guardrail_tripped` / `_skipped_result` independently of the
-heavy `run_fk_discovery` path (mirrors the semantic min-catalog gate
-test). Pins: disabled by default, below/above limit behavior, the skip
-recorded on the summary, the all-None result honoring the load-step
-None-edge contract, and the flat `fk_skipped*` keys reaching `row_counts`.
+heavy `run_fk_discovery` path. Pins: disabled by default, below/above
+limit behavior, the skip recorded on the summary, the all-None result
+honoring the load-step None-edge contract, and the flat `fk_skipped*` keys
+reaching `row_counts`.
 """
 
 from __future__ import annotations
@@ -101,6 +101,5 @@ def test_skipped_result_is_all_none_for_the_load_contract() -> None:
     r = _skipped_result()
     assert r.declared_edges_df is None and r.declared_edge_count == 0
     assert r.metadata_edges_df is None and r.metadata_edge_count == 0
-    assert r.semantic_edges_df is None and r.semantic_edge_count == 0
     # Honors the FKDiscoveryResult None-edge contract: unpersist is a no-op.
     r.unpersist_cached()

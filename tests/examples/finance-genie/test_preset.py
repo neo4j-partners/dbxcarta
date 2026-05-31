@@ -60,7 +60,6 @@ def test_env_overlay_validates_against_settings() -> None:
         dbxcarta_include_embeddings_values=True,
         dbxcarta_include_embeddings_schemas=True,
         dbxcarta_include_embeddings_databases=True,
-        dbxcarta_infer_semantic=True,
         dbxcarta_embedding_endpoint=env["DBXCARTA_EMBEDDING_ENDPOINT"],
         dbxcarta_embedding_dimension=int(env["DBXCARTA_EMBEDDING_DIMENSION"]),
         dbxcarta_embedding_failure_max=int(
@@ -85,7 +84,6 @@ def test_env_overlay_pins_known_keys() -> None:
     env = preset.env()
     assert env["DBXCARTA_INJECT_CRITERIA"] == "false"
     assert env["DBXCARTA_CLIENT_ARMS"] == "no_context,schema_dump,graph_rag"
-    assert env["DBXCARTA_INFER_SEMANTIC"] == "true"
     assert env["DBXCARTA_EMBEDDING_FAILURE_MAX"] == "0"
     assert env["DBXCARTA_CLIENT_QUESTIONS"].endswith("/dbxcarta/questions.json")
 

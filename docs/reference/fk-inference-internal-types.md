@@ -18,8 +18,6 @@ Spark DataFrames (information_schema.*)
 │   columns_df      → [ColumnMeta.from_row(r), ...]          │
 │   pk_rows_df      → [ConstraintRow.from_row(r), ...]       │
 │   declared edges  → frozenset[DeclaredPair]                │
-│   column_node_df  → dict[col_id, ColumnEmbedding]          │
-│   value_node_df⋈has_value_df → ValueIndex                  │
 │                                                            │
 │ No dict-key access past this point.                        │
 └────────────────────────────────────────────────────────────┘
@@ -27,11 +25,9 @@ Spark DataFrames (information_schema.*)
         ▼
 ┌────────────────────────────────────────────────────────────┐
 │ ingest.fk.metadata.infer_fk_pairs (Phase 3, pure Python)   │
-│ ingest.fk.semantic.infer_semantic_pairs (Phase 4, pure)    │
 │                                                            │
 │   Attribute access only. Enums for name-match, PK-         │
 │   evidence, rejection-reason, score bucket, edge source.   │
-│   Pure-Python cosine in ingest.fk.semantic.                │
 └────────────────────────────────────────────────────────────┘
         │
         ▼
@@ -73,8 +69,7 @@ packages/dbxcarta-spark/src/dbxcarta/spark/
                              canonicalize, build_id_cols_index, _TYPE_EQUIV
       declared.py            Catalog-declared FK discovery
       metadata.py            Phase 3 metadata inference
-      semantic.py            Phase 4 semantic inference
-      discovery.py           Declared → metadata → semantic FK orchestrator
+      discovery.py           Declared → metadata FK orchestrator
     transform/
       embeddings.py          ai_query transform
       sample_values.py       Distinct-value sampling
@@ -102,12 +97,8 @@ packages/dbxcarta-spark/src/dbxcarta/spark/
 | `RejectionReason` | enum | `ingest.fk.metadata` | Phase 3 rejection tags |
 | `ScoreBucket` | enum | `ingest.fk.metadata` | Phase 3 score buckets |
 | `InferenceCounters` | no | `ingest.fk.metadata` | Phase 3 mutable counter aggregate |
-| `ColumnEmbedding` | yes | `ingest.fk.semantic` | col_id + vector + cached norm |
-| `ValueIndex` | yes | `ingest.fk.semantic` | col_id → frozenset[sampled value-text] |
-| `SemanticRejectionReason` | enum | `ingest.fk.semantic` | Phase 4 rejection tags |
-| `SemanticInferenceCounters` | no | `ingest.fk.semantic` | Phase 4 mutable counter aggregate |
 | `ExtractResult` | no | `ingest.extract` | Raw UC DataFrames post-pull |
-| `FKDiscoveryResult` | no | `ingest.fk.discovery` | Declared, metadata, and semantic DataFrames + counts |
+| `FKDiscoveryResult` | no | `ingest.fk.discovery` | Declared and metadata DataFrames + counts |
 | `ExtractCounts` | no | `ingest.summary` | Per-catalog row counts |
 | `SampleValueCounts` | no | `ingest.summary` | Sample-values stats, flattens to row_counts |
 | `EmbeddingCounts` | no | `ingest.summary` | Per-NodeLabel embedding bookkeeping |
@@ -116,9 +107,7 @@ packages/dbxcarta-spark/src/dbxcarta/spark/
 ## Invariants
 
 - **Counter invariants.** After Phase 3,
-  `fk_metadata.candidates == fk_metadata.accepted + Σ rejections`. After
-  Phase 4, `fk_semantic.considered == fk_semantic.accepted + Σ rejections`.
-  `fk_semantic.value_corroborated` is an independent overlay, not a rejection.
+  `fk_metadata.candidates == fk_metadata.accepted + Σ rejections`.
 
 - **Immutability.** `ColumnMeta`, `ConstraintRow`, `DeclaredPair`, `FKEdge`,
   `PKIndex`, `ColumnEmbedding`, and `ValueIndex` are all
@@ -143,8 +132,6 @@ packages/dbxcarta-spark/src/dbxcarta/spark/
 `Settings.model_validator(mode="after")` rejects known-incoherent
 configurations at construction:
 
-- `DBXCARTA_INFER_SEMANTIC=true` with
-  `DBXCARTA_INCLUDE_EMBEDDINGS_COLUMNS=false`. Phase 4 needs column embeddings.
 - `DBXCARTA_INCLUDE_EMBEDDINGS_VALUES=true` with
   `DBXCARTA_INCLUDE_VALUES=false`. Value embeddings need Value nodes to embed.
 

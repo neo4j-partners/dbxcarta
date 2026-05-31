@@ -2,8 +2,7 @@
 
 `_IDENTIFIER_RE` enforces strict Databricks identifier shape.
 `model_validator(mode="after")` enforces cross-field coherence:
-semantic inference requires column embeddings; value embeddings require
-sample values.
+value embeddings require sample values.
 
 All tests construct Settings with explicit kwargs — no cloud infra, no
 Spark. Validates the boundary itself, not downstream behaviour.
@@ -116,22 +115,6 @@ def test_settings_rejects_unsafe_embedding_endpoint() -> None:
 
 # --- Cross-field validation --------------------------------------------------
 
-def test_settings_rejects_semantic_without_column_embeddings() -> None:
-    """DBXCARTA_INFER_SEMANTIC=true requires DBXCARTA_INCLUDE_EMBEDDINGS_COLUMNS=true.
-
-    Semantic inference needs column embeddings to compute cosine similarity;
-    without them there is nothing to consume. The model_validator raises at
-    Settings construction rather than letting the incoherence surface mid-run.
-    """
-    with pytest.raises(ValidationError, match="DBXCARTA_INFER_SEMANTIC"):
-        SparkIngestSettings(
-            dbxcarta_catalog="main",
-            dbxcarta_infer_semantic=True,
-            dbxcarta_include_embeddings_columns=False,
-            **_BASE_SETTINGS,
-        )
-
-
 def test_settings_rejects_value_embeddings_without_sampling() -> None:
     """DBXCARTA_INCLUDE_EMBEDDINGS_VALUES=true requires DBXCARTA_INCLUDE_VALUES=true.
 
@@ -144,22 +127,8 @@ def test_settings_rejects_value_embeddings_without_sampling() -> None:
             dbxcarta_catalog="main",
             dbxcarta_include_values=False,
             dbxcarta_include_embeddings_values=True,
-            # Semantic off so we only hit the values check.
-            dbxcarta_infer_semantic=False,
             **_BASE_SETTINGS,
         )
-
-
-def test_settings_accepts_semantic_with_column_embeddings() -> None:
-    """The coherent configuration constructs cleanly."""
-    s = SparkIngestSettings(
-        dbxcarta_catalog="main",
-        dbxcarta_infer_semantic=True,
-        dbxcarta_include_embeddings_columns=True,
-        **_BASE_SETTINGS,
-    )
-    assert s.dbxcarta_infer_semantic is True
-    assert s.dbxcarta_include_embeddings_columns is True
 
 
 # --- Multi-catalog list ------------------------------------------------------

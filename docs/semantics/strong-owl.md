@@ -2,6 +2,30 @@
 
 Status: proposal, not yet implemented.
 
+## TLDR
+
+How a common schema gets enforced, in plain terms:
+
+- **One shared shape, written once.** The rules for what a valid graph looks
+  like live in a single SHACL file stored as Turtle (`.ttl`). SHACL is a
+  standard language for "every Table must have a parent, every node must carry a
+  classification, ids must look like `catalog.schema.table`."
+- **The Turtle file is the human-readable contract.** It is vendor-neutral and
+  authored once. Nothing reads it at runtime in the pipeline.
+- **Hand-converted to PyDeequ.** A developer (or AI, as a one-time dev step)
+  translates each SHACL shape into a matching PyDeequ constraint check. PyDeequ
+  is a data-quality library that runs natively inside Spark.
+- **PyDeequ enforces the shape in every batch.** Each pipeline run validates its
+  output against those checks, fully distributed across the cluster, with no
+  `collect` to the driver. Rows that violate the shape are flagged, quarantined,
+  or fail the batch.
+- **A unit test keeps them in sync.** It asserts every SHACL shape has a
+  matching PyDeequ check, so the contract and the enforcement cannot silently
+  drift apart.
+
+So: SHACL in Turtle is the spec, PyDeequ is the distributed enforcement of that
+spec on each batch. There is no SHACL engine running in the pipeline itself.
+
 ## Goal
 
 One vendor-neutral semantic policy artifact, authored once, consulted at two

@@ -34,11 +34,11 @@ The result is a schema subgraph that is genuinely relevant to the question, asse
 
 ### Inferred Foreign Keys
 
-Unity Catalog's `information_schema.table_constraints` contains declared constraints only. Most lakehouses have significant join structure that is never declared: column names follow naming conventions, types align, values overlap, but no `FOREIGN KEY` constraint exists. dbxcarta infers those relationships through two independent phases.
+Unity Catalog's `information_schema.table_constraints` contains declared constraints only. Most lakehouses have significant join structure that is never declared: column names follow naming conventions and types align, but no `FOREIGN KEY` constraint exists. dbxcarta infers those relationships with a metadata phase.
 
-The metadata phase scores candidate pairs on name match (exact versus suffix), type compatibility, and target primary-key evidence. Each accepted pair becomes a `REFERENCES` edge with a confidence between 0.78 and 0.95 and `source="inferred_metadata"`. The semantic phase computes cosine similarity over column embeddings for pairs not covered by the metadata phase, with a value-overlap bonus when source values appear in the target column's samples. Each accepted pair becomes a `REFERENCES` edge with `source="semantic"`.
+The metadata phase scores candidate pairs on name match (exact versus suffix), type compatibility, target primary-key evidence, and comment-token overlap. Each accepted pair becomes a `REFERENCES` edge with a confidence between 0.78 and 0.95 and `source="inferred_metadata"`.
 
-The edge properties matter. A retrieval system can filter on confidence threshold. An evaluation can compare the declared, metadata-inferred, and semantically-inferred edges as separate populations. A debugging session can inspect the literal join predicate stored in `criteria`. None of that is available from a black-box FK inference system.
+The edge properties matter. A retrieval system can filter on confidence threshold. An evaluation can compare the declared and metadata-inferred edges as separate populations. A debugging session can inspect the literal join predicate stored in `criteria`. None of that is available from a black-box FK inference system.
 
 ### The Retrieval Payoff
 
@@ -98,7 +98,7 @@ Pinterest's Analytics Agent (March 2026) operates at a larger scale — 100,000 
 
 Amazon's RASL system uses retrieval-augmented schema linking with vector indexes over schema objects. FalkorDB and several academic papers use knowledge graphs for multi-hop SQL join resolution. None apply GDS algorithms to the schema graph.
 
-A specific search for community detection (Louvain, Leiden) and centrality measures (PageRank, degree) applied to database schemas for text-to-SQL retrieval returned no prior work. The two claims that appear unoccupied in the literature are: (1) using community detection on the inferred FK graph to partition the catalog into subject-area clusters and bound FK traversal to the community of the highest-confidence seed column; and (2) using PageRank or degree centrality as a retrieval prior to promote canonical hub tables — customers, products, accounts — in the seed set. The FK inference pipeline itself, specifically the two-phase approach combining metadata scoring with semantic cosine similarity and value overlap, is more systematic than documented prior work, though FK inference as a category has prior art in database reverse engineering research.
+A specific search for community detection (Louvain, Leiden) and centrality measures (PageRank, degree) applied to database schemas for text-to-SQL retrieval returned no prior work. The two claims that appear unoccupied in the literature are: (1) using community detection on the inferred FK graph to partition the catalog into subject-area clusters and bound FK traversal to the community of the highest-confidence seed column; and (2) using PageRank or degree centrality as a retrieval prior to promote canonical hub tables — customers, products, accounts — in the seed set. The metadata FK inference phase, which scores candidate pairs on name match, type compatibility, and primary-key evidence, is more systematic than documented prior work, though FK inference as a category has prior art in database reverse engineering research.
 
 The novelty claim for dbxcarta is therefore scoped: the knowledge-graph-plus-vector-search foundation has prior art, most directly in CSR-RAG. The differentiating contribution is the GDS layer — community detection and centrality analysis on the inferred FK graph as retrieval signals that vector similarity alone cannot supply.
 

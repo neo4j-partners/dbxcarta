@@ -28,11 +28,9 @@ from dbxcarta.spark.contract import (
 from dbxcarta.spark.ingest.extract import ExtractResult, extract
 from dbxcarta.spark.ingest.fk.discovery import (
     FKDiscoveryResult,
-    key_like_target_ids,
     run_fk_discovery,
 )
 from dbxcarta.spark.ingest.load.neo4j_io import (
-    apply_key_column_labels,
     bootstrap_constraints,
     delete_stale_values,
     query_counts,
@@ -201,23 +199,6 @@ def _run(
 
             extract_result = extract(spark, settings, schema_list, summary)
 
-            # Key-like FK target set, computed before the node-write loop so
-            # each Column slice can carry the contract-1.4 `is_key_like`
-            # boolean (set true for ids in this frame) through the node
-            # write. The :KeyColumn label is then a single scoped server-side
-            # projection of that written property, applied after the loop and
-            # before run_fk_discovery. Only needed when columns are embedded
-            # (semantic FK requires column embeddings); None otherwise leaves
-            # every Column with the default `is_key_like = false` and skips
-            # the relabel pass entirely.
-            keylike_ids = (
-                key_like_target_ids(
-                    spark, settings, schema_list, extract_result,
-                )
-                if settings.dbxcarta_include_embeddings_columns
-                else None
-            )
-
             # Sample distinct values BEFORE the chunk loop so each Value
             # slice can embed+write alongside its Column slice in the same
             # batched pass. Sampling-only now: no Neo4j write or stale purge
@@ -232,7 +213,7 @@ def _run(
             # discovery, MERGE-matching the nodes this loop already wrote.
             _embed_and_write_node_chunks(
                 spark, neo4j, settings, extract_result,
-                ledger_path, transient_root, keylike_ids, summary,
+                ledger_path, transient_root, summary,
                 values.value_node_df if values else None,
             )
             # Schema/Database are per-schema / per-catalog scale, not
@@ -264,22 +245,8 @@ def _run(
             # slot the removed check_thresholds gate used to occupy).
             finalize_embedding_summary(summary)
 
-            # Reconcile the :KeyColumn label from the now-written
-            # contract-1.4 `is_key_like` Column property: one scoped
-            # server-side SET/REMOVE pass over this run's catalogs/schemas.
-            # Runs before run_fk_discovery so the semantic FK same-schema
-            # pre-filter sees the current key-like set, and only when columns
-            # were embedded (keylike_ids drove the property; otherwise every
-            # Column is is_key_like=false and there is nothing to project).
-            if keylike_ids is not None:
-                apply_key_column_labels(
-                    driver,
-                    settings.resolved_catalogs(),
-                    schema_list,
-                )
-
             fk_result = run_fk_discovery(
-                spark, settings, schema_list, extract_result, neo4j, summary,
+                spark, settings, schema_list, extract_result, summary,
             )
 
             _load(neo4j, settings, extract_result, fk_result, values, summary)
@@ -430,7 +397,6 @@ def _write_label_nodes(
     batch_tag: str,
     summary: RunSummary,
     embed_enabled: bool,
-    keylike_ids: "DataFrame | None" = None,
 ) -> None:
     """Write one label's node frame to Neo4j, embedding-once when enabled.
 
@@ -440,20 +406,7 @@ def _write_label_nodes(
     pass, and the transient is deleted as soon as the batch is written. When
     embedding is off, the built frame is projected and written directly.
     `_project` is the fail-closed boundary in both arms.
-
-    `keylike_ids` (only passed for the Column label) is the distinct
-    `col_id` frame of key-like FK targets. When present, the Column frame's
-    contract-1.4 `is_key_like` property is set true for ids in that frame
-    (false otherwise) before the node write, in both the embed and non-embed
-    arms. The `:KeyColumn` label is no longer a connector multi-label write
-    (`MERGE (n:Column:KeyColumn {id})` matches the full label set and
-    collides with the Column.id uniqueness constraint); it is a single
-    scoped server-side projection of this written property, applied once
-    after the chunk loop by `apply_key_column_labels`.
     """
-    if label is NodeLabel.COLUMN:
-        df = _augment_is_key_like(df, keylike_ids)
-
     if embed_enabled:
         with embedded_batch(
             df, label, settings, ledger_path, transient_root, batch_tag, summary,
@@ -463,38 +416,6 @@ def _write_label_nodes(
         write_node(_project(df, label), neo4j, label)
 
 
-def _augment_is_key_like(
-    df: "DataFrame", keylike_ids: "DataFrame | None",
-) -> "DataFrame":
-    """Set the Column `is_key_like` boolean from the key-like FK target set.
-
-    `keylike_ids is None` (columns not embedded, so no key-like set was
-    computed) leaves the builder default `is_key_like = false`. Otherwise the
-    boolean is derived by a broadcast left-join on the distinct key-like
-    `col_id` frame, never a Python UDF (best-practices §7) and never a
-    driver-collected id list (§5). The builder ships a default `is_key_like`
-    column; it is overwritten here so the written value reflects this run's
-    key-like targets and a re-run heals.
-    """
-    from pyspark.sql.functions import broadcast, col, lit
-
-    if keylike_ids is None:
-        return df.withColumn("is_key_like", lit(False))
-
-    flags = (
-        keylike_ids
-        .select(col("col_id").alias("_kl_id"))
-        .distinct()
-        .withColumn("_kl", lit(True))
-    )
-    return (
-        df.drop("is_key_like")
-        .join(broadcast(flags), df["id"] == flags["_kl_id"], "left")
-        .withColumn("is_key_like", col("_kl").isNotNull())
-        .drop("_kl_id", "_kl")
-    )
-
-
 def _embed_and_write_node_chunks(
     spark: "SparkSession",
     neo4j: Neo4jConfig,
@@ -502,7 +423,6 @@ def _embed_and_write_node_chunks(
     extract_result: ExtractResult,
     ledger_path: str,
     transient_root: str,
-    keylike_ids: "DataFrame | None",
     summary: RunSummary,
     value_node_df: "DataFrame | None" = None,
 ) -> None:
@@ -517,10 +437,6 @@ def _embed_and_write_node_chunks(
     embeds once into a transient per-(chunk, label) materialization, gates on
     the per-batch failure count, and writes straight to Neo4j (MERGE on id; a
     re-run heals a partial run).
-
-    `keylike_ids` is threaded to the Column write only: its key-like subset
-    is re-written with the extra `:KeyColumn` label from the same embedded
-    batch, so the dedicated FK-discovery index is filled in this one pass.
 
     `value_node_df` (the un-embedded sampled Value frame, or None when the
     value path is off) is sliced to the same table range and written here so
@@ -579,7 +495,7 @@ def _embed_and_write_node_chunks(
         _write_label_nodes(
             _filter_to_chunk(extract_result.column_node_df, keys, "table"),
             NodeLabel.COLUMN, neo4j, settings, ledger_path, transient_root,
-            tag, summary, column_flag, keylike_ids,
+            tag, summary, column_flag,
         )
         if value_node_df is not None:
             value_slice = _filter_to_chunk(
@@ -654,17 +570,6 @@ def _load(
         )
         write_rel(
             _rel_partition(fk_result.metadata_edges_df, settings.dbxcarta_rel_write_partitions), neo4j,
-            RelType.REFERENCES, NodeLabel.COLUMN, NodeLabel.COLUMN,
-            properties=REFERENCES_PROPERTIES,
-        )
-
-    if fk_result.semantic_edge_count > 0 and fk_result.semantic_edges_df is not None:
-        logger.info(
-            "[dbxcarta] writing relationships: REFERENCES semantic (%d)",
-            fk_result.semantic_edge_count,
-        )
-        write_rel(
-            _rel_partition(fk_result.semantic_edges_df, settings.dbxcarta_rel_write_partitions), neo4j,
             RelType.REFERENCES, NodeLabel.COLUMN, NodeLabel.COLUMN,
             properties=REFERENCES_PROPERTIES,
         )

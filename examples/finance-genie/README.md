@@ -51,7 +51,6 @@ settings = SparkIngestSettings(
     dbxcarta_include_embeddings_values=True,
     dbxcarta_include_embeddings_schemas=True,
     dbxcarta_include_embeddings_databases=True,
-    dbxcarta_infer_semantic=True,
 )
 run_dbxcarta(settings=settings)
 ```
@@ -253,12 +252,12 @@ The local demo allows only `SELECT`, `WITH`, and `EXPLAIN` statements.
 
 ## Preset Defaults
 
-The preset targets the full `graph-enriched-schema`, enables every embedding
-label (tables, columns, values, schemas, databases), and turns on semantic FK
-inference so dbxcarta can recover join paths from Finance Genie column names,
-comments, and embeddings (the Finance Genie tables are not created with
-declared foreign-key constraints). The preset disables criteria injection
-because Finance Genie inferred relationships do not carry literal
+The preset targets the full `graph-enriched-schema` and enables every
+embedding label (tables, columns, values, schemas, databases) for graph-RAG
+retrieval. dbxcarta recovers join paths from Finance Genie column names and
+comments via metadata FK inference (the Finance Genie tables are not created
+with declared foreign-key constraints). The preset disables criteria
+injection because Finance Genie inferred relationships do not carry literal
 join-predicate strings.
 
 For a cheaper first validation run, override the embedding flags in `.env` and
