@@ -190,7 +190,7 @@ Next steps
 
 2. Upload the package and demo questions, then build the Neo4j semantic layer:
 
-   uv run dbxcarta-submit upload --wheel
+   uv run dbxcarta-submit publish-wheels
    uv run dbxcarta-submit upload --data tests/fixtures
    uv run dbxcarta-submit submit-entrypoint ingest
 

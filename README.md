@@ -29,8 +29,9 @@ canonical architecture reference.
 
 ## Packages
 
-dbxcarta is split into separate Spark and client packages. There is no
-top-level `dbxcarta` import surface; consumers import the layer they need.
+dbxcarta is split into three packages: the Spark and client libraries plus
+the operator-local `dbxcarta-submit` CLI. There is no top-level `dbxcarta`
+import surface; library consumers import the layer they need.
 
 | Capability | Distribution | Import path | Console script |
 |------------|--------------|-------------|----------------|
@@ -358,7 +359,7 @@ uv run python scripts/run_demo.py
 Upload the package wheel, upload the demo questions file to the configured UC Volume, then submit the installed wheel's ingest entrypoint.
 
 ```bash
-uv run dbxcarta-submit upload --wheel
+uv run dbxcarta-submit publish-wheels
 uv run dbxcarta-submit upload --data tests/fixtures
 uv run dbxcarta-submit submit-entrypoint ingest
 ```
@@ -509,15 +510,19 @@ The provenance file records:
 
 Treat it as audit evidence for the reviewed artifacts.
 
-**`upload`**
-- `--wheel` — builds the relevant dbxcarta wheel, bumps the patch version, and uploads the wheel to `DATABRICKS_VOLUME_PATH/wheels/`. Re-run whenever `packages/dbxcarta-*/src/` changes.
+**`publish-wheels`**
+
+Builds each dbxcarta wheel, bumps the patch version, uploads the wheels to `DATABRICKS_VOLUME_PATH/wheels/`, and ships the bootstrap script. Re-run whenever `packages/dbxcarta-*/src/` changes.
+
+**`upload`** (generic, passed through to `databricks-job-runner`)
 - `--all` — copies every `scripts/*.py` to the workspace. Re-run whenever `scripts/` changes.
+- `--data DIR` — uploads a data directory to the UC volume.
 
 **`submit <script>`**
 
 The script name is relative to `scripts/`. Scripts named `run_dbxcarta*` auto-attach the latest uploaded wheel. All non-Databricks `.env` variables are forwarded to the job.
 
-Supply-chain note: `upload --wheel` currently combines version bumping, building, and UC Volume upload. For reviewed releases, prefer a CI-built wheel and provenance manifest as the artifact of record. A future hardening step should make Databricks submission select a wheel by explicit version or hash instead of by latest local wheel mtime.
+Supply-chain note: `publish-wheels` currently combines version bumping, building, and UC Volume upload. For reviewed releases, prefer a CI-built wheel and provenance manifest as the artifact of record. A future hardening step should make Databricks submission select a wheel by explicit version or hash instead of by latest local wheel mtime.
 
 - `--upload` — uploads `scripts/*.py` before submitting, replacing a separate `upload --all` step.
 - `--no-wait` — returns immediately with the run ID.

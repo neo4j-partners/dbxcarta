@@ -113,8 +113,9 @@ def test_client_root_does_not_load_spark_modules() -> None:
 
 
 def test_spark_root_does_not_load_client_eval() -> None:
-    # spark.cli imports dbxcarta.client.databricks lazily (inside functions),
-    # so a top-level import of dbxcarta.spark should not pull client modules.
+    # dbxcarta.spark must never reach into the client layer: the eval client
+    # is a downstream consumer, so a top-level import of dbxcarta.spark
+    # should not pull any dbxcarta.client module into sys.modules.
     forbidden = {
         "dbxcarta.client",
     }

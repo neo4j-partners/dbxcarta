@@ -57,7 +57,7 @@ The dependency direction is the whole point.
 
 - **Unknown subcommands on `dbxcarta`.** Today `cli.py` ends by dispatching any unrecognized subcommand to `databricks_job_runner.Runner.main()`. Once the core drops the job runner, the core `dbxcarta` command no longer has that fallback. It must print usage and exit non-zero for anything other than `verify` and `preset`. The new `dbxcarta-submit` command owns the generic pass through to the runner.
 - **The `cli_command` string.** `_RUNNER_KWARGS` sets `cli_command` to `"uv run dbxcarta"`. This feeds runner wiring such as run names. It moves with the submission code and should become `"uv run dbxcarta-submit"`.
-- **The `upload` dispatch guard.** Today `upload` is dispatched only when `--wheel` appears in argv. Confirm whether that guard is still intended or an artifact to drop when the command moves.
+- **The `upload` dispatch guard.** ~~Today `upload` is dispatched only when `--wheel` appears in argv. Confirm whether that guard is still intended or an artifact to drop when the command moves.~~ Resolved: the `--wheel` sentinel was an unparsed argv string that overloaded the runner's own `upload` command. The dbxcarta wheel-publish is now a first-class `dbxcarta-submit publish-wheels` command with its own help; the generic `upload` (file/`--all`/`--data`) passes through to the runner unchanged.
 
 ## Phased implementation approach
 

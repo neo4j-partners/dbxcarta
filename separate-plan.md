@@ -57,9 +57,9 @@ Outcome: all submission logic lives in `dbxcarta-submit` and runs under the new 
 - [x] Point the new command at the generic job-runner pass-through for submit, validate, logs, and clean.
 - [x] Import the env-overlay helpers from core rather than duplicating them.
 - [x] Update the `cli_command` metadata to the new `dbxcarta-submit` command.
-- [x] Resolve the `upload` dispatch: kept the `--wheel` guard (behavior-preserving). Still flagged for the user; not dropped.
+- [x] Resolve the `upload` dispatch: the unparsed `--wheel` sentinel was dropped. The dbxcarta wheel-publish is now its own first-class `publish-wheels` command (discoverable in `--help`, with its own arg parser); the generic `upload` passes through to the runner unchanged. See Phase 7.
 
-Validation: `uv build` and `uv sync` succeed; `dbxcarta-submit --help` lists the generic runner commands; `import dbxcarta.submit.cli` constructs the Runner; mypy clean under the repo's strict config; existing core CLI/closure/boundary tests pass (13 passed).
+Validation: `uv build` and `uv sync` succeed; `dbxcarta-submit --help` lists the dbxcarta and generic runner commands (see Phase 7); `import dbxcarta.submit.cli` constructs the Runner; mypy clean under the repo's strict config; existing core CLI/closure/boundary tests pass (13 passed).
 Notes:
 - Core `cli.py` is intentionally untouched in this phase. The submission code now exists in both places; Phase 3 removes it from core. This keeps Phase 2 in a valid, testable state.
 - Resequenced: the `dbxcarta-submit` console script is registered now rather than in Phase 4, because the phase outcome requires the command to run. Phase 4 still verifies both commands and updates docs.
@@ -115,6 +115,15 @@ Outcome: every path behaves as before, with the job runner absent from core and 
 - [ ] `verify` and `preset` work from the core `dbxcarta` command.
 - [ ] `dbxcarta-submit` submits both the ingest and client entrypoints, and upload publishes both wheels.
 - [ ] An on-cluster ingestion run still succeeds.
+
+### Phase 7 — Post-review CLI hardening (Complete)
+Outcome: `dbxcarta-submit`'s own commands are discoverable and no longer collide with the wrapped runner. Closes review findings #2 (discoverability) and #3 (the `upload --wheel` sentinel), which shared one root cause: dbxcarta's commands were argv-string intercepts bolted onto the runner rather than first-class commands.
+- [x] Rename the wheel-publish from the overloaded `upload --wheel` to a first-class `publish-wheels` command with its own `argparse` (errors on extra args), removing the unparsed `--wheel` sentinel. Generic `upload` (file/`--all`/`--data`) now passes through to the runner cleanly.
+- [x] Add `dbxcarta-submit --help` / no-arg usage that lists the dbxcarta commands (`submit-entrypoint`, `publish-wheels`) and then delegates to the runner's own `--help` so the pass-through command list stays authoritative.
+- [x] Update the live caller `scripts/run_autotest.py` (`upload --wheel` -> `publish-wheels`) and every doc reference (README, examples, fixtures, best-practices, supply-chain).
+- [x] Correct the now-stale rationale comment in `tests/boundary/test_import_boundaries.py` (finding #4): `dbxcarta.spark` never imports `dbxcarta.client` at all after the trim.
+
+Validation: ruff and mypy clean across all three packages; `tests/submit tests/spark/test_cli.py tests/boundary` pass; `dbxcarta-submit --help` lists both command groups and `publish-wheels --help` shows its own usage; repo-wide grep finds no remaining `upload --wheel` outside the historical `docs/proposals/`.
 
 ## Completion criteria
 

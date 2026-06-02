@@ -195,7 +195,7 @@ This uploads the package's `questions.json` to the path named by
 ### 7. Build and upload dbxcarta artifacts
 
 ```bash
-uv run dbxcarta-submit upload --wheel
+uv run dbxcarta-submit publish-wheels
 uv run dbxcarta-submit upload --all
 ```
 

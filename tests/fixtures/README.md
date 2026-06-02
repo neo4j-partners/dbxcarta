@@ -141,7 +141,7 @@ only appear in Neo4j when **both** the source and target schemas are in scope.
 Upload the demo questions file and build the semantic layer:
 
 ```bash
-uv run dbxcarta-submit upload --wheel
+uv run dbxcarta-submit publish-wheels
 uv run dbxcarta-submit upload --data tests/fixtures
 uv run dbxcarta-submit submit-entrypoint ingest
 ```

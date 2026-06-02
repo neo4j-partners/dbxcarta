@@ -159,12 +159,14 @@ def _ingest_runner() -> Runner:
 def main() -> None:
     """Entry point for the operator submission CLI.
 
+    dbxcarta owns two first-class commands; every other command is passed
+    through to ``databricks-job-runner`` (submit, validate, logs, clean,
+    upload, download, catalog, schema, volume).
+
     - `dbxcarta-submit submit-entrypoint {ingest|client}` submits the wheel
       entrypoint.
-    - `dbxcarta-submit upload --wheel` publishes the stable per-package
+    - `dbxcarta-submit publish-wheels` publishes the stable per-package
       wheels and ships the bootstrap script.
-    - All other invocations dispatch to databricks_job_runner.Runner
-      (submit, validate, logs, clean).
     """
     overlay = select_overlay_path()
     runner.env_file = overlay
@@ -172,17 +174,57 @@ def main() -> None:
         # Path only, never resolved values, so no secret reaches logs.
         print(f"dbxcarta-submit: active env overlay: {overlay}", file=sys.stderr)
 
-    if sys.argv[1:2] == ["submit-entrypoint"]:
-        sys.exit(_handle_submit_entrypoint(sys.argv[2:]))
-    if sys.argv[1:2] == ["upload"] and "--wheel" in sys.argv[2:]:
-        sys.exit(_handle_upload())
+    argv = sys.argv[1:]
+    if argv[:1] == ["submit-entrypoint"]:
+        sys.exit(_handle_submit_entrypoint(argv[1:]))
+    if argv[:1] == ["publish-wheels"]:
+        sys.exit(_handle_publish_wheels(argv[1:]))
+    if not argv or argv[0] in ("-h", "--help"):
+        _print_help()
+        sys.exit(0 if argv else 2)
 
+    # Any other command is a generic job-runner command.
     runner.main()
 
 
-def _handle_upload() -> int:
+def _print_help() -> None:
+    """Summarize the dbxcarta commands, then the runner's own help.
+
+    dbxcarta owns ``submit-entrypoint`` and ``publish-wheels``; every other
+    command is the runner's. Delegating to the runner's ``--help`` keeps
+    that list authoritative instead of duplicating (and drifting from) it.
+    """
+    print(
+        "usage: dbxcarta-submit <command> [options]\n"
+        "\n"
+        "dbxcarta operator commands:\n"
+        "  submit-entrypoint {ingest|client}   Submit a wheel entrypoint as a Databricks job.\n"
+        "  publish-wheels                      Publish the ingest and client wheels to the\n"
+        "                                      stable Volume path and ship the bootstrap script.\n"
+        "\n"
+        "Commands passed through to databricks-job-runner:"
+    )
+    try:
+        runner.main(["--help"])
+    except SystemExit:
+        pass
+
+
+def _handle_publish_wheels(argv: list[str]) -> int:
+    import argparse
+
     from databricks_job_runner.errors import RunnerError
     from databricks_job_runner.upload import publish_wheel_stable
+
+    parser = argparse.ArgumentParser(
+        prog="dbxcarta-submit publish-wheels",
+        description=(
+            "Publish a stable wheel for each submit-entrypoint package "
+            "(ingest and client) to the fixed Volume path, then ship the "
+            "runner bootstrap script."
+        ),
+    )
+    parser.parse_args(argv)  # no arguments; errors on anything extra
 
     # Publish a stable wheel for every submit-entrypoint package so both
     # `submit-entrypoint ingest` and `submit-entrypoint client` resolve

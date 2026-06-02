@@ -175,7 +175,7 @@ SCHEMAPILE_QUESTIONS_FILE=examples/schemapile/questions.json \
   uv run dbxcarta preset dbxcarta_schemapile_example:preset --upload-questions
 
 # Build and submit the ingest job.
-uv run dbxcarta-submit upload --wheel
+uv run dbxcarta-submit publish-wheels
 uv run dbxcarta-submit upload --all
 uv run dbxcarta-submit submit-entrypoint ingest --env-file "$OVERLAY"
 uv run dbxcarta verify --env-file "$OVERLAY"

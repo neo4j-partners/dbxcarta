@@ -170,10 +170,10 @@ def run_ingest() -> dict:
 
     ws = _make_ws()
 
-    print("  Uploading wheel...")
-    r = _run(["uv", "run", "dbxcarta-submit", "upload", "--wheel"])
+    print("  Publishing wheels...")
+    r = _run(["uv", "run", "dbxcarta-submit", "publish-wheels"])
     if r.returncode != 0:
-        return {"status": "fail", "error": "wheel upload failed"}
+        return {"status": "fail", "error": "wheel publish failed"}
 
     files_before = set(list_volume_files(ws, summary_volume))
 
