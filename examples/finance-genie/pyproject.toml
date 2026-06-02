@@ -1,6 +1,6 @@
 [project]
 name = "dbxcarta-finance-genie-example"
-version = "0.1.0"
+version = "1.1.0"
 description = "Reference dbxcarta preset for the Finance Genie Lakehouse example"
 authors = [{ name = "Ryan Knight" }]
 requires-python = ">=3.12"

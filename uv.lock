@@ -294,7 +294,7 @@ wheels = [
 
 [[package]]
 name = "dbxcarta-client"
-version = "1.0.0"
+version = "1.1.0"
 source = { editable = "packages/dbxcarta-client" }
 dependencies = [
     { name = "databricks-sdk" },
@@ -324,7 +324,7 @@ provides-extras = ["graph", "test"]
 
 [[package]]
 name = "dbxcarta-dense-schema-example"
-version = "0.1.0"
+version = "1.1.0"
 source = { editable = "examples/dense-schema" }
 dependencies = [
     { name = "databricks-sdk" },
@@ -354,7 +354,7 @@ provides-extras = ["test"]
 
 [[package]]
 name = "dbxcarta-finance-genie-example"
-version = "0.1.0"
+version = "1.1.0"
 source = { editable = "examples/finance-genie" }
 dependencies = [
     { name = "databricks-sdk" },
@@ -380,7 +380,7 @@ provides-extras = ["test"]
 
 [[package]]
 name = "dbxcarta-schemapile-example"
-version = "0.1.0"
+version = "1.1.0"
 source = { editable = "examples/schemapile" }
 dependencies = [
     { name = "databricks-sdk" },
@@ -408,7 +408,7 @@ provides-extras = ["test"]
 
 [[package]]
 name = "dbxcarta-spark"
-version = "1.0.1"
+version = "1.1.0"
 source = { editable = "packages/dbxcarta-spark" }
 dependencies = [
     { name = "databricks-sdk" },
@@ -460,7 +460,7 @@ provides-extras = ["test"]
 
 [[package]]
 name = "dbxcarta-workspace"
-version = "1.0.1"
+version = "1.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "dbxcarta-client" },
