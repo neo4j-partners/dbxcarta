@@ -29,19 +29,22 @@ examples/dense-schema/
 
 Once the one-time setup is in place (example installed, the synthetic
 schema generated and materialized into Unity Catalog, and the question
-set uploaded), the wheel-rebuild-and-submit pipeline is a single make
-target from the repo root:
+set uploaded), the wheel-rebuild-and-submit pipeline runs in two make
+targets from the repo root — ingest first, then the client evaluation
+once ingest finishes:
 
 ```bash
-make e2e-dense-schema
+make e2e-dense-schema-ingest
+make e2e-dense-schema-client
 ```
 
-It rebuilds the wheels from your current source, then submits `ingest`,
-then `client`, so it reflects local edits to the dbxcarta packages on
-every run. The target sets `DBXCARTA_ENV_FILE` to this directory's
+The `-ingest` target rebuilds the wheels from your current source, then
+submits `ingest`; the `-client` target submits `client`, so it reflects
+local edits to the dbxcarta packages on every run. The targets set
+`DBXCARTA_ENV_FILE` to this directory's
 `dbxcarta-overlay.local.env` (the gitignored, local-only overlay) inline
-on each command, so it picks up the right dbxcarta config from any shell.
-`make help` lists the target for every example.
+on each command, so they pick up the right dbxcarta config from any shell.
+`make help` lists the targets for every example.
 
 ## Setup flow
 

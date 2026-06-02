@@ -267,6 +267,67 @@ loader; examples own their concrete preset implementations.
 - `examples/dense-schema/` generates a synthetic 500- or 1000-table single schema for stress testing schema-context retrieval. It shares the same preset pattern and exposes `dbxcarta_dense_schema_example:preset`.
 - `examples/demos/` is reserved for walkthroughs that are not migration-gate consumers.
 
+#### Quick start: run an example
+
+Once an example's one-time setup is in place (see its README), the repo-root
+`Makefile` runs its pipeline in two phases: an `-ingest` target that rebuilds
+the wheels from current source and submits ingest, then a `-client` target that
+submits the client evaluation. Run ingest, let it finish, then run client:
+
+```bash
+# Finance Genie
+make e2e-finance-genie-ingest
+make e2e-finance-genie-client
+
+# SchemaPile
+make e2e-schemapile-ingest
+make e2e-schemapile-client
+
+# Dense schema
+make e2e-dense-schema-ingest
+make e2e-dense-schema-client
+```
+
+Before the first `-ingest` run, each example needs a place to land the wheels,
+the question set, and run artifacts: a Unity Catalog catalog, a bookkeeping
+schema, and a volume. `publish-wheels` and `ingest` assume these already exist
+and fail with `Schema '<catalog>.<schema>' does not exist` if they do not. What
+provisions them differs per example.
+
+- **Finance Genie.** The medallion data catalogs, schemas, and tables come from
+  the upstream Finance Genie project; see step 2 of its README. The ops plane is
+  separate and must exist before ingest: the `dbxcarta-catalog` catalog, the
+  `finance_genie_ops` schema, and the `dbxcarta-ops` volume that hold the run
+  summaries, the generation cache, and the uploaded question set. There is no
+  dbxcarta bootstrap command for this example, so create the ops schema and
+  volume with the generic operator commands if they are not already present:
+  ```bash
+  DBXCARTA_ENV_FILE=examples/finance-genie/dbxcarta-overlay.env \
+    uv run dbxcarta-submit schema create dbxcarta-catalog.finance_genie_ops
+  DBXCARTA_ENV_FILE=examples/finance-genie/dbxcarta-overlay.env \
+    uv run dbxcarta-submit volume create dbxcarta-catalog.finance_genie_ops.dbxcarta-ops
+  ```
+- **SchemaPile.** A dedicated, idempotent bootstrap command creates the catalog,
+  the `_meta` schema, and the `schemapile_volume` volume:
+  ```bash
+  DBXCARTA_ENV_FILE=examples/schemapile/dbxcarta-overlay.env \
+    uv run dbxcarta-schemapile-bootstrap
+  ```
+  This creates `schemapile_lakehouse`, `schemapile_lakehouse._meta`, and
+  `schemapile_lakehouse._meta.schemapile_volume`. Tear the catalog down later
+  with `dbxcarta-schemapile-bootstrap --drop-all --yes-i-mean-it`.
+- **Dense schema.** It writes into the same `schemapile_lakehouse` catalog,
+  `_meta` schema, and `schemapile_volume` volume as SchemaPile and ships no
+  bootstrap command of its own, so run the SchemaPile bootstrap above first.
+  `dbxcarta-dense-materialize` then creates only the synthetic data schemas and
+  tables, not the catalog, the `_meta` schema, or the volume.
+
+Each target sets `DBXCARTA_ENV_FILE` to that example's committed dbxcarta
+overlay inline, so the commands work from the repo root with no per-shell setup.
+`make help` lists every target. The other one-time prerequisites (install the
+example preset, refresh secrets, upload questions, materialize upstream UC
+tables) are in each example README.
+
 ### Preset workflow
 
 1. Install the example package alongside dbxcarta:

@@ -110,19 +110,22 @@ recreates it with the current schema.
 
 Once the one-time prerequisites are in place (steps 1–6 below: preset
 installed, secrets refreshed, questions uploaded, upstream UC tables
-present), the whole pipeline is a single make target from the repo root:
+present), the pipeline runs in two make targets from the repo root —
+ingest first, then the client evaluation once ingest finishes:
 
 ```bash
-make e2e-finance-genie
+make e2e-finance-genie-ingest
+make e2e-finance-genie-client
 ```
 
-It rebuilds the wheels from your current source, then submits `ingest`,
-then `client`, so it reflects local edits to the dbxcarta packages on
-every run. The target sets `DBXCARTA_ENV_FILE` to this directory's
-`dbxcarta-overlay.env` inline on each command, so it picks up the right
-dbxcarta config no matter what shell you run it from. It does **not** use
+The `-ingest` target rebuilds the wheels from your current source, then
+submits `ingest`; the `-client` target submits `client`, so it reflects
+local edits to the dbxcarta packages on every run. The targets set
+`DBXCARTA_ENV_FILE` to this directory's
+`dbxcarta-overlay.env` inline on each command, so they pick up the right
+dbxcarta config no matter what shell you run them from. They do **not** use
 this directory's standalone `./.env` (that file is only for the local
-demo in section 10). `make help` lists the target for every example.
+demo in section 10). `make help` lists the targets for every example.
 
 The sections below are the full first-time setup and the individual
 commands the target wraps.

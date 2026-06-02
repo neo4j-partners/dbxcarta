@@ -48,20 +48,23 @@ benchmark and should not be cited as evidence of absolute correctness.
 Once the one-time setup is in place (steps 1–8 below: example installed,
 catalog bootstrapped, slice/candidates/Delta tables materialized, the
 `DBXCARTA_SCHEMAS` line copied into `dbxcarta-overlay.env`, and the
-question set uploaded), the wheel-rebuild-and-submit half of step 9 is a
-single make target from the repo root:
+question set uploaded), the wheel-rebuild-and-submit half of step 9 runs
+in two make targets from the repo root — ingest first, then the client
+evaluation once ingest finishes:
 
 ```bash
-make e2e-schemapile
+make e2e-schemapile-ingest
+make e2e-schemapile-client
 ```
 
-It rebuilds the wheels from your current source, then submits `ingest`,
-then `client`, so it reflects local edits to the dbxcarta packages on
-every run. The target sets `DBXCARTA_ENV_FILE` to this directory's
-`dbxcarta-overlay.env` inline on each command, so it picks up the right
-dbxcarta config from any shell. It does not use this directory's
+The `-ingest` target rebuilds the wheels from your current source, then
+submits `ingest`; the `-client` target submits `client`, so it reflects
+local edits to the dbxcarta packages on every run. The targets set
+`DBXCARTA_ENV_FILE` to this directory's
+`dbxcarta-overlay.env` inline on each command, so they pick up the right
+dbxcarta config from any shell. They do not use this directory's
 standalone `./.env` (that configures the slice/materialize tooling only).
-`make help` lists the target for every example.
+`make help` lists the targets for every example.
 
 ## Setup flow
 
@@ -208,8 +211,8 @@ uv run dbxcarta-submit submit-entrypoint client
 ```
 
 For the wheel-rebuild-and-submit half of this step on every code change,
-`make e2e-schemapile` from the repo root is the shortcut (see the Quick
-iterate loop section above).
+`make e2e-schemapile-ingest` then `make e2e-schemapile-client` from the
+repo root is the shortcut (see the Quick iterate loop section above).
 
 This overlay is the dbxcarta CLI overlay only. It is distinct from
 `./.env` / `./.env.sample`, which configure the standalone SchemaPile
