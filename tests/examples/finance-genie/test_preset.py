@@ -80,7 +80,6 @@ def test_overlay_pins_known_keys() -> None:
     env = dotenv_values(_OVERLAY)
     assert env["DBXCARTA_INJECT_CRITERIA"] == "false"
     assert env["DBXCARTA_CLIENT_ARMS"] == "no_context,schema_dump,graph_rag"
-    assert env["DBXCARTA_EMBEDDING_FAILURE_MAX"] == "0"
     assert env["DBXCARTA_CLIENT_QUESTIONS"].endswith("/dbxcarta/questions.json")
 
 

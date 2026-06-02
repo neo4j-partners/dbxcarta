@@ -29,7 +29,23 @@ dependency is satisfied.
 - [x] **Preset** — readiness queries the data catalog, not `schemapile_lakehouse`.
 - [x] **Docs** — README rewritten for the standalone-catalog, split-plane design.
 - [x] **Tests** — config, materialize, and preset coverage added.
-- [x] **Validation** — ruff, mypy, full suite, and both dry-runs green.
+- [x] **Validation** — ruff, full suite (497 passed), and both dry-runs green.
+
+### Implementation notes
+
+- **Preset catalog.** The plan proposed reading the preset catalog from
+  `DBXCARTA_CATALOG`. Implemented instead as a hardcoded
+  `_DEFAULT_CATALOG = "dense-schema_example"`, mirroring schemapile's preset,
+  which deliberately keeps the default off the environment so module-level
+  construction of the `preset` singleton at import time does not depend on env
+  load order. Net effect is the same: readiness queries the data catalog.
+- **`SCHEMAPILE_META_SCHEMA` / `SCHEMAPILE_VOLUME` kept** as the in-catalog
+  fallback inputs for `volume_path`, matching schemapile, rather than dropped.
+- **Config blocklist** now also refuses `dbxcarta-catalog` as a data catalog, so
+  `DBXCARTA_CATALOG` can never be set to the shared ops catalog.
+- **Pre-existing mypy gaps.** `materialize.py`'s `_execute` has two pre-existing
+  mypy findings (untyped params, `get_statement` arg type) unrelated to this
+  change. Left as-is to stay in scope.
 
 ## Why this is needed
 

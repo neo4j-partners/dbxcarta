@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sys
+
 import pytest
 
 from dbxcarta_dense_schema_example.preset import DenseSchemaPreset, preset
@@ -21,9 +23,10 @@ def test_readiness_queries_the_data_catalog(monkeypatch: pytest.MonkeyPatch) -> 
         captured["catalog"] = catalog
         return ["dense_1000"]
 
-    monkeypatch.setattr(
-        "dbxcarta_dense_schema_example.preset._fetch_schema_names", fake_fetch
-    )
+    # The package re-exports the `preset` instance, which shadows the module
+    # for monkeypatch's dotted-string form, so patch the module object directly.
+    preset_module = sys.modules[DenseSchemaPreset.__module__]
+    monkeypatch.setattr(preset_module, "_fetch_schema_names", fake_fetch)
     monkeypatch.setenv("DBXCARTA_SCHEMAS", "dense_1000")
 
     report = preset.readiness(ws=None, warehouse_id="wh")  # type: ignore[arg-type]

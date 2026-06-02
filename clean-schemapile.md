@@ -1,10 +1,25 @@
 # Plan: separate SchemaPile's ops plane from its data plane
 
-## Status: COMPLETE
+## Status: COMPLETE (reviewed + cleaned)
 
-Implemented in one pass. Full suite green (488 passed, 1 skipped). Two design
-gaps surfaced during implementation and were resolved (both confirmed with the
-user / entailed by the agreed design):
+Implemented in one pass, then reviewed at high effort and cleaned up. The
+schemapile + submit scope is fully green (93 tests). Post-review cleanup:
+
+- **Removed all backward-compat safety nets.** `config.volume_path` is now
+  required from `DATABRICKS_VOLUME_PATH` with no in-catalog fallback; the
+  vestigial `meta_schema`/`volume` fields and their `SCHEMAPILE_*` env reads are
+  gone. A missing volume path now fails loudly instead of routing ops into the
+  data catalog.
+- **Hardened `materialize._execute`.** It delegated DDL to a fire-and-forget
+  call that never checked the result, so a FAILED statement was counted as a
+  successful materialization. It now delegates to `dbxcarta.client.executor.
+  execute_ddl` (already an example dependency) and raises on any non-success.
+- **Teardown reports per-target.** The drop loop now prints each dropped target
+  and, on a mid-list failure, names the failing target. Re-running is safe since
+  every drop is `IF EXISTS`.
+
+Two design gaps surfaced during implementation and were resolved (both confirmed
+with the user / entailed by the agreed design):
 
 - **Preset readiness** keyed off `DBXCARTA_SCHEMAS`, so a blank list made
   `--check-ready` always fail. Reworked `readiness()` to query the catalog for

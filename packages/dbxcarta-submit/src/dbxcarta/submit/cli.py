@@ -417,12 +417,19 @@ def _handle_teardown(argv: list[str]) -> int:
             args.warehouse_id, operation="teardown"
         )
         ws = build_workspace_client()
-        for target in targets:
-            drop_teardown_target(ws, warehouse_id, target)
-    except (ValueError, RuntimeError) as exc:
+    except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
-    print(f"[teardown] dropped {described}", file=sys.stderr)
+
+    # Drop each target in its own try so a mid-list failure reports which
+    # targets already dropped. Re-running is safe: every drop is IF EXISTS.
+    for target in targets:
+        try:
+            drop_teardown_target(ws, warehouse_id, target)
+        except (ValueError, RuntimeError) as exc:
+            print(f"error: dropping {target.describe()} failed: {exc}", file=sys.stderr)
+            return 2
+        print(f"[teardown] dropped {target.describe()}", file=sys.stderr)
     return 0
 
 
