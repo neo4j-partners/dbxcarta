@@ -26,6 +26,7 @@ jobs:
             tests: tests/spark
           - layer: client
             package: dbxcarta-client
+            extras: graph
             tests: tests/client
           - layer: submit
             package: dbxcarta-submit
@@ -70,6 +71,7 @@ jobs:
         run: |
           args="--package ${{ matrix.package }}"
           [[ -n "${{ matrix.extra_package }}" ]] && args="$args --package ${{ matrix.extra_package }}"
+          [[ -n "${{ matrix.extras }}" ]] && args="$args --extra ${{ matrix.extras }}"
           uv sync --frozen $args --extra test --no-default-groups
 
       - name: Run layer tests

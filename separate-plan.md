@@ -122,8 +122,9 @@ Outcome: `dbxcarta-submit`'s own commands are discoverable and no longer collide
 - [x] Add `dbxcarta-submit --help` / no-arg usage that lists the dbxcarta commands (`submit-entrypoint`, `publish-wheels`) and then delegates to the runner's own `--help` so the pass-through command list stays authoritative.
 - [x] Update the live caller `scripts/run_autotest.py` (`upload --wheel` -> `publish-wheels`) and every doc reference (README, examples, fixtures, best-practices, supply-chain).
 - [x] Correct the now-stale rationale comment in `tests/boundary/test_import_boundaries.py` (finding #4): `dbxcarta.spark` never imports `dbxcarta.client` at all after the trim.
+- [x] Update the stale pre-split command forms in the proposals (`docs/proposals/tuning.md`, `docs/proposals/fix-zombines-v4.md`): `dbxcarta build && dbxcarta upload` -> `dbxcarta-submit publish-wheels`, and `dbxcarta submit-entrypoint` -> `dbxcarta-submit submit-entrypoint`.
 
-Validation: ruff and mypy clean across all three packages; `tests/submit tests/spark/test_cli.py tests/boundary` pass; `dbxcarta-submit --help` lists both command groups and `publish-wheels --help` shows its own usage; repo-wide grep finds no remaining `upload --wheel` outside the historical `docs/proposals/`.
+Validation: ruff and mypy clean across all three packages; `tests/submit tests/spark/test_cli.py tests/boundary` pass; `dbxcarta-submit --help` lists both command groups and `publish-wheels --help` shows its own usage; repo-wide grep finds no remaining runnable `upload --wheel` or pre-split `dbxcarta <submission-verb>` command anywhere.
 
 ## Completion criteria
 
