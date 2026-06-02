@@ -66,24 +66,48 @@ Notes:
 - The TYPE_CHECKING block from core (`WorkspaceClient`, `Driver`, `SparkIngestSettings`) was not carried over; the submission module does not use those types.
 - `_DBR_PROVIDED_PACKAGES` is referenced by `tests/spark/test_cli_closure.py`, so it is part of the closure surface and moves with the submission code in Phase 5.
 
-### Phase 3 — Trim the core (Pending)
+### Phase 3 — Trim the core (Complete, reviewed)
 Outcome: core builds with no reference to the job runner anywhere in its closure.
-- [ ] Reduce the core `dbxcarta` command to `verify` and `preset` only.
-- [ ] Replace the old runner fallback with a usage message and non-zero exit for any other subcommand.
-- [ ] Remove the job runner from the core package's dependencies.
-- [ ] Confirm the core builds and installs with no job runner present.
+- [x] Reduce the core `dbxcarta` command to `verify` and `preset` only.
+- [x] Replace the old runner fallback with a usage message and non-zero exit for any other subcommand.
+- [x] Remove the job runner from the core package's dependencies.
+- [x] Confirm the core builds and installs with no job runner present.
 
-### Phase 4 — Wire commands and update docs (Pending)
+Validation: the rebuilt `dbxcarta-spark` wheel's `Requires-Dist` no longer lists `databricks-job-runner`; `uv tree` shows the job runner absent from both the core and client resolved closures; mypy clean across `dbxcarta.spark`, `dbxcarta.client`, and `dbxcarta.submit`; `dbxcarta` with no args and with an unknown command prints usage and exits 2; `dbxcarta verify --help` and `dbxcarta preset` still dispatch; the import-boundary tests pass.
+Notes:
+- Also removed two pre-existing dead imports surfaced by the trim: `from pathlib import Path` (never used) and `TypedDict` (only used by the moved `_RunnerKwargs`).
+- The overlay banner is kept for verify/preset but no longer sets `runner.env_file`, since the runner is gone.
+- Expected, deferred breakage: `tests/presets/test_cli.py` and `tests/spark/test_cli_closure.py` are entirely submission tests that import moved symbols from `dbxcarta.spark.cli`. They fail until Phase 5 repoints them at `dbxcarta.submit.cli`.
+
+### Phase 4 — Wire commands and update docs (Complete, reviewed)
 Outcome: each command resolves to the right package and the guidance reflects the split.
-- [ ] Register the console scripts so `dbxcarta` lands in core and `dbxcarta-submit` lands in the new package.
-- [ ] Update the env-overlay documentation and any references that assume one package.
-- [ ] Update the project guidance files that describe how to run ingestion and how to submit jobs, including CLAUDE.md.
+- [x] Register the console scripts so `dbxcarta` lands in core and `dbxcarta-submit` lands in the new package (verified both resolve; `dbxcarta-ingest` on-cluster script untouched).
+- [x] Update the env-overlay documentation and any references that assume one package.
+- [x] Update the project guidance files that describe how to run ingestion and how to submit jobs.
 
-### Phase 5 — Move and update tests (Pending)
+Validation: ruff (`uvx ruff check .`) and mypy (all three packages) clean; `dbxcarta` shows the verify/preset usage; `dbxcarta-submit --help` lists the submission and generic-runner commands; a repo-wide grep confirms no remaining `dbxcarta <submission-cmd>` references outside the deliberately-deferred proposals.
+Files changed (command rename `dbxcarta` -> `dbxcarta-submit` for upload/submit-entrypoint/generic-runner commands only; `verify`/`preset` left on `dbxcarta`):
+- Executable: `scripts/run_autotest.py` (the real break the review caught), `scripts/run_demo.py` help text, `scripts/run_spike_ai_query.py` docstring, `packages/dbxcarta-client/.../eval/run.py` help string.
+- Docs: `README.md`, `examples/{dense-schema,finance-genie,schemapile}/README.md`, `tests/fixtures/README.md`, `docs/reference/best-practices.md`, `docs/security/supply-chain.md`.
+- CI: `.github/workflows/supply-chain.yml` mypy step gains `-p dbxcarta.submit`.
+Scoping decisions:
+- `docs/proposals/*` (`fix-zombines-v4.md`, `tuning.md`, `env-layering.md`) left unchanged: they are historical design records, and rewriting their internal narratives would misrepresent what was true when written.
+- Project `CLAUDE.md` needed no command edits: it has no `submit-entrypoint`/`upload` references, and its generic `uv run dbxcarta <cmd> --env-file` env example still holds for verify/preset.
+- The CI test matrix still has no `submit` layer and `uv run pytest` will be red until Phase 5 repoints the two moved submission test files. Adding a `submit` matrix layer is Phase 5 work, since it depends on where those tests land.
+
+### Phase 5 — Move and update tests (Complete, reviewed)
 Outcome: tests live with the code they cover and the separation is guarded.
-- [ ] Move the submission tests (entrypoint table, upload, submit-entrypoint) into `dbxcarta-submit`.
-- [ ] Keep the verify and preset tests in core.
-- [ ] Add a dependency-closure test that fails if the job runner re-enters the core or client closure.
+- [x] Move `tests/spark/test_cli_closure.py` and the submission half of `tests/presets/test_cli.py` into `tests/submit/`, repointing their imports from `dbxcarta.spark.cli` to `dbxcarta.submit.cli`.
+- [x] Keep the verify/preset core test in core: `test_build_neo4j_driver_raises_on_missing_secret` exercises `dbxcarta.spark.cli._build_neo4j_driver` (the verify path), so it stays on `dbxcarta.spark.cli` and moved to `tests/spark/test_cli.py`. No dedicated `preset`-command test exists today; that is a pre-existing coverage gap, not introduced here.
+- [x] Add a dependency-closure test in `tests/boundary/test_import_boundaries.py`: `test_layer_root_does_not_load_job_runner` asserts importing `dbxcarta.spark`/`dbxcarta.client` never loads `databricks_job_runner`, and `test_distribution_does_not_require_job_runner` asserts it is absent from each one's `Requires-Dist` (via `importlib.metadata.requires`).
+- [x] Update the CI mypy invocation to add `-p dbxcarta.submit` (already landed in Phase 4, line 115 of `supply-chain.yml`; confirmed).
+
+Validation: `uv run pytest tests/submit tests/spark/test_cli.py tests/boundary` -> 17 passed; full `uv run pytest` no longer errors at collection (the remaining local failures are a `sparkDriver` `BindException` from the `local_spark` fixture on this machine, an environment limit unrelated to the split — those tests run in CI with Java/network); mypy clean across all three packages; ruff clean.
+Notes:
+- `tests/presets/test_cli.py` was not a clean wholesale move. The file was misnamed (its docstring read "dbxcarta CLI guardrails", not presets) and mixed five submission tests with one verify-path test. It was split rather than moved, and the now-empty `tests/presets/` directory was removed.
+- CI test matrix: the `presets` layer (which ran the now-deleted `tests/presets`) is replaced by a `submit` layer (`package: dbxcarta-submit`, `tests: tests/submit`). Syncing `dbxcarta-submit` pulls the core and the job runner the submission tests need.
+- `tests/submit/test_cli.py` and `tests/spark/test_cli.py` share a basename; `--import-mode=importlib` (already configured) collects both without an `__init__.py`, matching the existing convention for `tests/spark` and `tests/boundary`.
+- The submission `_RunnerStub.cli_command` was corrected to `"uv run dbxcarta-submit"` to match the renamed command.
 
 ### Phase 6 — Verify end to end (Pending)
 Outcome: every path behaves as before, with the job runner absent from core and client.

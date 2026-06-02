@@ -36,11 +36,13 @@ top-level `dbxcarta` import surface; consumers import the layer they need.
 |------------|--------------|-------------|----------------|
 | Databricks Spark ingest, graph contract, IDs, validators, verification, preset runner | `dbxcarta-spark` | `dbxcarta.spark` | `dbxcarta`, `dbxcarta-ingest` |
 | Retrieval runtime and Text2SQL eval harness | `dbxcarta-client` | `dbxcarta.client` | `dbxcarta-client`, `dbxcarta-embed-probe` |
+| Operator CLI to build, upload, and submit Databricks jobs | `dbxcarta-submit` | `dbxcarta.submit` | `dbxcarta-submit` |
 
 **Layer responsibilities:**
 
-- **Spark** owns the concrete Unity Catalog ingest implementation, the graph contract, verification, Databricks validators, preset capability protocols, and the operational CLI.
+- **Spark** owns the concrete Unity Catalog ingest implementation, the graph contract, verification, Databricks validators, preset capability protocols, and the `dbxcarta` domain CLI for verify and preset.
 - **Client** owns retrieval primitives and the Text2SQL eval harness.
+- **Submit** owns the operator CLI that builds, uploads, and submits Databricks jobs. It is the only layer that depends on `databricks-job-runner`, runs on the operator's machine, and is never installed on the cluster.
 
 This repository uses a clean boundary cutover. Old top-level imports are deleted
 instead of re-exported; see [Migration notes](#migration-notes).
@@ -49,7 +51,8 @@ instead of re-exported; see [Migration notes](#migration-notes).
 
 The Spark package owns the concrete Unity Catalog ingest implementation, the
 graph contract, verification, Databricks validators, the preset capability
-protocols, and the operational CLI. It builds the Neo4j semantic layer.
+protocols, and the `dbxcarta` domain CLI for verify and preset. It builds the
+Neo4j semantic layer.
 
 **What the build pipeline does:**
 
@@ -144,7 +147,7 @@ The no-argument form, `run_dbxcarta()`, is the Databricks wheel entrypoint. It l
 
 Everything runs inside Databricks: no external orchestrators, no local execution, no service accounts.
 
-- **Single submission:** one installed wheel entrypoint (`dbxcarta-ingest`, submitted with `dbxcarta submit-entrypoint ingest`) drives the whole pipeline in one Databricks Job. Scope is controlled by per-label embedding flags in `.env`.
+- **Single submission:** one installed wheel entrypoint (`dbxcarta-ingest`, submitted with `dbxcarta-submit submit-entrypoint ingest`) drives the whole pipeline in one Databricks Job. Scope is controlled by per-label embedding flags in `.env`.
 - **Spark:** extraction and transformation use PySpark DataFrames, so the pipeline scales to large catalogs without single-process bottlenecks.
 - **Model Serving:** embeddings are generated in Spark via `ai_query` against a Databricks-hosted foundation model endpoint (`databricks-gte-large-en` by default), with `failOnError => false` so row-level failures are counted rather than thrown.
 - **Materialize-once:** enriched node DataFrames are written to a Delta staging table between transform and load, so the failure-rate aggregation and the Neo4j write both consume the staged rows without re-invoking `ai_query`.
@@ -153,7 +156,6 @@ Everything runs inside Databricks: no external orchestrators, no local execution
 - **Secrets:** Neo4j credentials live in a Databricks secret scope and are injected at job time, not read from a local file.
 - **Metadata source:** Unity Catalog `information_schema` only; no pluggable multi-source connector layer.
 - **Run observability:** every run emits a `RunSummary` to stdout, a timestamped JSON file in a UC Volume, and a row appended to a Delta table so history is queryable via SQL. The summary records per-label embedding attempts, successes, and failure rates alongside the threshold and the endpoint used.
-- **`databricks-job-runner`:** CLI wrapper around the Databricks SDK that handles upload, submit, and cleanup.
 
 See `docs/reference/best-practices.md` for the design rules (Spark / Databricks, Neo4j Spark Connector, project-level principles) that shape the pipeline.
 
@@ -327,8 +329,8 @@ Open `.env` and replace the placeholders. Keep the demo defaults already organiz
 Use an existing UC catalog, schema, and volume, or create them if your principal has permission:
 
 ```bash
-uv run dbxcarta schema create <catalog>.<schema>
-uv run dbxcarta volume create <catalog>.<schema>.<volume>
+uv run dbxcarta-submit schema create <catalog>.<schema>
+uv run dbxcarta-submit volume create <catalog>.<schema>.<volume>
 ```
 
 Create the Neo4j secrets in Databricks. These keys are read from the secret scope at job runtime.
@@ -356,9 +358,9 @@ uv run python scripts/run_demo.py
 Upload the package wheel, upload the demo questions file to the configured UC Volume, then submit the installed wheel's ingest entrypoint.
 
 ```bash
-uv run dbxcarta upload --wheel
-uv run dbxcarta upload --data tests/fixtures
-uv run dbxcarta submit-entrypoint ingest
+uv run dbxcarta-submit upload --wheel
+uv run dbxcarta-submit upload --data tests/fixtures
+uv run dbxcarta-submit submit-entrypoint ingest
 ```
 
 The ingest run should finish with `status=success`. It:
@@ -378,13 +380,13 @@ The demo client:
 - Writes a client run summary
 
 ```bash
-uv run dbxcarta submit-entrypoint client
+uv run dbxcarta-submit submit-entrypoint client
 ```
 
 Check the job output for per-arm `executed` and `non_empty` rates:
 
 ```bash
-uv run dbxcarta logs <run_id>
+uv run dbxcarta-submit logs <run_id>
 ```
 
 ### 5. Verify and clean up
@@ -481,6 +483,8 @@ The fixture covers all the structural edge cases:
 
 ## Upload and submit
 
+These operator commands are provided by the `dbxcarta-submit` package, a thin CLI wrapper around `databricks-job-runner` that handles upload, submit, and cleanup. It depends on `dbxcarta-spark`, runs on the operator's machine, and is never installed on the cluster. The `dbxcarta-spark` and `dbxcarta-client` packages do not depend on the job runner.
+
 ### Supply-chain checks
 
 Run the local supply-chain checks before submitting a changed package to Databricks:
@@ -539,7 +543,8 @@ External projects depend on the distribution that matches the capability they us
 - **Client:** retrieval primitives, SQL parsing and read-only guards, result comparison, `ClientSettings`, and the `dbxcarta.client.eval` harness
 
 The `dbxcarta` and `dbxcarta-ingest` commands are registered by
-`dbxcarta-spark`; `dbxcarta-client` is registered by `dbxcarta-client`.
+`dbxcarta-spark`, `dbxcarta-client` by `dbxcarta-client`, and
+`dbxcarta-submit` by `dbxcarta-submit`.
 
 Removing or renaming a public name above is a breaking change. Adding a new name is additive. Implementation modules below a layer remain internal unless documented here.
 

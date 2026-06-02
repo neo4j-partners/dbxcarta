@@ -175,13 +175,13 @@ SCHEMAPILE_QUESTIONS_FILE=examples/schemapile/questions.json \
   uv run dbxcarta preset dbxcarta_schemapile_example:preset --upload-questions
 
 # Build and submit the ingest job.
-uv run dbxcarta upload --wheel
-uv run dbxcarta upload --all
-uv run dbxcarta submit-entrypoint ingest --env-file "$OVERLAY"
+uv run dbxcarta-submit upload --wheel
+uv run dbxcarta-submit upload --all
+uv run dbxcarta-submit submit-entrypoint ingest --env-file "$OVERLAY"
 uv run dbxcarta verify --env-file "$OVERLAY"
 
 # Run the client evaluation arms.
-uv run dbxcarta submit-entrypoint client --env-file "$OVERLAY"
+uv run dbxcarta-submit submit-entrypoint client --env-file "$OVERLAY"
 ```
 
 This overlay is the dbxcarta CLI overlay only. It is distinct from

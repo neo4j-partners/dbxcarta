@@ -171,7 +171,7 @@ def run_ingest() -> dict:
     ws = _make_ws()
 
     print("  Uploading wheel...")
-    r = _run(["uv", "run", "dbxcarta", "upload", "--wheel"])
+    r = _run(["uv", "run", "dbxcarta-submit", "upload", "--wheel"])
     if r.returncode != 0:
         return {"status": "fail", "error": "wheel upload failed"}
 
@@ -180,7 +180,7 @@ def run_ingest() -> dict:
     print("  Submitting pipeline run...")
     schemas_val = ",".join(FIXTURE_SCHEMAS)
     r = _run(
-        ["uv", "run", "dbxcarta", "submit-entrypoint", "ingest"],
+        ["uv", "run", "dbxcarta-submit", "submit-entrypoint", "ingest"],
         env_overrides={"DBXCARTA_SCHEMAS": schemas_val},
     )
     if r.returncode != 0:

@@ -195,11 +195,11 @@ This uploads the package's `questions.json` to the path named by
 ### 7. Build and upload dbxcarta artifacts
 
 ```bash
-uv run dbxcarta upload --wheel
-uv run dbxcarta upload --all
+uv run dbxcarta-submit upload --wheel
+uv run dbxcarta-submit upload --all
 ```
 
-> Every `dbxcarta` command in steps 6–9 reads the overlay from the
+> Every `dbxcarta` and `dbxcarta-submit` command in steps 6–9 reads the overlay from the
 > `DBXCARTA_ENV_FILE` you exported in step 3. If you skipped that,
 > export it now:
 > `export DBXCARTA_ENV_FILE=examples/finance-genie/dbxcarta-overlay.env`.
@@ -209,7 +209,7 @@ uv run dbxcarta upload --all
 Submit the installed wheel's ingest entrypoint:
 
 ```bash
-uv run dbxcarta submit-entrypoint ingest
+uv run dbxcarta-submit submit-entrypoint ingest
 ```
 
 Verify the result:
@@ -221,7 +221,7 @@ uv run dbxcarta verify
 ### 9. Run the client evaluation
 
 ```bash
-uv run dbxcarta submit-entrypoint client
+uv run dbxcarta-submit submit-entrypoint client
 ```
 
 ### 10. Run the local CLI demo

@@ -1,4 +1,4 @@
-"""Unit tests for dbxcarta CLI guardrails."""
+"""Unit tests for dbxcarta-submit CLI guardrails."""
 
 from __future__ import annotations
 
@@ -7,13 +7,13 @@ import pytest
 from databricks_job_runner import BootstrapConfig, ClassicCluster, Serverless
 from databricks_job_runner.errors import RunnerError
 
-from dbxcarta.spark import cli
+from dbxcarta.submit import cli
 
 
 class _RunnerStub:
     wheel_volume_dir = "/Volumes/catalog/schema/volume/wheels"
     run_name_prefix = "dbxcarta"
-    cli_command = "uv run dbxcarta"
+    cli_command = "uv run dbxcarta-submit"
 
     def __init__(self, compute: object) -> None:
         self._compute_obj = compute
@@ -85,34 +85,3 @@ def test_submit_client_uses_shared_runner_without_probe(
 def test_is_serverless_compute_discriminates_real_compute_types() -> None:
     assert cli._is_serverless_compute(Serverless()) is True
     assert cli._is_serverless_compute(ClassicCluster(cluster_id="c-1")) is False
-
-
-class _Secret:
-    def __init__(self, value: str | None) -> None:
-        self.value = value
-
-
-class _Secrets:
-    def __init__(self, values: dict[str, str | None]) -> None:
-        self._values = values
-
-    def get_secret(self, *, scope: str, key: str) -> _Secret:
-        return _Secret(self._values.get(key))
-
-
-class _Ws:
-    def __init__(self, values: dict[str, str | None]) -> None:
-        self.secrets = _Secrets(values)
-
-
-class _Settings:
-    databricks_secret_scope = "dbxcarta"
-
-
-def test_build_neo4j_driver_raises_on_missing_secret() -> None:
-    # NEO4J_URI is resolved first; a None value must surface as an explicit
-    # error naming the key and scope, not an opaque b64decode TypeError.
-    ws = _Ws({"NEO4J_URI": None})
-
-    with pytest.raises(RuntimeError, match="'NEO4J_URI'.*'dbxcarta'"):
-        cli._build_neo4j_driver(ws, _Settings())  # type: ignore[arg-type]

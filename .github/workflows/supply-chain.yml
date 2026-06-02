@@ -27,9 +27,9 @@ jobs:
           - layer: client
             package: dbxcarta-client
             tests: tests/client
-          - layer: presets
-            package: dbxcarta-spark
-            tests: tests/presets
+          - layer: submit
+            package: dbxcarta-submit
+            tests: tests/submit
           - layer: boundary
             package: dbxcarta-spark
             extra_package: dbxcarta-client
@@ -112,7 +112,7 @@ jobs:
         run: uv run pytest
 
       - name: Type check
-        run: uv run mypy -p dbxcarta.spark -p dbxcarta.client
+        run: uv run mypy -p dbxcarta.spark -p dbxcarta.client -p dbxcarta.submit
 
       - name: Lint
         run: uvx ruff check .

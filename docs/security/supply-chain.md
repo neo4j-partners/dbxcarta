@@ -31,7 +31,7 @@ The recommended next hardening step is a UC Volume wheelhouse generated from
 the reviewed lockfile, with Databricks jobs installing from that wheelhouse
 instead of resolving directly from public PyPI.
 
-The current `dbxcarta upload --wheel` flow is convenient but not ideal for
+The current `dbxcarta-submit upload --wheel` flow is convenient but not ideal for
 release control because it bumps the version, builds the wheel, and uploads it
 in one operation. Reviewed release flows should keep build evidence from CI and
 eventually submit Databricks jobs by explicit artifact version or hash.
