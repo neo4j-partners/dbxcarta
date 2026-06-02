@@ -17,6 +17,7 @@ from dbxcarta.spark.settings import SparkIngestSettings
 
 
 _BASE_SETTINGS = {
+    "databricks_secret_scope": "dbxcarta-neo4j-test",
     "dbxcarta_summary_volume": "/Volumes/cat/schema/vol/dbxcarta",
     "dbxcarta_summary_table": "cat.schema.table",
 }
@@ -49,6 +50,7 @@ def test_settings_accepts_strict_catalog(good_catalog: str) -> None:
 
 def test_settings_accepts_three_part_summary_table() -> None:
     s = SparkIngestSettings(
+        databricks_secret_scope=_BASE_SETTINGS["databricks_secret_scope"],
         dbxcarta_catalog="main",
         dbxcarta_summary_volume=_BASE_SETTINGS["dbxcarta_summary_volume"],
         dbxcarta_summary_table="cat.schema.table",

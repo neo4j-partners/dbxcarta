@@ -24,7 +24,10 @@ class ClientSettings(BaseSettings):
     dbxcarta_catalogs: str = ""
     dbxcarta_schemas: str = ""
     databricks_warehouse_id: str
-    databricks_secret_scope: str = "dbxcarta-neo4j"
+    # Required, per-integration: set in each examples/<name>/dbxcarta-overlay.env
+    # (dbxcarta-neo4j-<example>). No default, so a run without a selected overlay
+    # fails at config load instead of silently reading an unprovisioned scope.
+    databricks_secret_scope: str
     dbxcarta_summary_volume: str
     dbxcarta_summary_table: str
     databricks_volume_path: str

@@ -1,13 +1,11 @@
-"""Preset protocols for dbxcarta ingest pipelines and CLI integrations.
+"""Preset protocols for dbxcarta CLI integrations.
 
-A preset is a single Python object that packages the dbxcarta environment
-overlay for a particular data source. Downstream projects publish a preset
-object in their own package and pass its import path to the dbxcarta CLI.
-
-The required contract is `Preset` (a single `env()` method). The optional
-capabilities let the operational CLI check upstream readiness and upload
-client evaluation questions without requiring the Spark package to depend on
-the client package.
+A preset is a Python object a downstream project publishes in its own package
+and passes (by import path) to the operational dbxcarta CLI. Per-example
+dbxcarta config lives in the committed ``examples/<name>/dbxcarta-overlay.env``,
+not in the preset; the preset exists only to provide the optional capabilities
+below (readiness checks, question upload) without making the Spark package
+depend on the client package.
 """
 
 from __future__ import annotations
@@ -15,19 +13,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
-from dbxcarta.spark.env import EnvOverlay
-
 if TYPE_CHECKING:
     from databricks.sdk import WorkspaceClient
 
 
 @runtime_checkable
-class Preset(EnvOverlay, Protocol):
-    """Required structural contract for a dbxcarta preset."""
+class Preset(Protocol):
+    """Marker protocol for a dbxcarta preset.
 
-    def env(self) -> dict[str, str]:
-        """Return the dbxcarta env overlay."""
-        ...
+    There is no required method: a preset's behavior comes from the optional
+    capability protocols below (:class:`ReadinessCheckable`,
+    :class:`QuestionsUploadable`).
+    """
 
 
 @dataclass(frozen=True)
@@ -83,8 +80,3 @@ class QuestionsUploadable(Protocol):
 
     def upload_questions(self, ws: "WorkspaceClient") -> None:
         ...
-
-
-def format_env(values: dict[str, str]) -> str:
-    """Format an env overlay as KEY=VALUE lines in dict-insertion order."""
-    return "\n".join(f"{key}={values[key]}" for key in values) + "\n"

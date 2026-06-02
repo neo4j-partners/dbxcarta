@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
+from dotenv import dotenv_values
 
 import dbxcarta_finance_genie_example.finance_genie as preset_module
 from dbxcarta.spark.presets import (
@@ -17,6 +20,14 @@ from dbxcarta_finance_genie_example.finance_genie import (
     preset,
 )
 
+# The committed overlay is now the single source of per-example dbxcarta config.
+_OVERLAY = (
+    Path(__file__).resolve().parents[3]
+    / "examples"
+    / "finance-genie"
+    / "dbxcarta-overlay.env"
+)
+
 
 def test_preset_satisfies_required_protocol() -> None:
     assert isinstance(preset, Preset)
@@ -27,14 +38,14 @@ def test_preset_satisfies_optional_capabilities() -> None:
     assert isinstance(preset, QuestionsUploadable)
 
 
-def test_minimal_preset_satisfies_required_protocol_alone() -> None:
-    """A preset that only implements env() must still pass the Preset check."""
+def test_minimal_object_satisfies_marker_protocol() -> None:
+    """Preset is a marker protocol; any object satisfies it. Behavior comes
+    from the optional capability protocols."""
 
-    class MinimalPreset:
-        def env(self) -> dict[str, str]:
-            return {"DBXCARTA_CATALOG": "c"}
+    class Minimal:
+        pass
 
-    minimal = MinimalPreset()
+    minimal = Minimal()
     assert isinstance(minimal, Preset)
     assert not isinstance(minimal, ReadinessCheckable)
     assert not isinstance(minimal, QuestionsUploadable)
@@ -45,27 +56,12 @@ def test_preset_resolvable_via_import_path() -> None:
     assert resolved is preset
 
 
-def test_env_overlay_validates_against_settings() -> None:
-    env = preset.env()
-    settings = SparkIngestSettings(
-        dbxcarta_catalog=env["DBXCARTA_CATALOG"],
-        dbxcarta_catalogs=env["DBXCARTA_CATALOGS"],
-        dbxcarta_layer_map=env["DBXCARTA_LAYER_MAP"],
-        dbxcarta_schemas=env["DBXCARTA_SCHEMAS"],
-        dbxcarta_summary_volume=env["DBXCARTA_SUMMARY_VOLUME"],
-        dbxcarta_summary_table=env["DBXCARTA_SUMMARY_TABLE"],
-        dbxcarta_include_values=env["DBXCARTA_INCLUDE_VALUES"] == "true",
-        dbxcarta_include_embeddings_tables=True,
-        dbxcarta_include_embeddings_columns=True,
-        dbxcarta_include_embeddings_values=True,
-        dbxcarta_include_embeddings_schemas=True,
-        dbxcarta_include_embeddings_databases=True,
-        dbxcarta_embedding_endpoint=env["DBXCARTA_EMBEDDING_ENDPOINT"],
-        dbxcarta_embedding_dimension=int(env["DBXCARTA_EMBEDDING_DIMENSION"]),
-        dbxcarta_embedding_failure_max=int(
-            env["DBXCARTA_EMBEDDING_FAILURE_MAX"]
-        ),
-    )
+def test_overlay_builds_valid_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    for key, value in dotenv_values(_OVERLAY).items():
+        if value is not None:
+            monkeypatch.setenv(key, value)
+    settings = SparkIngestSettings()
+    assert settings.databricks_secret_scope == "dbxcarta-neo4j-finance-genie"
     assert settings.dbxcarta_catalog == "graph-enriched-finance-silver"
     assert settings.dbxcarta_schemas == "graph-enriched-schema"
     assert settings.resolved_catalogs() == [
@@ -80,8 +76,8 @@ def test_env_overlay_validates_against_settings() -> None:
     }
 
 
-def test_env_overlay_pins_known_keys() -> None:
-    env = preset.env()
+def test_overlay_pins_known_keys() -> None:
+    env = dotenv_values(_OVERLAY)
     assert env["DBXCARTA_INJECT_CRITERIA"] == "false"
     assert env["DBXCARTA_CLIENT_ARMS"] == "no_context,schema_dump,graph_rag"
     assert env["DBXCARTA_EMBEDDING_FAILURE_MAX"] == "0"

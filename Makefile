@@ -60,7 +60,7 @@ e2e-schemapile-client:
 	$(call e2e_client,examples/schemapile/dbxcarta-overlay.env)
 
 e2e-dense-schema-ingest:
-	$(call e2e_ingest,examples/dense-schema/dbxcarta-overlay.local.env)
+	$(call e2e_ingest,examples/dense-schema/dbxcarta-overlay.env)
 
 e2e-dense-schema-client:
-	$(call e2e_client,examples/dense-schema/dbxcarta-overlay.local.env)
+	$(call e2e_client,examples/dense-schema/dbxcarta-overlay.env)

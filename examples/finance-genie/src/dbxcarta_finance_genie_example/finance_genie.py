@@ -94,49 +94,9 @@ class FinanceGeniePreset:
         validate_identifier(self.ops_volume, label="volume")
 
     @property
-    def catalogs(self) -> tuple[str, ...]:
-        """All ingested catalogs, bronze -> silver -> gold."""
-        return (self.bronze_catalog, self.catalog, self.gold_catalog)
-
-    @property
-    def layer_map(self) -> str:
-        """DBXCARTA_LAYER_MAP value: catalog:layer for each ingested catalog."""
-        return (
-            f"{self.bronze_catalog}:bronze,"
-            f"{self.catalog}:silver,"
-            f"{self.gold_catalog}:gold"
-        )
-
-    @property
     def volume_path(self) -> str:
         """Operational UC Volume root for run summaries and the question set."""
         return f"/Volumes/{self.ops_catalog}/{self.ops_schema}/{self.ops_volume}"
-
-    def env(self) -> dict[str, str]:
-        volume_path = self.volume_path
-        return {
-            "DBXCARTA_CATALOG": self.catalog,
-            "DBXCARTA_CATALOGS": ",".join(self.catalogs),
-            "DBXCARTA_LAYER_MAP": self.layer_map,
-            "DBXCARTA_SCHEMAS": self.schema,
-            "DATABRICKS_VOLUME_PATH": volume_path,
-            "DBXCARTA_SUMMARY_VOLUME": f"{volume_path}/dbxcarta/runs",
-            "DBXCARTA_SUMMARY_TABLE": f"{self.ops_catalog}.{self.ops_schema}.dbxcarta_run_summary",
-            "DBXCARTA_INCLUDE_VALUES": "true",
-            "DBXCARTA_SAMPLE_LIMIT": "10",
-            "DBXCARTA_SAMPLE_CARDINALITY_THRESHOLD": "50",
-            "DBXCARTA_INCLUDE_EMBEDDINGS_TABLES": "true",
-            "DBXCARTA_INCLUDE_EMBEDDINGS_COLUMNS": "true",
-            "DBXCARTA_INCLUDE_EMBEDDINGS_VALUES": "true",
-            "DBXCARTA_INCLUDE_EMBEDDINGS_SCHEMAS": "true",
-            "DBXCARTA_INCLUDE_EMBEDDINGS_DATABASES": "true",
-            "DBXCARTA_EMBEDDING_ENDPOINT": "databricks-gte-large-en",
-            "DBXCARTA_EMBEDDING_DIMENSION": "1024",
-            "DBXCARTA_EMBEDDING_FAILURE_MAX": "0",
-            "DBXCARTA_CLIENT_QUESTIONS": f"{volume_path}/dbxcarta/questions.json",
-            "DBXCARTA_CLIENT_ARMS": "no_context,schema_dump,graph_rag",
-            "DBXCARTA_INJECT_CRITERIA": "false",
-        }
 
     def readiness(
         self,

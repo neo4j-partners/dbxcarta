@@ -8,6 +8,7 @@ from dbxcarta.spark.settings import SparkIngestSettings
 
 def test_run_dbxcarta_accepts_explicit_settings_and_spark(monkeypatch) -> None:
     settings = SparkIngestSettings(
+        databricks_secret_scope="dbxcarta-neo4j-test",
         dbxcarta_catalog="main",
         dbxcarta_schemas="schema_one,schema_two",
         dbxcarta_summary_volume="/Volumes/main/default/dbxcarta/summaries",

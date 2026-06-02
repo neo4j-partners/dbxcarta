@@ -2,21 +2,25 @@
 
 from __future__ import annotations
 
-from dbxcarta.spark.env import load_env_overlay
+import importlib
+from typing import cast
+
 from dbxcarta.spark.presets import Preset
 
 
 def load_preset(spec: str) -> Preset:
-    """Resolve a `package.module:attr` spec to a Preset object.
+    """Resolve a `package.module:attr` spec to a preset object.
 
     Raises ValueError if the spec is malformed, ImportError if the module
-    cannot be imported, AttributeError if the attribute does not exist, and
-    TypeError if the resolved object does not satisfy the Preset protocol.
+    cannot be imported, and AttributeError if the attribute does not exist.
+    The operational CLI then checks for the optional capabilities it needs
+    (readiness, upload_questions); per-example config comes from the committed
+    dbxcarta-overlay.env, not the preset.
     """
-    obj = load_env_overlay(spec)
-    if not isinstance(obj, Preset):
-        raise TypeError(
-            f"object at {spec!r} does not satisfy the dbxcarta Preset protocol "
-            f"(must implement env() -> dict[str, str])"
+    module_path, sep, attr = spec.partition(":")
+    if not sep or not module_path or not attr:
+        raise ValueError(
+            f"invalid preset spec {spec!r}: expected 'module.path:attr'"
         )
-    return obj
+    module = importlib.import_module(module_path)
+    return cast(Preset, getattr(module, attr))

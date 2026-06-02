@@ -15,6 +15,7 @@ from dbxcarta.spark.settings import SparkIngestSettings
 
 
 _BASE = {
+    "databricks_secret_scope": "dbxcarta-neo4j-test",
     "dbxcarta_catalog": "main",
     "dbxcarta_summary_volume": "/Volumes/cat/schema/vol/dbxcarta",
     "dbxcarta_summary_table": "cat.schema.table",

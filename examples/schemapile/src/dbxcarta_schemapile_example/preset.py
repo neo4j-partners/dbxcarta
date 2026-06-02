@@ -1,13 +1,13 @@
 """SchemaPile dbxcarta preset.
 
-Owns the env overlay, readiness check, and question-upload helper for the
-schemapile example. The list of UC schemas is sourced from the
-`DBXCARTA_SCHEMAS` env var at `env()` time so the preset always reflects
-the latest output of the materializer (which writes the list into
+Per-example dbxcarta config lives in the committed
+examples/schemapile/dbxcarta-overlay.env. This preset only provides the
+readiness check and question-upload helper. Readiness sources the list of UC
+schemas from the `DBXCARTA_SCHEMAS` env var (which the materializer writes into
 `.env.generated`).
 
 Resolvable via:
-    uv run dbxcarta preset dbxcarta_schemapile_example:preset --print-env
+    uv run dbxcarta preset dbxcarta_schemapile_example:preset --check-ready
 """
 
 from __future__ import annotations
@@ -64,10 +64,6 @@ class SchemaPilePreset:
         validate_identifier(self.meta_schema, label="meta schema")
         validate_identifier(self.volume, label="volume")
 
-    @property
-    def volume_path(self) -> str:
-        return f"/Volumes/{self.catalog}/{self.meta_schema}/{self.volume}"
-
     def schemas_list(self) -> tuple[str, ...]:
         """Read DBXCARTA_SCHEMAS from the environment and validate each name."""
         raw = os.environ.get("DBXCARTA_SCHEMAS", "").strip()
@@ -75,32 +71,6 @@ class SchemaPilePreset:
         for name in names:
             validate_identifier(name, label="schema")
         return names
-
-    def env(self) -> dict[str, str]:
-        volume_path = self.volume_path
-        return {
-            "DBXCARTA_CATALOG": self.catalog,
-            "DBXCARTA_SCHEMAS": ",".join(self.schemas_list()),
-            "DATABRICKS_VOLUME_PATH": volume_path,
-            "DBXCARTA_SUMMARY_VOLUME": f"{volume_path}/dbxcarta/runs",
-            "DBXCARTA_SUMMARY_TABLE": (
-                f"{self.catalog}.{self.meta_schema}.dbxcarta_run_summary"
-            ),
-            "DBXCARTA_INCLUDE_VALUES": _bool(self.include_values),
-            "DBXCARTA_SAMPLE_LIMIT": str(self.sample_limit),
-            "DBXCARTA_SAMPLE_CARDINALITY_THRESHOLD": str(self.sample_cardinality_threshold),
-            "DBXCARTA_INCLUDE_EMBEDDINGS_TABLES": _bool(self.include_embeddings_tables),
-            "DBXCARTA_INCLUDE_EMBEDDINGS_COLUMNS": _bool(self.include_embeddings_columns),
-            "DBXCARTA_INCLUDE_EMBEDDINGS_VALUES": _bool(self.include_embeddings_values),
-            "DBXCARTA_INCLUDE_EMBEDDINGS_SCHEMAS": _bool(self.include_embeddings_schemas),
-            "DBXCARTA_INCLUDE_EMBEDDINGS_DATABASES": _bool(self.include_embeddings_databases),
-            "DBXCARTA_EMBEDDING_ENDPOINT": self.embedding_endpoint,
-            "DBXCARTA_EMBEDDING_DIMENSION": str(self.embedding_dimension),
-            "DBXCARTA_EMBEDDING_FAILURE_MAX": f"{self.embedding_failure_max}",
-            "DBXCARTA_CLIENT_QUESTIONS": f"{volume_path}/dbxcarta/{_QUESTIONS_FILENAME}",
-            "DBXCARTA_CLIENT_ARMS": self.client_arms,
-            "DBXCARTA_INJECT_CRITERIA": _bool(self.inject_criteria),
-        }
 
     def readiness(
         self,
@@ -192,10 +162,6 @@ def _validate_questions_file(path: Path) -> None:
     questions = load_questions(str(path))
     if not questions:
         raise ValueError(f"questions file must be a non-empty JSON array: {path}")
-
-
-def _bool(value: bool) -> str:
-    return "true" if value else "false"
 
 
 preset = SchemaPilePreset()

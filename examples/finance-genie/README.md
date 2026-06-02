@@ -31,37 +31,25 @@ Inside this repo, `uv` resolves it to the editable parent through
 those distributions from your wheel index. There is nothing privileged about
 the example's relationship to the dbxcarta workspace.
 
-The Finance Genie settings are normal Python data. A direct library call can
-construct `SparkIngestSettings` from the package-owned overlay and call the
-Spark ingest implementation:
+The Finance Genie per-example config lives in the committed
+`examples/finance-genie/dbxcarta-overlay.env` (the single source of truth). A
+direct library call can load that overlay over the base `.env` and run the
+Spark ingest from the resulting environment:
 
 ```python
 from dbxcarta.spark import SparkIngestSettings, run_dbxcarta
-from dbxcarta_finance_genie_example import preset
+from dbxcarta.spark.env import resolve_env_files, load_env_files
 
-env = preset.env()
-settings = SparkIngestSettings(
-    dbxcarta_catalog=env["DBXCARTA_CATALOG"],
-    dbxcarta_schemas=env["DBXCARTA_SCHEMAS"],
-    dbxcarta_summary_volume=env["DBXCARTA_SUMMARY_VOLUME"],
-    dbxcarta_summary_table=env["DBXCARTA_SUMMARY_TABLE"],
-    dbxcarta_include_values=env["DBXCARTA_INCLUDE_VALUES"] == "true",
-    dbxcarta_include_embeddings_tables=True,
-    dbxcarta_include_embeddings_columns=True,
-    dbxcarta_include_embeddings_values=True,
-    dbxcarta_include_embeddings_schemas=True,
-    dbxcarta_include_embeddings_databases=True,
+files, _ = resolve_env_files(
+    ["--env-file", "examples/finance-genie/dbxcarta-overlay.env"]
 )
-run_dbxcarta(settings=settings)
+load_env_files(files)  # overlay over base .env; process env still wins
+run_dbxcarta(settings=SparkIngestSettings())
 ```
 
 The preset itself is a single dataclass instance, `preset`, exposed at
-`dbxcarta_finance_genie_example:preset`. It implements the required dbxcarta
-`Preset` protocol:
-
-- `env()` returns the dbxcarta environment overlay.
-
-It also implements optional CLI/demo hooks:
+`dbxcarta_finance_genie_example:preset`. It carries no env config (that lives
+in the overlay); it provides the optional operational hooks the CLI uses:
 
 - `readiness(ws, warehouse_id)` returns a `ReadinessReport` describing whether
   the Finance Genie tables are present in Unity Catalog.
@@ -108,9 +96,10 @@ recreates it with the current schema.
 
 ## Quick iterate loop (testing dbxcarta changes)
 
-Once the one-time prerequisites are in place (steps 1–6 below: preset
-installed, secrets refreshed, questions uploaded, upstream UC tables
-present), the pipeline runs in two make targets from the repo root —
+Once the one-time prerequisites are in place (steps 1–8 below: preset
+installed, ops plane bootstrapped, secrets refreshed, questions uploaded,
+upstream UC tables present), the pipeline runs in two make targets from the
+repo root —
 ingest first, then the client evaluation once ingest finishes:
 
 ```bash
@@ -125,7 +114,7 @@ local edits to the dbxcarta packages on every run. The targets set
 `dbxcarta-overlay.env` inline on each command, so they pick up the right
 dbxcarta config no matter what shell you run them from. They do **not** use
 this directory's standalone `./.env` (that file is only for the local
-demo in section 10). `make help` lists the targets for every example.
+demo in section 11). `make help` lists the targets for every example.
 
 The sections below are the full first-time setup and the individual
 commands the target wraps.
@@ -177,15 +166,12 @@ Every `dbxcarta` command below then picks it up. Precedence is
 process env over overlay over base. With `DBXCARTA_ENV_FILE` unset,
 only the base `.env` loads, exactly as before.
 
-To regenerate the overlay values from the preset:
-
-```bash
-uv run dbxcarta preset dbxcarta_finance_genie_example:preset --print-env
-```
+This overlay is the single source of truth for the example's dbxcarta config;
+edit it directly to change catalogs, schemas, flags, or the secret scope.
 
 This file (`dbxcarta-overlay.env`) is the dbxcarta CLI overlay only. It
 is distinct from `./.env` / `./.env.sample`, which are the self-contained
-config for the standalone local demo (section 10) and never layer.
+config for the standalone local demo (section 11) and never layer.
 
 ### 4. Check readiness
 
@@ -198,7 +184,23 @@ uv run dbxcarta preset dbxcarta_finance_genie_example:preset --check-ready --str
 Without `--strict-optional`, only the five base tables are required for
 readiness; the three Gold tables are reported as a warning.
 
-### 5. Refresh Neo4j secrets
+### 5. Bootstrap the ops plane
+
+Create the ops catalog, the `finance_genie_ops` schema, and the `dbxcarta-ops`
+volume that hold run summaries, the generation cache, and the uploaded question
+set. It is idempotent and does not create the upstream medallion data catalogs:
+
+```bash
+uv run dbxcarta-finance-genie-bootstrap
+```
+
+To remove only the ops schema later, without touching the shared ops catalog:
+
+```bash
+uv run dbxcarta-finance-genie-bootstrap --drop-all --yes-i-mean-it
+```
+
+### 6. Refresh Neo4j secrets
 
 dbxcarta jobs read Neo4j credentials from the Databricks secret scope:
 
@@ -206,7 +208,7 @@ dbxcarta jobs read Neo4j credentials from the Databricks secret scope:
 ./setup_secrets.sh --profile aws-partner-rk
 ```
 
-### 6. Upload the question set
+### 7. Upload the question set
 
 ```bash
 uv run dbxcarta preset dbxcarta_finance_genie_example:preset --upload-questions
@@ -216,7 +218,7 @@ This uploads the package's `questions.json` to the path named by
 `DBXCARTA_CLIENT_QUESTIONS` (typically
 `/Volumes/.../graph-enriched-volume/dbxcarta/questions.json`).
 
-### 7. Build and upload dbxcarta artifacts
+### 8. Build and upload dbxcarta artifacts
 
 ```bash
 uv run dbxcarta-submit publish-wheels
@@ -226,12 +228,12 @@ uv run dbxcarta-submit publish-wheels
 already ships the bootstrap script (it calls `upload_all` internally), so
 no separate `upload --all` step is needed.
 
-> Every `dbxcarta` and `dbxcarta-submit` command in steps 6–9 reads the overlay from the
+> Every `dbxcarta` and `dbxcarta-submit` command in steps 7–10 reads the overlay from the
 > `DBXCARTA_ENV_FILE` you exported in step 3. If you skipped that,
 > export it now:
 > `export DBXCARTA_ENV_FILE=examples/finance-genie/dbxcarta-overlay.env`.
 
-### 8. Build the semantic layer
+### 9. Build the semantic layer
 
 Submit the installed wheel's ingest entrypoint:
 
@@ -245,13 +247,13 @@ Verify the result:
 uv run dbxcarta verify
 ```
 
-### 9. Run the client evaluation
+### 10. Run the client evaluation
 
 ```bash
 uv run dbxcarta-submit submit-entrypoint client
 ```
 
-### 10. Run the local CLI demo
+### 11. Run the local CLI demo
 
 After the semantic layer is built, use the local read-only CLI in this
 package to demonstrate the flow without submitting another Databricks job.

@@ -274,6 +274,7 @@ def test_is_table_ref_two_parts():
 def test_client_settings_requires_three_part_summary_table() -> None:
     with pytest.raises(ValueError, match="summary table"):
         ClientSettings(
+            databricks_secret_scope="dbxcarta-neo4j-test",
             dbxcarta_catalog="main",
             dbxcarta_summary_volume="/Volumes/cat/schema/vol/runs",
             dbxcarta_summary_table="schema.table",
@@ -285,6 +286,7 @@ def test_client_settings_requires_three_part_summary_table() -> None:
 def test_client_settings_rejects_volume_root_as_summary_volume() -> None:
     with pytest.raises(ValueError, match="DBXCARTA_SUMMARY_VOLUME"):
         ClientSettings(
+            databricks_secret_scope="dbxcarta-neo4j-test",
             dbxcarta_catalog="main",
             dbxcarta_summary_volume="/Volumes/cat/schema/vol",
             dbxcarta_summary_table="cat.schema.table",
@@ -296,6 +298,7 @@ def test_client_settings_rejects_volume_root_as_summary_volume() -> None:
 def test_client_settings_rejects_unsafe_chat_endpoint() -> None:
     with pytest.raises(ValueError, match="serving endpoint"):
         ClientSettings(
+            databricks_secret_scope="dbxcarta-neo4j-test",
             dbxcarta_catalog="main",
             dbxcarta_summary_volume="/Volumes/cat/schema/vol/runs",
             dbxcarta_summary_table="cat.schema.table",

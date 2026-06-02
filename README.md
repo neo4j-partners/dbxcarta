@@ -298,15 +298,12 @@ provisions them differs per example.
   the upstream Finance Genie project; see step 2 of its README. The ops plane is
   separate and must exist before ingest: the `dbxcarta-catalog` catalog, the
   `finance_genie_ops` schema, and the `dbxcarta-ops` volume that hold the run
-  summaries, the generation cache, and the uploaded question set. There is no
-  dbxcarta bootstrap command for this example, so create the ops schema and
-  volume with the generic operator commands if they are not already present:
+  summaries, the generation cache, and the uploaded question set. An idempotent
+  bootstrap command provisions only that ops plane:
   ```bash
-  DBXCARTA_ENV_FILE=examples/finance-genie/dbxcarta-overlay.env \
-    uv run dbxcarta-submit schema create dbxcarta-catalog.finance_genie_ops
-  DBXCARTA_ENV_FILE=examples/finance-genie/dbxcarta-overlay.env \
-    uv run dbxcarta-submit volume create dbxcarta-catalog.finance_genie_ops.dbxcarta-ops
+  uv run dbxcarta-finance-genie-bootstrap
   ```
+  It does not create the upstream data catalogs.
 - **SchemaPile.** A dedicated, idempotent bootstrap command creates the catalog,
   the `_meta` schema, and the `schemapile_volume` volume:
   ```bash
@@ -316,11 +313,17 @@ provisions them differs per example.
   This creates `schemapile_lakehouse`, `schemapile_lakehouse._meta`, and
   `schemapile_lakehouse._meta.schemapile_volume`. Tear the catalog down later
   with `dbxcarta-schemapile-bootstrap --drop-all --yes-i-mean-it`.
-- **Dense schema.** It writes into the same `schemapile_lakehouse` catalog,
-  `_meta` schema, and `schemapile_volume` volume as SchemaPile and ships no
-  bootstrap command of its own, so run the SchemaPile bootstrap above first.
-  `dbxcarta-dense-materialize` then creates only the synthetic data schemas and
-  tables, not the catalog, the `_meta` schema, or the volume.
+- **Dense schema.** It reuses the same `schemapile_lakehouse` catalog, `_meta`
+  schema, and `schemapile_volume` volume as SchemaPile, and lives in its own
+  `dense_*` data schema. Its bootstrap is idempotent and provisions that shared
+  catalog, schema, and volume, so running it or the SchemaPile bootstrap is
+  equivalent:
+  ```bash
+  uv run dbxcarta-dense-bootstrap
+  ```
+  `dbxcarta-dense-materialize` then creates only the synthetic data schema and
+  tables. Because the catalog is shared, `dbxcarta-dense-bootstrap --drop-all
+  --yes-i-mean-it` drops only the dense data schema, never the shared catalog.
 
 Each target sets `DBXCARTA_ENV_FILE` to that example's committed dbxcarta
 overlay inline, so the commands work from the repo root with no per-shell setup.

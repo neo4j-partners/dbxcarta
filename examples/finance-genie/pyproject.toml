@@ -14,6 +14,9 @@ dependencies = [
 [project.optional-dependencies]
 test = ["pytest"]
 
+[project.scripts]
+dbxcarta-finance-genie-bootstrap = "dbxcarta_finance_genie_example.bootstrap:main"
+
 [build-system]
 requires = ["uv_build>=0.11.0,<0.12.0"]
 build-backend = "uv_build"

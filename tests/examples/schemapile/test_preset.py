@@ -25,30 +25,6 @@ def test_preset_satisfies_optional_capabilities():
     assert isinstance(preset, QuestionsUploadable)
 
 
-def test_env_overlay_defaults():
-    env = preset.env()
-    assert env["DBXCARTA_CATALOG"] == "schemapile_lakehouse"
-    assert env["DATABRICKS_VOLUME_PATH"] == (
-        "/Volumes/schemapile_lakehouse/_meta/schemapile_volume"
-    )
-    assert env["DBXCARTA_SUMMARY_TABLE"] == (
-        "schemapile_lakehouse._meta.dbxcarta_run_summary"
-    )
-    assert env["DBXCARTA_INJECT_CRITERIA"] == "false"
-
-
-def test_env_overlay_picks_up_schemas_env(monkeypatch):
-    monkeypatch.setenv("DBXCARTA_SCHEMAS", "sp_one,sp_two")
-    env = preset.env()
-    assert env["DBXCARTA_SCHEMAS"] == "sp_one,sp_two"
-
-
-def test_env_overlay_empty_schemas_when_unset(monkeypatch):
-    monkeypatch.delenv("DBXCARTA_SCHEMAS", raising=False)
-    env = preset.env()
-    assert env["DBXCARTA_SCHEMAS"] == ""
-
-
 def test_preset_rejects_invalid_catalog():
     with pytest.raises(ValueError):
         SchemaPilePreset(catalog="bad catalog name")

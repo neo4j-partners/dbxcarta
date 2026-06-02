@@ -27,11 +27,11 @@ examples/dense-schema/
 
 ## Quick iterate loop (testing dbxcarta changes)
 
-Once the one-time setup is in place (example installed, the synthetic
-schema generated and materialized into Unity Catalog, and the question
-set uploaded), the wheel-rebuild-and-submit pipeline runs in two make
-targets from the repo root — ingest first, then the client evaluation
-once ingest finishes:
+Once the one-time setup is in place (example installed, the shared catalog
+bootstrapped, the synthetic schema generated and materialized into Unity
+Catalog, and the question set uploaded), the wheel-rebuild-and-submit pipeline
+runs in two make targets from the repo root — ingest first, then the client
+evaluation once ingest finishes:
 
 ```bash
 make e2e-dense-schema-ingest
@@ -41,10 +41,9 @@ make e2e-dense-schema-client
 The `-ingest` target rebuilds the wheels from your current source, then
 submits `ingest`; the `-client` target submits `client`, so it reflects
 local edits to the dbxcarta packages on every run. The targets set
-`DBXCARTA_ENV_FILE` to this directory's
-`dbxcarta-overlay.local.env` (the gitignored, local-only overlay) inline
-on each command, so they pick up the right dbxcarta config from any shell.
-`make help` lists the targets for every example.
+`DBXCARTA_ENV_FILE` to this directory's committed `dbxcarta-overlay.env`
+inline on each command, so they pick up the right dbxcarta config from any
+shell. `make help` lists the targets for every example.
 
 ## Setup flow
 
@@ -61,16 +60,30 @@ Generate the synthetic schema locally:
 uv run dbxcarta-dense-generate --tables 500
 ```
 
-Materialize it into Unity Catalog after configuring `.env`:
+Bootstrap the shared catalog, `_meta` schema, and volume after configuring
+`.env`. The dense fixture reuses the SchemaPile lakehouse catalog and volume, so
+this is idempotent and equivalent to running `dbxcarta-schemapile-bootstrap`:
+
+```bash
+uv run dbxcarta-dense-bootstrap
+```
+
+Materialize the fixture into Unity Catalog:
 
 ```bash
 uv run dbxcarta-dense-materialize
 ```
 
+To remove only the dense data schema later, without touching the shared catalog:
+
+```bash
+uv run dbxcarta-dense-bootstrap --drop-all --yes-i-mean-it
+```
+
 Then use the preset with the normal dbxcarta operational CLI:
 
 ```bash
-uv run dbxcarta preset dbxcarta_dense_schema_example:preset --print-env
+uv run dbxcarta preset dbxcarta_dense_schema_example:preset --check-ready
 uv run dbxcarta preset dbxcarta_dense_schema_example:preset --upload-questions
 uv run dbxcarta-submit submit-entrypoint ingest
 uv run dbxcarta-submit submit-entrypoint client

@@ -16,7 +16,7 @@ def main() -> None:
     """Entry point for the dbxcarta domain commands.
 
     - `dbxcarta verify [--run-id RUN_ID]` runs graph and catalog verification.
-    - `dbxcarta preset <import-path> {--print-env|--check-ready|--upload-questions|--run}`
+    - `dbxcarta preset <import-path> {--check-ready|--upload-questions}`
       resolves the given preset and runs the requested action.
 
     Job submission and wheel upload moved to the separate `dbxcarta-submit`
@@ -122,10 +122,8 @@ def _handle_preset(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="dbxcarta preset")
     parser.add_argument("spec", help="Preset import spec in 'package.module:attr' form.")
     actions = parser.add_mutually_exclusive_group(required=True)
-    actions.add_argument("--print-env", action="store_true")
     actions.add_argument("--check-ready", action="store_true")
     actions.add_argument("--upload-questions", action="store_true")
-    actions.add_argument("--run", action="store_true")
     parser.add_argument("--warehouse-id", default="")
     parser.add_argument("--strict-optional", action="store_true")
     args = parser.parse_args(argv)
@@ -134,7 +132,6 @@ def _handle_preset(argv: list[str]) -> int:
     from dbxcarta.spark.presets import (
         QuestionsUploadable,
         ReadinessCheckable,
-        format_env,
     )
 
     try:
@@ -142,10 +139,6 @@ def _handle_preset(argv: list[str]) -> int:
     except (ValueError, ImportError, AttributeError, TypeError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
-
-    if args.print_env:
-        print(format_env(preset.env()), end="")
-        return 0
 
     if args.check_ready:
         if not isinstance(preset, ReadinessCheckable):
@@ -166,14 +159,6 @@ def _handle_preset(argv: list[str]) -> int:
             return 2
         ws = _build_workspace_client()
         preset.upload_questions(ws)
-        return 0
-
-    if args.run:
-        from dbxcarta.spark.env import apply_env_overlay
-        from dbxcarta.spark.run import run_dbxcarta
-
-        apply_env_overlay(preset)
-        run_dbxcarta()
         return 0
 
     # Unreachable: the actions group is mutually exclusive and required,

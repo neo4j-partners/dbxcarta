@@ -23,10 +23,10 @@ def _pristine_environ() -> dict[str, str]:
 def _isolate_environ(_pristine_environ: dict[str, str]) -> Iterator[None]:
     """Restore ``os.environ`` to the pristine baseline after every test.
 
-    Production env-overlay helpers (``apply_env_overlay``/``inject_params``)
-    write to ``os.environ`` via ``setdefault`` by design. Without this,
-    those writes leak across tests and poison ``BaseSettings`` constructors
-    that read unset fields from the environment.
+    The production ``inject_params`` helper writes to ``os.environ`` via
+    ``setdefault`` by design. Without this, those writes leak across tests
+    and poison ``BaseSettings`` constructors that read unset fields from the
+    environment.
     """
     yield
     if os.environ != _pristine_environ:

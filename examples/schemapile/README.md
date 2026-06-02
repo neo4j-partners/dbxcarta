@@ -192,8 +192,8 @@ flag, so the export is the mechanism that selects it:
 # Select the SchemaPile overlay once for every command below.
 export DBXCARTA_ENV_FILE=examples/schemapile/dbxcarta-overlay.env
 
-# Confirm the preset resolves and shows the expected overlay.
-uv run dbxcarta preset dbxcarta_schemapile_example:preset --print-env
+# Confirm the preset resolves and the upstream schemas are materialized.
+uv run dbxcarta preset dbxcarta_schemapile_example:preset --check-ready
 
 # Upload the generated question set to the example volume.
 SCHEMAPILE_QUESTIONS_FILE=examples/schemapile/questions.json \

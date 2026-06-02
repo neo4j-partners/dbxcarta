@@ -61,12 +61,28 @@ It is idempotent and safe to re-run.
   scripts, so a bootstrap would start from the preset object rather than a
   config dataclass.
 
+## Design constraint
+
+`dbxcarta-spark` stays focused on data ingest: the graph contract, extract,
+transform, embed, and load. Provisioning a catalog, schema, and volume is setup
+that happens before ingest, not part of it, so it does not belong in
+`dbxcarta-spark`. The rule for this work:
+
+- Do not modify `dbxcarta-spark` to add a bootstrap protocol, CLI flag, or
+  provisioning helper.
+- Each example owns its own bootstrap, the way SchemaPile already does.
+- Examples may still import the existing public helpers from `dbxcarta-spark`,
+  for example `build_workspace_client` and `quote_identifier` in
+  `dbxcarta.spark.databricks`. Consuming the current surface is fine; expanding
+  it is not.
+
 ## What needs to be added
 
-There are two shapes. The first removes the duplication and is the recommended
-target; the second matches the SchemaPile pattern with the least new surface.
+The two shapes below are kept for the record. The example-local one (Option B)
+is the chosen path because it honors the constraint above. Option A is recorded
+as rejected.
 
-### Option A (recommended): a preset bootstrap capability
+### Option A (rejected): a preset bootstrap capability in dbxcarta-spark
 
 The preset protocol in
 `packages/dbxcarta-spark/src/dbxcarta/spark/presets.py` already models optional
@@ -91,8 +107,8 @@ Add:
    EXISTS` statements for whatever objects that example needs.
 
 2. A `--bootstrap` action on the `dbxcarta preset` CLI alongside
-   `--print-env`, `--check-ready`, `--upload-questions`, and `--run`, with the
-   same `--warehouse-id` resolution the other warehouse-touching actions use.
+   `--check-ready` and `--upload-questions`, with the same `--warehouse-id`
+   resolution the other warehouse-touching actions use.
 
 3. A small shared helper that runs the three `CREATE ... IF NOT EXISTS`
    statements given a catalog, schema, and volume, so each preset's `bootstrap`
@@ -116,23 +132,41 @@ DBXCARTA_ENV_FILE=examples/<name>/dbxcarta-overlay.env \
 Keep `dbxcarta-schemapile-bootstrap` as a thin wrapper for backward
 compatibility, or retire it once the docs point at `--bootstrap`.
 
-### Option B: per-example bootstrap console scripts
+This option is rejected: it would add a provisioning protocol, a CLI action, and
+a CREATE helper to `dbxcarta-spark`, which we are keeping focused on ingest.
 
-Mirror SchemaPile in each example:
+### Option B (chosen): per-example bootstrap, no dbxcarta-spark change
+
+Mirror SchemaPile in each example so every example exposes its own bootstrap
+console script. SchemaPile is already done and is the template.
 
 - **Dense schema**: add `bootstrap.py` next to `materialize.py`, wire a
   `dbxcarta-dense-bootstrap` script in `examples/dense-schema/pyproject.toml`,
-  and reuse the existing `config.py` and `utils.py`. Because it targets the same
-  objects as SchemaPile, document that running either bootstrap suffices.
+  and reuse the existing `config.py` (`catalog`, `meta_schema`, `volume`) and
+  `utils.py` (`load_dotenv_file`, `read_required_warehouse_id`). The body is
+  close to a copy of SchemaPile's `_provision`. Because it targets the same
+  objects as SchemaPile, document that running either bootstrap suffices, and
+  decide the shared-catalog question in Open questions before duplicating.
 - **Finance Genie**: add a `utils.py` with `load_dotenv_file` and
   `read_required_warehouse_id` (it has neither today), a `bootstrap.py` that
-  reads `ops_catalog`, `ops_schema`, and `ops_volume` from the preset, and a
-  `dbxcarta-finance-genie-bootstrap` script in its `pyproject.toml`.
+  reads `ops_catalog`, `ops_schema`, and `ops_volume` from the preset object in
+  `finance_genie.py`, and a `dbxcarta-finance-genie-bootstrap` script in its
+  `pyproject.toml`. It creates only the ops plane; the data catalogs are owned
+  upstream.
 
-This is more code and duplicates the SchemaPile logic three times. Option A
-centralizes it.
+Each `bootstrap.py` imports `build_workspace_client` from
+`dbxcarta.client.databricks` and `quote_identifier` from
+`dbxcarta.spark.databricks`, then runs the three idempotent `CREATE CATALOG /
+SCHEMA / VOLUME IF NOT EXISTS` statements, exactly as SchemaPile does today.
 
-### Makefile wiring (either option)
+Cost and trade-off: the small CREATE-statement helper is duplicated across the
+three example packages. That duplication is the price of keeping `dbxcarta-spark`
+ingest-only, and it is accepted. There is no shared examples package to hold a
+common helper, and creating one solely for this is not worth it. If the
+duplication later becomes a burden, revisit a shared examples utility package
+rather than pushing the logic back into `dbxcarta-spark`.
+
+### Makefile wiring
 
 Optionally make the bootstrap a prerequisite of each `-ingest` target in the
 repo-root `Makefile` so the objects are guaranteed before `publish-wheels`. The
@@ -140,28 +174,55 @@ operations are idempotent, so the cost is a few warehouse calls per ingest. This
 requires catalog-create or schema-create privilege on every ingest run, so it
 may be better left as an explicit one-time step the README documents.
 
-## Concrete task list
+## Status: implemented
 
-- [ ] Add a `Provisionable` protocol and a shared `create catalog/schema/volume`
-      helper to `dbxcarta-spark`.
-- [ ] Add `--bootstrap` to the `dbxcarta preset` CLI with warehouse-id
-      resolution.
-- [ ] Implement `bootstrap` on the SchemaPile, dense-schema, and Finance Genie
-      presets, with Finance Genie creating only the ops plane.
-- [ ] Decide whether `dbxcarta-schemapile-bootstrap` stays as a wrapper or is
-      retired.
-- [ ] Update the root `README.md` "Quick start: run an example" section and each
-      example README to point at the single bootstrap command.
-- [ ] Decide whether the `-ingest` Makefile targets depend on bootstrap.
+Per the design constraint, no task touched `dbxcarta-spark`. Implemented as
+Option B.
+
+- [x] Dense schema: added
+      `examples/dense-schema/src/dbxcarta_dense_schema_example/bootstrap.py` and
+      the `dbxcarta-dense-bootstrap` console script, reusing the existing
+      `config.py` and `utils.py`.
+- [x] Finance Genie: added `utils.py`, `bootstrap.py`, and the
+      `dbxcarta-finance-genie-bootstrap` console script. It provisions only the
+      ops plane and reads `ops_catalog`, `ops_schema`, `ops_volume` from the
+      preset object.
+- [x] SchemaPile unchanged; it is the template.
+- [x] Updated the root `README.md` "Quick start: run an example" section and the
+      dense-schema and finance-genie READMEs to name each bootstrap command.
+- [ ] Decide whether the `-ingest` Makefile targets depend on bootstrap. Left
+      out for now: bootstrap is an idempotent one-time step, but wiring it into
+      every ingest would require catalog-create privilege on every run. Pending
+      a decision.
+
+### Teardown decision
+
+Both new examples reuse a shared catalog (`schemapile_lakehouse` for dense,
+`dbxcarta-catalog` for Finance Genie ops), so neither `--drop-all` drops the
+catalog. Each drops only the schema it owns and keeps the shared catalog and
+volume:
+
+- `dbxcarta-dense-bootstrap --drop-all --yes-i-mean-it` drops the dense data
+  schema (for example `dense_1000`).
+- `dbxcarta-finance-genie-bootstrap --drop-all --yes-i-mean-it` drops the
+  `finance_genie_ops` schema.
+
+Full catalog teardown for the SchemaPile lakehouse stays with
+`dbxcarta-schemapile-bootstrap --drop-all --yes-i-mean-it`. Both guards require
+`--yes-i-mean-it`, matching SchemaPile.
 
 ## Open questions
 
-- Should Finance Genie bootstrap also assert the upstream data catalogs exist,
-  or stay strictly ops-plane and leave data provisioning to the upstream
-  project? Asserting would overlap with the existing `--check-ready` readiness
-  check.
+- **Resolved.** For dense-schema, the intended model is that it shares the
+  SchemaPile `schemapile_lakehouse` catalog, `_meta` schema, and
+  `schemapile_volume` volume, and lives in its own `dense_*` data schema. The
+  `examples/dense-schema/dbxcarta-overlay.env` comment states this. The dense
+  bootstrap therefore provisions the shared objects idempotently and drops only
+  the dense data schema.
+- **Resolved.** Finance Genie bootstrap stays strictly ops-plane and does not
+  create or assert the upstream data catalogs. Readiness of the upstream tables
+  remains the job of the existing `--check-ready` check.
 - Should the bootstrap reuse the same catalog blocklist guard SchemaPile has in
-  `load_config()`, applied uniformly across presets?
-- For dense-schema, is the intended model that it always shares the SchemaPile
-  catalog, or should it own a separate catalog so the two examples do not
-  collide on `schemapile_lakehouse._meta`?
+  `load_config()`, applied uniformly across presets? Dense reuses its
+  `config.load_config()` guard already; Finance Genie reads fixed names from the
+  preset object, so no guard applies there yet.

@@ -25,6 +25,7 @@ class _StubRetriever(Retriever):
 
 def _settings() -> ClientSettings:
     return ClientSettings(
+        databricks_secret_scope="dbxcarta-neo4j-test",
         dbxcarta_catalog="main",
         dbxcarta_schemas="s1",
         dbxcarta_summary_volume="/Volumes/cat/schema/vol/runs",

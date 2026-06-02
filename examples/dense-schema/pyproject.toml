@@ -18,6 +18,7 @@ test = ["pytest"]
 
 [project.scripts]
 dbxcarta-dense-generate = "dbxcarta_dense_schema_example.generator:main"
+dbxcarta-dense-bootstrap = "dbxcarta_dense_schema_example.bootstrap:main"
 dbxcarta-dense-materialize = "dbxcarta_dense_schema_example.materialize:main"
 dbxcarta-dense-generate-questions = "dbxcarta_dense_schema_example.question_generator:main"
 

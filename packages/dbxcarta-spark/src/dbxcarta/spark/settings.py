@@ -29,7 +29,10 @@ class SparkIngestSettings(BaseSettings):
     flag combinations before Spark or Neo4j work starts.
     """
 
-    databricks_secret_scope: str = "dbxcarta-neo4j"
+    # Required, per-integration: set in each examples/<name>/dbxcarta-overlay.env
+    # (dbxcarta-neo4j-<example>). No default, so a run without a selected overlay
+    # fails at config load instead of silently reading an unprovisioned scope.
+    databricks_secret_scope: str
     # Used by verify's catalog-vs-graph checks (information_schema queries).
     # When unset, those checks self-skip with a `catalog.no_warehouse` violation.
     databricks_warehouse_id: str = ""

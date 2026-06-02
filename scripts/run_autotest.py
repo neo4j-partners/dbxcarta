@@ -316,7 +316,12 @@ def _neo4j_references_by_source(ws) -> dict[str, set[tuple[str, str]]]:
 
     from neo4j import GraphDatabase
 
-    scope = os.environ.get("DATABRICKS_SECRET_SCOPE", "dbxcarta-neo4j")
+    scope = os.environ.get("DATABRICKS_SECRET_SCOPE")
+    if not scope:
+        raise RuntimeError(
+            "DATABRICKS_SECRET_SCOPE is not set; select an example overlay "
+            "(e.g. --env-file examples/<name>/dbxcarta-overlay.env)."
+        )
 
     def _secret(key: str) -> str:
         return base64.b64decode(ws.secrets.get_secret(scope=scope, key=key).value).decode()
