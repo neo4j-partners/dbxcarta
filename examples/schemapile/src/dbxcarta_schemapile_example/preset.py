@@ -26,8 +26,6 @@ if TYPE_CHECKING:
 
 
 _DEFAULT_CATALOG = "schemapile_lakehouse"
-_DEFAULT_META_SCHEMA = "_meta"
-_DEFAULT_VOLUME = "schemapile_volume"
 _QUESTIONS_FILENAME = "questions.json"
 _QUESTIONS_FILE = Path(__file__).resolve().parents[2] / _QUESTIONS_FILENAME
 
@@ -36,33 +34,16 @@ _QUESTIONS_FILE = Path(__file__).resolve().parents[2] / _QUESTIONS_FILENAME
 class SchemaPilePreset:
     """Preset implementation for the SchemaPile example.
 
-    Catalog, meta schema, and volume have defaults so module-level
-    construction does not depend on the environment being primed. The
-    UC-schema list is pulled from `DBXCARTA_SCHEMAS` inside `env()` so the
-    preset always reflects the latest materialize-step output.
+    `catalog` has a default so module-level construction does not depend on the
+    environment. Per-example dbxcarta config lives in the committed
+    dbxcarta-overlay.env; this preset only checks readiness and uploads
+    questions. `readiness` reads the UC-schema list from `DBXCARTA_SCHEMAS`.
     """
 
     catalog: str = _DEFAULT_CATALOG
-    meta_schema: str = _DEFAULT_META_SCHEMA
-    volume: str = _DEFAULT_VOLUME
-    embedding_endpoint: str = "databricks-gte-large-en"
-    embedding_dimension: int = 1024
-    embedding_failure_max: int = 0
-    include_values: bool = True
-    sample_limit: int = 10
-    sample_cardinality_threshold: int = 50
-    include_embeddings_tables: bool = True
-    include_embeddings_columns: bool = True
-    include_embeddings_values: bool = False
-    include_embeddings_schemas: bool = True
-    include_embeddings_databases: bool = False
-    client_arms: str = "no_context,schema_dump,graph_rag"
-    inject_criteria: bool = False
 
     def __post_init__(self) -> None:
         validate_identifier(self.catalog, label="catalog")
-        validate_identifier(self.meta_schema, label="meta schema")
-        validate_identifier(self.volume, label="volume")
 
     def schemas_list(self) -> tuple[str, ...]:
         """Read DBXCARTA_SCHEMAS from the environment and validate each name."""

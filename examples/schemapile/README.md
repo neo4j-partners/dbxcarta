@@ -10,6 +10,50 @@ The package depends on `dbxcarta-spark` and `dbxcarta-client`. Its tests live
 under `tests/examples/schemapile/` so the repo-level CI can run it as a
 first-class integration consumer.
 
+## Quick Start
+
+The full flow from a clean checkout to a scored client run. The first block is
+one-time setup; the two make targets are the loop you repeat on every change.
+Each numbered section under [Setup flow](#setup-flow) explains a step in more
+detail. Fetch the upstream `schemapile-perm.json` artifact first; see
+[section 2](#2-get-the-upstream-schemapile-data).
+
+```bash
+# Install dbxcarta and this example
+uv sync
+uv pip install -e examples/schemapile/
+
+# Build the slice through to a question set. These steps read
+# examples/schemapile/.env, so run them from that directory.
+cd examples/schemapile
+cp .env.sample .env                             # edit SCHEMAPILE_REPO, profile, warehouse, catalog
+uv run dbxcarta-schemapile-bootstrap            # provision catalog + volume
+uv run dbxcarta-schemapile-slice
+uv run dbxcarta-schemapile-select
+uv run dbxcarta-schemapile-materialize          # writes .env.generated
+uv run dbxcarta-schemapile-generate-questions
+cd ../..
+
+# Copy the DBXCARTA_SCHEMAS=... line that materialize wrote into
+# examples/schemapile/.env.generated into examples/schemapile/dbxcarta-overlay.env
+# (it ships blank), then select that overlay for every command below.
+export DBXCARTA_ENV_FILE=examples/schemapile/dbxcarta-overlay.env
+
+# Confirm the schemas materialized, then upload the generated question set.
+uv run dbxcarta preset dbxcarta_schemapile_example:preset --check-ready
+SCHEMAPILE_QUESTIONS_FILE=examples/schemapile/questions.json \
+  uv run dbxcarta preset dbxcarta_schemapile_example:preset --upload-questions
+```
+
+With setup in place, run the two make targets from the repo root. The `-ingest`
+target rebuilds the wheels from current source and builds the semantic layer, so
+run it first and let it finish, then run `-client`:
+
+```bash
+make e2e-schemapile-ingest
+make e2e-schemapile-client
+```
+
 ## What lives here
 
 ```

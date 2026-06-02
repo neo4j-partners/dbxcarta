@@ -262,17 +262,51 @@ the relevant dbxcarta distributions as normal pip dependencies and exposes a
 module-level `preset` object. The Spark package provides the preset protocol and
 loader; examples own their concrete preset implementations.
 
-- `examples/finance-genie/` pairs dbxcarta with Finance Genie on a three-catalog medallion layout. Finance Genie writes raw business tables to a bronze and silver catalog and graph-enriched features to a gold catalog (`graph-enriched-finance-bronze`, `-silver`, `-gold`); dbxcarta folds all three into one Neo4j semantic layer via `DBXCARTA_CATALOGS` and tags each table's tier via `DBXCARTA_LAYER_MAP`. Run summaries and the generation cache land in a separate ops catalog (`dbxcarta-catalog`).
-- `examples/schemapile/` materializes a reproducible SchemaPile slice as Delta tables, writes the generated UC schema list to `.env.generated`, generates a SQL-validated question set, and exposes `dbxcarta_schemapile_example:preset`.
-- `examples/dense-schema/` generates a synthetic 500- or 1000-table single schema for stress testing schema-context retrieval. It shares the same preset pattern and exposes `dbxcarta_dense_schema_example:preset`.
-- `examples/demos/` is reserved for walkthroughs that are not migration-gate consumers.
+#### Finance Genie
+
+Pairs dbxcarta with Finance Genie on a three-catalog medallion layout. Finance
+Genie writes raw business tables to bronze and silver catalogs and
+graph-enriched features to a gold catalog, named `graph-enriched-finance-bronze`,
+`-silver`, and `-gold`. dbxcarta folds all three into one Neo4j semantic layer
+via `DBXCARTA_CATALOGS` and tags each table's tier via `DBXCARTA_LAYER_MAP`. Run
+summaries and the generation cache land in a separate ops catalog,
+`dbxcarta-catalog`. Setup and copy-paste Quick Start:
+[`examples/finance-genie/README.md`](examples/finance-genie/README.md#quick-start).
+
+#### SchemaPile
+
+Materializes a reproducible slice of
+[SchemaPile](https://github.com/amsterdata/schemapile) as Delta tables in a
+dedicated catalog, writes the generated UC schema list to `.env.generated`, and
+generates a SQL-validated question set. It exposes
+`dbxcarta_schemapile_example:preset`. Setup and copy-paste Quick Start:
+[`examples/schemapile/README.md`](examples/schemapile/README.md#quick-start).
+
+#### Dense schema
+
+Generates a synthetic single schema of 500 or 1000 tables for stress testing
+schema-context retrieval against dense schema context. It reuses the SchemaPile
+lakehouse catalog and exposes `dbxcarta_dense_schema_example:preset`. Setup and
+copy-paste Quick Start:
+[`examples/dense-schema/README.md`](examples/dense-schema/README.md#quick-start).
+
+#### Demos
+
+`examples/demos/` is reserved for walkthroughs that are not migration-gate
+consumers.
 
 #### Quick start: run an example
 
-Once an example's one-time setup is in place (see its README), the repo-root
-`Makefile` runs its pipeline in two phases: an `-ingest` target that rebuilds
-the wheels from current source and submits ingest, then a `-client` target that
-submits the client evaluation. Run ingest, let it finish, then run client:
+The fastest end-to-end path is the
+[Finance Genie Quick Start](examples/finance-genie/README.md#quick-start): one
+copy-paste sequence from a clean checkout through one-time provisioning to a
+scored client run.
+
+Every example then runs the same way. Once its one-time setup is in place, the
+repo-root `Makefile` runs the pipeline in two phases: an `-ingest` target that
+rebuilds the wheels from current source and submits ingest, then a `-client`
+target that submits the client evaluation. Run ingest, let it finish, then run
+client:
 
 ```bash
 # Finance Genie
@@ -288,48 +322,15 @@ make e2e-dense-schema-ingest
 make e2e-dense-schema-client
 ```
 
-Before the first `-ingest` run, each example needs a place to land the wheels,
-the question set, and run artifacts: a Unity Catalog catalog, a bookkeeping
-schema, and a volume. `publish-wheels` and `ingest` assume these already exist
-and fail with `Schema '<catalog>.<schema>' does not exist` if they do not. What
-provisions them differs per example.
-
-- **Finance Genie.** The medallion data catalogs, schemas, and tables come from
-  the upstream Finance Genie project; see step 2 of its README. The ops plane is
-  separate and must exist before ingest: the `dbxcarta-catalog` catalog, the
-  `finance_genie_ops` schema, and the `dbxcarta-ops` volume that hold the run
-  summaries, the generation cache, and the uploaded question set. An idempotent
-  bootstrap command provisions only that ops plane:
-  ```bash
-  uv run dbxcarta-finance-genie-bootstrap
-  ```
-  It does not create the upstream data catalogs.
-- **SchemaPile.** A dedicated, idempotent bootstrap command creates the catalog,
-  the `_meta` schema, and the `schemapile_volume` volume:
-  ```bash
-  DBXCARTA_ENV_FILE=examples/schemapile/dbxcarta-overlay.env \
-    uv run dbxcarta-schemapile-bootstrap
-  ```
-  This creates `schemapile_lakehouse`, `schemapile_lakehouse._meta`, and
-  `schemapile_lakehouse._meta.schemapile_volume`. Tear the catalog down later
-  with `dbxcarta-schemapile-bootstrap --drop-all --yes-i-mean-it`.
-- **Dense schema.** It reuses the same `schemapile_lakehouse` catalog, `_meta`
-  schema, and `schemapile_volume` volume as SchemaPile, and lives in its own
-  `dense_*` data schema. Its bootstrap is idempotent and provisions that shared
-  catalog, schema, and volume, so running it or the SchemaPile bootstrap is
-  equivalent:
-  ```bash
-  uv run dbxcarta-dense-bootstrap
-  ```
-  `dbxcarta-dense-materialize` then creates only the synthetic data schema and
-  tables. Because the catalog is shared, `dbxcarta-dense-bootstrap --drop-all
-  --yes-i-mean-it` drops only the dense data schema, never the shared catalog.
-
 Each target sets `DBXCARTA_ENV_FILE` to that example's committed dbxcarta
 overlay inline, so the commands work from the repo root with no per-shell setup.
-`make help` lists every target. The other one-time prerequisites (install the
-example preset, refresh secrets, upload questions, materialize upstream UC
-tables) are in each example README.
+`make help` lists every target. The one-time prerequisites differ per example
+(provisioning the ops plane or catalog, refreshing secrets, uploading questions,
+materializing upstream UC tables) and are documented in each example README:
+
+- [`examples/finance-genie/README.md`](examples/finance-genie/README.md)
+- [`examples/schemapile/README.md`](examples/schemapile/README.md)
+- [`examples/dense-schema/README.md`](examples/dense-schema/README.md)
 
 ### Preset workflow
 

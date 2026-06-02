@@ -9,6 +9,43 @@ The package depends on `dbxcarta-spark` and `dbxcarta-client`. Its tests live
 under `tests/examples/dense-schema/` and run in CI as a first-class sample
 consumer.
 
+## Quick Start
+
+The full flow from a clean checkout to a scored client run. The first block is
+one-time setup; the two make targets are the loop you repeat on every change.
+The [Setup flow](#setup-flow) section explains each step in more detail.
+
+```bash
+# Install dbxcarta and this example
+uv sync
+uv pip install -e examples/dense-schema/
+
+# Generate the synthetic schema. 1000 tables yields schema dense_1000, which
+# matches DBXCARTA_SCHEMAS in dbxcarta-overlay.env.
+uv run dbxcarta-dense-generate --tables 1000
+
+# Configure .env, then provision the shared catalog/schema/volume and
+# materialize the fixture into Unity Catalog.
+cp examples/dense-schema/.env.sample examples/dense-schema/.env   # edit profile + warehouse
+uv run dbxcarta-dense-bootstrap
+uv run dbxcarta-dense-materialize
+
+# Select the overlay, then upload the matching question set.
+export DBXCARTA_ENV_FILE=examples/dense-schema/dbxcarta-overlay.env
+uv run dbxcarta preset dbxcarta_dense_schema_example:preset --check-ready
+DENSE_QUESTIONS_FILE=examples/dense-schema/questions_1000.json \
+  uv run dbxcarta preset dbxcarta_dense_schema_example:preset --upload-questions
+```
+
+With setup in place, run the two make targets from the repo root. The `-ingest`
+target rebuilds the wheels from current source and builds the semantic layer, so
+run it first and let it finish, then run `-client`:
+
+```bash
+make e2e-dense-schema-ingest
+make e2e-dense-schema-client
+```
+
 ## What lives here
 
 ```text

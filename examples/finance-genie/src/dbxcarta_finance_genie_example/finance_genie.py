@@ -27,7 +27,6 @@ if TYPE_CHECKING:
 # DBXCARTA_CATALOG anchor (preflight/verify/ops) is the silver catalog;
 # DBXCARTA_CATALOGS lists all three for the unified ingest graph.
 _SILVER_CATALOG = "graph-enriched-finance-silver"
-_BRONZE_CATALOG = "graph-enriched-finance-bronze"
 _GOLD_CATALOG = "graph-enriched-finance-gold"
 _DEFAULT_SCHEMA = "graph-enriched-schema"
 
@@ -75,7 +74,6 @@ class FinanceGeniePreset:
     """
 
     catalog: str = _SILVER_CATALOG
-    bronze_catalog: str = _BRONZE_CATALOG
     gold_catalog: str = _GOLD_CATALOG
     schema: str = _DEFAULT_SCHEMA
     ops_catalog: str = _OPS_CATALOG
@@ -86,7 +84,6 @@ class FinanceGeniePreset:
 
     def __post_init__(self) -> None:
         validate_identifier(self.catalog, label="catalog")
-        validate_identifier(self.bronze_catalog, label="catalog")
         validate_identifier(self.gold_catalog, label="catalog")
         validate_identifier(self.schema, label="schema")
         validate_identifier(self.ops_catalog, label="catalog")

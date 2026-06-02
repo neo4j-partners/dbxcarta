@@ -6,6 +6,96 @@ scripts. Its primary job is to own Finance Genie configuration. The CLI preset
 is a convenience wrapper around that configuration, not a requirement for using
 dbxcarta as a library.
 
+## Quick Start
+
+The full flow from a clean checkout to a scored client run, all from the repo
+root. The first block is one-time setup; the two make targets are the loop you
+repeat on every change. Each numbered section under [Setup Flow](#setup-flow)
+explains a step in more detail.
+
+```bash
+# Install dbxcarta and this example preset
+uv sync
+uv pip install -e examples/finance-genie/
+
+# Select the Finance Genie overlay for every dbxcarta command
+export DBXCARTA_ENV_FILE=examples/finance-genie/dbxcarta-overlay.env
+
+# Confirm the upstream Finance Genie UC tables are present (section 2 creates them)
+uv run dbxcarta preset dbxcarta_finance_genie_example:preset --check-ready --strict-optional
+
+# Provision the ops plane: catalog, finance_genie_ops schema, dbxcarta-ops volume
+uv run dbxcarta-finance-genie-bootstrap
+
+# Provision the Neo4j secret scope
+./setup_secrets.sh --profile aws-partner-rk
+
+# Upload the demo question set to the ops volume
+uv run dbxcarta preset dbxcarta_finance_genie_example:preset --upload-questions
+```
+
+With setup in place, run the two make targets from the repo root. The `-ingest`
+target rebuilds the wheels from current source and builds the semantic layer, so
+run it first and let it finish, then run `-client`:
+
+```bash
+make e2e-finance-genie-ingest
+make e2e-finance-genie-client
+```
+
+The upstream Finance Genie tables checked by readiness are owned by the upstream
+project and created once per workspace; see
+[section 2](#2-prepare-finance-genie). The other setup steps are idempotent, so
+re-running them is safe. After setup, every code change replays through the two
+make targets alone.
+
+### Find the results
+
+The `-client` make target submits a Databricks job and reports `SUCCESS` when the
+job finishes, but the actual evaluation scores are in the job's stdout, not in
+the make output. Print them with the run ID the submit step echoes:
+
+```bash
+uv run dbxcarta-submit logs <run-id>
+```
+
+The summary is one line per arm:
+
+```
+[dbxcarta_client] run_id=... job=dbxcarta_client status=success catalog=...
+  no_context:  attempted=12 parsed=12 executed=2  non_empty=2  exec_rate=16.7%  non_empty_rate=16.7%  correct_rate=100.0%
+  schema_dump: attempted=12 parsed=12 executed=12 non_empty=12 exec_rate=100.0% non_empty_rate=100.0% correct_rate=91.7%
+  graph_rag:   attempted=12 parsed=12 executed=12 non_empty=12 exec_rate=100.0% non_empty_rate=100.0% correct_rate=100.0%
+```
+
+Reading a line:
+
+- `attempted` — questions sent to the arm.
+- `parsed` — responses that yielded valid SQL.
+- `executed` — generated SQL that ran on the warehouse without error.
+- `non_empty` — executed queries that returned at least one row.
+- `exec_rate` / `non_empty_rate` — `executed` / `non_empty` over `attempted`.
+- `correct_rate` — fraction of gradable questions whose result set matched the
+  reference SQL (only questions that carry a reference are gradable).
+
+The three arms are a progression, not three attempts at the same task. `no_context`
+is a deliberate zero-context baseline: it gives the model only the question and the
+catalog and schema names, no tables or columns, so a low `exec_rate` is expected and
+is the floor you compare against. `schema_dump` adds a token-capped schema dump, and
+`graph_rag` adds context retrieved from the knowledge graph. `graph_rag` matching or
+beating `schema_dump` on `correct_rate` is the result the run is checking for.
+
+The harness does not enforce a pass/fail threshold on these rates; it reports them
+for you to read. The same numbers, plus per-question detail, are persisted two ways:
+
+- A JSON file per run under `DBXCARTA_SUMMARY_VOLUME`
+  (`/Volumes/dbxcarta-catalog/finance_genie_ops/dbxcarta-ops/dbxcarta/runs`),
+  named `<job>_<run-id>_<timestamp>.json`, including every question's generated
+  SQL and result.
+- A run-history Delta table `DBXCARTA_SUMMARY_TABLE`
+  (`dbxcarta-catalog.finance_genie_ops.dbxcarta_run_summary`), one row per run,
+  for comparing arms across runs in SQL.
+
 ## What lives here, and why
 
 ```
