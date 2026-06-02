@@ -105,7 +105,7 @@ jobs:
         run: uv lock --check
 
       - name: Sync frozen test environment
-        run: uv sync --frozen --group test --all-packages
+        run: uv sync --frozen --group test --group ci --all-packages
 
       - name: Verify integration tests importable
         run: uv run pytest tests/integration --collect-only -q || [ $? -eq 5 ]
@@ -117,13 +117,13 @@ jobs:
         run: uv run mypy -p dbxcarta.spark -p dbxcarta.client -p dbxcarta.submit
 
       - name: Lint
-        run: uvx ruff@0.15.15 check .
+        run: uv run ruff check .
 
       - name: Vulnerability scan
         run: |
           uv export --frozen --all-packages --no-hashes -o /tmp/all-requirements.txt
           grep -v "^-e " /tmp/all-requirements.txt > /tmp/requirements.txt
-          uvx pip-audit@2.10.0 -r /tmp/requirements.txt
+          uv run pip-audit -r /tmp/requirements.txt
 
       - name: Clean package output
         run: rm -rf dist
@@ -135,7 +135,7 @@ jobs:
         run: |
           uv export --frozen --all-packages --no-hashes -o /tmp/all-requirements.txt
           grep -v "^-e " /tmp/all-requirements.txt > /tmp/sbom-requirements.txt
-          uvx --from cyclonedx-bom==7.3.0 cyclonedx-py requirements /tmp/sbom-requirements.txt --output-file dist/sbom.cdx.json
+          uv run cyclonedx-py requirements /tmp/sbom-requirements.txt --output-file dist/sbom.cdx.json
 
       - name: Inspect package artifacts
         run: uv run python scripts/security/artifact_audit.py inspect dist
