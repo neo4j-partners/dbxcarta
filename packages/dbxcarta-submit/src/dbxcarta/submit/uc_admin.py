@@ -172,6 +172,29 @@ def parse_teardown_target(value: str) -> TeardownTarget:
     )
 
 
+def parse_teardown_targets(value: str) -> list[TeardownTarget]:
+    """Parse a comma-separated ``DBXCARTA_TEARDOWN_TARGET`` into targets.
+
+    An example that owns more than one thing (e.g. a data catalog plus an ops
+    schema in the shared ops catalog) lists each target separated by commas, so
+    one teardown removes everything it owns. Each item is validated by
+    :func:`parse_teardown_target`, so the protected-name guard and the explicit
+    ``catalog:``/``schema:`` prefix apply per target. A value with no parseable
+    target is a hard error rather than a silent no-op.
+    """
+    targets = [
+        parse_teardown_target(item)
+        for item in value.split(",")
+        if item.strip()
+    ]
+    if not targets:
+        raise ValueError(
+            "DBXCARTA_TEARDOWN_TARGET must name at least one "
+            "'schema:<catalog>.<schema>' or 'catalog:<catalog>' target"
+        )
+    return targets
+
+
 def drop_teardown_target(
     ws: WorkspaceClient, warehouse_id: str, target: TeardownTarget
 ) -> None:

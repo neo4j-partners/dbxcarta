@@ -2,9 +2,10 @@
 
 Per-example dbxcarta config lives in the committed
 examples/schemapile/dbxcarta-overlay.env. This preset only provides the
-readiness check and question-upload helper. Readiness sources the list of UC
-schemas from the `DBXCARTA_SCHEMAS` env var (which the materializer writes into
-`.env.generated`).
+readiness check and question-upload helper. schemapile_lakehouse is a
+dedicated, data-only catalog auto-discovered by a blank `DBXCARTA_SCHEMAS`, so
+readiness queries the catalog directly: it is ready once materialize has
+produced at least one schema there.
 
 Resolvable via:
     uv run dbxcarta preset dbxcarta_schemapile_example:preset --check-ready
@@ -37,7 +38,7 @@ class SchemaPilePreset:
     `catalog` has a default so module-level construction does not depend on the
     environment. Per-example dbxcarta config lives in the committed
     dbxcarta-overlay.env; this preset only checks readiness and uploads
-    questions. `readiness` reads the UC-schema list from `DBXCARTA_SCHEMAS`.
+    questions. `readiness` queries the catalog for materialized schemas.
     """
 
     catalog: str = _DEFAULT_CATALOG
@@ -45,44 +46,38 @@ class SchemaPilePreset:
     def __post_init__(self) -> None:
         validate_identifier(self.catalog, label="catalog")
 
-    def schemas_list(self) -> tuple[str, ...]:
-        """Read DBXCARTA_SCHEMAS from the environment and validate each name."""
-        raw = os.environ.get("DBXCARTA_SCHEMAS", "").strip()
-        names = tuple(s.strip() for s in raw.split(",") if s.strip())
-        for name in names:
-            validate_identifier(name, label="schema")
-        return names
-
     def readiness(
         self,
         ws: "WorkspaceClient",
         warehouse_id: str,
     ) -> ReadinessReport:
-        """Report whether the materialized UC schemas exist under the catalog.
+        """Report whether materialize has produced any schemas in the catalog.
 
-        Required-vs-optional is collapsed because the schemapile example does
-        not have a fixed expected table set; readiness is "did materialize
-        run, and are the produced schemas visible?".
+        schemapile_lakehouse is a dedicated, data-only catalog auto-discovered
+        by a blank `DBXCARTA_SCHEMAS`, so there is no fixed expected schema
+        list to match against. Readiness is "did materialize run, and is at
+        least one data schema visible?". `information_schema` is the only
+        always-present schema, so it is excluded from the count.
         """
-        expected = self.schemas_list()
-        if not expected:
+        present_schemas = _fetch_schema_names(ws, warehouse_id, self.catalog)
+        present = tuple(
+            name
+            for raw in present_schemas
+            if (name := raw.strip()) and name != "information_schema"
+        )
+        if not present:
             return ReadinessReport(
                 catalog=self.catalog,
                 schema="",
                 present=(),
-                missing_required=("(DBXCARTA_SCHEMAS is empty; run materialize first)",),
+                missing_required=("(no schemas materialized; run materialize first)",),
                 missing_optional=(),
             )
-
-        present_schemas = _fetch_schema_names(ws, warehouse_id, self.catalog)
-        present_set = {n.strip() for n in present_schemas if n and n.strip()}
-        present = tuple(n for n in expected if n in present_set)
-        missing = tuple(n for n in expected if n not in present_set)
         return ReadinessReport(
             catalog=self.catalog,
-            schema=",".join(expected),
+            schema=",".join(present),
             present=present,
-            missing_required=missing,
+            missing_required=(),
             missing_optional=(),
         )
 

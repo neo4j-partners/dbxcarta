@@ -39,6 +39,7 @@ def _make_config(tmp_path, **overrides) -> SchemaPileConfig:
         catalog="schemapile_lakehouse",
         meta_schema="_meta",
         volume="schemapile_volume",
+        volume_path="/Volumes/dbxcarta-catalog/schemapile_ops/dbxcarta-ops",
         questions_path="/Volumes/x/_meta/x/dbxcarta/questions.json",
         question_model="model",
         questions_per_schema=6,

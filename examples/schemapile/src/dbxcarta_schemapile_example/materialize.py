@@ -3,8 +3,9 @@
 Reads the candidate JSON (produced by the candidate selector), creates one
 UC schema per candidate entry under the schemapile catalog, then creates one
 Delta table per table spec. Sample row values from schemapile are inserted
-when present. The list of materialized UC schemas is written to
-`.env.generated` for the dbxcarta run.
+when present. No schema list is emitted: schemapile_lakehouse is a dedicated,
+data-only catalog, so the dbxcarta run auto-discovers every materialized
+schema from a blank `DBXCARTA_SCHEMAS`.
 
 Type coercion from arbitrary schemapile DDL types to Delta types uses a
 small documented map. Anything that does not match falls back to STRING.
@@ -114,12 +115,6 @@ def main() -> int:
         help="Path to the .env file to load (default: example directory .env)",
     )
     parser.add_argument(
-        "--env-out",
-        type=Path,
-        default=Path(__file__).resolve().parents[2] / ".env.generated",
-        help="Path to write the generated DBXCARTA_SCHEMAS overlay (default: example directory .env.generated)",
-    )
-    parser.add_argument(
         "--warehouse-id",
         type=str,
         default=None,
@@ -151,16 +146,12 @@ def main() -> int:
     ws = build_workspace_client()
     stats = materialize(ws, warehouse_id, config, schemas)
 
-    uc_schemas = [s["uc_schema"] for s in schemas]
-    args.env_out.write_text(f"DBXCARTA_SCHEMAS={','.join(uc_schemas)}\n")
     print(
         f"[schemapile] materialized schemas={stats.schemas_created}"
         f" tables={stats.tables_created} rows={stats.rows_inserted}"
         f" skipped={stats.tables_skipped} type_fallbacks={stats.type_fallbacks}",
         file=sys.stderr,
     )
-    print(f"[schemapile] wrote {args.env_out} with DBXCARTA_SCHEMAS list",
-          file=sys.stderr)
     return 0
 
 
@@ -172,6 +163,17 @@ def materialize(
 ) -> MaterializeStats:
     stats = MaterializeStats()
     catalog_q = quote_identifier(config.catalog)
+
+    # Provision the data catalog itself. The ops plane (volume, summary) lives
+    # in a separate catalog that `dbxcarta-submit bootstrap` creates from
+    # DATABRICKS_VOLUME_PATH; the data catalog is this example's own, so
+    # materialize owns creating it. config.load_config already refuses a
+    # protected/project catalog name, so this never targets a shared catalog.
+    _execute(
+        ws, warehouse_id,
+        f"CREATE CATALOG IF NOT EXISTS {catalog_q}"
+        " COMMENT 'schemapile materialize: data catalog'",
+    )
 
     for schema_entry in schemas:
         uc_schema = schema_entry["uc_schema"]

@@ -52,7 +52,22 @@ def test_load_config_truthy_parsing(tmp_path):
     assert cfg2.require_self_contained is True
 
 
-def test_volume_path_is_volumes_subpath(tmp_path):
+def test_volume_path_uses_env_ops_path(tmp_path):
+    cfg = load_config(
+        _base_env(
+            tmp_path,
+            DATABRICKS_VOLUME_PATH="/Volumes/dbxcarta-catalog/schemapile_ops/dbxcarta-ops",
+        )
+    )
+    assert cfg.volume_path == "/Volumes/dbxcarta-catalog/schemapile_ops/dbxcarta-ops"
+    # questions_path defaults under the ops volume, not the data catalog.
+    assert cfg.questions_path == (
+        "/Volumes/dbxcarta-catalog/schemapile_ops/dbxcarta-ops/dbxcarta/questions.json"
+    )
+
+
+def test_volume_path_falls_back_to_in_catalog_derivation(tmp_path):
+    # With no DATABRICKS_VOLUME_PATH the legacy in-catalog path is the fallback.
     cfg = load_config(_base_env(tmp_path))
     assert cfg.volume_path == "/Volumes/schemapile_lakehouse/_meta/schemapile_volume"
 

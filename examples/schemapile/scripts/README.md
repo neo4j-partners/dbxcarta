@@ -2,8 +2,7 @@
 
 One-off utilities that live alongside the example but are not part of
 the published package's entrypoints. Run them with `uv run` from the
-example directory so the `.env` and `.env.generated` overlay is picked
-up automatically.
+example directory so the `.env` is picked up automatically.
 
 ## `dump_question_context.py`
 
@@ -59,14 +58,13 @@ uv run --directory examples/schemapile python scripts/dump_question_context.py \
 ### Required environment
 
 The script uses `dbxcarta.client.ClientSettings`, which reads the same
-variables the runtime client uses. The two `.env` files in the example
-directory are sufficient:
+variables the runtime client uses. The example `.env` is sufficient:
 
 - `examples/schemapile/.env` — workspace credentials, catalog name,
-  warehouse id, volume/summary paths, Neo4j credentials.
-- `examples/schemapile/.env.generated` — `DBXCARTA_SCHEMAS=...`
-  written by the materialize step. The script loads this as an
-  overlay so the schema list reflects what is actually in UC.
+  warehouse id, volume/summary paths, Neo4j credentials. `DBXCARTA_SCHEMAS`
+  is blank (schemapile_lakehouse is data-only and auto-discovered), and the
+  script's Cypher treats an empty schema list as "all schemas", so the dump
+  covers the whole graph.
 
 If `NEO4J_URI` / `NEO4J_USERNAME` / `NEO4J_PASSWORD` are not set in
 the env, the script falls back to the Databricks secret scope path in

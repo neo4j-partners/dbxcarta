@@ -179,11 +179,18 @@ example's `--drop-all` does today:
 - schemapile: `DBXCARTA_TEARDOWN_TARGET=catalog:schemapile_lakehouse`
 - finance: `DBXCARTA_TEARDOWN_TARGET=schema:dbxcarta-catalog.finance_genie_ops`
 
-This preserves the shared-catalog interdependence on purpose: dense tears down
-only its own `dense_1000` data schema and leaves the shared catalog (and its
-`_meta` schema and volume) for schemapile, while schemapile's target drops the
-whole `schemapile_lakehouse` catalog. The value is secret-free, so it is safe to
-keep in the committed, job-param-forwarded overlay.
+The value is secret-free, so it is safe to keep in the committed,
+job-param-forwarded overlay.
+
+**Later widened to multi-target (schemapile plane separation).**
+`DBXCARTA_TEARDOWN_TARGET` now accepts a comma-separated list, parsed by
+`parse_teardown_targets`, so an example that owns more than one thing drops all
+of it in one command. This came in with the schemapile ops/data plane split:
+schemapile's ops moved out of `schemapile_lakehouse` into
+`dbxcarta-catalog.schemapile_ops`, so it now owns two targets and its value is
+`catalog:schemapile_lakehouse,schema:dbxcarta-catalog.schemapile_ops`. dense and
+finance remain single-target. The shared `dbxcarta-catalog` is never itself a
+target, so other examples' ops are safe. See `clean-schemapile.md`.
 
 ### Phase 4 (done): Wire the commands into the make targets
 

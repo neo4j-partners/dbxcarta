@@ -50,6 +50,11 @@ class SchemaPileConfig:
     catalog: str
     meta_schema: str
     volume: str
+    # Ops volume path, sourced from DATABRICKS_VOLUME_PATH. Deliberately not
+    # derived from `catalog`: the ops plane lives in its own catalog
+    # (dbxcarta-catalog.schemapile_ops), separate from the data catalog this
+    # config materializes tables into, so data discovery never sweeps it in.
+    volume_path: str
     questions_path: str
     question_model: str
     questions_per_schema: int
@@ -71,10 +76,6 @@ class SchemaPileConfig:
     def upstream_slice_script(self) -> Path:
         return self.repo / "slice.py"
 
-    @property
-    def volume_path(self) -> str:
-        return f"/Volumes/{self.catalog}/{self.meta_schema}/{self.volume}"
-
 
 def load_config(env: Mapping[str, str] | None = None) -> SchemaPileConfig:
     """Build a SchemaPileConfig from environment variables.
@@ -93,6 +94,16 @@ def load_config(env: Mapping[str, str] | None = None) -> SchemaPileConfig:
             f"DBXCARTA_CATALOG={catalog!r} collides with a known project catalog;"
             " choose a dedicated catalog for the schemapile example"
         )
+
+    meta_schema = e.get("SCHEMAPILE_META_SCHEMA", "_meta")
+    volume = e.get("SCHEMAPILE_VOLUME", "schemapile_volume")
+    # The ops plane is separate from the data catalog. Prefer the explicit
+    # DATABRICKS_VOLUME_PATH (the overlay/.env points it at the ops catalog);
+    # fall back to the legacy in-catalog derivation only when it is unset.
+    volume_path = e.get(
+        "DATABRICKS_VOLUME_PATH",
+        f"/Volumes/{catalog}/{meta_schema}/{volume}",
+    )
 
     return SchemaPileConfig(
         repo=repo,
@@ -121,11 +132,12 @@ def load_config(env: Mapping[str, str] | None = None) -> SchemaPileConfig:
         ),
         candidate_limit=int(e.get("SCHEMAPILE_CANDIDATE_LIMIT", "20")),
         catalog=catalog,
-        meta_schema=e.get("SCHEMAPILE_META_SCHEMA", "_meta"),
-        volume=e.get("SCHEMAPILE_VOLUME", "schemapile_volume"),
+        meta_schema=meta_schema,
+        volume=volume,
+        volume_path=volume_path,
         questions_path=e.get(
             "DBXCARTA_CLIENT_QUESTIONS",
-            f"/Volumes/{catalog}/_meta/schemapile_volume/dbxcarta/questions.json",
+            f"{volume_path}/dbxcarta/questions.json",
         ),
         question_model=e.get(
             "SCHEMAPILE_QUESTION_MODEL",

@@ -30,17 +30,36 @@ def test_preset_rejects_invalid_catalog():
         SchemaPilePreset(catalog="bad catalog name")
 
 
-def test_schemas_list_rejects_invalid_names(monkeypatch):
-    monkeypatch.setenv("DBXCARTA_SCHEMAS", "good, bad name")
-    with pytest.raises(ValueError):
-        preset.schemas_list()
+class _FakeStatementExecution:
+    def __init__(self, schema_rows):
+        self._schema_rows = schema_rows
+
+    def execute_statement(self, **kwargs):
+        data_array = [[name] for name in self._schema_rows]
+        return type(
+            "Resp",
+            (),
+            {"result": type("Result", (), {"data_array": data_array})()},
+        )()
 
 
-def test_readiness_reports_missing_when_schemas_empty(monkeypatch):
-    monkeypatch.delenv("DBXCARTA_SCHEMAS", raising=False)
-    report = preset.readiness(ws=None, warehouse_id="abc")  # type: ignore[arg-type]
+class _FakeWorkspaceClient:
+    def __init__(self, schema_rows):
+        self.statement_execution = _FakeStatementExecution(schema_rows)
+
+
+def test_readiness_reports_missing_when_only_information_schema():
+    ws = _FakeWorkspaceClient(["information_schema"])
+    report = preset.readiness(ws=ws, warehouse_id="abc")  # type: ignore[arg-type]
     assert not report.ok()
     assert any("materialize" in m for m in report.missing_required)
+
+
+def test_readiness_ready_when_schemas_present():
+    ws = _FakeWorkspaceClient(["information_schema", "sp_a", "sp_b"])
+    report = preset.readiness(ws=ws, warehouse_id="abc")  # type: ignore[arg-type]
+    assert report.ok()
+    assert report.present == ("sp_a", "sp_b")
 
 
 def test_readiness_report_format_contains_status():

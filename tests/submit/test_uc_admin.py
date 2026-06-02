@@ -13,6 +13,7 @@ from dbxcarta.submit.uc_admin import (
     ensure_uc_volume,
     execute_statement,
     parse_teardown_target,
+    parse_teardown_targets,
     read_required_warehouse_id,
 )
 
@@ -101,6 +102,32 @@ def test_parse_teardown_target_refuses_protected_catalog() -> None:
         parse_teardown_target("catalog:main")
     with pytest.raises(ValueError, match="protected"):
         parse_teardown_target("schema:system.foo")
+
+
+def test_parse_teardown_targets_splits_comma_separated() -> None:
+    targets = parse_teardown_targets(
+        "catalog:schemapile_lakehouse, schema:dbxcarta-catalog.schemapile_ops"
+    )
+    assert [t.describe() for t in targets] == [
+        "catalog schemapile_lakehouse",
+        "schema dbxcarta-catalog.schemapile_ops",
+    ]
+
+
+def test_parse_teardown_targets_single_value() -> None:
+    targets = parse_teardown_targets("schema:dbxcarta-catalog.finance_genie_ops")
+    assert len(targets) == 1
+    assert targets[0].kind is TeardownKind.SCHEMA
+
+
+def test_parse_teardown_targets_rejects_empty() -> None:
+    with pytest.raises(ValueError):
+        parse_teardown_targets("   ")
+
+
+def test_parse_teardown_targets_propagates_protected_guard() -> None:
+    with pytest.raises(ValueError, match="protected"):
+        parse_teardown_targets("schema:cat.s, catalog:main")
 
 
 def test_ensure_uc_volume_emits_idempotent_ddl() -> None:

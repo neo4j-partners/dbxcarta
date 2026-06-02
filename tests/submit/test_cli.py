@@ -175,3 +175,17 @@ def test_teardown_dry_run_is_noop_even_with_confirmation(
     _no_workspace(monkeypatch)
     monkeypatch.setenv("DBXCARTA_TEARDOWN_TARGET", "catalog:schemapile_lakehouse")
     assert cli._handle_teardown(["--dry-run", "--yes-i-mean-it"]) == 0
+
+
+def test_teardown_dry_run_lists_every_target(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _no_workspace(monkeypatch)
+    monkeypatch.setenv(
+        "DBXCARTA_TEARDOWN_TARGET",
+        "catalog:schemapile_lakehouse,schema:dbxcarta-catalog.schemapile_ops",
+    )
+    assert cli._handle_teardown(["--dry-run"]) == 0
+    err = capsys.readouterr().err
+    assert "catalog schemapile_lakehouse" in err
+    assert "schema dbxcarta-catalog.schemapile_ops" in err

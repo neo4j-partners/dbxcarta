@@ -27,16 +27,16 @@ uv pip install -e examples/schemapile/
 # examples/schemapile/.env, so run them from that directory.
 cd examples/schemapile
 cp .env.sample .env                             # edit SCHEMAPILE_REPO, profile, warehouse, catalog
-uv run dbxcarta-submit bootstrap --env-file dbxcarta-overlay.env  # provision catalog + volume
+uv run dbxcarta-submit bootstrap --env-file dbxcarta-overlay.env  # provision ops catalog + volume
 uv run dbxcarta-schemapile-slice
 uv run dbxcarta-schemapile-select
-uv run dbxcarta-schemapile-materialize          # writes .env.generated
+uv run dbxcarta-schemapile-materialize
 uv run dbxcarta-schemapile-generate-questions
 cd ../..
 
-# Copy the DBXCARTA_SCHEMAS=... line that materialize wrote into
-# examples/schemapile/.env.generated into examples/schemapile/dbxcarta-overlay.env
-# (it ships blank), then select that overlay for every command below.
+# Select the SchemaPile overlay for every command below. No schema list to
+# copy: schemapile_lakehouse is a dedicated, data-only catalog, so the ingest
+# auto-discovers the materialized schemas from a blank DBXCARTA_SCHEMAS.
 export DBXCARTA_ENV_FILE=examples/schemapile/dbxcarta-overlay.env
 
 # Confirm the schemas materialized, then upload the generated question set.
@@ -89,10 +89,9 @@ benchmark and should not be cited as evidence of absolute correctness.
 ## Quick iterate loop (testing dbxcarta changes)
 
 Once the one-time setup is in place (steps 1–8 below: example installed,
-catalog bootstrapped, slice/candidates/Delta tables materialized, the
-`DBXCARTA_SCHEMAS` line copied into `dbxcarta-overlay.env`, and the
+catalog bootstrapped, slice/candidates/Delta tables materialized, and the
 question set uploaded), the wheel-rebuild-and-submit half of step 9 runs
-in two make targets from the repo root — ingest first, then the client
+in two make targets from the repo root. Run ingest first, then the client
 evaluation once ingest finishes:
 
 ```bash
@@ -145,7 +144,7 @@ cp .env.sample .env
 The example refuses to run if `DBXCARTA_CATALOG` matches a known project
 catalog (e.g. `graph-enriched-lakehouse`).
 
-### 4. Bootstrap the Unity Catalog catalog and volume
+### 4. Bootstrap the ops plane (catalog + volume)
 
 Requires catalog-create privilege on the workspace.
 
@@ -154,10 +153,17 @@ cd examples/schemapile
 uv run dbxcarta-submit bootstrap --env-file dbxcarta-overlay.env
 ```
 
-This creates `<catalog>`, `<catalog>._meta`, and
-`<catalog>._meta.schemapile_volume` from the overlay's `DATABRICKS_VOLUME_PATH`,
-and is idempotent. To tear down later, `teardown` drops the overlay's
-`DBXCARTA_TEARDOWN_TARGET` (`catalog:schemapile_lakehouse`, the whole lakehouse):
+This provisions the **ops plane** named by the overlay's
+`DATABRICKS_VOLUME_PATH`: the `dbxcarta-catalog` catalog, the
+`schemapile_ops` schema, and the `dbxcarta-ops` volume that hold wheels,
+run summaries, and the question set. It is idempotent. The **data**
+catalog (`schemapile_lakehouse`) is created by the materialize step
+(section 7), not here, so the data plane and ops plane stay separate.
+
+To tear down later, `teardown` drops both targets the overlay names in
+`DBXCARTA_TEARDOWN_TARGET`: the data catalog `schemapile_lakehouse` and
+the ops schema `dbxcarta-catalog.schemapile_ops`. The shared
+`dbxcarta-catalog` itself is left intact for other examples.
 
 ```bash
 uv run dbxcarta-submit teardown --env-file dbxcarta-overlay.env --yes-i-mean-it
@@ -200,8 +206,9 @@ filename, primary key list, and foreign key list are recorded as Delta
 table properties on every table so the trace from a UC table to its
 schemapile origin is always one query away.
 
-The step writes `examples/schemapile/.env.generated` with the
-`DBXCARTA_SCHEMAS=...` line that the dbxcarta runner needs.
+No schema list is emitted. `schemapile_lakehouse` is a dedicated,
+data-only catalog, so the dbxcarta run auto-discovers every materialized
+schema from a blank `DBXCARTA_SCHEMAS` in the overlay.
 
 ### 8. Generate and validate the question set
 
@@ -223,15 +230,16 @@ model.
 ### 9. Run dbxcarta against the schemapile catalog
 
 dbxcarta loads config in two layers: the repo-root `.env` is the shared
-base (Databricks infra + Neo4j secrets, never edited per integration),
-and this directory's committed, secret-free `dbxcarta-overlay.env` is
-the SchemaPile overlay (dbxcarta-scoped values only). Selecting it is
-one variable, no root `.env` edit. Copy the `DBXCARTA_SCHEMAS` line that
-step 7 wrote into `.env.generated` into `dbxcarta-overlay.env` first
-(it ships blank otherwise), then export `DBXCARTA_ENV_FILE` once and run
-the standard flow from the repo root. The `dbxcarta-submit` subcommands
-read the overlay from the environment and do not accept a `--env-file`
-flag, so the export is the mechanism that selects it:
+base, holding Databricks infra and Neo4j secrets, never edited per
+integration. This directory's committed, secret-free
+`dbxcarta-overlay.env` is the SchemaPile overlay, holding dbxcarta-scoped
+values only. Selecting it is one variable, no root `.env` edit. There is
+no schema list to copy: `DBXCARTA_SCHEMAS` ships blank because
+`schemapile_lakehouse` is data-only and auto-discovered. Export
+`DBXCARTA_ENV_FILE` once and run the standard flow from the repo root.
+The `dbxcarta-submit` subcommands read the overlay from the environment
+and do not accept a `--env-file` flag, so the export is the mechanism
+that selects it:
 
 ```bash
 # Select the SchemaPile overlay once for every command below.

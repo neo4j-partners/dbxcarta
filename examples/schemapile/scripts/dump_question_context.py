@@ -22,12 +22,11 @@ from pathlib import Path
 from dotenv import load_dotenv
 from neo4j import GraphDatabase
 
-# Load .env first, then .env.generated as an overlay (matches the
-# preset's overlay behavior — the materializer writes DBXCARTA_SCHEMAS
-# into .env.generated, not .env).
+# Load the standalone .env. DBXCARTA_SCHEMAS is blank for schemapile (the
+# data-only catalog is auto-discovered), and the Cypher below treats an empty
+# schema list as "all schemas", so the dump covers the whole graph.
 _EXAMPLE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(_EXAMPLE_DIR / ".env")
-load_dotenv(_EXAMPLE_DIR / ".env.generated", override=True)
 
 from dbxcarta.client.neo4j_utils import neo4j_credentials  # noqa: E402
 from dbxcarta.client.schema_dump import fetch_schema_dump  # noqa: E402

@@ -170,8 +170,8 @@ def main() -> None:
       wheels and ships the bootstrap script.
     - `dbxcarta-submit bootstrap` creates the catalog, schema, and volume the
       selected overlay names in `DATABRICKS_VOLUME_PATH`.
-    - `dbxcarta-submit teardown` drops the catalog or schema the selected
-      overlay names in `DBXCARTA_TEARDOWN_TARGET`.
+    - `dbxcarta-submit teardown` drops the catalog and/or schema targets the
+      selected overlay names in `DBXCARTA_TEARDOWN_TARGET` (comma-separated).
     """
     overlay = select_overlay_path()
     runner.env_file = overlay
@@ -213,7 +213,7 @@ def _print_help() -> None:
         "                                      stable Volume path and ship the bootstrap script.\n"
         "  bootstrap                           Create the catalog, schema, and volume named by\n"
         "                                      the overlay's DATABRICKS_VOLUME_PATH (idempotent).\n"
-        "  teardown                            Drop the catalog or schema named by the overlay's\n"
+        "  teardown                            Drop the catalog/schema targets named by the overlay's\n"
         "                                      DBXCARTA_TEARDOWN_TARGET (needs --yes-i-mean-it).\n"
         "\n"
         "Commands passed through to databricks-job-runner:"
@@ -341,10 +341,10 @@ def _handle_bootstrap(argv: list[str]) -> int:
 
 
 def _handle_teardown(argv: list[str]) -> int:
-    """Drop the catalog or schema named by the overlay's teardown target.
+    """Drop every catalog/schema target named by the overlay's teardown value.
 
     Destructive and never automatic: without ``--yes-i-mean-it`` it prints the
-    target and exits without dropping anything.
+    targets and exits without dropping anything.
     """
     import argparse
 
@@ -353,7 +353,7 @@ def _handle_teardown(argv: list[str]) -> int:
 
     from dbxcarta.submit.uc_admin import (
         drop_teardown_target,
-        parse_teardown_target,
+        parse_teardown_targets,
         read_required_warehouse_id,
     )
 
@@ -395,17 +395,18 @@ def _handle_teardown(argv: list[str]) -> int:
         )
         return 2
     try:
-        target = parse_teardown_target(target_value)
+        targets = parse_teardown_targets(target_value)
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
+    described = ", ".join(t.describe() for t in targets)
     if args.dry_run:
-        print(f"[teardown] would drop {target.describe()}", file=sys.stderr)
+        print(f"[teardown] would drop {described}", file=sys.stderr)
         return 0
     if not args.yes_i_mean_it:
         print(
-            f"[teardown] refusing to drop {target.describe()} without "
+            f"[teardown] refusing to drop {described} without "
             "--yes-i-mean-it; nothing changed.",
             file=sys.stderr,
         )
@@ -416,11 +417,12 @@ def _handle_teardown(argv: list[str]) -> int:
             args.warehouse_id, operation="teardown"
         )
         ws = build_workspace_client()
-        drop_teardown_target(ws, warehouse_id, target)
+        for target in targets:
+            drop_teardown_target(ws, warehouse_id, target)
     except (ValueError, RuntimeError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
-    print(f"[teardown] dropped {target.describe()}", file=sys.stderr)
+    print(f"[teardown] dropped {described}", file=sys.stderr)
     return 0
 
 

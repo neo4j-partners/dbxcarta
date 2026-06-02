@@ -33,6 +33,7 @@ def _config() -> SchemaPileConfig:
         catalog="schemapile_lakehouse",
         meta_schema="_meta",
         volume="schemapile_volume",
+        volume_path="/Volumes/dbxcarta-catalog/schemapile_ops/dbxcarta-ops",
         questions_path="/Volumes/schemapile_lakehouse/_meta/schemapile_volume/dbxcarta/questions.json",
         question_model="databricks-meta-llama-3-3-70b-instruct",
         questions_per_schema=6,

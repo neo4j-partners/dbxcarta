@@ -26,10 +26,10 @@ reads the selected example's committed overlay:
   VOLUME IF NOT EXISTS` against a SQL warehouse. It is idempotent and is the
   first step of every `e2e-<example>-ingest` make target.
 - **`dbxcarta-submit teardown`** reads the overlay's explicit
-  `DBXCARTA_TEARDOWN_TARGET` (`schema:<catalog>.<schema>` or
-  `catalog:<catalog>`) and drops exactly that with `CASCADE`. It requires
-  `--yes-i-mean-it`, is never chained into ingest, and is exposed as
-  `make e2e-<example>-teardown`.
+  `DBXCARTA_TEARDOWN_TARGET`, a comma-separated list of
+  `schema:<catalog>.<schema>` or `catalog:<catalog>` targets, and drops each
+  with `CASCADE`. It requires `--yes-i-mean-it`, is never chained into ingest,
+  and is exposed as `make e2e-<example>-teardown`.
 
 Both run locally against a SQL warehouse (needing `DATABRICKS_WAREHOUSE_ID` and
 operator privilege), and both refuse a target on a shared protected-name
@@ -39,12 +39,12 @@ primitives live in `dbxcarta.spark.databricks` (`parse_volume_path`,
 `dbxcarta.submit.uc_admin`, kept out of the cluster-installed `dbxcarta-spark`
 ingest wheel.
 
-Each example declares its own teardown target because what each drops genuinely
-differs and cannot be derived from the volume path:
+Each example declares its own teardown target(s) because what each drops
+genuinely differs and cannot be derived from the volume path:
 
 | Example | `DBXCARTA_TEARDOWN_TARGET` | Effect |
 |---------|----------------------------|--------|
-| SchemaPile | `catalog:schemapile_lakehouse` | drops the whole shared lakehouse |
+| SchemaPile | `catalog:schemapile_lakehouse,schema:dbxcarta-catalog.schemapile_ops` | drops the data catalog and its ops schema; the shared `dbxcarta-catalog` is left intact |
 | Dense schema | `schema:dense-schema_example.dense_1000` | drops only its own data schema |
 | Finance Genie | `schema:dbxcarta-catalog.finance_genie_ops` | drops only the ops schema; upstream data catalogs are untouched |
 
