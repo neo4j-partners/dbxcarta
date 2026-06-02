@@ -264,73 +264,29 @@ loader; examples own their concrete preset implementations.
 
 #### Finance Genie
 
-Pairs dbxcarta with Finance Genie on a three-catalog medallion layout. Finance
-Genie writes raw business tables to bronze and silver catalogs and
-graph-enriched features to a gold catalog, named `graph-enriched-finance-bronze`,
-`-silver`, and `-gold`. dbxcarta folds all three into one Neo4j semantic layer
-via `DBXCARTA_CATALOGS` and tags each table's tier via `DBXCARTA_LAYER_MAP`. Run
-summaries and the generation cache land in a separate ops catalog,
-`dbxcarta-catalog`. Setup and copy-paste Quick Start:
-[`examples/finance-genie/README.md`](examples/finance-genie/README.md#quick-start).
+[**Follow the Finance Genie Quick Start →**](examples/finance-genie/README.md#quick-start)
+
+- **Layout:** three-catalog medallion. Finance Genie writes raw business tables to bronze and silver, graph-enriched features to gold, named `graph-enriched-finance-bronze`, `-silver`, and `-gold`.
+- **Graph:** dbxcarta folds all three catalogs into one Neo4j semantic layer via `DBXCARTA_CATALOGS`, tagging each table's tier via `DBXCARTA_LAYER_MAP`.
+- **Ops catalog:** run summaries and the generation cache land in a separate `dbxcarta-catalog`.
 
 #### SchemaPile
 
-Materializes a reproducible slice of
-[SchemaPile](https://github.com/amsterdata/schemapile) as Delta tables in a
-dedicated catalog, writes the generated UC schema list to `.env.generated`, and
-generates a SQL-validated question set. It exposes
-`dbxcarta_schemapile_example:preset`. Setup and copy-paste Quick Start:
-[`examples/schemapile/README.md`](examples/schemapile/README.md#quick-start).
+[**Follow the SchemaPile Quick Start →**](examples/schemapile/README.md#quick-start)
+
+- **Source:** a reproducible slice of [SchemaPile](https://github.com/amsterdata/schemapile) materialized as Delta tables in a dedicated catalog.
+- **Schema list:** the generated UC schema list is written to `.env.generated`.
+- **Questions:** a SQL-validated question set is generated.
+- **Preset:** exposes `dbxcarta_schemapile_example:preset`.
 
 #### Dense schema
 
-Generates a synthetic single schema of 500 or 1000 tables for stress testing
-schema-context retrieval against dense schema context. It reuses the SchemaPile
-lakehouse catalog and exposes `dbxcarta_dense_schema_example:preset`. Setup and
-copy-paste Quick Start:
-[`examples/dense-schema/README.md`](examples/dense-schema/README.md#quick-start).
+[**Follow the Dense Schema Quick Start →**](examples/dense-schema/README.md#quick-start)
 
-#### Demos
-
-`examples/demos/` is reserved for walkthroughs that are not migration-gate
-consumers.
-
-#### Quick start: run an example
-
-The fastest end-to-end path is the
-[Finance Genie Quick Start](examples/finance-genie/README.md#quick-start): one
-copy-paste sequence from a clean checkout through one-time provisioning to a
-scored client run.
-
-Every example then runs the same way. Once its one-time setup is in place, the
-repo-root `Makefile` runs the pipeline in two phases: an `-ingest` target that
-rebuilds the wheels from current source and submits ingest, then a `-client`
-target that submits the client evaluation. Run ingest, let it finish, then run
-client:
-
-```bash
-# Finance Genie
-make e2e-finance-genie-ingest
-make e2e-finance-genie-client
-
-# SchemaPile
-make e2e-schemapile-ingest
-make e2e-schemapile-client
-
-# Dense schema
-make e2e-dense-schema-ingest
-make e2e-dense-schema-client
-```
-
-Each target sets `DBXCARTA_ENV_FILE` to that example's committed dbxcarta
-overlay inline, so the commands work from the repo root with no per-shell setup.
-`make help` lists every target. The one-time prerequisites differ per example
-(provisioning the ops plane or catalog, refreshing secrets, uploading questions,
-materializing upstream UC tables) and are documented in each example README:
-
-- [`examples/finance-genie/README.md`](examples/finance-genie/README.md)
-- [`examples/schemapile/README.md`](examples/schemapile/README.md)
-- [`examples/dense-schema/README.md`](examples/dense-schema/README.md)
+- **Purpose:** stress-test schema-context retrieval against dense schema context.
+- **Schema:** a synthetic single schema of 500 or 1000 tables.
+- **Catalog:** reuses the SchemaPile lakehouse catalog.
+- **Preset:** exposes `dbxcarta_dense_schema_example:preset`.
 
 ### Preset workflow
 
@@ -366,14 +322,9 @@ uv pip install -e examples/dense-schema/
 uv run dbxcarta preset dbxcarta_dense_schema_example:preset --print-env
 ```
 
-Keep the generated overlay in the environment (or copy its `DBXCARTA_SCHEMAS=...` line into `.env`) before running `--print-env`, `--check-ready`, `--upload-questions`, ingest, or client jobs.
+Keep the generated overlay in the environment (or copy its `DBXCARTA_SCHEMAS=...` line into `.env`) before running `--print-env`, `--check-ready`, `--upload-questions`, ingest, or client jobs. See each example's README for its full setup flow.
 
-See the example READMEs for the full setup flows:
-
-- [`examples/finance-genie/README.md`](examples/finance-genie/README.md)
-- [`examples/schemapile/README.md`](examples/schemapile/README.md)
-
-## Quickstart
+## Quickstart: demo catalog
 
 This path creates the demo Unity Catalog schemas, builds the Neo4j semantic layer, then runs the demo client against that graph.
 
@@ -575,9 +526,17 @@ The provenance file records:
 
 Treat it as audit evidence for the reviewed artifacts.
 
+**`bootstrap`**
+
+Creates the catalog, schema, and volume named by the selected overlay's `DATABRICKS_VOLUME_PATH` (`CREATE ... IF NOT EXISTS`), running locally against a SQL warehouse. Idempotent, so it is the first step of every `e2e-<example>-ingest` make target and a no-op on later runs; needs `DATABRICKS_WAREHOUSE_ID` and operator privilege. `--dry-run` prints the three names (and refuses a protected catalog) without touching the workspace.
+
+**`teardown`**
+
+Drops the catalog or schema named by the overlay's `DBXCARTA_TEARDOWN_TARGET` (`schema:<catalog>.<schema>` or `catalog:<catalog>`, dropped with `CASCADE`). Destructive and never automatic: it requires `--yes-i-mean-it`, and without it — or under `--dry-run` — only prints what it would drop. A shared protected-name blocklist guards both commands, so neither can name a system catalog. Run by hand via `make e2e-<example>-teardown`.
+
 **`publish-wheels`**
 
-Builds each dbxcarta wheel, bumps the patch version, uploads the wheels to `DATABRICKS_VOLUME_PATH/wheels/`, and ships the bootstrap script. Re-run whenever `packages/dbxcarta-*/src/` changes.
+Builds each dbxcarta wheel, bumps the patch version, uploads the wheels to `DATABRICKS_VOLUME_PATH/wheels/`, and ships the cluster bootstrap script. Re-run whenever `packages/dbxcarta-*/src/` changes.
 
 **`upload`** (generic, passed through to `databricks-job-runner`)
 - `--all` — copies every `scripts/*.py` to the workspace. Re-run whenever `scripts/` changes.

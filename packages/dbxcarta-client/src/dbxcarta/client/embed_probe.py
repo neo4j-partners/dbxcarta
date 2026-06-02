@@ -25,11 +25,7 @@ _DEFAULT_ENDPOINT = "databricks-gte-large-en"
 def _resolve_endpoint(cli_value: str | None) -> str:
     if cli_value:
         return cli_value
-    return (
-        os.environ.get("DBXCARTA_EMBED_ENDPOINT")
-        or os.environ.get("DBXCARTA_EMBEDDING_ENDPOINT")
-        or _DEFAULT_ENDPOINT
-    )
+    return os.environ.get("DBXCARTA_EMBEDDING_ENDPOINT") or _DEFAULT_ENDPOINT
 
 
 def main() -> None:
@@ -47,8 +43,8 @@ def main() -> None:
     parser.add_argument(
         "--endpoint",
         default=None,
-        help="Serving endpoint name. Defaults to DBXCARTA_EMBED_ENDPOINT, "
-        "DBXCARTA_EMBEDDING_ENDPOINT, then databricks-gte-large-en.",
+        help="Serving endpoint name. Defaults to DBXCARTA_EMBEDDING_ENDPOINT, "
+        "then databricks-gte-large-en.",
     )
     args = parser.parse_args()
 

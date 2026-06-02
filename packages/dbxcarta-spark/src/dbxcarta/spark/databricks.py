@@ -11,6 +11,15 @@ from databricks.sdk import WorkspaceClient
 _IDENTIFIER_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_-]*$")
 _VOLUME_SUBPATH_PART_RE = re.compile(r"^[A-Za-z0-9._=-]+$")
 
+# Catalogs that dbxcarta tooling must never create or drop. The build and
+# teardown commands both refuse these so a typo in an overlay's volume path
+# or teardown target cannot point setup or teardown at a shared system
+# catalog. ``graph-enriched-lakehouse`` is included because the per-example
+# config historically blocked it.
+UC_PROTECTED_NAMES: frozenset[str] = frozenset(
+    {"main", "system", "hive_metastore", "samples", "graph-enriched-lakehouse"}
+)
+
 
 def build_workspace_client() -> WorkspaceClient:
     """Build a WorkspaceClient from DATABRICKS_PROFILE or default SDK auth."""
@@ -70,6 +79,39 @@ def quote_qualified_name(value: str, *, expected_parts: int | None = None) -> st
         quote_identifier(part)
         for part in split_qualified_name(value, expected_parts=expected_parts)
     )
+
+
+def check_not_protected(value: str, *, label: str = "catalog") -> str:
+    """Reject names on the protected blocklist.
+
+    Guards both the build path (creating a catalog) and the teardown path
+    (dropping a catalog or schema) so neither can act on a shared system
+    catalog because of a typo in an overlay.
+    """
+    if value in UC_PROTECTED_NAMES:
+        raise ValueError(f"refusing to operate on protected {label}: {value!r}")
+    return value
+
+
+def parse_volume_path(value: str) -> tuple[str, str, str]:
+    """Split ``/Volumes/<catalog>/<schema>/<volume>`` into its three identifiers.
+
+    Unlike :func:`validate_uc_volume_subpath`, this expects a bare volume path
+    with no trailing subdirectory (exactly four parts), which is what the
+    bootstrap command provisions. Each identifier is validated so the caller
+    can quote it safely with backticks.
+    """
+    parts = value.strip().strip("/").split("/")
+    if len(parts) != 4 or parts[0] != "Volumes":
+        raise ValueError(
+            f"volume path must be /Volumes/<catalog>/<schema>/<volume>, "
+            f"got {value!r}"
+        )
+    catalog, schema, volume = parts[1], parts[2], parts[3]
+    validate_identifier(catalog, label="volume catalog")
+    validate_identifier(schema, label="volume schema")
+    validate_identifier(volume, label="volume name")
+    return catalog, schema, volume
 
 
 def validate_uc_volume_subpath(value: str, *, label: str = "UC Volume path") -> str:

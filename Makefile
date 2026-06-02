@@ -16,14 +16,18 @@
 # with no `export` and no per-shell setup.
 
 .PHONY: help \
-	e2e-finance-genie-ingest e2e-finance-genie-client \
-	e2e-schemapile-ingest e2e-schemapile-client \
-	e2e-dense-schema-ingest e2e-dense-schema-client
+	e2e-finance-genie-ingest e2e-finance-genie-client e2e-finance-genie-teardown \
+	e2e-schemapile-ingest e2e-schemapile-client e2e-schemapile-teardown \
+	e2e-dense-schema-ingest e2e-dense-schema-client e2e-dense-schema-teardown
 
-# Phase 1: rebuild+ship wheels from current source, then submit ingest. $(1) is
-# the overlay path. publish-wheels rebuilds the wheels and already uploads the
-# bootstrap script, so no separate `upload --all` is needed.
+# Phase 1: ensure the catalog/schema/volume exist, rebuild+ship wheels from
+# current source, then submit ingest. $(1) is the overlay path. bootstrap is
+# idempotent (CREATE ... IF NOT EXISTS), so it does real work only the first
+# time and is a no-op on every later run. publish-wheels rebuilds the wheels
+# and already uploads the cluster bootstrap script, so no separate
+# `upload --all` is needed.
 define e2e_ingest
+	DBXCARTA_ENV_FILE=$(1) uv run dbxcarta-submit bootstrap
 	DBXCARTA_ENV_FILE=$(1) uv run dbxcarta-submit publish-wheels
 	DBXCARTA_ENV_FILE=$(1) uv run dbxcarta-submit submit-entrypoint ingest
 endef
@@ -33,19 +37,31 @@ define e2e_client
 	DBXCARTA_ENV_FILE=$(1) uv run dbxcarta-submit submit-entrypoint client
 endef
 
+# Teardown: drop this example's DBXCARTA_TEARDOWN_TARGET. $(1) is the overlay
+# path. Never chained into ingest; run by hand. Requires --yes-i-mean-it, or it
+# only prints what it would drop.
+define e2e_teardown
+	DBXCARTA_ENV_FILE=$(1) uv run dbxcarta-submit teardown --yes-i-mean-it
+endef
+
 help:
 	@echo "dbxcarta e2e pipeline targets (run from repo root, ingest then client):"
-	@echo "  make e2e-finance-genie-ingest   Rebuild wheels, then ingest for finance-genie"
-	@echo "  make e2e-finance-genie-client   Client evaluation for finance-genie"
-	@echo "  make e2e-schemapile-ingest      Rebuild wheels, then ingest for schemapile"
-	@echo "  make e2e-schemapile-client      Client evaluation for schemapile"
-	@echo "  make e2e-dense-schema-ingest    Rebuild wheels, then ingest for dense-schema"
-	@echo "  make e2e-dense-schema-client    Client evaluation for dense-schema"
+	@echo "  make e2e-finance-genie-ingest    Bootstrap, rebuild wheels, then ingest for finance-genie"
+	@echo "  make e2e-finance-genie-client    Client evaluation for finance-genie"
+	@echo "  make e2e-finance-genie-teardown  Drop finance-genie's teardown target"
+	@echo "  make e2e-schemapile-ingest       Bootstrap, rebuild wheels, then ingest for schemapile"
+	@echo "  make e2e-schemapile-client       Client evaluation for schemapile"
+	@echo "  make e2e-schemapile-teardown     Drop schemapile's teardown target"
+	@echo "  make e2e-dense-schema-ingest     Bootstrap, rebuild wheels, then ingest for dense-schema"
+	@echo "  make e2e-dense-schema-client     Client evaluation for dense-schema"
+	@echo "  make e2e-dense-schema-teardown   Drop dense-schema's teardown target"
 	@echo ""
-	@echo "The *-ingest targets rebuild wheels from current source, so they reflect"
-	@echo "local changes to the dbxcarta packages. Prerequisites (one-time: install"
-	@echo "the example preset, secrets, questions, upstream UC tables) are in each"
-	@echo "example README."
+	@echo "The *-ingest targets bootstrap the catalog/schema/volume (idempotent) and"
+	@echo "rebuild wheels from current source, so they reflect local changes to the"
+	@echo "dbxcarta packages. The *-teardown targets drop each example's"
+	@echo "DBXCARTA_TEARDOWN_TARGET and are only ever run by hand. Prerequisites"
+	@echo "(one-time: install the example preset, secrets, questions, upstream UC"
+	@echo "tables) are in each example README."
 
 e2e-finance-genie-ingest:
 	$(call e2e_ingest,examples/finance-genie/dbxcarta-overlay.env)
@@ -53,14 +69,23 @@ e2e-finance-genie-ingest:
 e2e-finance-genie-client:
 	$(call e2e_client,examples/finance-genie/dbxcarta-overlay.env)
 
+e2e-finance-genie-teardown:
+	$(call e2e_teardown,examples/finance-genie/dbxcarta-overlay.env)
+
 e2e-schemapile-ingest:
 	$(call e2e_ingest,examples/schemapile/dbxcarta-overlay.env)
 
 e2e-schemapile-client:
 	$(call e2e_client,examples/schemapile/dbxcarta-overlay.env)
 
+e2e-schemapile-teardown:
+	$(call e2e_teardown,examples/schemapile/dbxcarta-overlay.env)
+
 e2e-dense-schema-ingest:
 	$(call e2e_ingest,examples/dense-schema/dbxcarta-overlay.env)
 
 e2e-dense-schema-client:
 	$(call e2e_client,examples/dense-schema/dbxcarta-overlay.env)
+
+e2e-dense-schema-teardown:
+	$(call e2e_teardown,examples/dense-schema/dbxcarta-overlay.env)

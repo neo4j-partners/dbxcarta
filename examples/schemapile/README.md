@@ -27,7 +27,7 @@ uv pip install -e examples/schemapile/
 # examples/schemapile/.env, so run them from that directory.
 cd examples/schemapile
 cp .env.sample .env                             # edit SCHEMAPILE_REPO, profile, warehouse, catalog
-uv run dbxcarta-schemapile-bootstrap            # provision catalog + volume
+uv run dbxcarta-submit bootstrap --env-file dbxcarta-overlay.env  # provision catalog + volume
 uv run dbxcarta-schemapile-slice
 uv run dbxcarta-schemapile-select
 uv run dbxcarta-schemapile-materialize          # writes .env.generated
@@ -67,7 +67,6 @@ examples/schemapile/
 │   ├── config.py                # one-shot .env parser
 │   ├── slice_runner.py          # shells out to upstream slice.py
 │   ├── candidate_selector.py    # slice JSON -> candidate-table JSON
-│   ├── bootstrap.py             # provisions the UC catalog and volume
 │   ├── materialize.py           # candidate JSON -> Delta tables
 │   └── question_generator.py    # LLM + SQL validation -> questions.json
 ├── scripts/                     # one-off utilities, see scripts/README.md
@@ -152,14 +151,16 @@ Requires catalog-create privilege on the workspace.
 
 ```bash
 cd examples/schemapile
-uv run dbxcarta-schemapile-bootstrap
+uv run dbxcarta-submit bootstrap --env-file dbxcarta-overlay.env
 ```
 
 This creates `<catalog>`, `<catalog>._meta`, and
-`<catalog>._meta.schemapile_volume`. To tear down later:
+`<catalog>._meta.schemapile_volume` from the overlay's `DATABRICKS_VOLUME_PATH`,
+and is idempotent. To tear down later, `teardown` drops the overlay's
+`DBXCARTA_TEARDOWN_TARGET` (`catalog:schemapile_lakehouse`, the whole lakehouse):
 
 ```bash
-uv run dbxcarta-schemapile-bootstrap --drop-all --yes-i-mean-it
+uv run dbxcarta-submit teardown --env-file dbxcarta-overlay.env --yes-i-mean-it
 ```
 
 ### 5. Produce the SchemaPile slice (host-only, no credentials needed)

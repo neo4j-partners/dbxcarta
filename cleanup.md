@@ -1,173 +1,244 @@
-# Cleanup Plan: One Simple Way to Set Up Every Example
+# Cleanup Plan: Two Commands to Build and Tear Down Every Example
 
 ## The problem in plain words
 
 Before the pipeline can run, three storage things must already exist in
 Databricks: a catalog, a schema, and a volume. A volume is just a folder that
-holds files. If any of the three is missing, the run fails right away.
+holds files. If any of the three is missing, the run fails right away. When an
+example is finished with, those same things need a way to be removed.
 
-Today each example has its own little setup script, and each script looks in a
-different place to decide which catalog, schema, and volume to build. The real
-divergence is finance-genie. Its overlay sets `DBXCARTA_CATALOG` to an upstream,
-data-owned catalog (`graph-enriched-finance-silver`), but its run actually needs
-its own ops plane (`dbxcarta-catalog` / `finance_genie_ops` / `dbxcarta-ops`).
-Any setup that keyed off `DBXCARTA_CATALOG` would build the wrong catalog for
-finance. Dense-schema and schemapile happen to agree across their sources today,
-but nothing keeps them from drifting, and three copies of the same
-`CREATE ... IF NOT EXISTS` logic is three things to maintain.
+Today each example carries its own setup script, and each script does two
+different jobs at once: it builds the catalog/schema/volume, and (under
+`--drop-all`) it tears them down. Each script also decides for itself, in a
+slightly different way, which catalog/schema/volume it is talking about.
+Three copies of the same `CREATE ... IF NOT EXISTS` and `DROP` logic is three
+things to keep in sync, and they will drift.
 
-There is now one place that already holds the right answer for every example:
-the committed overlay settings file. It has a storage folder path in it, and
-that path is written as `/Volumes/<catalog>/<schema>/<volume>`, so it spells out
-the catalog, the schema, and the volume all at once. That path always points at
-the same plane the setup needs to build (the ops/volume plane), even for an
-example like finance-genie whose data catalog is a different, upstream-owned
-catalog. So we can build a single setup step that reads that one path and
-creates exactly what the run needs.
+There is one place that already holds the right answer for every example: the
+committed overlay settings file. Its storage folder path is written as
+`/Volumes/<catalog>/<schema>/<volume>`, so it spells out the catalog, the
+schema, and the volume all at once, and it always points at the plane setup
+needs (the ops/volume plane) even for an example like finance-genie whose data
+catalog is a different, upstream-owned catalog.
 
 ## Scope of this plan
 
-This plan does **build only**. It adds one shared command that creates the
-catalog, schema, and volume, and wires it in front of every ingest. Teardown
-(removing those things) is left exactly as it is today, in the per-example
-`--drop-all` scripts, and a unified teardown command is deferred to a later
-phase (see Phase 5). Nothing in this plan touches or removes the teardown path,
-so the automatic ingest flow can never destroy data.
+Replace the per-example setup scripts with **exactly two operator commands**:
 
-## Core goals
+- `dbxcarta-submit bootstrap` builds the catalog, schema, and volume.
+- `dbxcarta-submit teardown` removes an example's footprint.
 
-- One build command for every example, instead of three different scripts.
-- The command always reads the answer from one place: the overlay settings file.
-- Setup runs by itself right before each ingest, so nobody forgets it.
-- The command runs locally on the operator's machine against a SQL warehouse,
-  the same way today's scripts do. It does not spin up a cluster job just to run
-  three `CREATE` statements.
-- The command is safe to run over and over. It never breaks anything that
-  already exists.
-- Building runs automatically; tearing down is never part of this command, so
-  the automatic ingest path can never destroy data by accident.
+This is a complete switch, not a partial one. When it is done, no per-example
+`bootstrap.py` script, entry point, or duplicated build/teardown logic remains.
+There is one build implementation and one teardown implementation, both reading
+from the overlay, both run locally against a SQL warehouse.
+
+A small, orthogonal env cleanup rides along in Phase 1 (drop one dead alias;
+the two runner-owned `DATABRICKS_`-prefixed vars stay untouched, with the
+reason recorded).
+
+## Progress
+
+- [x] **Phase 1** — dead `DBXCARTA_EMBED_ENDPOINT` alias dropped; runner-owned
+  vars kept.
+- [x] **Phase 2** — shared UC primitives + `bootstrap` and `teardown` commands
+  landed, with unit tests; full suite green (474 passed).
+- [x] **Phase 3** — `DBXCARTA_TEARDOWN_TARGET` added to all three overlays;
+  `teardown --dry-run` resolves each.
+- [x] **Phase 4** — `bootstrap` wired as the first step of every ingest target;
+  `e2e-<example>-teardown` targets added (run by hand, `--yes-i-mean-it`).
+- [x] **Phase 5** — all three per-example `bootstrap.py`, their entry points, and
+  finance-genie's `utils.py` deleted; suite green (482 passed).
+- [x] **Phase 6** — READMEs + planning note rewritten to the two commands;
+  dry-runs, grep sweep, and the suite (482 passed) all verified.
+
+## Key goals
+
+- **Two commands, one implementation each.** `bootstrap` and `teardown` live in
+  the operator toolbox (`dbxcarta-submit`) and share a single UC-admin helper.
+  No third copy, nothing per-example left to drift.
+- **One source of truth per command, from the overlay.** `bootstrap` reads the
+  volume path and creates exactly its catalog/schema/volume. `teardown` reads one
+  explicit `DBXCARTA_TEARDOWN_TARGET`, because what each example drops is
+  genuinely different and cannot be derived from the volume path.
+- **Build is automatic and safe; teardown is deliberate.** `bootstrap` is
+  idempotent (`CREATE ... IF NOT EXISTS`) and runs before every ingest.
+  `teardown` never runs on its own: it requires `--yes-i-mean-it` and does
+  nothing without it. The same protected-name blocklist guards both, so a typo
+  can never point either command at a shared system catalog.
+- **Local, like today.** Both commands build a workspace client and run their
+  SQL through a warehouse, needing `DATABRICKS_WAREHOUSE_ID` and operator
+  privilege. Neither spins up a cluster job.
 
 ## How the plan is phased
 
-### Phase 1: Build the one shared build command
+### Phase 1 (done): Drop the dead embed-endpoint alias; keep the runner-owned env vars as-is
 
-The command is named `bootstrap` and is added to the operator toolbox you
-already use to publish code and start jobs (`dbxcarta-submit bootstrap`). You
-choose which example you mean the same way you already do for other commands, by
-pointing the usual environment switch at that example's overlay. It has one mode
-only: build. There is no teardown mode in this command.
+An earlier draft of this plan renamed two settings off the `DATABRICKS_` prefix
+(`DATABRICKS_VOLUME_PATH` -> `DBXCARTA_VOLUME_PATH`,
+`DATABRICKS_SECRET_SCOPE` -> `DBXCARTA_SECRET_SCOPE`) on the theory that dbxcarta
+reads them itself and the Databricks SDK never does, so the rename was
+mechanically safe. That theory is wrong. The relevant reader is not the SDK; it
+is the pinned `databricks-job-runner` (`==0.6.2`) that the submit path delegates
+to, and it reads **both** names by exact string. They are part of its hard-coded
+`CORE_KEYS`, in the same category as `DATABRICKS_WORKSPACE_DIR` and
+`DATABRICKS_CLUSTER_ID`:
 
-How it runs:
+- `DATABRICKS_VOLUME_PATH` is how the runner derives the wheel directory
+  (`{DATABRICKS_VOLUME_PATH}/wheels/`) and every upload path (`runner.py`).
+  Renaming it in the overlays breaks `publish-wheels`.
+- `DATABRICKS_SECRET_SCOPE` is forwarded to the cluster as a job parameter
+  (`config.py`) and read on the cluster by the bootstrap's secret injection
+  (`inject.py`) to fetch the `NEO4J_*` secrets. Renaming it means no scope
+  reaches the cluster, so the Neo4j connection is left without credentials and
+  ingest fails.
 
-- It runs locally on the operator's machine, like today's per-example scripts:
-  it builds a workspace client and executes the `CREATE` statements through a SQL
-  warehouse. It needs `DATABRICKS_WAREHOUSE_ID` and operator catalog-create
-  privilege, both of which the existing scripts already require.
-- It loads config through the existing env-layering loader
-  (`resolve_env_files` + `load_env_files` in `dbxcarta.spark.env`), so the
-  documented precedence (base `.env` -> overlay -> real process env) is reused,
-  not reinvented. From the resolved environment it reads one setting: the storage
-  folder path for the run (`DATABRICKS_VOLUME_PATH`).
-- Because that path is written as `/Volumes/<catalog>/<schema>/<volume>`, the
-  command reads all three names straight from it. No second source is consulted,
-  so there is nothing to disagree with. It parses the four-part path with the
-  existing `validate_identifier` and `quote_identifier` helpers. Note that the
-  existing `validate_uc_volume_subpath` helper expects a five-part path (it
-  requires a trailing subdir), so it does not fit a bare
-  `/Volumes/cat/schema/volume` and is not used here.
-- It asks Databricks to create the catalog, the schema, and the volume, each one
-  only if it is not already there, using `CREATE ... IF NOT EXISTS`. If they
-  already exist, nothing changes and the command still succeeds.
-- It prints the three names it ensured, so you can see it did the right thing.
-- A `--dry-run` flag parses the path and prints the three names it *would*
-  create, then exits without touching the workspace. This is the repeatable
-  check used in Phase 4 verification.
+So these two belong to the same category as the standard variables we leave
+alone, not to dbxcarta's own `DBXCARTA_` settings. dbxcarta does also read them
+(via the `databricks_volume_path` / `databricks_secret_scope` fields in
+`packages/dbxcarta-client/src/dbxcarta/client/settings.py` and in
+`neo4j_utils.py`), but that is in addition to the runner, not instead of it.
+Renaming would require either keeping both names in every overlay or patching
+the pinned external runner, both of which are worse than the cosmetic
+inconsistency they would fix. We therefore keep `DATABRICKS_VOLUME_PATH` and
+`DATABRICKS_SECRET_SCOPE` exactly as they are, alongside the other standard
+Databricks variables (`DATABRICKS_HOST`, `DATABRICKS_TOKEN`,
+`DATABRICKS_CLUSTER_ID`, `DATABRICKS_WORKSPACE_DIR`, `DATABRICKS_JOB_RUN_ID`,
+`DATABRICKS_WAREHOUSE_ID`, `DATABRICKS_PROFILE`). The per-example `SCHEMAPILE_*`
+and `DENSE_*` knobs stay as they are too; they live in separate overlays and
+separate packages, never collide, and only partially overlap, so a partial
+merge would produce a messier mixed scheme rather than a cleaner one.
 
-Why it is safe:
+The one cleanup this phase does keep: in `embed_probe.py`, drop the stray
+`DBXCARTA_EMBED_ENDPOINT` fallback alias. Nothing sets it; every env file uses
+`DBXCARTA_EMBEDDING_ENDPOINT`, so the alias is dead and only invites confusion.
 
-- "Create only if missing" means a second run does no harm.
-- A short list of protected names is refused, so a typo in the settings cannot
-  point setup at a shared system catalog. The list preserves the names the
-  current dense/schemapile config blocks: `main`, `system`, `hive_metastore`,
-  `samples`, and `graph-enriched-lakehouse`.
+With no rename to coordinate, the commands below read the volume path under its
+existing `DATABRICKS_VOLUME_PATH` name.
 
-What it does not do:
+### Phase 2 (done): Build the shared UC-admin helper and the two commands
 
-- It does not create the example's data tables. Those are still made by the
-  existing materialize step.
-- It does not create the run-summary table. The pipeline still makes that on its
-  own during the first ingest (via `saveAsTable` in append mode). Setup only
-  needs to make the schema it lives in.
-- It does not tear anything down. Teardown stays in the per-example scripts for
-  now (see Phase 5).
+Add the shared helpers, then two thin commands on top of them. As built, the
+helpers are split by layer rather than living in one module:
 
-### Phase 2: Wire the build command into the make targets
+- **Pure UC primitives** went into `dbxcarta.spark.databricks`, next to the
+  existing `validate_identifier` / `quote_identifier`: `parse_volume_path` (the
+  four-part `/Volumes/<catalog>/<schema>/<volume>` split; `validate_uc_volume_subpath`
+  expects a five-part path with a trailing subdir and does not fit a bare volume
+  path), plus the protected-name blocklist `UC_PROTECTED_NAMES` and its
+  `check_not_protected` guard (`main`, `system`, `hive_metastore`, `samples`,
+  `graph-enriched-lakehouse`), refused by both commands.
+- **Operator DDL** went into a new `dbxcarta.submit.uc_admin` module rather than
+  into `dbxcarta.spark.databricks`. `dbxcarta-spark` is the wheel installed on
+  the cluster for ingest and should not carry catalog/volume DDL it never runs
+  there; both commands live in `dbxcarta-submit`, so that is the single home for
+  the warehouse `execute_statement` (which waits for a terminal state and raises
+  on a non-`SUCCEEDED` result, so a failed `CREATE`/`DROP` is never reported as
+  success), `ensure_uc_volume` (the three `CREATE ... IF NOT EXISTS`), and the
+  teardown side (`TeardownTarget`, `parse_teardown_target`, `drop_teardown_target`).
+- Both command handlers load the layered env via `resolve_env_files` +
+  `load_env_files`, so the documented precedence (base `.env` -> overlay ->
+  process env) is reused.
 
-- The make targets are the short commands you run from the repo root.
-- Each example has an ingest target. We add `dbxcarta-submit bootstrap` as the
-  very first step inside that target, before the publish step and before the
-  ingest step.
-- We do this the same way for all three examples, so they all behave alike.
-- Because the command is safe to repeat, running the ingest target many times
-  stays fine. Setup does real work only the first time, then quietly passes.
-- This assumes catalog-create privilege is available whenever ingest runs.
+**`dbxcarta-submit bootstrap`** (build):
 
-### Phase 3: Retire only the per-example *build* path
+- Reads `DATABRICKS_VOLUME_PATH` from the resolved overlay, parses the three
+  names, and runs `CREATE CATALOG / SCHEMA / VOLUME IF NOT EXISTS`. A second run
+  changes nothing and still succeeds.
+- Prints the three names it ensured. `--dry-run` parses, runs the protected-name
+  guard, and prints them without touching the workspace, so a typo'd
+  `/Volumes/main/...` is refused in dry-run the same way teardown refuses one.
+- Does **not** create data tables (the materialize step does) or the run-summary
+  table (the ingest creates it via `saveAsTable` in append mode). It only makes
+  the schema that table lives in.
 
-We do not delete the per-example scripts yet, because they still carry the
-teardown (`--drop-all`) logic that Phase 5 will consolidate. To avoid two copies
-of build logic drifting, we trim each per-example `bootstrap.py` down to its
-teardown-only path:
+**`dbxcarta-submit teardown`** (destroy):
 
-- Remove the `_provision` build function and the build branch of each script's
-  `main`, leaving the `--drop-all` / `--yes-i-mean-it` teardown path intact.
-- Keep the entry points (`dbxcarta-dense-bootstrap`,
-  `dbxcarta-finance-genie-bootstrap`, `dbxcarta-schemapile-bootstrap`); they are
-  now teardown-only commands until Phase 5 replaces them.
-- Keep every `utils.py`. Finance-genie's is still imported by its (now
-  teardown-only) `bootstrap.py`; dense-schema's and schemapile's are still
+- Reads one explicit setting, `DBXCARTA_TEARDOWN_TARGET`, written as
+  `schema:<catalog>.<schema>` or `catalog:<catalog>`, and drops exactly that
+  (`DROP SCHEMA ... CASCADE` or `DROP CATALOG ... CASCADE`).
+- Requires `--yes-i-mean-it`; without it the command prints what it would drop
+  and exits without doing anything. `--dry-run` does the same regardless.
+- Refuses any target on the protected blocklist, so the explicit `catalog:` form
+  still cannot name a system catalog.
+- The explicit `catalog:` vs `schema:` prefix is deliberate: it makes the
+  dangerous "drop the whole catalog" case a declared value in a committed file
+  rather than logic buried in a script, and prevents a missing schema segment
+  from silently escalating a schema drop into a catalog drop.
+
+Both commands are registered in `dbxcarta-submit`'s `main` next to
+`submit-entrypoint` and `publish-wheels`; neither name collides with the runner
+pass-through commands.
+
+### Phase 3 (done): Declare each example's teardown target in its overlay
+
+Add `DBXCARTA_TEARDOWN_TARGET` to each overlay, reproducing exactly what each
+example's `--drop-all` does today:
+
+- dense: `DBXCARTA_TEARDOWN_TARGET=schema:schemapile_lakehouse.dense_1000`
+- schemapile: `DBXCARTA_TEARDOWN_TARGET=catalog:schemapile_lakehouse`
+- finance: `DBXCARTA_TEARDOWN_TARGET=schema:dbxcarta-catalog.finance_genie_ops`
+
+This preserves the shared-catalog interdependence on purpose: dense tears down
+only its own `dense_1000` data schema and leaves the shared catalog (and its
+`_meta` schema and volume) for schemapile, while schemapile's target drops the
+whole `schemapile_lakehouse` catalog. The value is secret-free, so it is safe to
+keep in the committed, job-param-forwarded overlay.
+
+### Phase 4 (done): Wire the commands into the make targets
+
+The repo-root `Makefile` now drives both commands:
+
+- `dbxcarta-submit bootstrap` is the first step of the `e2e_ingest` define,
+  ahead of `publish-wheels` and `submit-entrypoint ingest`, for all three
+  examples. Because it is idempotent, repeated ingest runs stay fine; it does
+  real work only the first time.
+- A `make e2e-<example>-teardown` target was added for each example, calling
+  `dbxcarta-submit teardown --yes-i-mean-it` with that overlay through a new
+  `e2e_teardown` define. Teardown is never chained into ingest; it is only ever
+  run by hand, and each new target is in `.PHONY` and the `help` text.
+
+### Phase 5 (done): Delete the per-example scripts
+
+With both commands live and wired, the old machinery was removed entirely:
+
+- `bootstrap.py` deleted from all three example packages (dense-schema,
+  schemapile, finance-genie).
+- The three entry points removed from each `pyproject.toml`
+  (`dbxcarta-dense-bootstrap`, `dbxcarta-finance-genie-bootstrap`,
+  `dbxcarta-schemapile-bootstrap`). finance-genie's `[project.scripts]` table
+  held only its bootstrap, so the now-empty table was removed with it.
+- finance-genie's `utils.py` deleted: it was imported only by finance-genie's
+  `bootstrap.py`. dense-schema's and schemapile's `utils.py` kept, still
   imported by their `materialize.py`, `question_generator.py`,
   `candidate_selector.py`, and `slice_runner.py`.
 
-After this, build lives in exactly one place, and teardown stays exactly where
-it is until it gets its own command.
+A grep confirmed no remaining code references to the deleted modules or entry
+points; `uv sync` regenerated the console scripts (the three `*-bootstrap`
+binaries are gone, the rest intact); ruff, mypy, and the full suite (482 passed)
+stay green.
 
-> If trimming the scripts now feels like too much churn, the alternative is to
-> leave the per-example `bootstrap.py` fully intact and simply stop calling its
-> build path from the make targets. That leaves a dead build path temporarily
-> but touches nothing in those files. Pick one before implementing.
+After this there is one build command and one teardown command in the whole
+repo, and nothing per-example to drift.
 
-### Phase 4: Update the docs and verify
+### Phase 6 (done): Update the docs and verify
 
-- Update the main README setup section so it names the single new build command.
-- Update each example README the same way, so every example tells the same
-  story. Teardown docs continue to point at the existing per-example `--drop-all`
-  until Phase 5.
-- Rewrite the older planning note so future readers see this simpler shared
-  build command instead of the retired per-example plan.
-- Run the test suite and confirm it passes.
-- For each example, run `dbxcarta-submit bootstrap --dry-run` and confirm it
-  picks the catalog, schema, and volume you expect from that example's overlay,
-  without changing anything in the workspace.
-- Search the repo to confirm the old per-example build commands are no longer
-  referenced as setup steps, including README setup steps and the schemapile
-  pytest marker comment that references a "previously-bootstrapped catalog."
-
-### Phase 5 (later, separate): Unified teardown
-
-Teardown is intentionally out of scope above. It is not the inverse of build:
-build creates the `_meta`/ops schema and volume named by the volume path, but
-each example tears down something different and interdependent:
-
-- dense drops only its `dense_1000` data schema and keeps the shared catalog;
-- schemapile drops the whole shared `schemapile_lakehouse` catalog;
-- finance drops only its `finance_genie_ops` ops schema and keeps the catalog.
-
-Because dense and schemapile share one catalog, these behaviors must be
-preserved exactly, not derived from the volume path. A future phase can add a
-separate, opt-in teardown command (for example `dbxcarta-submit teardown`) that
-reads an explicit per-overlay target such as
-`DBXCARTA_TEARDOWN_TARGET=schema:<catalog>.<schema>` or `catalog:<catalog>`,
-paired with `--yes-i-mean-it`. Only once that exists do we delete the
-per-example teardown scripts, their entry points, and finance-genie's now-unused
-`utils.py`. Until then, teardown stays as it is today.
+- The main `README.md` "Upload and submit" section now documents `bootstrap` and
+  `teardown` next to `publish-wheels` (the latter's "ships the bootstrap script"
+  was clarified to "cluster bootstrap script" to avoid confusion with the new
+  command). Each example README's quick start and setup flow now call
+  `dbxcarta-submit bootstrap` / `teardown` with `--env-file`, the retired
+  `dbxcarta-<example>-bootstrap` invocations and `--drop-all` lines are gone, and
+  schemapile's file tree no longer lists the deleted `bootstrap.py`.
+- The schemapile pytest `live` marker comment was changed from "a
+  previously-bootstrapped catalog" to "a catalog provisioned by
+  `dbxcarta-submit bootstrap`".
+- The older planning note `examples/BOOT.md` was rewritten as a superseded
+  record: it now documents the two-command design first and keeps the retired
+  per-example plan (Option B) only as history, pointing at this file.
+- Verification: ruff and mypy clean, full suite 482 passed / 1 skipped. For all
+  three examples, `bootstrap --dry-run` matched the overlay's
+  catalog/schema/volume and `teardown --dry-run` named the expected target,
+  neither touching the workspace. A repo grep confirmed the retired console-script
+  names and `--drop-all` survive only in this file and `BOOT.md` as history, and
+  that no `DBXCARTA_EMBED_ENDPOINT` remains in source.

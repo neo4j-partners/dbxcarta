@@ -32,6 +32,9 @@ ci = [
 
 [tool.uv]
 package = false
+# A bare `uv sync` provisions the full dev/CI env so it never prunes the
+# test/ci tooling. CI still selects groups explicitly (supply-chain.yml).
+default-groups = ["test", "ci"]
 
 [tool.uv.sources]
 dbxcarta-client = { workspace = true }

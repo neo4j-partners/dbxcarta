@@ -24,10 +24,10 @@ uv pip install -e examples/dense-schema/
 # matches DBXCARTA_SCHEMAS in dbxcarta-overlay.env.
 uv run dbxcarta-dense-generate --tables 1000
 
-# Configure .env, then provision the shared catalog/schema/volume and
-# materialize the fixture into Unity Catalog.
+# Configure .env, then provision the catalog/schema/volume and materialize the
+# fixture into Unity Catalog.
 cp examples/dense-schema/.env.sample examples/dense-schema/.env   # edit profile + warehouse
-uv run dbxcarta-dense-bootstrap
+uv run dbxcarta-submit bootstrap --env-file examples/dense-schema/dbxcarta-overlay.env
 uv run dbxcarta-dense-materialize
 
 # Select the overlay, then upload the matching question set.
@@ -97,12 +97,12 @@ Generate the synthetic schema locally:
 uv run dbxcarta-dense-generate --tables 500
 ```
 
-Bootstrap the shared catalog, `_meta` schema, and volume after configuring
-`.env`. The dense fixture reuses the SchemaPile lakehouse catalog and volume, so
-this is idempotent and equivalent to running `dbxcarta-schemapile-bootstrap`:
+Provision the catalog, `_meta` schema, and volume named by the overlay's
+`DATABRICKS_VOLUME_PATH` after configuring `.env`. `bootstrap` is idempotent, so
+re-running it changes nothing; the `-ingest` make target also runs it first:
 
 ```bash
-uv run dbxcarta-dense-bootstrap
+uv run dbxcarta-submit bootstrap --env-file examples/dense-schema/dbxcarta-overlay.env
 ```
 
 Materialize the fixture into Unity Catalog:
@@ -111,10 +111,12 @@ Materialize the fixture into Unity Catalog:
 uv run dbxcarta-dense-materialize
 ```
 
-To remove only the dense data schema later, without touching the shared catalog:
+To remove only the dense data schema later, without touching the shared catalog,
+run `teardown` (it drops the overlay's `DBXCARTA_TEARDOWN_TARGET`,
+`schema:dense-schema_example.dense_1000`):
 
 ```bash
-uv run dbxcarta-dense-bootstrap --drop-all --yes-i-mean-it
+uv run dbxcarta-submit teardown --env-file examples/dense-schema/dbxcarta-overlay.env --yes-i-mean-it
 ```
 
 Then use the preset with the normal dbxcarta operational CLI:

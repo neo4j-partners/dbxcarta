@@ -25,7 +25,7 @@ export DBXCARTA_ENV_FILE=examples/finance-genie/dbxcarta-overlay.env
 uv run dbxcarta preset dbxcarta_finance_genie_example:preset --check-ready --strict-optional
 
 # Provision the ops plane: catalog, finance_genie_ops schema, dbxcarta-ops volume
-uv run dbxcarta-finance-genie-bootstrap
+uv run dbxcarta-submit bootstrap
 
 # Provision the Neo4j secret scope
 ./setup_secrets.sh --profile aws-partner-rk
@@ -278,16 +278,19 @@ readiness; the three Gold tables are reported as a warning.
 
 Create the ops catalog, the `finance_genie_ops` schema, and the `dbxcarta-ops`
 volume that hold run summaries, the generation cache, and the uploaded question
-set. It is idempotent and does not create the upstream medallion data catalogs:
+set. `bootstrap` reads the overlay's `DATABRICKS_VOLUME_PATH`, is idempotent, and
+does not create the upstream medallion data catalogs:
 
 ```bash
-uv run dbxcarta-finance-genie-bootstrap
+uv run dbxcarta-submit bootstrap
 ```
 
-To remove only the ops schema later, without touching the shared ops catalog:
+To remove only the ops schema later, without touching the shared ops catalog,
+run `teardown` (it drops the overlay's `DBXCARTA_TEARDOWN_TARGET`,
+`schema:dbxcarta-catalog.finance_genie_ops`):
 
 ```bash
-uv run dbxcarta-finance-genie-bootstrap --drop-all --yes-i-mean-it
+uv run dbxcarta-submit teardown --yes-i-mean-it
 ```
 
 ### 6. Refresh Neo4j secrets

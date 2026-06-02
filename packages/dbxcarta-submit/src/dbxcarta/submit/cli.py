@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 from typing import TypedDict
 
@@ -159,7 +160,7 @@ def _ingest_runner() -> Runner:
 def main() -> None:
     """Entry point for the operator submission CLI.
 
-    dbxcarta owns two first-class commands; every other command is passed
+    dbxcarta owns four first-class commands; every other command is passed
     through to ``databricks-job-runner`` (submit, validate, logs, clean,
     upload, download, catalog, schema, volume).
 
@@ -167,6 +168,10 @@ def main() -> None:
       entrypoint.
     - `dbxcarta-submit publish-wheels` publishes the stable per-package
       wheels and ships the bootstrap script.
+    - `dbxcarta-submit bootstrap` creates the catalog, schema, and volume the
+      selected overlay names in `DATABRICKS_VOLUME_PATH`.
+    - `dbxcarta-submit teardown` drops the catalog or schema the selected
+      overlay names in `DBXCARTA_TEARDOWN_TARGET`.
     """
     overlay = select_overlay_path()
     runner.env_file = overlay
@@ -179,6 +184,10 @@ def main() -> None:
         sys.exit(_handle_submit_entrypoint(argv[1:]))
     if argv[:1] == ["publish-wheels"]:
         sys.exit(_handle_publish_wheels(argv[1:]))
+    if argv[:1] == ["bootstrap"]:
+        sys.exit(_handle_bootstrap(argv[1:]))
+    if argv[:1] == ["teardown"]:
+        sys.exit(_handle_teardown(argv[1:]))
     if not argv or argv[0] in ("-h", "--help"):
         _print_help()
         sys.exit(0 if argv else 2)
@@ -190,9 +199,10 @@ def main() -> None:
 def _print_help() -> None:
     """Summarize the dbxcarta commands, then the runner's own help.
 
-    dbxcarta owns ``submit-entrypoint`` and ``publish-wheels``; every other
-    command is the runner's. Delegating to the runner's ``--help`` keeps
-    that list authoritative instead of duplicating (and drifting from) it.
+    dbxcarta owns ``submit-entrypoint``, ``publish-wheels``, ``bootstrap``, and
+    ``teardown``; every other command is the runner's. Delegating to the
+    runner's ``--help`` keeps that list authoritative instead of duplicating
+    (and drifting from) it.
     """
     print(
         "usage: dbxcarta-submit <command> [options]\n"
@@ -201,6 +211,10 @@ def _print_help() -> None:
         "  submit-entrypoint {ingest|client}   Submit a wheel entrypoint as a Databricks job.\n"
         "  publish-wheels                      Publish the ingest and client wheels to the\n"
         "                                      stable Volume path and ship the bootstrap script.\n"
+        "  bootstrap                           Create the catalog, schema, and volume named by\n"
+        "                                      the overlay's DATABRICKS_VOLUME_PATH (idempotent).\n"
+        "  teardown                            Drop the catalog or schema named by the overlay's\n"
+        "                                      DBXCARTA_TEARDOWN_TARGET (needs --yes-i-mean-it).\n"
         "\n"
         "Commands passed through to databricks-job-runner:"
     )
@@ -242,6 +256,171 @@ def _handle_publish_wheels(argv: list[str]) -> int:
     except RunnerError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
+    return 0
+
+
+def _handle_bootstrap(argv: list[str]) -> int:
+    """Create the catalog/schema/volume named by the overlay's volume path.
+
+    Runs locally against a SQL warehouse. Idempotent: every object is created
+    only if missing, so the make targets can run it before each ingest.
+    """
+    import argparse
+
+    from dbxcarta.spark.databricks import (
+        build_workspace_client,
+        check_not_protected,
+        parse_volume_path,
+    )
+    from dbxcarta.spark.env import EnvFileError, load_env_files, resolve_env_files
+
+    from dbxcarta.submit.uc_admin import ensure_uc_volume, read_required_warehouse_id
+
+    try:
+        files, cleaned_argv = resolve_env_files(argv)
+    except EnvFileError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    load_env_files(files)
+
+    parser = argparse.ArgumentParser(
+        prog="dbxcarta-submit bootstrap",
+        description=(
+            "Create the catalog, schema, and volume named by the overlay's "
+            "DATABRICKS_VOLUME_PATH. Idempotent; safe to run before every ingest."
+        ),
+    )
+    parser.add_argument(
+        "--warehouse-id", default=None, help="Override DATABRICKS_WAREHOUSE_ID."
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the catalog, schema, and volume that would be created, then exit.",
+    )
+    args = parser.parse_args(cleaned_argv)
+
+    volume_path = os.environ.get("DATABRICKS_VOLUME_PATH", "").strip()
+    if not volume_path:
+        print(
+            "error: DATABRICKS_VOLUME_PATH is not set; select an example overlay "
+            "with --env-file or DBXCARTA_ENV_FILE.",
+            file=sys.stderr,
+        )
+        return 2
+    try:
+        catalog, schema, volume = parse_volume_path(volume_path)
+        # Refuse a protected catalog before the dry-run print, so --dry-run
+        # surfaces a typo'd /Volumes/main/... the same way teardown does.
+        check_not_protected(catalog, label="catalog")
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    if args.dry_run:
+        print(
+            f"[bootstrap] would ensure catalog={catalog} schema={schema} "
+            f"volume={volume}",
+            file=sys.stderr,
+        )
+        return 0
+
+    try:
+        warehouse_id = read_required_warehouse_id(
+            args.warehouse_id, operation="bootstrap"
+        )
+        ws = build_workspace_client()
+        ensure_uc_volume(
+            ws, warehouse_id, catalog=catalog, schema=schema, volume=volume
+        )
+    except (ValueError, RuntimeError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    print(f"[bootstrap] ensured {catalog}.{schema}.{volume}", file=sys.stderr)
+    return 0
+
+
+def _handle_teardown(argv: list[str]) -> int:
+    """Drop the catalog or schema named by the overlay's teardown target.
+
+    Destructive and never automatic: without ``--yes-i-mean-it`` it prints the
+    target and exits without dropping anything.
+    """
+    import argparse
+
+    from dbxcarta.spark.databricks import build_workspace_client
+    from dbxcarta.spark.env import EnvFileError, load_env_files, resolve_env_files
+
+    from dbxcarta.submit.uc_admin import (
+        drop_teardown_target,
+        parse_teardown_target,
+        read_required_warehouse_id,
+    )
+
+    try:
+        files, cleaned_argv = resolve_env_files(argv)
+    except EnvFileError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    load_env_files(files)
+
+    parser = argparse.ArgumentParser(
+        prog="dbxcarta-submit teardown",
+        description=(
+            "Drop the catalog or schema named by the overlay's "
+            "DBXCARTA_TEARDOWN_TARGET. Requires --yes-i-mean-it; destructive."
+        ),
+    )
+    parser.add_argument(
+        "--warehouse-id", default=None, help="Override DATABRICKS_WAREHOUSE_ID."
+    )
+    parser.add_argument(
+        "--yes-i-mean-it",
+        action="store_true",
+        help="Required to actually drop; without it the command is a no-op.",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the target that would be dropped, then exit.",
+    )
+    args = parser.parse_args(cleaned_argv)
+
+    target_value = os.environ.get("DBXCARTA_TEARDOWN_TARGET", "").strip()
+    if not target_value:
+        print(
+            "error: DBXCARTA_TEARDOWN_TARGET is not set; select an example "
+            "overlay with --env-file or DBXCARTA_ENV_FILE.",
+            file=sys.stderr,
+        )
+        return 2
+    try:
+        target = parse_teardown_target(target_value)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    if args.dry_run:
+        print(f"[teardown] would drop {target.describe()}", file=sys.stderr)
+        return 0
+    if not args.yes_i_mean_it:
+        print(
+            f"[teardown] refusing to drop {target.describe()} without "
+            "--yes-i-mean-it; nothing changed.",
+            file=sys.stderr,
+        )
+        return 0
+
+    try:
+        warehouse_id = read_required_warehouse_id(
+            args.warehouse_id, operation="teardown"
+        )
+        ws = build_workspace_client()
+        drop_teardown_target(ws, warehouse_id, target)
+    except (ValueError, RuntimeError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    print(f"[teardown] dropped {target.describe()}", file=sys.stderr)
     return 0
 
 
