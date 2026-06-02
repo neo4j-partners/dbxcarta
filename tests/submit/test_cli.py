@@ -85,3 +85,21 @@ def test_submit_client_uses_shared_runner_without_probe(
 def test_is_serverless_compute_discriminates_real_compute_types() -> None:
     assert cli._is_serverless_compute(Serverless()) is True
     assert cli._is_serverless_compute(ClassicCluster(cluster_id="c-1")) is False
+
+
+def test_help_lists_both_dbxcarta_commands(capsys: pytest.CaptureFixture[str]) -> None:
+    # dbxcarta's own commands are intercepted before the runner sees them, so
+    # they are invisible unless help advertises them. Guard that both appear.
+    cli._print_help()
+
+    out = capsys.readouterr().out
+    assert "submit-entrypoint" in out
+    assert "publish-wheels" in out
+
+
+def test_publish_wheels_rejects_unknown_args() -> None:
+    # publish-wheels takes no arguments; the old `upload --wheel` form swallowed
+    # any extra argv silently. argparse must now reject unknown tokens before
+    # touching the workspace.
+    with pytest.raises(SystemExit):
+        cli._handle_publish_wheels(["--wheel"])
