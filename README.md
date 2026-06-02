@@ -534,7 +534,7 @@ Each integration writes its run artifacts to an ops plane: a run summary table, 
 
 ```bash
 uv run scripts/clean-dbxcarta.py \
-  --profile azure-rk-knight \
+  --profile aws-partner-rk \
   --env-file examples/finance-genie/dbxcarta-overlay.env
 ```
 

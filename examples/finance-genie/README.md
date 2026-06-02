@@ -106,6 +106,27 @@ on the first ingest from the writer's own schema. It holds run history only,
 not source data, so it is disposable: drop it to reset, and the next run
 recreates it with the current schema.
 
+## Quick iterate loop (testing dbxcarta changes)
+
+Once the one-time prerequisites are in place (steps 1–6 below: preset
+installed, secrets refreshed, questions uploaded, upstream UC tables
+present), the whole pipeline is a single make target from the repo root:
+
+```bash
+make e2e-finance-genie
+```
+
+It rebuilds the wheels from your current source, then submits `ingest`,
+then `client`, so it reflects local edits to the dbxcarta packages on
+every run. The target sets `DBXCARTA_ENV_FILE` to this directory's
+`dbxcarta-overlay.env` inline on each command, so it picks up the right
+dbxcarta config no matter what shell you run it from. It does **not** use
+this directory's standalone `./.env` (that file is only for the local
+demo in section 10). `make help` lists the target for every example.
+
+The sections below are the full first-time setup and the individual
+commands the target wraps.
+
 ## Setup Flow
 
 Run these commands from the dbxcarta repo unless a step says otherwise.
@@ -179,7 +200,7 @@ readiness; the three Gold tables are reported as a warning.
 dbxcarta jobs read Neo4j credentials from the Databricks secret scope:
 
 ```bash
-./setup_secrets.sh --profile azure-rk-knight
+./setup_secrets.sh --profile aws-partner-rk
 ```
 
 ### 6. Upload the question set
@@ -196,8 +217,11 @@ This uploads the package's `questions.json` to the path named by
 
 ```bash
 uv run dbxcarta-submit publish-wheels
-uv run dbxcarta-submit upload --all
 ```
+
+`publish-wheels` rebuilds the per-package wheels from current source and
+already ships the bootstrap script (it calls `upload_all` internally), so
+no separate `upload --all` step is needed.
 
 > Every `dbxcarta` and `dbxcarta-submit` command in steps 6–9 reads the overlay from the
 > `DBXCARTA_ENV_FILE` you exported in step 3. If you skipped that,

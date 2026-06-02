@@ -24,11 +24,11 @@ answered the y/n prompt. Pass --yes to skip the prompt in automation.
 
 Usage:
     uv run scripts/clean-dbxcarta.py \
-        --profile azure-rk-knight \
+        --profile aws-partner-rk \
         --env-file examples/finance-genie/dbxcarta-overlay.env
 
     # explicit warehouse instead of auto-resolve
-    uv run scripts/clean-dbxcarta.py -p azure-rk-knight \
+    uv run scripts/clean-dbxcarta.py -p aws-partner-rk \
         -e examples/finance-genie/dbxcarta-overlay.env \
         --warehouse-id 1234567890abcdef
 """

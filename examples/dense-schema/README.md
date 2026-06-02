@@ -25,6 +25,24 @@ examples/dense-schema/
     └── question_generator.py
 ```
 
+## Quick iterate loop (testing dbxcarta changes)
+
+Once the one-time setup is in place (example installed, the synthetic
+schema generated and materialized into Unity Catalog, and the question
+set uploaded), the wheel-rebuild-and-submit pipeline is a single make
+target from the repo root:
+
+```bash
+make e2e-dense-schema
+```
+
+It rebuilds the wheels from your current source, then submits `ingest`,
+then `client`, so it reflects local edits to the dbxcarta packages on
+every run. The target sets `DBXCARTA_ENV_FILE` to this directory's
+`dbxcarta-overlay.local.env` (the gitignored, local-only overlay) inline
+on each command, so it picks up the right dbxcarta config from any shell.
+`make help` lists the target for every example.
+
 ## Setup flow
 
 Run these commands from the dbxcarta repo unless a step says otherwise.

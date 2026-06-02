@@ -43,6 +43,26 @@ This is useful for *relative comparison* across the three dbxcarta arms
 (`no_context`, `schema_dump`, `graph_rag`). It is not a hand-curated gold
 benchmark and should not be cited as evidence of absolute correctness.
 
+## Quick iterate loop (testing dbxcarta changes)
+
+Once the one-time setup is in place (steps 1–8 below: example installed,
+catalog bootstrapped, slice/candidates/Delta tables materialized, the
+`DBXCARTA_SCHEMAS` line copied into `dbxcarta-overlay.env`, and the
+question set uploaded), the wheel-rebuild-and-submit half of step 9 is a
+single make target from the repo root:
+
+```bash
+make e2e-schemapile
+```
+
+It rebuilds the wheels from your current source, then submits `ingest`,
+then `client`, so it reflects local edits to the dbxcarta packages on
+every run. The target sets `DBXCARTA_ENV_FILE` to this directory's
+`dbxcarta-overlay.env` inline on each command, so it picks up the right
+dbxcarta config from any shell. It does not use this directory's
+standalone `./.env` (that configures the slice/materialize tooling only).
+`make help` lists the target for every example.
+
 ## Setup flow
 
 Run from the dbxcarta repo unless a step says otherwise.
@@ -158,14 +178,16 @@ dbxcarta loads config in two layers: the repo-root `.env` is the shared
 base (Databricks infra + Neo4j secrets, never edited per integration),
 and this directory's committed, secret-free `dbxcarta-overlay.env` is
 the SchemaPile overlay (dbxcarta-scoped values only). Selecting it is
-one flag — no root `.env` edit. Copy the `DBXCARTA_SCHEMAS` line that
+one variable, no root `.env` edit. Copy the `DBXCARTA_SCHEMAS` line that
 step 7 wrote into `.env.generated` into `dbxcarta-overlay.env` first
-(it ships blank otherwise), then run the standard flow from the repo
-root with `--env-file` (or export `DBXCARTA_ENV_FILE` once to the same
-path and drop the flag):
+(it ships blank otherwise), then export `DBXCARTA_ENV_FILE` once and run
+the standard flow from the repo root. The `dbxcarta-submit` subcommands
+read the overlay from the environment and do not accept a `--env-file`
+flag, so the export is the mechanism that selects it:
 
 ```bash
-OVERLAY=examples/schemapile/dbxcarta-overlay.env
+# Select the SchemaPile overlay once for every command below.
+export DBXCARTA_ENV_FILE=examples/schemapile/dbxcarta-overlay.env
 
 # Confirm the preset resolves and shows the expected overlay.
 uv run dbxcarta preset dbxcarta_schemapile_example:preset --print-env
@@ -174,15 +196,20 @@ uv run dbxcarta preset dbxcarta_schemapile_example:preset --print-env
 SCHEMAPILE_QUESTIONS_FILE=examples/schemapile/questions.json \
   uv run dbxcarta preset dbxcarta_schemapile_example:preset --upload-questions
 
-# Build and submit the ingest job.
+# Build and submit the ingest job. publish-wheels rebuilds the wheels and
+# ships the bootstrap script (it calls upload_all internally), so no
+# separate `upload --all` step is needed.
 uv run dbxcarta-submit publish-wheels
-uv run dbxcarta-submit upload --all
-uv run dbxcarta-submit submit-entrypoint ingest --env-file "$OVERLAY"
-uv run dbxcarta verify --env-file "$OVERLAY"
+uv run dbxcarta-submit submit-entrypoint ingest
+uv run dbxcarta verify
 
 # Run the client evaluation arms.
-uv run dbxcarta-submit submit-entrypoint client --env-file "$OVERLAY"
+uv run dbxcarta-submit submit-entrypoint client
 ```
+
+For the wheel-rebuild-and-submit half of this step on every code change,
+`make e2e-schemapile` from the repo root is the shortcut (see the Quick
+iterate loop section above).
 
 This overlay is the dbxcarta CLI overlay only. It is distinct from
 `./.env` / `./.env.sample`, which configure the standalone SchemaPile
