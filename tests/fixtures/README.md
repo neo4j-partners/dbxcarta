@@ -141,15 +141,15 @@ only appear in Neo4j when **both** the source and target schemas are in scope.
 Upload the demo questions file and build the semantic layer:
 
 ```bash
-uv run dbxcarta upload --wheel
-uv run dbxcarta upload --data tests/fixtures
-uv run dbxcarta submit-entrypoint ingest
+uv run dbxcarta-submit publish-wheels
+uv run dbxcarta-submit upload --data tests/fixtures
+uv run dbxcarta-submit submit-entrypoint ingest
 ```
 
 Then run the graph_rag demo client:
 
 ```bash
-uv run dbxcarta submit-entrypoint client
+uv run dbxcarta-submit submit-entrypoint client
 ```
 
 ### Demo questions

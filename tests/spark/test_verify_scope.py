@@ -207,8 +207,7 @@ def test_node_counts_multi_catalog_flags_missing_catalog():
 def test_references_edge_count_scoped_with_hyphenated_catalog():
     summary = {
         "catalog": _CATALOG,
-        "row_counts": {"fk_edges": 1, "fk_inferred_metadata_accepted": 0,
-                       "fk_inferred_semantic_accepted": 0},
+        "row_counts": {"fk_edges": 1, "fk_inferred_metadata_accepted": 0},
     }
     src_col = generate_id(_CATALOG, _SCHEMA, "orders", "customer_id")
     driver = _Driver(nodes=(), rels=[("REFERENCES", src_col)])
@@ -225,8 +224,7 @@ def test_references_edge_count_multi_catalog_aggregate():
     ]
     summary = {
         "catalog": _SILVER,
-        "row_counts": {"fk_edges": 0, "fk_inferred_metadata_accepted": 1,
-                       "fk_inferred_semantic_accepted": 2},
+        "row_counts": {"fk_edges": 0, "fk_inferred_metadata_accepted": 3},
     }
     assert (
         references_mod._check_edge_count(

@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import ast
+import re
 import subprocess
 import sys
+from importlib import metadata
 from pathlib import Path
+
+import pytest
 
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -61,6 +65,17 @@ def _matches_forbidden(module: str, forbidden: tuple[str, ...]) -> bool:
     )
 
 
+def _requirement_names(distribution: str) -> set[str]:
+    """Return the bare package names from a distribution's Requires-Dist.
+
+    Each requirement string carries version specifiers, extras, and
+    environment markers (e.g. ``"neo4j>=5.0 ; extra == 'graph'"``); only
+    the leading name token identifies the dependency.
+    """
+    requires = metadata.requires(distribution) or []
+    return {re.split(r"[<>=!~;\[ ]", spec, maxsplit=1)[0].lower() for spec in requires}
+
+
 def test_top_level_namespace_has_no_compatibility_reexports() -> None:
     result = subprocess.run(
         [
@@ -98,8 +113,9 @@ def test_client_root_does_not_load_spark_modules() -> None:
 
 
 def test_spark_root_does_not_load_client_eval() -> None:
-    # spark.cli imports dbxcarta.client.databricks lazily (inside functions),
-    # so a top-level import of dbxcarta.spark should not pull client modules.
+    # dbxcarta.spark must never reach into the client layer: the eval client
+    # is a downstream consumer, so a top-level import of dbxcarta.spark
+    # should not pull any dbxcarta.client module into sys.modules.
     forbidden = {
         "dbxcarta.client",
     }
@@ -107,6 +123,27 @@ def test_spark_root_does_not_load_client_eval() -> None:
     leaked = _matching_modules(_loaded_modules_after("import dbxcarta.spark"), forbidden)
 
     assert not leaked, f"Forbidden modules loaded by dbxcarta.spark: {sorted(leaked)}"
+
+
+@pytest.mark.parametrize("layer", ["spark", "client"])
+def test_layer_root_does_not_load_job_runner(layer: str) -> None:
+    # The job runner is the dependency the whole split exists to keep out
+    # of the core and client closures. Importing either layer must not
+    # pull it into sys.modules; only dbxcarta-submit may touch it.
+    leaked = _matching_modules(
+        _loaded_modules_after(f"import dbxcarta.{layer}"),
+        {"databricks_job_runner"},
+    )
+
+    assert not leaked, f"dbxcarta.{layer} loaded the job runner: {sorted(leaked)}"
+
+
+@pytest.mark.parametrize("distribution", ["dbxcarta-spark", "dbxcarta-client"])
+def test_distribution_does_not_require_job_runner(distribution: str) -> None:
+    # A module-load check alone would miss a re-declared dependency that
+    # is simply never imported at module top level. Guard the published
+    # metadata too, so the runner cannot creep back into the closure.
+    assert "databricks-job-runner" not in _requirement_names(distribution)
 
 
 def test_source_imports_preserve_layer_boundaries() -> None:

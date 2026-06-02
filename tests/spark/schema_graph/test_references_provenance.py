@@ -1,8 +1,8 @@
 """build_references_rel sets provenance from each FKEdge.source tag.
 
-Source-agnostic builder: declared (1.0, "declared", null), metadata
-(score, "inferred_metadata", null), semantic (score, "semantic", null)
-all flow through the same 5-column schema via the FKEdge dataclass.
+Source-agnostic builder: declared (1.0, "declared", null) and metadata
+(score, "inferred_metadata", null) both flow through the same 5-column
+schema via the FKEdge dataclass.
 """
 
 from __future__ import annotations
@@ -65,13 +65,9 @@ def test_build_references_source_tag_is_serialized_from_enum(local_spark) -> Non
             source_id="cat.s.t.a", target_id="cat.s.t.b",
             confidence=0.85, source=EdgeSource.INFERRED_METADATA, criteria=None,
         ),
-        FKEdge(
-            source_id="cat.s.t.c", target_id="cat.s.t.d",
-            confidence=0.87, source=EdgeSource.SEMANTIC, criteria=None,
-        ),
     ]
     rows = {r["source"] for r in build_references_rel(local_spark, edges).collect()}
-    assert rows == {"inferred_metadata", "semantic"}
+    assert rows == {"inferred_metadata"}
 
 
 def test_references_properties_tuple_matches_dataframe(local_spark) -> None:

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from dbxcarta.spark import cli
+from dbxcarta.submit import cli
 
 
 def _package_names(closure: tuple[str, ...]) -> set[str]:

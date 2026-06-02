@@ -130,7 +130,6 @@ class FinanceGeniePreset:
             "DBXCARTA_INCLUDE_EMBEDDINGS_VALUES": "true",
             "DBXCARTA_INCLUDE_EMBEDDINGS_SCHEMAS": "true",
             "DBXCARTA_INCLUDE_EMBEDDINGS_DATABASES": "true",
-            "DBXCARTA_INFER_SEMANTIC": "true",
             "DBXCARTA_EMBEDDING_ENDPOINT": "databricks-gte-large-en",
             "DBXCARTA_EMBEDDING_DIMENSION": "1024",
             "DBXCARTA_EMBEDDING_FAILURE_MAX": "0",

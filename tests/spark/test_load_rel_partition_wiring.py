@@ -5,7 +5,7 @@ through `_rel_partition`.
 in isolation. This test proves the other half the proposal's validation
 asks for: that `_load` actually sends *every* relationship DataFrame
 (HAS_VALUE, HAS_SCHEMA, HAS_TABLE, HAS_COLUMN, and the declared / metadata
-/ semantic REFERENCES writes — seven sites) through that helper with the
+REFERENCES writes — six sites) through that helper with the
 configured partition count, and never writes a relationship that bypassed
 it. Node writes are stubbed; they intentionally do not use the helper.
 """
@@ -25,7 +25,7 @@ _BASE = {
     "dbxcarta_summary_table": "cat.schema.table",
 }
 
-# The seven relationship DataFrames _load must route through _rel_partition,
+# The six relationship DataFrames _load must route through _rel_partition,
 # tagged so the test can assert identity end to end.
 _EXPECTED_RELS = {
     "has_value_df",
@@ -34,7 +34,6 @@ _EXPECTED_RELS = {
     "has_column_df",
     "declared_edges_df",
     "metadata_edges_df",
-    "semantic_edges_df",
 }
 
 
@@ -72,7 +71,6 @@ def test_every_relationship_write_is_routed_through_rel_partition(
     fk_result = SimpleNamespace(
         declared_edge_count=1, declared_edges_df="declared_edges_df",
         metadata_edge_count=1, metadata_edges_df="metadata_edges_df",
-        semantic_edge_count=1, semantic_edges_df="semantic_edges_df",
     )
     values = SimpleNamespace(
         sample_stats=SimpleNamespace(value_nodes=1, has_value_edges=1),

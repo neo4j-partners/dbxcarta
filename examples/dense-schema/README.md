@@ -51,8 +51,8 @@ Then use the preset with the normal dbxcarta operational CLI:
 ```bash
 uv run dbxcarta preset dbxcarta_dense_schema_example:preset --print-env
 uv run dbxcarta preset dbxcarta_dense_schema_example:preset --upload-questions
-uv run dbxcarta submit-entrypoint ingest
-uv run dbxcarta submit-entrypoint client
+uv run dbxcarta-submit submit-entrypoint ingest
+uv run dbxcarta-submit submit-entrypoint client
 ```
 
 Synthetic materialization and question generation stay inside this example.

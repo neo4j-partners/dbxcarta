@@ -48,12 +48,11 @@ Any path that collects rows whose count grows with catalog size — columns, con
 
 **How we apply it — FK discovery (the largest such surface):** all of metadata and semantic FK inference runs in Spark via `fk/inference.py`, with no driver collect of columns, constraints, embeddings, or the value index:
 
-- Columns are a per-column working frame from `build_columns_frame`, with the column-node `embedding` array left-joined and kept as a DataFrame column end to end (never collected, never normalized — see §7).
+- Columns are a per-column working frame from `build_columns_frame`, kept as a DataFrame end to end (never collected — see §7).
 - Constraints are a Spark frame: `_constraints_df` in `fk/discovery.py` unions the per-catalog `information_schema` reads and feeds the frame straight into `build_pk_gate`; the PK-like gate and composite-PK count are Spark aggregations/joins, not a collected Python index.
-- The value-overlap corroboration signal is a join on the Value/HAS_VALUE frames (`build_value_overlap`), not a collected value index.
-- Metadata and semantic edges (`infer_metadata_edges`, `infer_semantic_edges`) are produced as DataFrames; prior-edge suppression is threaded as a `(source_id, target_id)` DataFrame anti-join (`_union_pairs`), never a collected set.
+- Metadata edges (`infer_metadata_edges`) are produced as DataFrames; prior-edge suppression is threaded as a `(source_id, target_id)` DataFrame anti-join, never a collected set.
 
-**Sanctioned exception — bounded declared-FK resolve:** `discover_declared` in `fk/declared.py` does `collect()` the resolved declared-FK pairs (and unresolved rows for logging). This is allowed because it is bounded by the number of *catalog-declared* foreign keys, not by the n²-shaped all-pairs space — it does not scale with column count and does not threaten driver memory at the 10,000-table target. The exception is specific to declared FKs; do not generalize it to the metadata or semantic paths, and do not "optimize" it away.
+**Sanctioned exception — bounded declared-FK resolve:** `discover_declared` in `fk/declared.py` does `collect()` the resolved declared-FK pairs (and unresolved rows for logging). This is allowed because it is bounded by the number of *catalog-declared* foreign keys, not by the n²-shaped all-pairs space — it does not scale with column count and does not threaten driver memory at the 10,000-table target. The exception is specific to declared FKs; do not generalize it to the metadata path, and do not "optimize" it away.
 
 Source: derived from Spark lazy-evaluation semantics and the driver memory constraint for large catalogs.
 
@@ -69,7 +68,7 @@ Catalyst optimizes only what it can see. A Python UDF, including a vectorized `p
 
 Most logic that looks like it needs a UDF is driven by small static tables: a suffix list, a type-class map, a score table, a stopword set. Those expand into native `Column` expressions and broadcast-join lookups at plan-construction time. The governing rule: Python builds the plan, Spark evaluates every row. A UDF is justified only when the per-row logic genuinely cannot be expressed with Catalyst expressions or higher-order array functions, and that bar is rarely met for metadata, string, or vector-math rules.
 
-**How we apply it:** FK discovery is native DataFrame joins. Name-match stem and plural rules are generated as `Column` expressions by looping the static suffix list once while the plan is built. Type compatibility and the score table are broadcast-join lookups. Comment-token overlap uses `split`, `filter`, and `array_intersect`. Semantic cosine keeps persisted vectors unchanged and computes `dot / (norm(a) * norm(b))` with `aggregate` and `zip_with`. No `pandas_udf` anywhere in the FK path. The implementation is `fk/inference.py` (`infer_metadata_edges`, `infer_semantic_edges`, `build_pk_gate`, `canonicalize_expr`) orchestrated by `fk/discovery.py`.
+**How we apply it:** FK discovery is native DataFrame joins. Name-match stem and plural rules are generated as `Column` expressions by looping the static suffix list once while the plan is built. Type compatibility and the score table are broadcast-join lookups. Comment-token overlap uses `split`, `filter`, and `array_intersect`. No `pandas_udf` anywhere in the FK path. The implementation is `fk/inference.py` (`infer_metadata_edges`, `build_pk_gate`, `canonicalize_expr`) orchestrated by `fk/discovery.py`.
 
 Source: derived from Spark Catalyst optimization semantics; see the [Spark SQL performance tuning guide](https://spark.apache.org/docs/latest/sql-performance-tuning.html) and the PySpark guidance that Python UDFs are a black box to the optimizer.
 
@@ -156,7 +155,7 @@ The preflight enumerates every grant and endpoint permission the enabled flags r
 
 `submit` is a reference operation, not a build operation. The runner attaches the wheel last uploaded to the UC Volume and executes the script last uploaded to the Databricks workspace; it does not rebuild or re-upload either on `submit`. Running stale code against real infrastructure produces misleading signal — apparent failures may be old bugs already fixed, apparent successes may hide regressions in new code, and the run summary reflects whatever the cluster actually ran, not what the local source says.
 
-Any time source files change, run `dbxcarta upload --wheel && dbxcarta upload --all` before `dbxcarta submit`. Treat `job_name` and `contract_version` in the JSON run summary as a quick sanity check that the expected code ran; a wrong prefix (e.g. `schema_graph_*` instead of `dbxcarta_*`) means the workspace script is stale and a re-upload is required before interpreting any results.
+Any time source files change, run `dbxcarta-submit publish-wheels && dbxcarta-submit upload --all` before `dbxcarta-submit submit`. Treat `job_name` and `contract_version` in the JSON run summary as a quick sanity check that the expected code ran; a wrong prefix (e.g. `schema_graph_*` instead of `dbxcarta_*`) means the workspace script is stale and a re-upload is required before interpreting any results.
 
 ### 6. Make Databricks targets explicit at the configuration boundary
 
@@ -176,6 +175,6 @@ Source: derived from the catalog-qualified node-ID scheme and the multi-catalog 
 
 A name match is a candidate, not a foreign key. Every inferred edge (metadata and semantic) must additionally clear two hard gates: the source and target types must be compatible, and the target must carry primary-key or unique evidence. A name match with neither is never emitted. Declared catalog foreign keys are authoritative: an inferred edge that duplicates one a higher-authority strategy already emitted is suppressed, not re-emitted at a different confidence. Accuracy tuning may tighten these gates but may not weaken them.
 
-**How we apply it:** in `fk/inference.py`, both `infer_metadata_edges` and `infer_semantic_edges` apply the `canonicalize_expr` type-equality predicate and an inner join against `build_pk_gate`'s PK-evidence frame as hard filters — no edge survives either one failing. Authority order is threaded in `fk/discovery.py`: metadata left-anti-joins declared-only edges, semantic left-anti-joins `declared ∪ metadata` (`_union_pairs`), so declared suppresses inferred and metadata suppresses semantic.
+**How we apply it:** in `fk/inference.py`, `infer_metadata_edges` applies the `canonicalize_expr` type-equality predicate and an inner join against `build_pk_gate`'s PK-evidence frame as hard filters — no edge survives either one failing. Authority order is threaded in `fk/discovery.py`: metadata left-anti-joins declared-only edges, so declared suppresses inferred metadata.
 
 Source: derived from FK correctness requirements (a name match alone is not a foreign key) and the declared-edge authority ordering.

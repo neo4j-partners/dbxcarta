@@ -40,12 +40,11 @@ def write_nodes_multi(
 
     Only the single-label form is used (via `write_nodes`). The multi-label
     form is NOT idempotent against an existing single-label node:
-    `labels=("Column", "KeyColumn")` compiles to
-    `MERGE (n:Column:KeyColumn {id})`, which matches the full label set, so
-    it can never match an existing `:Column` node and instead creates a new
-    one, colliding with the Column.id uniqueness constraint. Adding a second
-    label to already-written nodes is done server-side off a written
-    property (see `neo4j_io.apply_key_column_labels`), never here.
+    `labels=("Column", "Extra")` compiles to `MERGE (n:Column:Extra {id})`,
+    which matches the full label set, so it can never match an existing
+    `:Column` node and instead creates a new one, colliding with the
+    Column.id uniqueness constraint. Add a second label to already-written
+    nodes server-side off a written property, never here.
     """
     label_opt = "".join(f":{name}" for name in labels)
     (
@@ -67,12 +66,11 @@ def read_query(
     the result rows back as a DataFrame — no DataFrame rows are pushed into
     the read and nothing is collected to the driver. No bind parameters: the
     Neo4j Spark Connector does not parameterize a `query` read (its only
-    documented injection point is the separate `script` option), so the one
-    bound value the semantic read needs — `k` — is interpolated into the
-    Cypher upstream as a trusted, settings-validated int. `partitions` /
-    `query.count` are intentionally not set: the default single-partition
-    read is correct, and partitioning is the only batching lever to add
-    later if a result set ever warrants it.
+    documented injection point is the separate `script` option), so any value
+    a caller needs in the Cypher must be interpolated upstream as a trusted,
+    validated literal. `partitions` / `query.count` are intentionally not
+    set: the default single-partition read is correct, and partitioning is
+    the only batching lever to add later if a result set ever warrants it.
     """
     return (
         spark.read.format(_FORMAT)

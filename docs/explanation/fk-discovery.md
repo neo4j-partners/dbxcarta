@@ -6,7 +6,7 @@ Databricks Genie is the platform-native path from natural language to SQL, and i
 
 Unity Catalog tracks declared primary-key and foreign-key constraints, but those constraints are informational only and, in most production catalogs, are absent entirely. Engineers know which columns join to which, but that knowledge lives in notebooks, tribal memory, and query history, not in the metadata layer. A retrieval system that needs to answer questions across a thousand tables cannot wait for those declarations to be written.
 
-DBxCarta closes that gap by inferring join relationships from three independent signals: column naming conventions, data type compatibility paired with primary-key evidence, and semantic similarity between column descriptions. Each inferred relationship is stored with a confidence score and a record of which method discovered it. At query time, the graph retriever traverses those relationships to expand the set of tables relevant to a question and, where available, injects the literal join predicate directly into the prompt sent to the SQL-generation model.
+DBxCarta closes that gap by inferring join relationships from column naming conventions and data type compatibility paired with primary-key evidence. Each inferred relationship is stored with a confidence score and a record of which method discovered it. At query time, the graph retriever traverses those relationships to expand the set of tables relevant to a question and, where available, injects the literal join predicate directly into the prompt sent to the SQL-generation model.
 
 The result is that an LLM working against a catalog of a thousand tables can receive a focused, join-aware schema context rather than a generic dump of column names, without any manual annotation of the catalog and without pre-committing to a 30-table subset.
 
@@ -14,17 +14,15 @@ The result is that an LLM working against a catalog of a thousand tables can rec
 
 ## Core Features
 
-- **Multi-signal inference.** Foreign key relationships are discovered through three distinct methods: declared FK constraints from Unity Catalog, naming-convention analysis paired with primary-key evidence, and cosine similarity between pre-computed column embeddings. Each method runs independently and produces its own edges in the graph.
+- **Multi-signal inference.** Foreign key relationships are discovered through two distinct methods: declared FK constraints from Unity Catalog, and naming-convention analysis paired with primary-key evidence. Each method runs independently and produces its own edges in the graph.
 
-- **Confidence scoring.** Every inferred relationship carries a numeric confidence score between 0.0 and 1.0. Declared FK constraints score 1.0. Metadata-inferred relationships score between 0.78 and 0.95 depending on the quality of the evidence. Semantically inferred relationships score between 0.80 and 0.90, with a boost for pairs where actual column values overlap. At query time, a threshold filter controls which relationships are traversed.
+- **Confidence scoring.** Every inferred relationship carries a numeric confidence score between 0.0 and 1.0. Declared FK constraints score 1.0. Metadata-inferred relationships score between 0.78 and 0.95 depending on the quality of the evidence. At query time, a threshold filter controls which relationships are traversed.
 
-- **Provenance tagging.** Each relationship records how it was discovered: "declared" for Unity Catalog constraints, "inferred\_metadata" for name and type-based inference, and "semantic" for embedding-based inference. This makes it possible to measure the contribution of each signal independently and to debug unexpected join suggestions.
+- **Provenance tagging.** Each relationship records how it was discovered: "declared" for Unity Catalog constraints, and "inferred\_metadata" for name and type-based inference. This makes it possible to measure the contribution of each signal independently and to debug unexpected join suggestions.
 
 - **Primary-key gating.** Metadata inference only proposes a join if the target column has evidence of being a primary key. That evidence can come from a declared primary key constraint, a declared unique constraint, or a naming heuristic for catalogs with no formal constraints at all. Without this gate, a column named `user_id` would match every `id` column in the catalog.
 
 - **Tie-break attenuation.** When a source column produces multiple plausible join targets above the confidence threshold, each candidate's score is attenuated in proportion to the number of competing matches. A source column with nine high-scoring targets sees each score reduced by roughly a third, typically dropping ambiguous matches below the retrieval threshold while leaving well-constrained two-way joins intact.
-
-- **Value-overlap corroboration.** For semantically inferred relationships, the system checks whether actual sampled values from the source column appear in the target column's sampled values. Pairs where at least half the source values are present in the target receive a confidence boost and are tagged as value-corroborated. This evidence is stronger than naming or embedding alone.
 
 - **Literal join predicates.** Where a declared FK constraint provides the join condition explicitly, that predicate is stored on the relationship edge. At query time, the retriever can pull the exact predicate and inject it into the model prompt, so the model sees `orders.customer_id = customers.id` rather than only knowing that the two tables are related.
 
@@ -42,13 +40,13 @@ The right comparison is not against the Unity Catalog information schema alone. 
 
 | Capability | UC information schema | Genie space + knowledge store | DBxCarta |
 |---|---|---|---|
-| FK discovery | Declared constraints only | Declared constraints auto-imported; new joins suggested from thumbs-up feedback | Declared plus three inferred signals, ranked by confidence, working at day zero |
+| FK discovery | Declared constraints only | Declared constraints auto-imported; new joins suggested from thumbs-up feedback | Declared plus metadata-inferred signals, ranked by confidence, working at day zero |
 | Scale target | N/A | 30 tables per space (hard cap), 200 knowledge-store snippets | Thousands of tables in a single graph |
 | Cold start | Authoritative for what exists | Knowledge mining needs user feedback traffic to learn | Produces candidate joins before any conversations occur |
 | Provenance and confidence | Not available | Not surfaced | Per-edge score and source tag, threshold-filterable |
 | Literal join predicates | Not available for inferred joins | Stored when authored by a human | Stored on edge where derivable |
-| Sampled column values | Not available | Entity matching stores up to 1,024 values per column for up to 120 columns | Stored and used for value-overlap corroboration on inferred edges |
-| Semantic similarity across columns | Not available | Not available for join discovery | Pre-computed embeddings on all schema nodes |
+| Sampled column values | Not available | Entity matching stores up to 1,024 values per column for up to 120 columns | Stored and used as retrieval context |
+| Semantic similarity across columns | Not available | Not available for join discovery | Pre-computed embeddings on schema nodes for query-time retrieval |
 | Portability | System table queries | Scoped to the Genie space | Graph is consumable by any LLM pipeline, not only Genie |
 | Auditability | N/A | Author sees authored snippets; inference steps not exposed | Run summaries with candidates, acceptances, and rejection reasons |
 
@@ -58,13 +56,11 @@ The practical consequence is that a Genie space is the right tool when you can c
 
 ## How the Inference Pipeline Works
 
-The pipeline runs in three phases after extracting Unity Catalog metadata.
+The pipeline runs in two phases after extracting Unity Catalog metadata.
 
 **Metadata inference** analyzes every pair of columns in the catalog where one column plausibly references another. It applies three gates in sequence. First, the column names must match either exactly across tables or through a suffix pattern where one column ends in `_id`, `_fk`, or `_ref` and the other is the corresponding identifier column for that table. Second, the types must be compatible, with normalization that treats integer variants as equivalent and decimal types as compatible if their scale matches. Third, the target column must have primary-key evidence. Only pairs that pass all three gates receive a score. A soft signal from shared vocabulary in column comments can raise a score slightly, but its absence does not disqualify a pair.
 
-**Semantic inference** operates on column pairs that passed the type and primary-key gates but were not matched by name. It computes cosine similarity between the pre-computed embeddings of the two columns' names and descriptions. Pairs above the similarity threshold receive a baseline confidence score. That score rises if the sampled values from the two columns overlap substantially. Pairs that do not reach the final confidence threshold are discarded entirely.
-
-**Graph storage** writes every accepted relationship into Neo4j with its confidence score, source tag, and join predicate if available. Declared FK edges are written first. Metadata-inferred and semantically inferred edges are written after, with deduplication ensuring that a relationship already covered by a declared FK is not duplicated. All writes use merge semantics, so the pipeline is safe to re-run.
+**Graph storage** writes every accepted relationship into Neo4j with its confidence score, source tag, and join predicate if available. Declared FK edges are written first. Metadata-inferred edges are written after, with deduplication ensuring that a relationship already covered by a declared FK is not duplicated. All writes use merge semantics, so the pipeline is safe to re-run.
 
 At query time, the graph retriever seeds from vector similarity search, walks FK edges above the confidence threshold, collects the parent tables of all reachable columns, fetches their full column lists and sample values, and assembles that context alongside any stored join predicates before calling the SQL-generation model.
 
@@ -95,9 +91,7 @@ Once the overlaps are accounted for, the parts that remain are what justify the 
 Not every piece of the pipeline is equally necessary. An honest assessment:
 
 - **Multi-gate sequencing with tie-break attenuation.** This solves a real ambiguity problem — a column named `user_id` will naively match every `id` column in the catalog — but the current machinery is elaborate. A hard top-N cap per source column covers most of the same ground with less moving parts and is easier to explain to a reader of the run summary.
-- **Semantic inference on column descriptions.** Works where descriptions exist. In most production catalogs they do not, at which point this signal degrades to embedding similarity on column names, which is a noisier cousin of the naming-convention rule running alongside it. Worth keeping, worth not overweighting.
 - **Neo4j as a separate dependency.** Justifiable only if multi-hop traversal with confidence filtering is core to retrieval. If the typical query walks one or two hops, a combination of Delta tables plus Databricks Vector Search could host the same data with one fewer system to operate. The current choice is defensible but should be revisited as retrieval patterns stabilize.
-- **Value-overlap corroboration.** The signal is strong, but if the catalog is already using Genie's entity matching, some of this data exists elsewhere. Worth sharing a sampling strategy across both paths rather than maintaining two independent sample stores.
 
 The parts that are clearly load-bearing: the naming-convention plus PK-evidence gate, the confidence score per edge, the provenance tag, and the run summary. Those are the features that make the output trustworthy enough to feed an LLM prompt automatically.
 

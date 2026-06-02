@@ -1,7 +1,7 @@
-"""Spark-native metadata and semantic FK inference.
+"""Spark-native metadata FK inference.
 
-Single source of truth for the two inferred FK strategies. Everything runs
-in Spark DataFrames: no catalog-scale collect to the driver, no Python
+Single source of truth for the metadata inferred FK strategy. Everything
+runs in Spark DataFrames: no catalog-scale collect to the driver, no Python
 all-pairs loop, no UDF. Python builds the plan once; Spark evaluates every
 row.
 
@@ -11,10 +11,9 @@ there is one definition of each rule; this module only expands them into
 native `Column` expressions and broadcast-join lookups at plan-construction
 time (best-practices Spark §7).
 
-Both strategies share:
+The strategy uses:
   - `build_columns_frame` — the per-column working frame with `col_id`,
-    `table_key`, canonicalized type token, comment-token array, and the
-    optional embedding column.
+    `table_key`, canonicalized type token, and comment-token array.
   - `build_pk_gate` — the PK-like target classification (`pk_evidence`),
     reproducing `common.pk_kind` and `PKIndex.from_constraints` as Spark
     aggregations and joins.
@@ -47,9 +46,6 @@ from dbxcarta.spark.ingest.fk.metadata import (
 
 if TYPE_CHECKING:
     from pyspark.sql import Column, DataFrame, SparkSession
-
-    from dbxcarta.spark.ingest.load.writer import Neo4jConfig
-    from dbxcarta.spark.settings import SparkIngestSettings
 
 
 # Inference frames are projected onto the canonical REFERENCES schema via
@@ -152,19 +148,15 @@ def _comment_tokens_expr(comment: "Column") -> "Column":
 
 def build_columns_frame(
     columns_df: "DataFrame",
-    column_node_df: "DataFrame | None" = None,
 ) -> "DataFrame":
-    """Per-column working frame shared by both inferred strategies.
+    """Per-column working frame for metadata FK inference.
 
     `columns_df` is the cached information_schema.columns snapshot
     (table_catalog/table_schema/table_name/column_name/data_type/comment).
-    `column_node_df`, when supplied and carrying an `embedding` column, is
-    left-joined on the contract id so semantic inference can read embeddings
-    without a driver collect; metadata ignores the embedding column.
     """
     from pyspark.sql import functions as F
 
-    cf = (
+    return (
         columns_df.select(
             F.col("table_catalog").alias("catalog"),
             F.col("table_schema").alias("schema"),
@@ -186,16 +178,6 @@ def build_columns_frame(
         .withColumn("canon", canonicalize_expr(F.col("data_type")))
         .withColumn("ctok", _comment_tokens_expr(F.col("comment")))
     )
-
-    if column_node_df is not None and "embedding" in column_node_df.columns:
-        emb = column_node_df.select(
-            F.col("id").alias("_emb_id"), F.col("embedding").alias("embedding"),
-        )
-        cf = cf.join(emb, cf["col_id"] == emb["_emb_id"], "left").drop("_emb_id")
-    else:
-        cf = cf.withColumn("embedding", F.lit(None).cast("array<double>"))
-
-    return cf
 
 
 def build_pk_gate(
@@ -492,190 +474,3 @@ def infer_metadata_edges(
         composite_pk_skipped=composite_pk_count,
     )
     return edges, counts, composite_pk_count
-
-
-# --- Semantic strategy ------------------------------------------------------
-
-# Per-source nearest-neighbor template, verified against the deployed Neo4j
-# (5.27-aura, enterprise) by scripts/spikes/neo4j_query_param_spike.py. Two
-# earlier candidates were rejected on spike evidence:
-#
-#   * The GQL `SEARCH t IN (VECTOR INDEX …)` form does NOT parse on this
-#     version ("Invalid input 'SEARCH'").
-#   * `db.index.vector.queryNodes` parses, but returns the GLOBAL top-k by
-#     similarity and only then post-filters by catalog/schema. For a
-#     per-source correlated filter that is the "wrong schema crowds out the
-#     right match" bug (a same-schema target ranked below the global top-k
-#     is silently lost). Rejected.
-#
-# Adopted shape (`prefilter_cosine`, spike PASS): the exact structural
-# pre-filter (same catalog/schema, :KeyColumn, not self) is applied FIRST,
-# then the survivors are scored with core `vector.similarity.cosine`, built
-# in since Neo4j 5.18 with no GDS plugin, under ORDER BY score DESC LIMIT k.
-# A same-schema key can never be truncated away, so the bug is closed by
-# construction. The `keycolumn_embedding` vector index is unused under this
-# shape (the compare is exact, not index-approximate); it is left created
-# elsewhere (cheap, idempotent). The scoped `CALL (s) { … }` subquery is
-# used (the legacy `CALL { WITH s … }` runs but is deprecation-warned).
-#
-# `__K__` is interpolated upstream (the connector cannot bind a `query`
-# parameter); it is the settings-validated `dbxcarta_semantic_k` int,
-# re-coerced with `int()` at substitution, never user input. The WHERE
-# filter uses `catalog`/`schema`, the contract node property names, NOT
-# `table_catalog`/`table_schema` (those exist only in the embedding-text
-# input expressions; filtering on them would match nothing).
-_SEMANTIC_NN_CYPHER = """
-MATCH (s:Column)
-WHERE s.embedding IS NOT NULL
-CALL (s) {
-  MATCH (t:KeyColumn)
-  WHERE t.catalog = s.catalog
-    AND t.schema  = s.schema
-    AND t.id <> s.id
-    AND t.embedding IS NOT NULL
-  WITH t, vector.similarity.cosine(s.embedding, t.embedding) AS score
-  ORDER BY score DESC
-  LIMIT __K__
-  RETURN t.id AS target_id, score
-}
-RETURN s.id AS source_id, target_id, score
-""".strip()
-
-
-def semantic_nn_pairs(
-    spark: "SparkSession",
-    neo4j: "Neo4jConfig",
-    columns_frame: "DataFrame",
-    settings: "SparkIngestSettings",
-    k: int,
-) -> "DataFrame":
-    """Per-source nearest-neighbor candidate pairs by pre-filter then cosine.
-
-    Replaces *only* candidate generation: instead of the src×tgt cartesian +
-    in-Spark cosine recompute, one server-side Cypher (`_SEMANTIC_NN_CYPHER`,
-    `k` interpolated) walks the already-loaded `:Column` nodes and, per
-    source, applies the exact structural pre-filter (same catalog/schema,
-    `:KeyColumn`, not self) *before* scoring the survivors with core
-    `vector.similarity.cosine` (the spike-verified `prefilter_cosine`
-    shape; the global-top-k `queryNodes` and unparsable `SEARCH` forms
-    were rejected, see `_SEMANTIC_NN_CYPHER`). A same-schema target can
-    never be truncated
-    out of a global top-k, so the recall bug is closed by construction.
-    Returns `(source_id, target_id, score)`. The read goes through the
-    connector `query` option: no DataFrame rows are pushed in and nothing
-    is collected to the driver. `score` is the same cosine the old Spark
-    path computed; `infer_semantic_edges` owns the deterministic filter
-    pipeline and clamps it into confidence.
-
-    `columns_frame`/`settings` are accepted so this stays the single
-    injectable seam with a stable signature (`discovery.run_fk_discovery`
-    holds both at the call site, and the deterministic pipeline downstream
-    consumes `columns_frame`); the server-side query itself needs neither.
-    """
-    from dbxcarta.spark.ingest.load.writer import read_query
-
-    cypher = _SEMANTIC_NN_CYPHER.replace("__K__", str(int(k)))
-    return read_query(spark, neo4j, cypher)
-
-
-def infer_semantic_edges(
-    columns_frame: "DataFrame",
-    pk_gate: "DataFrame",
-    prior_edges_df: "DataFrame | None",
-    nn_pairs: "DataFrame",
-    *,
-    threshold: float = 0.85,
-    floor: float = 0.80,
-    cap: float = 0.90,
-) -> tuple["DataFrame", CoarseFKCounts]:
-    """Spark-native semantic FK inference over nearest-neighbor candidates.
-
-    Candidate generation is now the injected `nn_pairs`
-    (`source_id, target_id, score`) from `semantic_nn_pairs`: the exact
-    structural pre-filter (same catalog/schema, `:KeyColumn`, not self)
-    followed by core `vector.similarity.cosine` over the survivors, not a
-    vector SEARCH and not the `keycolumn_embedding` index. This function
-    stays the owner
-    of the deterministic correctness pipeline: it joins the pair back to
-    `columns_frame` for both sides, enforces same-(catalog, schema), target
-    PK-like (`pk_gate`), type compatibility, the not-both-named-`id` guard,
-    and the prior-pair anti-join (declared ∪ metadata), keeps only neighbors
-    above the similarity bar, and clamps the surviving `score` into the
-    floor/cap confidence band. No value-overlap term: confidence is the
-    floor/cap-clamped raw similarity with no value-derived bonus.
-    """
-    from pyspark.sql import functions as F
-
-    cf = columns_frame
-
-    src = _select_as(
-        cf,
-        {
-            "catalog": "s_catalog",
-            "schema": "s_schema",
-            "column": "s_column",
-            "col_id": "source_id",
-            "canon": "s_canon",
-        },
-    )
-    tgt = _select_as(
-        cf.join(
-            pk_gate.select(F.col("col_id").alias("_pk_id")),
-            cf["col_id"] == F.col("_pk_id"),
-            "inner",
-        ),
-        {
-            "catalog": "t_catalog",
-            "schema": "t_schema",
-            "column": "t_column",
-            "col_id": "target_id",
-            "canon": "t_canon",
-        },
-    )
-
-    # nn_pairs is the only candidate source. The join to src/tgt resolves the
-    # deterministic per-column attributes; the pk_gate inner join on the tgt
-    # side enforces key-like even if a seam ever returns a non-key target.
-    cand = (
-        nn_pairs.select("source_id", "target_id", "score")
-        .join(src, "source_id")
-        .join(tgt, "target_id")
-        .filter(
-            (F.col("s_catalog") == F.col("t_catalog"))
-            & (F.col("s_schema") == F.col("t_schema"))
-            & (F.col("source_id") != F.col("target_id"))
-            & (F.col("s_canon") == F.col("t_canon"))
-            & ~(
-                (F.lower(F.col("s_column")) == F.lit("id"))
-                & (F.lower(F.col("t_column")) == F.lit("id"))
-            )
-        )
-    )
-
-    if prior_edges_df is not None:
-        prior = prior_edges_df.select(
-            F.col("source_id").alias("_p_s"), F.col("target_id").alias("_p_t"),
-        ).distinct()
-        cand = cand.join(
-            prior,
-            (F.col("source_id") == F.col("_p_s"))
-            & (F.col("target_id") == F.col("_p_t")),
-            "left_anti",
-        )
-
-    above = cand.filter(F.col("score") >= F.lit(threshold))
-    conf = F.least(F.lit(cap), F.greatest(F.lit(floor), F.col("score")))
-
-    edges = sg.to_references_rel(above.select(
-        F.col("source_id"),
-        F.col("target_id"),
-        F.round(conf, 4).alias("confidence"),
-        F.lit(EdgeSource.SEMANTIC.value).alias("source"),
-        F.lit(None).cast("string").alias("criteria"),
-    ))
-
-    accepted = edges.cache().count()
-    if accepted == 0:
-        edges.unpersist()
-    counts = CoarseFKCounts(accepted=accepted)
-    return edges, counts

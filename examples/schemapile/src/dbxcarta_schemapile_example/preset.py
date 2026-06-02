@@ -51,7 +51,6 @@ class SchemaPilePreset:
     include_values: bool = True
     sample_limit: int = 10
     sample_cardinality_threshold: int = 50
-    infer_semantic: bool = True
     include_embeddings_tables: bool = True
     include_embeddings_columns: bool = True
     include_embeddings_values: bool = False
@@ -95,7 +94,6 @@ class SchemaPilePreset:
             "DBXCARTA_INCLUDE_EMBEDDINGS_VALUES": _bool(self.include_embeddings_values),
             "DBXCARTA_INCLUDE_EMBEDDINGS_SCHEMAS": _bool(self.include_embeddings_schemas),
             "DBXCARTA_INCLUDE_EMBEDDINGS_DATABASES": _bool(self.include_embeddings_databases),
-            "DBXCARTA_INFER_SEMANTIC": _bool(self.infer_semantic),
             "DBXCARTA_EMBEDDING_ENDPOINT": self.embedding_endpoint,
             "DBXCARTA_EMBEDDING_DIMENSION": str(self.embedding_dimension),
             "DBXCARTA_EMBEDDING_FAILURE_MAX": f"{self.embedding_failure_max}",

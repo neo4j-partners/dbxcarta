@@ -19,17 +19,16 @@ def _expected_edge_total(summary: dict[str, Any]) -> int:
     """Total REFERENCES edges the writer is expected to have produced.
 
     The summary's `fk_edges` counter only counts *declared* FKs from the
-    catalog; metadata- and semantic-inferred FKs are tracked under separate
-    `fk_inferred_*_accepted` counters but are written to Neo4j as REFERENCES
-    edges alongside the declared ones. Comparing `fk_edges` to Neo4j's
-    REFERENCES count without summing the inferred totals will always look
-    high by `accepted` whenever inference is on (its default for metadata).
+    catalog; metadata-inferred FKs are tracked under a separate
+    `fk_inferred_metadata_accepted` counter but are written to Neo4j as
+    REFERENCES edges alongside the declared ones. Comparing `fk_edges` to
+    Neo4j's REFERENCES count without summing the inferred total will always
+    look high by `accepted` whenever inference is on (its default).
     """
     counts: dict[str, int] = summary.get("row_counts") or {}
     return (
         counts.get("fk_edges", 0)
         + counts.get("fk_inferred_metadata_accepted", 0)
-        + counts.get("fk_inferred_semantic_accepted", 0)
     )
 
 

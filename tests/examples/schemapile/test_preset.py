@@ -35,7 +35,6 @@ def test_env_overlay_defaults():
         "schemapile_lakehouse._meta.dbxcarta_run_summary"
     )
     assert env["DBXCARTA_INJECT_CRITERIA"] == "false"
-    assert env["DBXCARTA_INFER_SEMANTIC"] == "true"
 
 
 def test_env_overlay_picks_up_schemas_env(monkeypatch):

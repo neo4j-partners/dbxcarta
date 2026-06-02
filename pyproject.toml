@@ -12,6 +12,7 @@ dependencies = [
     "dbxcarta-finance-genie-example",
     "dbxcarta-schemapile-example",
     "dbxcarta-spark",
+    "dbxcarta-submit",
 ]
 
 [dependency-groups]
@@ -28,6 +29,7 @@ package = false
 [tool.uv.sources]
 dbxcarta-client = { workspace = true }
 dbxcarta-spark = { workspace = true }
+dbxcarta-submit = { workspace = true }
 dbxcarta-dense-schema-example = { workspace = true }
 dbxcarta-finance-genie-example = { workspace = true }
 dbxcarta-schemapile-example = { workspace = true }
@@ -36,6 +38,7 @@ dbxcarta-schemapile-example = { workspace = true }
 members = [
     "packages/dbxcarta-client",
     "packages/dbxcarta-spark",
+    "packages/dbxcarta-submit",
     "examples/dense-schema",
     "examples/finance-genie",
     "examples/schemapile",

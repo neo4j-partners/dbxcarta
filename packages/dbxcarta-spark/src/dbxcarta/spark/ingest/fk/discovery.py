@@ -1,16 +1,16 @@
-"""FK discovery orchestrator: runs declared → metadata → semantic.
+"""FK discovery orchestrator: runs declared → metadata.
 
 Pipeline boundary for all FK-discovery work. Declared FK is read from
-information_schema as a bounded Spark frame; metadata and semantic
-inference run entirely in Spark via `fk.inference` — no catalog-scale
-collect to the driver, no Python all-pairs loop. Produces
-`FKDiscoveryResult` — ready-to-write REFERENCES DataFrames tagged with
-`EdgeSource.{DECLARED, INFERRED_METADATA, SEMANTIC}`.
+information_schema as a bounded Spark frame; metadata inference runs
+entirely in Spark via `fk.inference` — no catalog-scale collect to the
+driver, no Python all-pairs loop. Produces `FKDiscoveryResult` —
+ready-to-write REFERENCES DataFrames tagged with
+`EdgeSource.{DECLARED, INFERRED_METADATA}`.
 
 Each strategy is suppressed against the edges earlier strategies already
-emitted. Declared receives nothing; metadata anti-joins declared-only;
-semantic anti-joins declared ∪ metadata. The prior set is threaded as a
-`(source_id, target_id)` DataFrame, never collected.
+emitted. Declared receives nothing; metadata anti-joins declared-only. The
+prior set is threaded as a `(source_id, target_id)` DataFrame, never
+collected.
 """
 
 from __future__ import annotations
@@ -25,8 +25,6 @@ from dbxcarta.spark.ingest.fk.inference import (
     build_columns_frame,
     build_pk_gate,
     infer_metadata_edges,
-    infer_semantic_edges,
-    semantic_nn_pairs,
 )
 from dbxcarta.spark.ingest.summary import FKSkipCounts, RunSummary
 
@@ -34,7 +32,6 @@ if TYPE_CHECKING:
     from pyspark.sql import DataFrame, SparkSession
 
     from dbxcarta.spark.ingest.extract import ExtractResult
-    from dbxcarta.spark.ingest.load.writer import Neo4jConfig
     from dbxcarta.spark.settings import SparkIngestSettings
 
 logger = logging.getLogger(__name__)
@@ -51,14 +48,11 @@ class FKDiscoveryResult:
     declared_edge_count: int
     metadata_edges_df: "DataFrame | None"
     metadata_edge_count: int
-    semantic_edges_df: "DataFrame | None"
-    semantic_edge_count: int
 
     def unpersist_cached(self) -> None:
-        """Release inferred edge caches created for count/write reuse."""
-        for df in (self.metadata_edges_df, self.semantic_edges_df):
-            if df is not None:
-                df.unpersist()
+        """Release the metadata edge cache created for count/write reuse."""
+        if self.metadata_edges_df is not None:
+            self.metadata_edges_df.unpersist()
 
 
 def run_fk_discovery(
@@ -66,17 +60,13 @@ def run_fk_discovery(
     settings: "SparkIngestSettings",
     schema_list: list[str],
     extract: "ExtractResult",
-    neo4j: "Neo4jConfig",
     summary: RunSummary,
 ) -> FKDiscoveryResult:
-    """Run declared → metadata → semantic, threading prior edges in Spark.
+    """Run declared → metadata, threading prior edges in Spark.
 
-    Semantic is gated on DBXCARTA_INFER_SEMANTIC and on a catalog-size floor
-    (DBXCARTA_SEMANTIC_MIN_TABLES). Column embeddings are required and
-    already validated present by Settings' cross-field validator. Semantic
-    candidate generation is the per-source nearest-neighbor SEARCH against
-    the key-like vector index (`semantic_nn_pairs`, reading Neo4j via the
-    connector `query` option); there is no sampled-value FK consumer.
+    Declared FK is read from information_schema as a bounded frame; metadata
+    inference runs in Spark and anti-joins the declared edges so a declared
+    pair is never re-emitted as inferred.
     """
     from pyspark import StorageLevel
 
@@ -84,14 +74,12 @@ def run_fk_discovery(
         return _skipped_result()
 
     constraints_df = _constraints_df(spark, settings, schema_list)
-    columns_frame = build_columns_frame(
-        extract.columns_df, extract.column_node_df,
-    )
-    # columns_frame and pk_gate each feed up to three jobs (build_pk_gate,
-    # then the two strategy actions). Persist once so the n²-shaped lineage
-    # is not re-run per strategy. MEMORY_AND_DISK (not cache/MEMORY_ONLY) so
-    # eviction at the 10k-table target cannot cause a silent recompute.
-    # Marking persisted does not materialize; both fill lazily on first use.
+    columns_frame = build_columns_frame(extract.columns_df)
+    # columns_frame and pk_gate each feed two jobs (build_pk_gate, then the
+    # metadata strategy action). Persist once so the n²-shaped lineage is not
+    # re-run. MEMORY_AND_DISK (not cache/MEMORY_ONLY) so eviction at the
+    # 10k-table target cannot cause a silent recompute. Marking persisted does
+    # not materialize; both fill lazily on first use.
     columns_frame.persist(StorageLevel.MEMORY_AND_DISK)
     # pk_gate is internal to this function; its lifecycle ends here. Wrap the
     # body in try/finally so both caches are released on the failure path
@@ -134,76 +122,16 @@ def run_fk_discovery(
         if metadata_out is None:
             metadata_edges_df.unpersist()
 
-        # declared ∪ metadata, for the semantic anti-join only.
-        prior_edges_df = _union_pairs(declared_edges_df, metadata_out)
-
-        semantic_out: "DataFrame | None" = None
-        semantic_count = 0
-        if _should_run_semantic(settings, summary.extract.tables):
-            nn_pairs = semantic_nn_pairs(
-                spark, neo4j, columns_frame, settings,
-                settings.dbxcarta_semantic_k,
-            )
-            semantic_edges_df, semantic_counts = infer_semantic_edges(
-                columns_frame, pk_gate, prior_edges_df, nn_pairs,
-                threshold=settings.dbxcarta_semantic_threshold,
-            )
-            summary.fk_semantic = semantic_counts
-            logger.info(
-                "[dbxcarta] semantic inference: accepted=%d",
-                semantic_counts.accepted,
-            )
-            if semantic_counts.accepted:
-                semantic_out = semantic_edges_df
-                semantic_count = semantic_counts.accepted
-            else:
-                semantic_edges_df.unpersist()
-
         return FKDiscoveryResult(
             declared_edges_df=declared_edges_df,
             declared_edge_count=len(declared_edges),
             metadata_edges_df=metadata_out,
             metadata_edge_count=metadata_counts.accepted,
-            semantic_edges_df=semantic_out,
-            semantic_edge_count=semantic_count,
         )
     finally:
         columns_frame.unpersist()
         if pk_gate is not None:
             pk_gate.unpersist()
-
-
-def _union_pairs(
-    a: "DataFrame | None", b: "DataFrame | None",
-) -> "DataFrame | None":
-    """`(source_id, target_id)` union of two edge frames, dropping None."""
-    frames = [
-        f.select("source_id", "target_id") for f in (a, b) if f is not None
-    ]
-    if not frames:
-        return None
-    out = frames[0]
-    for f in frames[1:]:
-        out = out.unionByName(f)
-    return out.distinct()
-
-
-def _should_run_semantic(settings: "SparkIngestSettings", n_tables: int) -> bool:
-    """Semantic runs iff enabled and the catalog exceeds the min-tables floor.
-
-    On tiny catalogs, embedding similarity fires on unrelated pairs more often
-    than it helps; the gate blocks that while letting small fixtures exercise
-    the code path via a per-test override of DBXCARTA_SEMANTIC_MIN_TABLES.
-    """
-    if not settings.dbxcarta_infer_semantic:
-        return False
-    if n_tables < settings.dbxcarta_semantic_min_tables:
-        logger.info(
-            "[dbxcarta] semantic inference skipped: %d tables < min %d",
-            n_tables, settings.dbxcarta_semantic_min_tables,
-        )
-        return False
-    return True
 
 
 def _fk_guardrail_tripped(
@@ -243,8 +171,6 @@ def _skipped_result() -> FKDiscoveryResult:
         declared_edge_count=0,
         metadata_edges_df=None,
         metadata_edge_count=0,
-        semantic_edges_df=None,
-        semantic_edge_count=0,
     )
 
 
@@ -282,26 +208,3 @@ def _constraints_df(
     if schema_list:
         rows = rows.filter(col("table_schema").isin(schema_list))
     return rows
-
-
-def key_like_target_ids(
-    spark: "SparkSession",
-    settings: "SparkIngestSettings",
-    schema_list: list[str],
-    extract: "ExtractResult",
-) -> "DataFrame":
-    """Distinct `col_id` of every key-like FK target.
-
-    The single source of truth for which columns get the `:KeyColumn` label
-    at load time: it reuses the existing key definition
-    (`build_pk_gate`'s `pk_evidence`) rather than introducing a second rule.
-    Returned as a DataFrame and never collected — the caller applies it via
-    a broadcast semi-join, so this stays within best-practices §5 even at
-    the dense-catalog target.
-    """
-    constraints_df = _constraints_df(spark, settings, schema_list)
-    columns_frame = build_columns_frame(
-        extract.columns_df, extract.column_node_df,
-    )
-    pk_gate, _ = build_pk_gate(columns_frame, constraints_df)
-    return pk_gate.select("col_id").distinct()

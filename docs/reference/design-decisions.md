@@ -145,8 +145,7 @@ confident and uses guessing only where there is nothing better.
 > key (or primary key) in the catalog, even as an informational, unenforced
 > constraint, which moves it onto the exact, always-trusted declared path.
 > Note this is only about the *rescue*: sampled Value nodes themselves are
-> still produced and are still used elsewhere (client text-to-SQL grounding
-> and semantic-confidence corroboration).
+> still produced and are still used elsewhere (client text-to-SQL grounding).
 
 ### The problem
 

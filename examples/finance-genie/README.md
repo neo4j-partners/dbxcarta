@@ -51,7 +51,6 @@ settings = SparkIngestSettings(
     dbxcarta_include_embeddings_values=True,
     dbxcarta_include_embeddings_schemas=True,
     dbxcarta_include_embeddings_databases=True,
-    dbxcarta_infer_semantic=True,
 )
 run_dbxcarta(settings=settings)
 ```
@@ -196,11 +195,11 @@ This uploads the package's `questions.json` to the path named by
 ### 7. Build and upload dbxcarta artifacts
 
 ```bash
-uv run dbxcarta upload --wheel
-uv run dbxcarta upload --all
+uv run dbxcarta-submit publish-wheels
+uv run dbxcarta-submit upload --all
 ```
 
-> Every `dbxcarta` command in steps 6–9 reads the overlay from the
+> Every `dbxcarta` and `dbxcarta-submit` command in steps 6–9 reads the overlay from the
 > `DBXCARTA_ENV_FILE` you exported in step 3. If you skipped that,
 > export it now:
 > `export DBXCARTA_ENV_FILE=examples/finance-genie/dbxcarta-overlay.env`.
@@ -210,7 +209,7 @@ uv run dbxcarta upload --all
 Submit the installed wheel's ingest entrypoint:
 
 ```bash
-uv run dbxcarta submit-entrypoint ingest
+uv run dbxcarta-submit submit-entrypoint ingest
 ```
 
 Verify the result:
@@ -222,7 +221,7 @@ uv run dbxcarta verify
 ### 9. Run the client evaluation
 
 ```bash
-uv run dbxcarta submit-entrypoint client
+uv run dbxcarta-submit submit-entrypoint client
 ```
 
 ### 10. Run the local CLI demo
@@ -253,12 +252,12 @@ The local demo allows only `SELECT`, `WITH`, and `EXPLAIN` statements.
 
 ## Preset Defaults
 
-The preset targets the full `graph-enriched-schema`, enables every embedding
-label (tables, columns, values, schemas, databases), and turns on semantic FK
-inference so dbxcarta can recover join paths from Finance Genie column names,
-comments, and embeddings (the Finance Genie tables are not created with
-declared foreign-key constraints). The preset disables criteria injection
-because Finance Genie inferred relationships do not carry literal
+The preset targets the full `graph-enriched-schema` and enables every
+embedding label (tables, columns, values, schemas, databases) for graph-RAG
+retrieval. dbxcarta recovers join paths from Finance Genie column names and
+comments via metadata FK inference (the Finance Genie tables are not created
+with declared foreign-key constraints). The preset disables criteria
+injection because Finance Genie inferred relationships do not carry literal
 join-predicate strings.
 
 For a cheaper first validation run, override the embedding flags in `.env` and
