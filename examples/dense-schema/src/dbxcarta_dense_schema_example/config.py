@@ -8,8 +8,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-_CATALOG_BLOCKLIST: frozenset[str] = frozenset({
+_PROJECT_CATALOGS_BLOCKLIST: frozenset[str] = frozenset({
     "graph-enriched-lakehouse",
+    "dbxcarta-catalog",
     "main",
     "hive_metastore",
     "samples",
@@ -26,39 +27,50 @@ class DenseSchemaConfig:
     uc_schema: str
     seed: int
     candidate_cache: Path
+    # Ops volume path, sourced from DATABRICKS_VOLUME_PATH. Deliberately not
+    # derived from `catalog`: the ops plane lives in its own catalog
+    # (dbxcarta-catalog.dense_ops), separate from the data catalog this config
+    # materializes tables into, so data discovery never sweeps it in.
+    volume_path: str
     questions_path: str
     question_model: str
     questions_target: int
     questions_per_batch: int
     question_temperature: float
 
-    @property
-    def volume_path(self) -> str:
-        return f"/Volumes/{self.catalog}/{self.meta_schema}/{self.volume}"
-
 
 def load_config(env: Mapping[str, str] | None = None) -> DenseSchemaConfig:
     e = env if env is not None else os.environ
     catalog = _required(e, "DBXCARTA_CATALOG")
-    if catalog.casefold() in _CATALOG_BLOCKLIST:
+    if catalog.casefold() in _PROJECT_CATALOGS_BLOCKLIST:
         raise ValueError(
             f"DBXCARTA_CATALOG={catalog!r} collides with a known project catalog"
         )
     table_count = int(e.get("DENSE_TABLE_COUNT", "500"))
     uc_schema = e.get("DENSE_SCHEMA_NAME", f"dense_{table_count}")
+    meta_schema = e.get("SCHEMAPILE_META_SCHEMA", "_meta")
+    volume = e.get("SCHEMAPILE_VOLUME", "schemapile_volume")
+    # The ops plane is separate from the data catalog. Prefer the explicit
+    # DATABRICKS_VOLUME_PATH (the overlay/.env points it at the ops catalog);
+    # fall back to the legacy in-catalog derivation only when it is unset.
+    volume_path = e.get(
+        "DATABRICKS_VOLUME_PATH",
+        f"/Volumes/{catalog}/{meta_schema}/{volume}",
+    )
     return DenseSchemaConfig(
         catalog=catalog,
-        meta_schema=e.get("SCHEMAPILE_META_SCHEMA", "_meta"),
-        volume=e.get("SCHEMAPILE_VOLUME", "schemapile_volume"),
+        meta_schema=meta_schema,
+        volume=volume,
         table_count=table_count,
         uc_schema=uc_schema,
         seed=int(e.get("DENSE_SEED", "42")),
         candidate_cache=Path(
             e.get("DENSE_CANDIDATE_CACHE", f".cache/candidates_{table_count}.json")
         ),
+        volume_path=volume_path,
         questions_path=e.get(
             "DBXCARTA_CLIENT_QUESTIONS",
-            f"/Volumes/{catalog}/_meta/schemapile_volume/dbxcarta/dense_questions.json",
+            f"{volume_path}/dbxcarta/dense_questions.json",
         ),
         question_model=e.get(
             "DENSE_QUESTION_MODEL",

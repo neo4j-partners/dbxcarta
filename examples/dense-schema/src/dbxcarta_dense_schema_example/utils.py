@@ -1,14 +1,22 @@
-"""Shared helpers for dense-schema entrypoints."""
+"""Shared entrypoint helpers for the dense-schema example."""
 
 from __future__ import annotations
 
+import logging
+import os
 from pathlib import Path
 
 
 def load_dotenv_file(path: Path) -> None:
+    """Load a dotenv file when python-dotenv is installed and the file exists."""
     try:
         from dotenv import load_dotenv
     except ImportError:
+        logging.getLogger(__name__).warning(
+            "python-dotenv is not installed; %s was not loaded and "
+            "configuration will come from the process environment only",
+            path,
+        )
         return
     if path.is_file():
         load_dotenv(path, override=False)
@@ -16,15 +24,16 @@ def load_dotenv_file(path: Path) -> None:
 
 def read_required_warehouse_id(
     override: str | None,
+    *,
     operation: str,
     extra_hint: str = "",
 ) -> str:
-    import os
-
-    wid = (override or os.environ.get("DATABRICKS_WAREHOUSE_ID", "")).strip()
-    if not wid:
+    """Return the SQL warehouse id from CLI override or environment."""
+    warehouse_id = (override or os.environ.get("DATABRICKS_WAREHOUSE_ID", "")).strip()
+    if not warehouse_id:
         hint = f" {extra_hint}" if extra_hint else ""
         raise ValueError(
-            f"DATABRICKS_WAREHOUSE_ID is required for {operation}.{hint}"
+            f"DATABRICKS_WAREHOUSE_ID is required for {operation};"
+            f" set it in .env or pass --warehouse-id{hint}"
         )
-    return wid
+    return warehouse_id

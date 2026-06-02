@@ -64,9 +64,9 @@ examples/dense-schema/
 
 ## Quick iterate loop (testing dbxcarta changes)
 
-Once the one-time setup is in place (example installed, the shared catalog
-bootstrapped, the synthetic schema generated and materialized into Unity
-Catalog, and the question set uploaded), the wheel-rebuild-and-submit pipeline
+Once the one-time setup is in place (example installed, the ops plane
+bootstrapped, the synthetic schema generated and materialized into its own data
+catalog, and the question set uploaded), the wheel-rebuild-and-submit pipeline
 runs in two make targets from the repo root — ingest first, then the client
 evaluation once ingest finishes:
 
@@ -97,23 +97,28 @@ Generate the synthetic schema locally:
 uv run dbxcarta-dense-generate --tables 500
 ```
 
-Provision the catalog, `_meta` schema, and volume named by the overlay's
-`DATABRICKS_VOLUME_PATH` after configuring `.env`. `bootstrap` is idempotent, so
-re-running it changes nothing; the `-ingest` make target also runs it first:
+Provision the ops plane, the `dbxcarta-catalog.dense_ops` schema and its
+`dbxcarta-ops` volume named by the overlay's `DATABRICKS_VOLUME_PATH`, after
+configuring `.env`. `bootstrap` is idempotent, so re-running it changes nothing;
+the `-ingest` make target also runs it first. The `dense-schema_example` data
+catalog is created by the materialize step below:
 
 ```bash
 uv run dbxcarta-submit bootstrap --env-file examples/dense-schema/dbxcarta-overlay.env
 ```
 
-Materialize the fixture into Unity Catalog:
+Materialize the fixture into Unity Catalog. This creates the
+`dense-schema_example` data catalog and the `dense_1000` schema and tables:
 
 ```bash
 uv run dbxcarta-dense-materialize
 ```
 
-To remove only the dense data schema later, without touching the shared catalog,
-run `teardown` (it drops the overlay's `DBXCARTA_TEARDOWN_TARGET`,
-`schema:dense-schema_example.dense_1000`):
+To remove dense's full footprint later, run `teardown`. It drops the overlay's
+`DBXCARTA_TEARDOWN_TARGET`,
+`catalog:dense-schema_example,schema:dbxcarta-catalog.dense_ops`: the data
+catalog and dense's ops schema. The shared `dbxcarta-catalog` is left intact for
+the other examples:
 
 ```bash
 uv run dbxcarta-submit teardown --env-file examples/dense-schema/dbxcarta-overlay.env --yes-i-mean-it

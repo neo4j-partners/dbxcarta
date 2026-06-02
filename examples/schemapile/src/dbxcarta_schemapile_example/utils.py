@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 
@@ -11,6 +12,11 @@ def load_dotenv_file(path: Path) -> None:
     try:
         from dotenv import load_dotenv
     except ImportError:
+        logging.getLogger(__name__).warning(
+            "python-dotenv is not installed; %s was not loaded and "
+            "configuration will come from the process environment only",
+            path,
+        )
         return
     if path.is_file():
         load_dotenv(path, override=False)

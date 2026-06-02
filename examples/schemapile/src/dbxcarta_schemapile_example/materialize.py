@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
 from dbxcarta.client.databricks import build_workspace_client
+from dbxcarta.client.executor import execute_ddl
 from dbxcarta.spark.databricks import quote_identifier
 from dbxcarta_schemapile_example.config import SchemaPileConfig, load_config
 from dbxcarta_schemapile_example.utils import (
@@ -356,14 +357,15 @@ def _build_insert(
 
 
 def _execute(ws: "WorkspaceClient", warehouse_id: str, statement: str) -> None:
-    from databricks.sdk.service.sql import ExecuteStatementRequestOnWaitTimeout
+    """Run one statement on the warehouse and raise on any non-success.
 
-    ws.statement_execution.execute_statement(
-        warehouse_id=warehouse_id,
-        statement=statement,
-        wait_timeout="50s",
-        on_wait_timeout=ExecuteStatementRequestOnWaitTimeout.CONTINUE,
-    )
+    Delegates to the shared client executor, so a FAILED or timed-out statement
+    is surfaced as an error instead of being silently counted as a successful
+    materialization.
+    """
+    succeeded, error = execute_ddl(ws, warehouse_id, statement)
+    if not succeeded:
+        raise RuntimeError(f"statement failed ({error}):\n{statement}")
 
 
 if __name__ == "__main__":

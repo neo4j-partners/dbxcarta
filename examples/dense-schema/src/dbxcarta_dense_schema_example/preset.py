@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from databricks.sdk import WorkspaceClient
 
 
-_DEFAULT_CATALOG = "schemapile_lakehouse"
+_DEFAULT_CATALOG = "dense-schema_example"
 _QUESTIONS_FILE = Path(__file__).resolve().parents[2] / "questions.json"
 
 

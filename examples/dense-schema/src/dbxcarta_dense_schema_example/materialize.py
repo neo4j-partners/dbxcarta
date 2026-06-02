@@ -132,6 +132,19 @@ def materialize(
 ) -> MaterializeStats:
     stats = MaterializeStats()
     catalog_q = quote_identifier(config.catalog)
+
+    # Provision the data catalog itself. The ops plane (volume, summary) lives
+    # in a separate catalog that `dbxcarta-submit bootstrap` creates from
+    # DATABRICKS_VOLUME_PATH; the data catalog is this example's own, so
+    # materialize owns creating it. load_config already refuses a
+    # protected/project catalog name, so this never targets a shared catalog.
+    _execute(
+        ws, warehouse_id,
+        f"CREATE CATALOG IF NOT EXISTS {catalog_q}"
+        " COMMENT 'dense-schema materialize: data catalog'",
+        label=f"CREATE CATALOG {config.catalog}",
+    )
+
     total_tables = sum(len(s.get("tables", [])) for s in schemas)
     table_idx = 0
     for schema_entry in schemas:

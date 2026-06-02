@@ -14,6 +14,23 @@ This is the follow-up sibling to clean-schemapile.md. It lands after it, and it
 depends on the comma-separated `DBXCARTA_TEARDOWN_TARGET` parser that
 clean-schemapile introduces.
 
+## Progress
+
+clean-schemapile.md is implemented: the comma-list teardown parser
+(`parse_teardown_targets`), the schemapile overlay, and schemapile's
+`materialize.py` `CREATE CATALOG IF NOT EXISTS` have all landed, so the
+dependency is satisfied.
+
+- [x] **Overlay** — ops moved to `dbxcarta-catalog.dense_ops`, comma-list teardown,
+  stale comments rewritten.
+- [x] **Materialize** — `CREATE CATALOG IF NOT EXISTS` for the data catalog.
+- [x] **Standalone `config.py`** — `volume_path`/`questions_path` read env, ops fallback.
+- [x] **Standalone `.env` / `.env.sample`** — ops location; `.env.sample` catalog fixed.
+- [x] **Preset** — readiness queries the data catalog, not `schemapile_lakehouse`.
+- [x] **Docs** — README rewritten for the standalone-catalog, split-plane design.
+- [x] **Tests** — config, materialize, and preset coverage added.
+- [x] **Validation** — ruff, mypy, full suite, and both dry-runs green.
+
 ## Why this is needed
 
 The dense overlay already moved dense off SchemaPile's catalog onto its own
