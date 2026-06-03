@@ -51,6 +51,18 @@ DEFAULT_DELTA_TYPE_MAP: Mapping[str, str] = MappingProxyType(
         "SMALLINT": "SMALLINT",
         "TINYINT": "TINYINT",
         "MEDIUMINT": "INT",
+        # Spark has no unsigned integers; widen each to the next signed type
+        # that holds the full unsigned range without overflow.
+        "UNSIGNEDTINYINT": "SMALLINT",
+        "UNSIGNEDSMALLINT": "INT",
+        "UNSIGNEDMEDIUMINT": "INT",
+        "UNSIGNEDINT": "BIGINT",
+        "UNSIGNEDINTEGER": "BIGINT",
+        "UNSIGNEDBIGINT": "DECIMAL(20,0)",
+        # Postgres auto-increment aliases.
+        "SERIAL": "BIGINT",
+        "BIGSERIAL": "BIGINT",
+        "SMALLSERIAL": "INT",
         "FLOAT": "FLOAT",
         "REAL": "FLOAT",
         "DOUBLE": "DOUBLE",
@@ -58,6 +70,7 @@ DEFAULT_DELTA_TYPE_MAP: Mapping[str, str] = MappingProxyType(
         "DECIMAL": "DECIMAL(18,4)",
         "NUMERIC": "DECIMAL(18,4)",
         "NUMBER": "DECIMAL(18,4)",
+        "MONEY": "DECIMAL(18,4)",
         "BOOLEAN": "BOOLEAN",
         "BOOL": "BOOLEAN",
         "BIT": "BOOLEAN",
@@ -67,10 +80,12 @@ DEFAULT_DELTA_TYPE_MAP: Mapping[str, str] = MappingProxyType(
         "TINYTEXT": "STRING",
         "CHARACTER VARYING": "STRING",
         "VARCHAR": "STRING",
+        "VARCHAR2": "STRING",
         "CHAR": "STRING",
         "NVARCHAR": "STRING",
         "NCHAR": "STRING",
         "STRING": "STRING",
+        "CLOB": "STRING",
         "DATE": "DATE",
         "DATETIME": "TIMESTAMP",
         "TIMESTAMP": "TIMESTAMP",
@@ -80,6 +95,9 @@ DEFAULT_DELTA_TYPE_MAP: Mapping[str, str] = MappingProxyType(
         "TIME": "STRING",
         "TIME WITHOUT TIME ZONE": "STRING",
         "BLOB": "BINARY",
+        "TINYBLOB": "BINARY",
+        "MEDIUMBLOB": "BINARY",
+        "LONGBLOB": "BINARY",
         "BINARY": "BINARY",
         "VARBINARY": "BINARY",
         "BYTEA": "BINARY",
@@ -133,6 +151,8 @@ def coerce_type(raw: str, type_map: Mapping[str, str] = DEFAULT_DELTA_TYPE_MAP) 
     Returns ``(delta_type, fellback)`` where ``fellback`` is True when the type
     could not be matched and defaulted to ``STRING``. ``DECIMAL(p, s)`` is
     clamped to Delta's bounds; sized ``VARCHAR``/``CHAR`` becomes ``STRING``.
+    Matching is whitespace-insensitive, so a CamelCase source type such as
+    ``DoublePrecision`` resolves to the same entry as ``DOUBLE PRECISION``.
     """
     if not raw:
         return "STRING", True
@@ -149,6 +169,10 @@ def coerce_type(raw: str, type_map: Mapping[str, str] = DEFAULT_DELTA_TYPE_MAP) 
     base = normalized.split("(", 1)[0].strip()
     if base in type_map:
         return type_map[base], False
+    collapsed = base.replace(" ", "")
+    despaced = {key.replace(" ", ""): value for key, value in type_map.items()}
+    if collapsed in despaced:
+        return despaced[collapsed], False
     return "STRING", True
 
 

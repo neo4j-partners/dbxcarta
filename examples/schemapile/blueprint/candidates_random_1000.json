@@ -1,6 +1,6 @@
 {
   "format_version": 2,
-  "source_slice": ".cache/slice_random_1000.json",
+  "source_slice": "/Users/ryanknight/projects/databricks/dbxcarta/examples/schemapile/.cache/slice_random_1000.json",
   "selection_params": {
     "candidate_min_tables": 3,
     "candidate_max_tables": 20,
@@ -19,31 +19,31 @@
           "columns": [
             {
               "name": "DateKey",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "FullDateAlternateKey",
-              "type": ""
+              "type": "Date"
             },
             {
               "name": "EnglishDayNameOfWeek",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "EnglishMonthName",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "FiscalQuarter",
-              "type": ""
+              "type": "SmallInt"
             },
             {
               "name": "FiscalYear",
-              "type": ""
+              "type": "SmallInt"
             },
             {
               "name": "FiscalSemester",
-              "type": ""
+              "type": "SmallInt"
             }
           ],
           "primary_keys": [
@@ -58,19 +58,19 @@
           "columns": [
             {
               "name": "SalesTerritoryKey",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "SalesTerritoryRegion",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "SalesTerritoryCountry",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "SalesTerritoryGroup",
-              "type": ""
+              "type": "Varchar"
             }
           ],
           "primary_keys": [
@@ -85,23 +85,23 @@
           "columns": [
             {
               "name": "DateHolidayKey",
-              "type": ""
+              "type": "serial"
             },
             {
               "name": "DateKey",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "TerritoryCode",
-              "type": ""
+              "type": "Char"
             },
             {
               "name": "HolidayFlag",
-              "type": ""
+              "type": "Boolean"
             },
             {
               "name": "HolidayName",
-              "type": ""
+              "type": "Varchar"
             }
           ],
           "primary_keys": [
@@ -126,55 +126,55 @@
           "columns": [
             {
               "name": "CustomerKey",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "GeographyKey",
-              "type": ""
+              "type": "Date"
             },
             {
               "name": "FirstName",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "LastName",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "BirthDate",
-              "type": ""
+              "type": "Date"
             },
             {
               "name": "MaritalStatus",
-              "type": ""
+              "type": "Char"
             },
             {
               "name": "Gender",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "EmailAddress",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "YearlyIncome",
-              "type": ""
+              "type": "money"
             },
             {
               "name": "EnglishEducation",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "DateFirstPurchase",
-              "type": ""
+              "type": "Date"
             },
             {
               "name": "SalesTerritoryKey",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "City",
-              "type": ""
+              "type": "Varchar"
             }
           ],
           "primary_keys": [
@@ -199,59 +199,59 @@
           "columns": [
             {
               "name": "OrderSalesNumber",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "ProductKey",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "OrderDateKey",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "DueDateKey",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "ShipDateKey",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "CustomerKey",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "SalesTerritoryKey",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "OrderQuantity",
-              "type": ""
+              "type": "SmallInt"
             },
             {
               "name": "UnitPrice",
-              "type": ""
+              "type": "money"
             },
             {
               "name": "DiscountAmount",
-              "type": ""
+              "type": "Decimal"
             },
             {
               "name": "SalesAmount",
-              "type": ""
+              "type": "money"
             },
             {
               "name": "OrderDate",
-              "type": ""
+              "type": "Timestamp"
             },
             {
               "name": "DueDate",
-              "type": ""
+              "type": "Timestamp"
             },
             {
               "name": "ShipDate",
-              "type": ""
+              "type": "Timestamp"
             }
           ],
           "primary_keys": [
@@ -312,67 +312,67 @@
           "columns": [
             {
               "name": "PostKey",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "AnswerCount",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "Body",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "ClosedDate",
-              "type": ""
+              "type": "Timestamp"
             },
             {
               "name": "CommentCount",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "CreationDate",
-              "type": ""
+              "type": "Timestamp"
             },
             {
               "name": "FavoriteCount",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "LastActivityDate",
-              "type": ""
+              "type": "Timestamp"
             },
             {
               "name": "LastEditDate",
-              "type": ""
+              "type": "Timestamp"
             },
             {
               "name": "Score",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "Title",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "ViewCount",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "ClosedDateKey",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "CreationDateKey",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "LastActivityDateKey",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "LastEditDateKey",
-              "type": ""
+              "type": "Integer"
             }
           ],
           "primary_keys": [
@@ -431,15 +431,15 @@
           "columns": [
             {
               "name": "id",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "login",
-              "type": ""
+              "type": "Text"
             },
             {
               "name": "country_code",
-              "type": ""
+              "type": "Text"
             }
           ],
           "primary_keys": [
@@ -473,23 +473,23 @@
           "columns": [
             {
               "name": "id",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "name",
-              "type": ""
+              "type": "Text"
             },
             {
               "name": "owner_id",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "forked_from",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "deleted",
-              "type": ""
+              "type": "TYNYINT"
             }
           ],
           "primary_keys": [
@@ -523,19 +523,19 @@
           "columns": [
             {
               "name": "id",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "login",
-              "type": ""
+              "type": "Text"
             },
             {
               "name": "name",
-              "type": ""
+              "type": "Text"
             },
             {
               "name": "status",
-              "type": ""
+              "type": "TYNYINT"
             }
           ],
           "primary_keys": [
@@ -569,43 +569,43 @@
           "columns": [
             {
               "name": "login",
-              "type": ""
+              "type": "Text"
             },
             {
               "name": "name",
-              "type": ""
+              "type": "Text"
             },
             {
               "name": "link_file",
-              "type": ""
+              "type": "Text"
             },
             {
               "name": "path_file",
-              "type": ""
+              "type": "Text"
             },
             {
               "name": "path_copy_file",
-              "type": ""
+              "type": "Text"
             },
             {
               "name": "n_authors",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "n_revs",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "age_months",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "duplicate",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "is_xml",
-              "type": ""
+              "type": "Integer"
             }
           ],
           "primary_keys": [
@@ -657,31 +657,31 @@
           "columns": [
             {
               "name": "login",
-              "type": ""
+              "type": "Text"
             },
             {
               "name": "name",
-              "type": ""
+              "type": "Text"
             },
             {
               "name": "language",
-              "type": ""
+              "type": "Text"
             },
             {
               "name": "created_at",
-              "type": ""
+              "type": "Text"
             },
             {
               "name": "last_commit_at",
-              "type": ""
+              "type": "Text"
             },
             {
               "name": "n_commits",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "location_country",
-              "type": ""
+              "type": "Text"
             }
           ],
           "primary_keys": [
@@ -697,39 +697,39 @@
           "columns": [
             {
               "name": "path_file",
-              "type": ""
+              "type": "Text"
             },
             {
               "name": "path_copy_file",
-              "type": ""
+              "type": "Text"
             },
             {
               "name": "has_copy",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "n_xml_elements",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "valid",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "valid_after_repairing",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "constraints_list",
-              "type": ""
+              "type": "Text"
             },
             {
               "name": "constraints_list_after_repairing",
-              "type": ""
+              "type": "Text"
             },
             {
               "name": "BPMNDiagram",
-              "type": ""
+              "type": "Integer"
             }
           ],
           "primary_keys": [
@@ -751,39 +751,39 @@
           "columns": [
             {
               "name": "username",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "firstName",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "lastName",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "birthDate",
-              "type": ""
+              "type": "Date"
             },
             {
               "name": "registery_date",
-              "type": ""
+              "type": "Datetime"
             },
             {
               "name": "bio",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "followers",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "following",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "password",
-              "type": ""
+              "type": "Varchar"
             }
           ],
           "primary_keys": [
@@ -798,31 +798,31 @@
           "columns": [
             {
               "name": "tweetid",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "type",
-              "type": ""
+              "type": "Char"
             },
             {
               "name": "username",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "tweet_content",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "ref_id",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "timestamp_t",
-              "type": ""
+              "type": "Timestamp"
             },
             {
               "name": "likes",
-              "type": ""
+              "type": "Int"
             }
           ],
           "primary_keys": [
@@ -856,31 +856,31 @@
           "columns": [
             {
               "name": "mess_id",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "type",
-              "type": ""
+              "type": "Char"
             },
             {
               "name": "s_id",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "r_id",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "content",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "ref_id",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "timestamp_t",
-              "type": ""
+              "type": "Timestamp"
             }
           ],
           "primary_keys": [
@@ -923,11 +923,11 @@
           "columns": [
             {
               "name": "username",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "timestamp_t",
-              "type": ""
+              "type": "Timestamp"
             }
           ],
           "primary_keys": [
@@ -953,11 +953,11 @@
           "columns": [
             {
               "name": "follower",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "following",
-              "type": ""
+              "type": "Varchar"
             }
           ],
           "primary_keys": [
@@ -992,11 +992,11 @@
           "columns": [
             {
               "name": "hashtag",
-              "type": ""
+              "type": "Char"
             },
             {
               "name": "tweetid",
-              "type": ""
+              "type": "Int"
             }
           ],
           "primary_keys": [
@@ -1022,15 +1022,15 @@
           "columns": [
             {
               "name": "username",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "tweetid",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "timeStamp_l",
-              "type": ""
+              "type": "Timestamp"
             }
           ],
           "primary_keys": [
@@ -1065,11 +1065,11 @@
           "columns": [
             {
               "name": "username",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "blocked_user",
-              "type": ""
+              "type": "Varchar"
             }
           ],
           "primary_keys": [
@@ -1111,31 +1111,31 @@
           "columns": [
             {
               "name": "username",
-              "type": ""
+              "type": "Char"
             },
             {
               "name": "pwd",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "salt",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "nkuorzhuanglang",
-              "type": ""
+              "type": "Enum"
             },
             {
               "name": "name",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "person_no",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "mail",
-              "type": ""
+              "type": "Varchar"
             }
           ],
           "primary_keys": [
@@ -1160,19 +1160,19 @@
           "columns": [
             {
               "name": "id",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "name",
-              "type": ""
+              "type": "Char"
             },
             {
               "name": "upload",
-              "type": ""
+              "type": "Char"
             },
             {
               "name": "discipline",
-              "type": ""
+              "type": "Enum"
             }
           ],
           "primary_keys": [
@@ -1210,23 +1210,23 @@
           "columns": [
             {
               "name": "id",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "number",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "upload",
-              "type": ""
+              "type": "Char"
             },
             {
               "name": "note",
-              "type": ""
+              "type": "Char"
             },
             {
               "name": "belong",
-              "type": ""
+              "type": "Int"
             }
           ],
           "primary_keys": [
@@ -1296,23 +1296,23 @@
           "columns": [
             {
               "name": "id",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "number",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "upload",
-              "type": ""
+              "type": "Char"
             },
             {
               "name": "note",
-              "type": ""
+              "type": "Char"
             },
             {
               "name": "belong",
-              "type": ""
+              "type": "Int"
             }
           ],
           "primary_keys": [
@@ -1382,39 +1382,39 @@
           "columns": [
             {
               "name": "id",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "md5",
-              "type": ""
+              "type": "Char"
             },
             {
               "name": "name",
-              "type": ""
+              "type": "Char"
             },
             {
               "name": "path",
-              "type": ""
+              "type": "Char"
             },
             {
               "name": "upload",
-              "type": ""
+              "type": "Char"
             },
             {
               "name": "videoorslide",
-              "type": ""
+              "type": "Enum"
             },
             {
               "name": "bilibili",
-              "type": ""
+              "type": "Char"
             },
             {
               "name": "note",
-              "type": ""
+              "type": "Char"
             },
             {
               "name": "belong",
-              "type": ""
+              "type": "Int"
             }
           ],
           "primary_keys": [
@@ -1478,7 +1478,7 @@
           "columns": [
             {
               "name": "tab_a_id",
-              "type": ""
+              "type": "number"
             }
           ],
           "primary_keys": [
@@ -1493,7 +1493,7 @@
           "columns": [
             {
               "name": "tab_b_id",
-              "type": ""
+              "type": "number"
             }
           ],
           "primary_keys": [
@@ -1508,7 +1508,7 @@
           "columns": [
             {
               "name": "tab_c_id",
-              "type": ""
+              "type": "number"
             }
           ],
           "primary_keys": [
@@ -1523,7 +1523,7 @@
           "columns": [
             {
               "name": "tab d id",
-              "type": ""
+              "type": "number"
             }
           ],
           "primary_keys": [
@@ -1538,19 +1538,19 @@
           "columns": [
             {
               "name": "tab_a_id",
-              "type": ""
+              "type": "number"
             },
             {
               "name": "tab_b_id",
-              "type": ""
+              "type": "number"
             },
             {
               "name": "tab_c_id",
-              "type": ""
+              "type": "number"
             },
             {
               "name": "tab_d_id",
-              "type": ""
+              "type": "number"
             }
           ],
           "primary_keys": [],
@@ -1600,19 +1600,19 @@
           "columns": [
             {
               "name": "tab_a_id",
-              "type": ""
+              "type": "number"
             },
             {
               "name": "tab_b_id",
-              "type": ""
+              "type": "number"
             },
             {
               "name": "tab_c_id",
-              "type": ""
+              "type": "number"
             },
             {
               "name": "tab_d_id",
-              "type": ""
+              "type": "number"
             }
           ],
           "primary_keys": [],
@@ -1662,19 +1662,19 @@
           "columns": [
             {
               "name": "tab_a_id",
-              "type": ""
+              "type": "number"
             },
             {
               "name": "tab_b_id",
-              "type": ""
+              "type": "number"
             },
             {
               "name": "tab_c_id",
-              "type": ""
+              "type": "number"
             },
             {
               "name": "tab_d_id",
-              "type": ""
+              "type": "number"
             }
           ],
           "primary_keys": [],
@@ -1724,11 +1724,11 @@
           "columns": [
             {
               "name": "id1",
-              "type": ""
+              "type": "number"
             },
             {
               "name": "id2",
-              "type": ""
+              "type": "number"
             }
           ],
           "primary_keys": [
@@ -1744,7 +1744,7 @@
           "columns": [
             {
               "name": "id",
-              "type": ""
+              "type": "number"
             }
           ],
           "primary_keys": [],
@@ -1767,7 +1767,7 @@
           "columns": [
             {
               "name": "id",
-              "type": ""
+              "type": "number"
             }
           ],
           "primary_keys": [],
@@ -1790,11 +1790,11 @@
           "columns": [
             {
               "name": "id1",
-              "type": ""
+              "type": "number"
             },
             {
               "name": "id2",
-              "type": ""
+              "type": "number"
             }
           ],
           "primary_keys": [],
@@ -1819,15 +1819,15 @@
           "columns": [
             {
               "name": "id",
-              "type": ""
+              "type": "number"
             },
             {
               "name": "id_1",
-              "type": ""
+              "type": "number"
             },
             {
               "name": "id_2",
-              "type": ""
+              "type": "number"
             }
           ],
           "primary_keys": [],
@@ -1868,7 +1868,7 @@
           "columns": [
             {
               "name": "id",
-              "type": ""
+              "type": "number"
             }
           ],
           "primary_keys": [],
@@ -1891,7 +1891,7 @@
           "columns": [
             {
               "name": "tab_index_test_id",
-              "type": ""
+              "type": "number"
             }
           ],
           "primary_keys": [
@@ -1913,35 +1913,35 @@
           "columns": [
             {
               "name": "id",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "name",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "description",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "process",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "current_iteration",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "start_date",
-              "type": ""
+              "type": "Date"
             },
             {
               "name": "end_date",
-              "type": ""
+              "type": "Date"
             },
             {
               "name": "version",
-              "type": ""
+              "type": "Varchar"
             }
           ],
           "primary_keys": [
@@ -1966,11 +1966,11 @@
           "columns": [
             {
               "name": "id",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "name",
-              "type": ""
+              "type": "Varchar"
             }
           ],
           "primary_keys": [
@@ -1985,15 +1985,15 @@
           "columns": [
             {
               "name": "project",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "member",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "role",
-              "type": ""
+              "type": "Varchar"
             }
           ],
           "primary_keys": [],
@@ -2025,31 +2025,31 @@
           "columns": [
             {
               "name": "id",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "project",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "iteration",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "number",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "start_date",
-              "type": ""
+              "type": "Date"
             },
             {
               "name": "end_date",
-              "type": ""
+              "type": "Date"
             },
             {
               "name": "current_activity",
-              "type": ""
+              "type": "Int"
             }
           ],
           "primary_keys": [
@@ -2083,15 +2083,15 @@
           "columns": [
             {
               "name": "id",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "iteration",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "current_task",
-              "type": ""
+              "type": "Int"
             }
           ],
           "primary_keys": [
@@ -2125,15 +2125,15 @@
           "columns": [
             {
               "name": "id",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "task",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "member",
-              "type": ""
+              "type": "Int"
             }
           ],
           "primary_keys": [
@@ -2158,15 +2158,15 @@
           "columns": [
             {
               "name": "id",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "artifact",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "filename",
-              "type": ""
+              "type": "Varchar"
             }
           ],
           "primary_keys": [
@@ -2181,11 +2181,11 @@
           "columns": [
             {
               "name": "task",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "artifact",
-              "type": ""
+              "type": "Int"
             }
           ],
           "primary_keys": [],
@@ -2224,23 +2224,23 @@
           "columns": [
             {
               "name": "uuid",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "order_id",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "x",
-              "type": ""
+              "type": "Float"
             },
             {
               "name": "y",
-              "type": ""
+              "type": "Float"
             },
             {
               "name": "time",
-              "type": ""
+              "type": "Datetime"
             }
           ],
           "primary_keys": [
@@ -2265,19 +2265,19 @@
           "columns": [
             {
               "name": "dish_id",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "order_id",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "amount",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "attribute",
-              "type": ""
+              "type": "Varchar"
             }
           ],
           "primary_keys": [
@@ -2303,11 +2303,11 @@
           "columns": [
             {
               "name": "order_id",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "username",
-              "type": ""
+              "type": "Varchar"
             }
           ],
           "primary_keys": [
@@ -2332,27 +2332,27 @@
           "columns": [
             {
               "name": "use_username",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "username",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "score",
-              "type": ""
+              "type": "Numeric"
             },
             {
               "name": "comment",
-              "type": ""
+              "type": "Text"
             },
             {
               "name": "img",
-              "type": ""
+              "type": "longblob"
             },
             {
               "name": "type",
-              "type": ""
+              "type": "Int"
             }
           ],
           "primary_keys": [
@@ -2387,23 +2387,23 @@
           "columns": [
             {
               "name": "username",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "dish_id",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "grade",
-              "type": ""
+              "type": "Decimal"
             },
             {
               "name": "comment",
-              "type": ""
+              "type": "Text"
             },
             {
               "name": "img",
-              "type": ""
+              "type": "longblob"
             }
           ],
           "primary_keys": [
@@ -2429,19 +2429,19 @@
           "columns": [
             {
               "name": "store_id",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "username",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "address",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "s_phone",
-              "type": ""
+              "type": "Varchar"
             }
           ],
           "primary_keys": [
@@ -2466,23 +2466,23 @@
           "columns": [
             {
               "name": "username",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "store_id",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "use_username",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "role",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "phone",
-              "type": ""
+              "type": "Varchar"
             }
           ],
           "primary_keys": [
@@ -2507,27 +2507,27 @@
           "columns": [
             {
               "name": "username",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "order_id",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "state",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "reciever",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "recieve_address",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "r_phone",
-              "type": ""
+              "type": "Varchar"
             }
           ],
           "primary_keys": [
@@ -2569,19 +2569,19 @@
           "columns": [
             {
               "name": "id",
-              "type": ""
+              "type": "serial"
             },
             {
               "name": "source",
-              "type": ""
+              "type": "generic_string"
             },
             {
               "name": "parent_id",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "parent_path",
-              "type": ""
+              "type": "exts"
             }
           ],
           "primary_keys": [
@@ -2606,35 +2606,35 @@
           "columns": [
             {
               "name": "id",
-              "type": ""
+              "type": "serial"
             },
             {
               "name": "name",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "kind",
-              "type": ""
+              "type": "generic_string"
             },
             {
               "name": "parent_id",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "scope_id",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "created_at",
-              "type": ""
+              "type": "generic_timestamp"
             },
             {
               "name": "updated_at",
-              "type": ""
+              "type": "generic_timestamp"
             },
             {
               "name": "deleted_at",
-              "type": ""
+              "type": "Timestamp"
             }
           ],
           "primary_keys": [
@@ -2668,15 +2668,15 @@
           "columns": [
             {
               "name": "id",
-              "type": ""
+              "type": "serial"
             },
             {
               "name": "scope_id",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "domain",
-              "type": ""
+              "type": "generic_string"
             }
           ],
           "primary_keys": [
@@ -2701,15 +2701,15 @@
           "columns": [
             {
               "name": "id",
-              "type": ""
+              "type": "serial"
             },
             {
               "name": "name",
-              "type": ""
+              "type": "generic_string"
             },
             {
               "name": "description",
-              "type": ""
+              "type": "generic_string"
             }
           ],
           "primary_keys": [
@@ -2724,23 +2724,23 @@
           "columns": [
             {
               "name": "id",
-              "type": ""
+              "type": "serial"
             },
             {
               "name": "name",
-              "type": ""
+              "type": "generic_string"
             },
             {
               "name": "system_id",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "description",
-              "type": ""
+              "type": "Text"
             },
             {
               "name": "actions",
-              "type": ""
+              "type": "Array"
             }
           ],
           "primary_keys": [
@@ -2765,35 +2765,35 @@
           "columns": [
             {
               "name": "id",
-              "type": ""
+              "type": "serial"
             },
             {
               "name": "scope_id",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "resource_id",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "actions",
-              "type": ""
+              "type": "Array"
             },
             {
               "name": "frn",
-              "type": ""
+              "type": "generic_string"
             },
             {
               "name": "created_at",
-              "type": ""
+              "type": "generic_timestamp"
             },
             {
               "name": "updated_at",
-              "type": ""
+              "type": "generic_timestamp"
             },
             {
               "name": "deleted_at",
-              "type": ""
+              "type": "Timestamp"
             }
           ],
           "primary_keys": [
@@ -2827,27 +2827,27 @@
           "columns": [
             {
               "name": "id",
-              "type": ""
+              "type": "serial"
             },
             {
               "name": "name",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "scope_id",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "created_at",
-              "type": ""
+              "type": "generic_timestamp"
             },
             {
               "name": "updated_at",
-              "type": ""
+              "type": "generic_timestamp"
             },
             {
               "name": "deleted_at",
-              "type": ""
+              "type": "Timestamp"
             }
           ],
           "primary_keys": [
@@ -2872,15 +2872,15 @@
           "columns": [
             {
               "name": "id",
-              "type": ""
+              "type": "serial"
             },
             {
               "name": "role_id",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "permission_id",
-              "type": ""
+              "type": "Integer"
             }
           ],
           "primary_keys": [
@@ -2914,23 +2914,23 @@
           "columns": [
             {
               "name": "id",
-              "type": ""
+              "type": "serial"
             },
             {
               "name": "ratchet",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "created_at",
-              "type": ""
+              "type": "generic_timestamp"
             },
             {
               "name": "updated_at",
-              "type": ""
+              "type": "generic_timestamp"
             },
             {
               "name": "deleted_at",
-              "type": ""
+              "type": "Timestamp"
             }
           ],
           "primary_keys": [
@@ -2945,15 +2945,15 @@
           "columns": [
             {
               "name": "id",
-              "type": ""
+              "type": "serial"
             },
             {
               "name": "account_id",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "role_id",
-              "type": ""
+              "type": "Integer"
             }
           ],
           "primary_keys": [
@@ -2987,35 +2987,35 @@
           "columns": [
             {
               "name": "id",
-              "type": ""
+              "type": "serial"
             },
             {
               "name": "account_id",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "name",
-              "type": ""
+              "type": "generic_string"
             },
             {
               "name": "hashed_password",
-              "type": ""
+              "type": "generic_string"
             },
             {
               "name": "algorithm",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "created_at",
-              "type": ""
+              "type": "generic_timestamp"
             },
             {
               "name": "updated_at",
-              "type": ""
+              "type": "generic_timestamp"
             },
             {
               "name": "deleted_at",
-              "type": ""
+              "type": "generic_timestamp"
             }
           ],
           "primary_keys": [
@@ -3040,15 +3040,15 @@
           "columns": [
             {
               "name": "id",
-              "type": ""
+              "type": "serial"
             },
             {
               "name": "account_id",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "organization_id",
-              "type": ""
+              "type": "Integer"
             }
           ],
           "primary_keys": [
@@ -3082,51 +3082,51 @@
           "columns": [
             {
               "name": "id",
-              "type": ""
+              "type": "serial"
             },
             {
               "name": "account_id",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "email",
-              "type": ""
+              "type": "email"
             },
             {
               "name": "is_disabled",
-              "type": ""
+              "type": "Boolean"
             },
             {
               "name": "disabled_by",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "is_blacklisted",
-              "type": ""
+              "type": "Boolean"
             },
             {
               "name": "blacklisted_by",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "name",
-              "type": ""
+              "type": "generic_string"
             },
             {
               "name": "phone_number",
-              "type": ""
+              "type": "phone_number"
             },
             {
               "name": "created_at",
-              "type": ""
+              "type": "generic_timestamp"
             },
             {
               "name": "updated_at",
-              "type": ""
+              "type": "generic_timestamp"
             },
             {
               "name": "deleted_at",
-              "type": ""
+              "type": "Timestamp"
             }
           ],
           "primary_keys": [
@@ -3158,15 +3158,15 @@
           "columns": [
             {
               "name": "uid",
-              "type": ""
+              "type": "SERIAL"
             },
             {
               "name": "username",
-              "type": ""
+              "type": "Text"
             },
             {
               "name": "password",
-              "type": ""
+              "type": "Text"
             }
           ],
           "primary_keys": [
@@ -3181,43 +3181,43 @@
           "columns": [
             {
               "name": "sid",
-              "type": ""
+              "type": "SERIAL"
             },
             {
               "name": "stock",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "price",
-              "type": ""
+              "type": "Float"
             },
             {
               "name": "size",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "colour",
-              "type": ""
+              "type": "Text"
             },
             {
               "name": "image_url",
-              "type": ""
+              "type": "Text"
             },
             {
               "name": "name",
-              "type": ""
+              "type": "Text"
             },
             {
               "name": "description",
-              "type": ""
+              "type": "Text"
             },
             {
               "name": "brand",
-              "type": ""
+              "type": "Text"
             },
             {
               "name": "style",
-              "type": ""
+              "type": "Text"
             }
           ],
           "primary_keys": [
@@ -3473,19 +3473,19 @@
           "columns": [
             {
               "name": "uid",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "sid",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "rating",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "comment",
-              "type": ""
+              "type": "Text"
             }
           ],
           "primary_keys": [
@@ -3520,19 +3520,19 @@
           "columns": [
             {
               "name": "uid",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "cardNumber",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "type",
-              "type": ""
+              "type": "card"
             },
             {
               "name": "isDefault",
-              "type": ""
+              "type": "Boolean"
             }
           ],
           "primary_keys": [
@@ -3558,31 +3558,31 @@
           "columns": [
             {
               "name": "tid",
-              "type": ""
+              "type": "SERIAL"
             },
             {
               "name": "uid",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "sid",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "datetime",
-              "type": ""
+              "type": "Timestamp"
             },
             {
               "name": "quantity",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "address",
-              "type": ""
+              "type": "Text"
             },
             {
               "name": "cardNumber",
-              "type": ""
+              "type": "Varchar"
             }
           ],
           "primary_keys": [
@@ -3627,15 +3627,15 @@
           "columns": [
             {
               "name": "uid",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "address",
-              "type": ""
+              "type": "Text"
             },
             {
               "name": "isDefault",
-              "type": ""
+              "type": "Boolean"
             }
           ],
           "primary_keys": [
@@ -3668,11 +3668,11 @@
           "columns": [
             {
               "name": "role_id",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "role",
-              "type": ""
+              "type": "Varchar"
             }
           ],
           "primary_keys": [
@@ -3692,39 +3692,39 @@
           "columns": [
             {
               "name": "user_id",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "role_id",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "password",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "status",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "fname",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "mname",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "lname",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "birthdate",
-              "type": ""
+              "type": "Date"
             },
             {
               "name": "contact_no",
-              "type": ""
+              "type": "Varchar"
             }
           ],
           "primary_keys": [
@@ -3761,11 +3761,11 @@
           "columns": [
             {
               "name": "course_id",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "course_name",
-              "type": ""
+              "type": "Varchar"
             }
           ],
           "primary_keys": [
@@ -3785,15 +3785,15 @@
           "columns": [
             {
               "name": "student_id",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "course_id",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "year_level",
-              "type": ""
+              "type": "Int"
             }
           ],
           "primary_keys": [
@@ -3827,11 +3827,11 @@
           "columns": [
             {
               "name": "instructor_id",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "position",
-              "type": ""
+              "type": "Varchar"
             }
           ],
           "primary_keys": [
@@ -3856,11 +3856,11 @@
           "columns": [
             {
               "name": "room_type_id",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "room_type",
-              "type": ""
+              "type": "Varchar"
             }
           ],
           "primary_keys": [
@@ -3875,11 +3875,11 @@
           "columns": [
             {
               "name": "room_id",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "room_type",
-              "type": ""
+              "type": "Int"
             }
           ],
           "primary_keys": [
@@ -3904,11 +3904,11 @@
           "columns": [
             {
               "name": "subject_code",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "subject_title",
-              "type": ""
+              "type": "Varchar"
             }
           ],
           "primary_keys": [
@@ -3928,11 +3928,11 @@
           "columns": [
             {
               "name": "academic_year_id",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "academic_year",
-              "type": ""
+              "type": "Varchar"
             }
           ],
           "primary_keys": [
@@ -3952,23 +3952,23 @@
           "columns": [
             {
               "name": "semester_id",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "semester",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "academic_year_id",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "start_date",
-              "type": ""
+              "type": "Date"
             },
             {
               "name": "end_date",
-              "type": ""
+              "type": "Date"
             }
           ],
           "primary_keys": [
@@ -4001,15 +4001,15 @@
           "columns": [
             {
               "name": "seat_id",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "row",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "column",
-              "type": ""
+              "type": "Int"
             }
           ],
           "primary_keys": [
@@ -4024,35 +4024,35 @@
           "columns": [
             {
               "name": "class_id",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "subject_code",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "room_id",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "semester_id",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "start_time",
-              "type": ""
+              "type": "Time"
             },
             {
               "name": "end_time",
-              "type": ""
+              "type": "Time"
             },
             {
               "name": "days",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "instructor_id",
-              "type": ""
+              "type": "Varchar"
             }
           ],
           "primary_keys": [
@@ -4104,19 +4104,19 @@
           "columns": [
             {
               "name": "student_id",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "class_id",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "status",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "seat_id",
-              "type": ""
+              "type": "Int"
             }
           ],
           "primary_keys": [
@@ -4159,11 +4159,11 @@
           "columns": [
             {
               "name": "attendance_status",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "definition",
-              "type": ""
+              "type": "Varchar"
             }
           ],
           "primary_keys": [
@@ -4178,23 +4178,23 @@
           "columns": [
             {
               "name": "attendance_id",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "class_id",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "student_id",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "attendance_datetime",
-              "type": ""
+              "type": "Datetime"
             },
             {
               "name": "attendance_status",
-              "type": ""
+              "type": "Int"
             }
           ],
           "primary_keys": [
@@ -4237,19 +4237,19 @@
           "columns": [
             {
               "name": "class_calendar_id",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "class_id",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "event_date",
-              "type": ""
+              "type": "Datetime"
             },
             {
               "name": "event",
-              "type": ""
+              "type": "Text"
             }
           ],
           "primary_keys": [
@@ -4274,35 +4274,35 @@
           "columns": [
             {
               "name": "consultation_id",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "instructor_id",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "class_id",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "datetime_scheduled",
-              "type": ""
+              "type": "Datetime"
             },
             {
               "name": "start_time",
-              "type": ""
+              "type": "Time"
             },
             {
               "name": "end_time",
-              "type": ""
+              "type": "Time"
             },
             {
               "name": "issue_topic",
-              "type": ""
+              "type": "Text"
             },
             {
               "name": "remarks",
-              "type": ""
+              "type": "Text"
             }
           ],
           "primary_keys": [
@@ -4336,11 +4336,11 @@
           "columns": [
             {
               "name": "consultation_id",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "student_id",
-              "type": ""
+              "type": "Varchar"
             }
           ],
           "primary_keys": [
@@ -4381,23 +4381,23 @@
           "columns": [
             {
               "name": "contant_id",
-              "type": ""
+              "type": "SERIAL"
             },
             {
               "name": "phone_number",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "e_mail",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "pat_id",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "doc_id",
-              "type": ""
+              "type": "Int"
             }
           ],
           "primary_keys": [
@@ -4431,27 +4431,27 @@
           "columns": [
             {
               "name": "appoi_id",
-              "type": ""
+              "type": "SERIAL"
             },
             {
               "name": "day",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "time_from",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "time_to",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "pat_id",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "doc_id",
-              "type": ""
+              "type": "Int"
             }
           ],
           "primary_keys": [
@@ -4485,31 +4485,31 @@
           "columns": [
             {
               "name": "patient_id",
-              "type": ""
+              "type": "SERIAL"
             },
             {
               "name": "patient_first_name",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "patient_last_name",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "gender",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "date_of_birth",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "patient_image",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "patient_password",
-              "type": ""
+              "type": "Varchar"
             }
           ],
           "primary_keys": [
@@ -4524,19 +4524,19 @@
           "columns": [
             {
               "name": "doctor_id",
-              "type": ""
+              "type": "SERIAL"
             },
             {
               "name": "doctor_name",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "doctor_speciailty",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "doc_location",
-              "type": ""
+              "type": "Varchar"
             }
           ],
           "primary_keys": [
@@ -4558,23 +4558,23 @@
           "columns": [
             {
               "name": "id",
-              "type": ""
+              "type": "SERIAL"
             },
             {
               "name": "email",
-              "type": ""
+              "type": "Text"
             },
             {
               "name": "password",
-              "type": ""
+              "type": "Text"
             },
             {
               "name": "name",
-              "type": ""
+              "type": "Text"
             },
             {
               "name": "role",
-              "type": ""
+              "type": "user_role"
             }
           ],
           "primary_keys": [
@@ -4589,11 +4589,11 @@
           "columns": [
             {
               "name": "id",
-              "type": ""
+              "type": "SERIAL"
             },
             {
               "name": "name",
-              "type": ""
+              "type": "Text"
             }
           ],
           "primary_keys": [
@@ -4608,23 +4608,23 @@
           "columns": [
             {
               "name": "id",
-              "type": ""
+              "type": "SERIAL"
             },
             {
               "name": "name",
-              "type": ""
+              "type": "Text"
             },
             {
               "name": "price_usd",
-              "type": ""
+              "type": "Numeric"
             },
             {
               "name": "description",
-              "type": ""
+              "type": "Text"
             },
             {
               "name": "category_id",
-              "type": ""
+              "type": "Int"
             }
           ],
           "primary_keys": [
@@ -4649,35 +4649,35 @@
           "columns": [
             {
               "name": "id",
-              "type": ""
+              "type": "SERIAL"
             },
             {
               "name": "status",
-              "type": ""
+              "type": "order_status"
             },
             {
               "name": "created_at",
-              "type": ""
+              "type": "Timestamp"
             },
             {
               "name": "delivered_at",
-              "type": ""
+              "type": "Timestamp"
             },
             {
               "name": "cacelled_at",
-              "type": ""
+              "type": "Timestamp"
             },
             {
               "name": "opened_at",
-              "type": ""
+              "type": "Timestamp"
             },
             {
               "name": "accepted_at",
-              "type": ""
+              "type": "Timestamp"
             },
             {
               "name": "user_id",
-              "type": ""
+              "type": "Int"
             }
           ],
           "primary_keys": [
@@ -4702,11 +4702,11 @@
           "columns": [
             {
               "name": "order_id",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "item_id",
-              "type": ""
+              "type": "Int"
             }
           ],
           "primary_keys": [
@@ -4741,15 +4741,15 @@
           "columns": [
             {
               "name": "id",
-              "type": ""
+              "type": "SERIAL"
             },
             {
               "name": "label",
-              "type": ""
+              "type": "Text"
             },
             {
               "name": "is_free",
-              "type": ""
+              "type": "Boolean"
             }
           ],
           "primary_keys": [
@@ -4764,11 +4764,11 @@
           "columns": [
             {
               "name": "spot_id",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "user_id",
-              "type": ""
+              "type": "Int"
             }
           ],
           "primary_keys": [
@@ -4810,11 +4810,11 @@
           "columns": [
             {
               "name": "Id_perfil",
-              "type": ""
+              "type": "NUMBER"
             },
             {
               "name": "Nombre",
-              "type": ""
+              "type": "VARCHAR2"
             }
           ],
           "primary_keys": [
@@ -4834,39 +4834,39 @@
           "columns": [
             {
               "name": "Id_persona",
-              "type": ""
+              "type": "NUMBER"
             },
             {
               "name": "Nombre",
-              "type": ""
+              "type": "VARCHAR2"
             },
             {
               "name": "Apellido1",
-              "type": ""
+              "type": "VARCHAR2"
             },
             {
               "name": "Apellido2",
-              "type": ""
+              "type": "VARCHAR2"
             },
             {
               "name": "Fecha_alta",
-              "type": ""
+              "type": "Date"
             },
             {
               "name": "Usuario",
-              "type": ""
+              "type": "VARCHAR2"
             },
             {
               "name": "Contrasenna",
-              "type": ""
+              "type": "VARCHAR2"
             },
             {
               "name": "Email",
-              "type": ""
+              "type": "VARCHAR2"
             },
             {
               "name": "Id_perfil",
-              "type": ""
+              "type": "Integer"
             }
           ],
           "primary_keys": [
@@ -4891,27 +4891,27 @@
           "columns": [
             {
               "name": "Id_equipo",
-              "type": ""
+              "type": "NUMBER"
             },
             {
               "name": "Nombre",
-              "type": ""
+              "type": "VARCHAR2"
             },
             {
               "name": "Fecha_creacion",
-              "type": ""
+              "type": "Date"
             },
             {
               "name": "Comentario",
-              "type": ""
+              "type": "VARCHAR2"
             },
             {
               "name": "Lugar",
-              "type": ""
+              "type": "VARCHAR2"
             },
             {
               "name": "Id_persona",
-              "type": ""
+              "type": "Integer"
             }
           ],
           "primary_keys": [
@@ -4936,43 +4936,43 @@
           "columns": [
             {
               "name": "Id_jugador",
-              "type": ""
+              "type": "NUMBER"
             },
             {
               "name": "Dni",
-              "type": ""
+              "type": "VARCHAR2"
             },
             {
               "name": "Nombre",
-              "type": ""
+              "type": "VARCHAR2"
             },
             {
               "name": "Apellido1",
-              "type": ""
+              "type": "VARCHAR2"
             },
             {
               "name": "Apellido2",
-              "type": ""
+              "type": "VARCHAR2"
             },
             {
               "name": "Nickname",
-              "type": ""
+              "type": "VARCHAR2"
             },
             {
               "name": "Sueldo",
-              "type": ""
+              "type": "NUMBER"
             },
             {
               "name": "Fecha_alta",
-              "type": ""
+              "type": "Date"
             },
             {
               "name": "Comentario",
-              "type": ""
+              "type": "VARCHAR2"
             },
             {
               "name": "Id_equipo",
-              "type": ""
+              "type": "Integer"
             }
           ],
           "primary_keys": [
@@ -4997,15 +4997,15 @@
           "columns": [
             {
               "name": "Id_jornada",
-              "type": ""
+              "type": "NUMBER"
             },
             {
               "name": "Fecha_inicio",
-              "type": ""
+              "type": "Date"
             },
             {
               "name": "Fecha_fin",
-              "type": ""
+              "type": "Date"
             }
           ],
           "primary_keys": [
@@ -5020,15 +5020,15 @@
           "columns": [
             {
               "name": "Id_partido",
-              "type": ""
+              "type": "NUMBER"
             },
             {
               "name": "Fecha",
-              "type": ""
+              "type": "Timestamp"
             },
             {
               "name": "Id_jornada",
-              "type": ""
+              "type": "Integer"
             }
           ],
           "primary_keys": [
@@ -5053,23 +5053,23 @@
           "columns": [
             {
               "name": "Id_marcador",
-              "type": ""
+              "type": "NUMBER"
             },
             {
               "name": "Puntuacion",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "Visitante",
-              "type": ""
+              "type": "NUMBER"
             },
             {
               "name": "Id_partido",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "Id_equipo",
-              "type": ""
+              "type": "Integer"
             }
           ],
           "primary_keys": [
@@ -5110,15 +5110,15 @@
           "columns": [
             {
               "name": "id",
-              "type": ""
+              "type": "BigInt"
             },
             {
               "name": "uid",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "active",
-              "type": ""
+              "type": "Boolean"
             }
           ],
           "primary_keys": [
@@ -5133,11 +5133,11 @@
           "columns": [
             {
               "name": "id",
-              "type": ""
+              "type": "BigInt"
             },
             {
               "name": "role_name",
-              "type": ""
+              "type": "Varchar"
             }
           ],
           "primary_keys": [
@@ -5152,15 +5152,15 @@
           "columns": [
             {
               "name": "id",
-              "type": ""
+              "type": "BigInt"
             },
             {
               "name": "uid",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "authority",
-              "type": ""
+              "type": "Varchar"
             }
           ],
           "primary_keys": [
@@ -5194,19 +5194,19 @@
           "columns": [
             {
               "name": "id",
-              "type": ""
+              "type": "BigInt"
             },
             {
               "name": "user_name",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "password",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "uid",
-              "type": ""
+              "type": "Varchar"
             }
           ],
           "primary_keys": [
@@ -5231,15 +5231,15 @@
           "columns": [
             {
               "name": "id",
-              "type": ""
+              "type": "BigInt"
             },
             {
               "name": "uid",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "client_id",
-              "type": ""
+              "type": "Varchar"
             }
           ],
           "primary_keys": [
@@ -5264,23 +5264,23 @@
           "columns": [
             {
               "name": "id",
-              "type": ""
+              "type": "BigInt"
             },
             {
               "name": "client_id",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "api_key",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "api_key_desc",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "active",
-              "type": ""
+              "type": "Boolean"
             }
           ],
           "primary_keys": [
@@ -5312,31 +5312,31 @@
           "columns": [
             {
               "name": "username",
-              "type": ""
+              "type": "Text"
             },
             {
               "name": "email",
-              "type": ""
+              "type": "Text"
             },
             {
               "name": "name",
-              "type": ""
+              "type": "Text"
             },
             {
               "name": "surname",
-              "type": ""
+              "type": "Text"
             },
             {
               "name": "biografy",
-              "type": ""
+              "type": "Text"
             },
             {
               "name": "imageprofile",
-              "type": ""
+              "type": "Text"
             },
             {
               "name": "password",
-              "type": ""
+              "type": "Text"
             }
           ],
           "primary_keys": [
@@ -5351,7 +5351,7 @@
           "columns": [
             {
               "name": "advertiserid",
-              "type": ""
+              "type": "Text"
             }
           ],
           "primary_keys": [
@@ -5376,7 +5376,7 @@
           "columns": [
             {
               "name": "readerid",
-              "type": ""
+              "type": "Text"
             }
           ],
           "primary_keys": [],
@@ -5399,11 +5399,11 @@
           "columns": [
             {
               "name": "name",
-              "type": ""
+              "type": "Text"
             },
             {
               "name": "description",
-              "type": ""
+              "type": "Text"
             }
           ],
           "primary_keys": [
@@ -5418,31 +5418,31 @@
           "columns": [
             {
               "name": "articlesid",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "advertiserid",
-              "type": ""
+              "type": "Text"
             },
             {
               "name": "categoryid",
-              "type": ""
+              "type": "Text"
             },
             {
               "name": "title",
-              "type": ""
+              "type": "Text"
             },
             {
               "name": "description",
-              "type": ""
+              "type": "Text"
             },
             {
               "name": "markdown",
-              "type": ""
+              "type": "Text"
             },
             {
               "name": "imagearticle",
-              "type": ""
+              "type": "Text"
             }
           ],
           "primary_keys": [
@@ -5476,19 +5476,19 @@
           "columns": [
             {
               "name": "materialid",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "articlesid",
-              "type": ""
+              "type": "Integer"
             },
             {
               "name": "filepath",
-              "type": ""
+              "type": "Text"
             },
             {
               "name": "virustotalurl",
-              "type": ""
+              "type": "Text"
             }
           ],
           "primary_keys": [
@@ -5520,11 +5520,11 @@
           "columns": [
             {
               "name": "id",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "name",
-              "type": ""
+              "type": "Varchar"
             }
           ],
           "primary_keys": [
@@ -5539,15 +5539,15 @@
           "columns": [
             {
               "name": "id",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "name",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "planet_id",
-              "type": ""
+              "type": "Int"
             }
           ],
           "primary_keys": [
@@ -5572,19 +5572,19 @@
           "columns": [
             {
               "name": "id",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "name",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "manufacturer",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "light_speed_rate",
-              "type": ""
+              "type": "Int"
             }
           ],
           "primary_keys": [
@@ -5599,23 +5599,23 @@
           "columns": [
             {
               "name": "id",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "first_name",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "last_name",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "ucn",
-              "type": ""
+              "type": "Char"
             },
             {
               "name": "birth_date",
-              "type": ""
+              "type": "Date"
             }
           ],
           "primary_keys": [
@@ -5630,27 +5630,27 @@
           "columns": [
             {
               "name": "id",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "journey_start",
-              "type": ""
+              "type": "Datetime"
             },
             {
               "name": "journey_end",
-              "type": ""
+              "type": "Datetime"
             },
             {
               "name": "purpose",
-              "type": ""
+              "type": "Enum"
             },
             {
               "name": "destination_spaceport_id",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "spaceship_id",
-              "type": ""
+              "type": "Int"
             }
           ],
           "primary_keys": [
@@ -5684,23 +5684,23 @@
           "columns": [
             {
               "name": "id",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "card_number",
-              "type": ""
+              "type": "Char"
             },
             {
               "name": "job_during_journey",
-              "type": ""
+              "type": "Enum"
             },
             {
               "name": "colonist_id",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "journey_id",
-              "type": ""
+              "type": "Int"
             }
           ],
           "primary_keys": [
@@ -5741,11 +5741,11 @@
           "columns": [
             {
               "name": "title_id",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "title",
-              "type": ""
+              "type": "Varchar"
             }
           ],
           "primary_keys": [
@@ -5760,31 +5760,31 @@
           "columns": [
             {
               "name": "emp_no",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "emp_title_id",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "birth_date",
-              "type": ""
+              "type": "Date"
             },
             {
               "name": "first_name",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "last_name",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "sex",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "hire_date",
-              "type": ""
+              "type": "Date"
             }
           ],
           "primary_keys": [
@@ -5809,11 +5809,11 @@
           "columns": [
             {
               "name": "dept_no",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "dept_name",
-              "type": ""
+              "type": "Varchar"
             }
           ],
           "primary_keys": [
@@ -5828,11 +5828,11 @@
           "columns": [
             {
               "name": "dept_no",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "emp_no",
-              "type": ""
+              "type": "Int"
             }
           ],
           "primary_keys": [
@@ -5867,11 +5867,11 @@
           "columns": [
             {
               "name": "emp_no",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "salary",
-              "type": ""
+              "type": "Int"
             }
           ],
           "primary_keys": [
@@ -5886,11 +5886,11 @@
           "columns": [
             {
               "name": "emp_no",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "dept_no",
-              "type": ""
+              "type": "Varchar"
             }
           ],
           "primary_keys": [
@@ -5932,15 +5932,15 @@
           "columns": [
             {
               "name": "id_grupo",
-              "type": ""
+              "type": "serial"
             },
             {
               "name": "ds_nome",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "ds_descricao",
-              "type": ""
+              "type": "Varchar"
             }
           ],
           "primary_keys": [
@@ -5961,15 +5961,15 @@
           "columns": [
             {
               "name": "id_permissao",
-              "type": ""
+              "type": "serial"
             },
             {
               "name": "ds_permissao",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "ds_descricao",
-              "type": ""
+              "type": "Varchar"
             }
           ],
           "primary_keys": [
@@ -5990,23 +5990,23 @@
           "columns": [
             {
               "name": "id_usuario",
-              "type": ""
+              "type": "SERIAL"
             },
             {
               "name": "ds_nome",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "ds_login",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "ds_senha",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "fl_ativo",
-              "type": ""
+              "type": "Boolean"
             }
           ],
           "primary_keys": [
@@ -6029,11 +6029,11 @@
           "columns": [
             {
               "name": "id_usuario",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "id_grupo",
-              "type": ""
+              "type": "Int"
             }
           ],
           "primary_keys": [
@@ -6073,11 +6073,11 @@
           "columns": [
             {
               "name": "id_permissao",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "id_grupo",
-              "type": ""
+              "type": "Int"
             }
           ],
           "primary_keys": [
@@ -6124,23 +6124,23 @@
           "columns": [
             {
               "name": "IDPACIENTE",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "NOME",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "SEXO",
-              "type": ""
+              "type": "Char"
             },
             {
               "name": "EMAIL",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "NASCIMENTO",
-              "type": ""
+              "type": "Date"
             }
           ],
           "primary_keys": [
@@ -6155,23 +6155,23 @@
           "columns": [
             {
               "name": "IDMEDICO",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "NOME",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "SEXO",
-              "type": ""
+              "type": "Char"
             },
             {
               "name": "ESPECIALIDADE",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "FUNCIONARIO",
-              "type": ""
+              "type": "Enum"
             }
           ],
           "primary_keys": [
@@ -6186,23 +6186,23 @@
           "columns": [
             {
               "name": "IDHOSPITAL",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "NOME",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "BAIRRO",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "CIDADE",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "ESTADO",
-              "type": ""
+              "type": "Char"
             }
           ],
           "primary_keys": [
@@ -6217,27 +6217,27 @@
           "columns": [
             {
               "name": "IDCONSULTA",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "ID_PACIENTE",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "ID_MEDICO",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "ID_HOSPITAL",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "DATA",
-              "type": ""
+              "type": "Datetime"
             },
             {
               "name": "DIAGNOSTIVO",
-              "type": ""
+              "type": "Varchar"
             }
           ],
           "primary_keys": [
@@ -6280,27 +6280,27 @@
           "columns": [
             {
               "name": "IDINTERNACAO",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "ENTRADA",
-              "type": ""
+              "type": "Datetime"
             },
             {
               "name": "QUARTO",
-              "type": ""
+              "type": "Int"
             },
             {
               "name": "SAIDA",
-              "type": ""
+              "type": "Datetime"
             },
             {
               "name": "OBSERVACOES",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "ID_CONSULTA",
-              "type": ""
+              "type": "Int"
             }
           ],
           "primary_keys": [
@@ -6332,11 +6332,11 @@
           "columns": [
             {
               "name": "id",
-              "type": ""
+              "type": "UnsignedInt"
             },
             {
               "name": "name",
-              "type": ""
+              "type": "Varchar"
             }
           ],
           "primary_keys": [
@@ -6351,11 +6351,11 @@
           "columns": [
             {
               "name": "id",
-              "type": ""
+              "type": "UnsignedInt"
             },
             {
               "name": "name",
-              "type": ""
+              "type": "Varchar"
             }
           ],
           "primary_keys": [
@@ -6370,15 +6370,15 @@
           "columns": [
             {
               "name": "id",
-              "type": ""
+              "type": "UnsignedInt"
             },
             {
               "name": "name",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "students_number",
-              "type": ""
+              "type": "UnsignedInt"
             }
           ],
           "primary_keys": [
@@ -6393,15 +6393,15 @@
           "columns": [
             {
               "name": "id",
-              "type": ""
+              "type": "UnsignedInt"
             },
             {
               "name": "name",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "hours_number",
-              "type": ""
+              "type": "UnsignedInt"
             }
           ],
           "primary_keys": [
@@ -6416,27 +6416,27 @@
           "columns": [
             {
               "name": "id",
-              "type": ""
+              "type": "UnsignedInt"
             },
             {
               "name": "name",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "course",
-              "type": ""
+              "type": "UnsignedTinyInt"
             },
             {
               "name": "phone_number",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "email",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "group_id",
-              "type": ""
+              "type": "UnsignedInt"
             }
           ],
           "primary_keys": [
@@ -6461,19 +6461,19 @@
           "columns": [
             {
               "name": "id",
-              "type": ""
+              "type": "UnsignedInt"
             },
             {
               "name": "name",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "phone_number",
-              "type": ""
+              "type": "Varchar"
             },
             {
               "name": "position",
-              "type": ""
+              "type": "UnsignedInt"
             }
           ],
           "primary_keys": [
@@ -6498,19 +6498,19 @@
           "columns": [
             {
               "name": "uuid",
-              "type": ""
+              "type": "UnsignedInt"
             },
             {
               "name": "subject_id",
-              "type": ""
+              "type": "UnsignedInt"
             },
             {
               "name": "teacher_id",
-              "type": ""
+              "type": "UnsignedInt"
             },
             {
               "name": "lesson_type",
-              "type": ""
+              "type": "UnsignedInt"
             }
           ],
           "primary_keys": [
@@ -6553,19 +6553,19 @@
           "columns": [
             {
               "name": "uuid",
-              "type": ""
+              "type": "UnsignedInt"
             },
             {
               "name": "student_id",
-              "type": ""
+              "type": "UnsignedInt"
             },
             {
               "name": "subject_id",
-              "type": ""
+              "type": "UnsignedInt"
             },
             {
               "name": "grade",
-              "type": ""
+              "type": "UnsignedTinyInt"
             }
           ],
           "primary_keys": [

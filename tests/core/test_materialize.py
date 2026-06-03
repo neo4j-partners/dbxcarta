@@ -49,6 +49,27 @@ def test_coerce_type_honours_custom_map() -> None:
     assert coerce_type("GEOMETRY", {"GEOMETRY": "BINARY"}) == ("BINARY", False)
 
 
+def test_coerce_type_maps_unsigned_ints_to_wider_signed() -> None:
+    assert coerce_type("UnsignedTinyInt") == ("SMALLINT", False)
+    assert coerce_type("UnsignedSmallInt") == ("INT", False)
+    assert coerce_type("UnsignedInt") == ("BIGINT", False)
+    assert coerce_type("UnsignedInteger") == ("BIGINT", False)
+    assert coerce_type("UnsignedBigInt") == ("DECIMAL(20,0)", False)
+
+
+def test_coerce_type_maps_vendor_aliases() -> None:
+    assert coerce_type("VARCHAR2") == ("STRING", False)
+    assert coerce_type("CLOB") == ("STRING", False)
+    assert coerce_type("serial") == ("BIGINT", False)
+    assert coerce_type("money") == ("DECIMAL(18,4)", False)
+    assert coerce_type("LONGBLOB") == ("BINARY", False)
+
+
+def test_coerce_type_matches_camelcase_multiword_types() -> None:
+    assert coerce_type("DoublePrecision") == ("DOUBLE", False)
+    assert coerce_type("CharacterVarying") == ("STRING", False)
+
+
 # --- sanitize_identifier -------------------------------------------------
 
 

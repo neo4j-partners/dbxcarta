@@ -189,7 +189,7 @@ def _build_tables(raw_tables: dict[str, Any]) -> tuple[TableSpec, ...]:
     for name, raw in raw_tables.items():
         columns = raw.get("COLUMNS") or {}
         cols = tuple(
-            (col_name, str(col_def.get("DATA_TYPE") or "").strip())
+            (col_name, str(col_def.get("TYPE") or "").strip())
             for col_name, col_def in columns.items()
         )
         pks = tuple(raw.get("PRIMARY_KEYS") or [])
