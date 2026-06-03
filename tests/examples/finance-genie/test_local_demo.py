@@ -4,13 +4,23 @@ import json
 
 import pytest
 
+from dbxcarta_finance_genie_example import preset
 from dbxcarta_finance_genie_example.local_demo import (
+    DEFAULT_QUESTIONS,
     _ensure_read_only_sql,
     _print_context,
     _print_rows,
     _resolve_question,
     main,
 )
+
+
+def test_default_questions_points_at_the_bundled_example_root_file() -> None:
+    # The bundled questions.json lives at the example root, the same place the
+    # dbxcarta preset reads it from. Guard the default so moving the file can
+    # never again leave the demo pointing at a path that does not exist.
+    assert DEFAULT_QUESTIONS.is_file()
+    assert DEFAULT_QUESTIONS == preset.questions_file
 
 
 def test_ensure_read_only_sql_accepts_select_with_and_explain() -> None:

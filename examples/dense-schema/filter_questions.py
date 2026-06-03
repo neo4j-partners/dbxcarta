@@ -90,8 +90,8 @@ def main() -> int:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("questions_1000.json"),
-        help="Output path for the cleaned questions JSON (default: questions_1000.json)",
+        default=Path("questions.json"),
+        help="Output path for the cleaned questions JSON (default: questions.json)",
     )
     parser.add_argument(
         "--keep-all-shapes",

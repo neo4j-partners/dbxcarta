@@ -46,11 +46,14 @@ class _FakeWorkspaceClient:
         self.statement_execution = _FakeStatementExecution(schemas_by_catalog)
 
 
-_QUESTIONS = Path(__file__).resolve().parents[2] / "examples" / "schemapile" / "questions.json"
+# questions_file is never opened by the readiness, protocol, or dest-validation
+# tests below: readiness ignores it, and the dest check raises before any read.
+# _validate_questions_file is exercised directly with tmp_path fixtures.
+_QUESTIONS_PLACEHOLDER = Path("questions.json")
 
 
 def _preset() -> StandardPreset:
-    return StandardPreset(questions_file=_QUESTIONS)
+    return StandardPreset(questions_file=_QUESTIONS_PLACEHOLDER)
 
 
 def test_standard_preset_satisfies_protocols() -> None:

@@ -21,12 +21,15 @@ from dbxcarta.client.questions import Question, load_questions
 from dbxcarta.client.schema_dump import fetch_schema_dump
 from dbxcarta.client.settings import ClientSettings
 
-DEFAULT_QUESTIONS = Path(__file__).resolve().with_name("questions.json")
-# Anchor .env lookup to the example package root so the demo never inherits
-# the parent dbxcarta repo's .env. parents[2] resolves to
-# examples/finance-genie/
+# The bundled questions.json and the standalone .env both live at the example
+# root, two levels up from this module, the same place the dbxcarta preset reads
+# questions.json from. parents[2] resolves to examples/finance-genie/
 # (local_demo.py -> dbxcarta_finance_genie_example -> src -> finance-genie).
-DEMO_ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
+_EXAMPLE_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_QUESTIONS = _EXAMPLE_ROOT / "questions.json"
+# Anchor .env lookup to the example root so the demo never inherits the parent
+# dbxcarta repo's .env.
+DEMO_ENV_FILE = _EXAMPLE_ROOT / ".env"
 _READ_ONLY_SQL_RE = re.compile(r"^\s*(SELECT|WITH|EXPLAIN)\b", re.IGNORECASE)
 _MUTATING_SQL_RE = re.compile(
     r"\b(ALTER|COPY|CREATE|DELETE|DROP|INSERT|MERGE|REPLACE|TRUNCATE|UPDATE)\b",

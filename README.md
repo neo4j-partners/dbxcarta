@@ -234,7 +234,7 @@ object within that module. The CLI resolves this at runtime by importing the
 module and reading the object. A preset bundles three things together:
 
 1. **Environment overlay:** the set of environment variables needed to run dbxcarta against a specific upstream project or schema
-2. **Readiness check** (optional): logic to verify the expected tables and resources exist before running ingest
+2. **Readiness check** (optional): logic to verify each ingested catalog holds a data schema before running ingest
 3. **Question upload** (optional): logic to push a demo question set to the configured UC Volume
 
 **Why use a preset?**
@@ -247,19 +247,22 @@ on the client runtime.
 
 **The preset interface:**
 
-| Method | Required | CLI flag | Purpose |
-|--------|----------|----------|---------|
-| `env()` | Yes | `--print-env` | Returns the environment variable overlay for this preset |
-| `readiness(ws, warehouse_id)` | No | `--check-ready` | Checks that expected tables and resources are present in the workspace |
-| `upload_questions(ws)` | No | `--upload-questions` | Uploads the preset's demo question set to the configured UC Volume |
+Per-example config lives in the committed `dbxcarta-overlay.env`, not in the
+preset, so the preset carries only behavior. Both capabilities are optional.
+
+| Method | CLI flag | Purpose |
+|--------|----------|---------|
+| `readiness(ws, warehouse_id)` | `--check-ready` | Checks that each ingested catalog holds a data schema |
+| `upload_questions(ws)` | `--upload-questions` | Uploads the preset's demo question set to the configured UC Volume |
 
 ### Available examples
 
 Companion examples show how to package reusable configuration and demo data for
 known upstream projects. Each example is its own Python package that depends on
 the relevant dbxcarta distributions as normal pip dependencies and exposes a
-module-level `preset` object. The Spark package provides the preset protocol and
-loader; examples own their concrete preset implementations.
+module-level `preset` object. The Spark package provides the preset protocol,
+the shared `StandardPreset`, and the loader; each example constructs
+`StandardPreset` with its bundled question set.
 
 #### Finance Genie
 
@@ -274,7 +277,7 @@ loader; examples own their concrete preset implementations.
 [**Follow the SchemaPile Quick Start →**](examples/schemapile/README.md#quick-start)
 
 - **Source:** a reproducible slice of [SchemaPile](https://github.com/amsterdata/schemapile) materialized as Delta tables in a dedicated catalog.
-- **Schema list:** the generated UC schema list is written to `.env.generated`.
+- **Schema list:** `schemapile_lakehouse` is a dedicated, data-only catalog, so a blank `DBXCARTA_SCHEMAS` auto-discovers the materialized schemas.
 - **Questions:** a SQL-validated question set is generated.
 - **Preset:** exposes `dbxcarta_schemapile_example:preset`.
 
@@ -289,19 +292,23 @@ loader; examples own their concrete preset implementations.
 
 ### Preset workflow
 
+Every example exposes the same preset and follows the same steps. The
+per-example config lives in the committed `dbxcarta-overlay.env`, so select that
+overlay once and every preset command picks it up.
+
 1. Install the example package alongside dbxcarta:
    ```bash
    uv pip install -e examples/finance-genie/
    ```
 
-2. Print the environment overlay the preset provides:
+2. Select the example's overlay (the single source of per-example config):
    ```bash
-   uv run dbxcarta preset dbxcarta_finance_genie_example:preset --print-env
+   export DBXCARTA_ENV_FILE=examples/finance-genie/dbxcarta-overlay.env
    ```
 
-3. Verify the expected source tables exist in the workspace before running ingest:
+3. Check readiness, which confirms each ingested catalog holds a data schema:
    ```bash
-   uv run dbxcarta preset dbxcarta_finance_genie_example:preset --check-ready --strict-optional
+   uv run dbxcarta preset dbxcarta_finance_genie_example:preset --check-ready
    ```
 
 4. Upload the preset's demo question set to the configured UC Volume:
@@ -309,19 +316,21 @@ loader; examples own their concrete preset implementations.
    uv run dbxcarta preset dbxcarta_finance_genie_example:preset --upload-questions
    ```
 
-**Generated examples** (schemapile, dense-schema) follow the same pattern, but the materializer owns the source schemas. The preset reads `DBXCARTA_SCHEMAS` at command runtime, so you must set that variable before running any preset command:
+**Generated examples** (schemapile, dense-schema) follow the identical steps;
+materialize the source data first so readiness sees a data schema. Swap the
+package name and overlay path:
 
 ```bash
 uv pip install -e examples/schemapile/
-# Source or copy examples/schemapile/.env.generated first so DBXCARTA_SCHEMAS is set.
-uv run dbxcarta preset dbxcarta_schemapile_example:preset --print-env
+export DBXCARTA_ENV_FILE=examples/schemapile/dbxcarta-overlay.env
+uv run dbxcarta preset dbxcarta_schemapile_example:preset --check-ready
 
 uv pip install -e examples/dense-schema/
-# Set DBXCARTA_SCHEMAS to the generated dense schema, e.g. dense_500.
-uv run dbxcarta preset dbxcarta_dense_schema_example:preset --print-env
+export DBXCARTA_ENV_FILE=examples/dense-schema/dbxcarta-overlay.env
+uv run dbxcarta preset dbxcarta_dense_schema_example:preset --check-ready
 ```
 
-Keep the generated overlay in the environment (or copy its `DBXCARTA_SCHEMAS=...` line into `.env`) before running `--print-env`, `--check-ready`, `--upload-questions`, ingest, or client jobs. See each example's README for its full setup flow.
+See each example's README for its full setup flow.
 
 ## Quickstart: demo catalog
 

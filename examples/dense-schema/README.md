@@ -33,8 +33,7 @@ uv run dbxcarta-dense-materialize
 # Select the overlay, then upload the matching question set.
 export DBXCARTA_ENV_FILE=examples/dense-schema/dbxcarta-overlay.env
 uv run dbxcarta preset dbxcarta_dense_schema_example:preset --check-ready
-DENSE_QUESTIONS_FILE=examples/dense-schema/questions_1000.json \
-  uv run dbxcarta preset dbxcarta_dense_schema_example:preset --upload-questions
+uv run dbxcarta preset dbxcarta_dense_schema_example:preset --upload-questions
 ```
 
 With setup in place, run the two make targets from the repo root. The `-ingest`
@@ -54,7 +53,6 @@ examples/dense-schema/
 ├── .env.sample
 ├── filter_questions.py
 ├── questions.json
-├── questions_1000.json
 └── src/dbxcarta_dense_schema_example/
     ├── generator.py
     ├── materialize.py

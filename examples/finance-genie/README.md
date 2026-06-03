@@ -21,8 +21,8 @@ uv pip install -e examples/finance-genie/
 # Select the Finance Genie overlay for every dbxcarta command
 export DBXCARTA_ENV_FILE=examples/finance-genie/dbxcarta-overlay.env
 
-# Confirm the upstream Finance Genie UC tables are present (section 2 creates them)
-uv run dbxcarta preset dbxcarta_finance_genie_example:preset --check-ready --strict-optional
+# Confirm each ingested catalog holds a data schema (section 2 creates them)
+uv run dbxcarta preset dbxcarta_finance_genie_example:preset --check-ready
 
 # Provision the ops plane: catalog, finance_genie_ops schema, dbxcarta-ops volume
 uv run dbxcarta-submit bootstrap
@@ -43,11 +43,11 @@ make e2e-finance-genie-ingest
 make e2e-finance-genie-client
 ```
 
-The upstream Finance Genie tables checked by readiness are owned by the upstream
-project and created once per workspace; see
-[section 2](#2-prepare-finance-genie). The other setup steps are idempotent, so
-re-running them is safe. After setup, every code change replays through the two
-make targets alone.
+The upstream Finance Genie data is owned by the upstream project and created
+once per workspace; readiness confirms each ingested catalog holds a data
+schema. See [section 2](#2-prepare-finance-genie). The other setup steps are
+idempotent, so re-running them is safe. After setup, every code change replays
+through the two make targets alone.
 
 ### Find the results
 
@@ -102,13 +102,13 @@ for you to read. The same numbers, plus per-question detail, are persisted two w
 examples/finance-genie/
 ├── pyproject.toml                                         # standalone package
 ├── README.md                                              # this file
-├── .env.sample                                            # operator overlay reference
+├── dbxcarta-overlay.env                                   # per-example dbxcarta config (single source of truth)
+├── .env.sample                                            # standalone local-demo config reference
+├── questions.json                                         # demo question fixture
 ├── src/dbxcarta_finance_genie_example/
 │   ├── __init__.py                                        # re-exports `preset`
-│   ├── finance_genie.py                                   # `FinanceGeniePreset` + `preset`
-│   ├── local_demo.py                                      # optional read-only local CLI
-│   ├── upload_questions.py                                # optional script
-│   └── questions.json                                     # demo question fixture
+│   ├── preset.py                                          # module-level `preset` (shared StandardPreset)
+│   └── local_demo.py                                      # optional read-only local CLI
 └── ../../../tests/examples/finance-genie/
     ├── test_preset.py
     └── test_local_demo.py
@@ -137,12 +137,12 @@ load_env_files(files)  # overlay over base .env; process env still wins
 run_dbxcarta(settings=SparkIngestSettings())
 ```
 
-The preset itself is a single dataclass instance, `preset`, exposed at
+The preset is the shared `StandardPreset` instance, `preset`, exposed at
 `dbxcarta_finance_genie_example:preset`. It carries no env config (that lives
 in the overlay); it provides the optional operational hooks the CLI uses:
 
 - `readiness(ws, warehouse_id)` returns a `ReadinessReport` describing whether
-  the Finance Genie tables are present in Unity Catalog.
+  each ingested catalog holds a data schema in Unity Catalog.
 - `upload_questions(ws)` uploads `questions.json` to the path named by
   `DBXCARTA_CLIENT_QUESTIONS`.
 
@@ -151,13 +151,14 @@ in the overlay); it provides the optional operational hooks the CLI uses:
 To build your own application package, copy this layout and change:
 
 1. The package name in `pyproject.toml` and the src folder name.
-2. The catalog, schema, volume, and table list in `finance_genie.py`.
-3. The env overlay returned by `env()` to match the dbxcarta features you
-   want enabled.
-4. The questions fixture, if you want a demo question set.
+2. The catalog list (and any `:layer` suffixes) and dbxcarta features in
+   `dbxcarta-overlay.env`, the single source of truth for per-example config.
+3. The `questions.json` fixture, if you want a demo question set.
 
-If you also want CLI automation, expose a small `Preset` object and document
-its import path explicitly, for example `mycorp_dbxcarta_preset:preset`.
+`preset.py` is the same one-liner in every example: it constructs the shared
+`StandardPreset` with the bundled `questions.json`. Expose it at an import path
+like `mycorp_dbxcarta_preset:preset`, and the CLI resolves it for
+`--check-ready` and `--upload-questions`.
 
 ## Responsibility Boundary
 
@@ -226,17 +227,22 @@ From `finance-genie/enrichment-pipeline` (the upstream project), run the
 Finance Genie setup path that generates data, creates Unity Catalog tables,
 runs GDS, and writes Gold tables.
 
-The validated UC scope for this workspace is
-`graph-enriched-lakehouse.graph-enriched-schema`.
+The validated UC scope for this workspace is the
+`graph-enriched-finance-silver` and `graph-enriched-finance-gold` catalogs,
+each holding the `graph-enriched-schema` schema.
 
-Expected base tables:
+The upstream project writes its curated tables to the silver catalog:
 
 - `accounts`, `merchants`, `transactions`, `account_links`, `account_labels`
 
-Expected Gold (optional) tables:
+and its graph-enriched tables to the gold catalog:
 
 - `gold_accounts`, `gold_account_similarity_pairs`,
   `gold_fraud_ring_communities`
+
+dbxcarta readiness does not check these tables individually; it confirms each
+catalog holds a data schema, and the upstream project owns table-level
+validation.
 
 ### 3. Configure dbxcarta
 
@@ -265,14 +271,16 @@ config for the standalone local demo (section 11) and never layer.
 
 ### 4. Check readiness
 
-Strict readiness fails if either base or Gold tables are missing:
+Readiness confirms each ingested catalog (silver and gold) holds at least one
+data schema beyond the auto-created `information_schema` and `default`:
 
 ```bash
-uv run dbxcarta preset dbxcarta_finance_genie_example:preset --check-ready --strict-optional
+uv run dbxcarta preset dbxcarta_finance_genie_example:preset --check-ready
 ```
 
-Without `--strict-optional`, only the five base tables are required for
-readiness; the three Gold tables are reported as a warning.
+It does not check individual tables; the upstream project owns and validates
+those. A catalog holding only `information_schema` and an empty `default`
+reports not ready.
 
 ### 5. Bootstrap the ops plane
 

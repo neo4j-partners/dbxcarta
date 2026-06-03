@@ -41,8 +41,7 @@ export DBXCARTA_ENV_FILE=examples/schemapile/dbxcarta-overlay.env
 
 # Confirm the schemas materialized, then upload the generated question set.
 uv run dbxcarta preset dbxcarta_schemapile_example:preset --check-ready
-SCHEMAPILE_QUESTIONS_FILE=examples/schemapile/questions.json \
-  uv run dbxcarta preset dbxcarta_schemapile_example:preset --upload-questions
+uv run dbxcarta preset dbxcarta_schemapile_example:preset --upload-questions
 ```
 
 With setup in place, run the two make targets from the repo root. The `-ingest`
@@ -63,7 +62,7 @@ examples/schemapile/
 ├── .env.sample
 ├── src/dbxcarta_schemapile_example/
 │   ├── __init__.py
-│   ├── preset.py                # SchemaPilePreset + module-level `preset`
+│   ├── preset.py                # module-level `preset` (shared StandardPreset)
 │   ├── config.py                # one-shot .env parser
 │   ├── slice_runner.py          # shells out to upstream slice.py
 │   ├── candidate_selector.py    # slice JSON -> candidate-table JSON
@@ -249,8 +248,7 @@ export DBXCARTA_ENV_FILE=examples/schemapile/dbxcarta-overlay.env
 uv run dbxcarta preset dbxcarta_schemapile_example:preset --check-ready
 
 # Upload the generated question set to the example volume.
-SCHEMAPILE_QUESTIONS_FILE=examples/schemapile/questions.json \
-  uv run dbxcarta preset dbxcarta_schemapile_example:preset --upload-questions
+uv run dbxcarta preset dbxcarta_schemapile_example:preset --upload-questions
 
 # Build and submit the ingest job. publish-wheels rebuilds the wheels and
 # ships the bootstrap script (it calls upload_all internally), so no

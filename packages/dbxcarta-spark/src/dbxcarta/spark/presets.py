@@ -73,13 +73,16 @@ class ReadinessReport:
             lines.append("missing required: " + ", ".join(self.missing_required))
         else:
             lines.append("catalogs: ready")
+        # No example populates missing_optional under the one-rule design: every
+        # listed catalog is required. The field and the strict_optional flag are
+        # kept so ok() and the CLI --strict-optional flag need no signature
+        # change, but the report stays silent on optional catalogs unless one is
+        # ever surfaced, rather than printing a category the design removed.
         if self.missing_optional:
             label = "missing optional"
             if not strict_optional:
                 label += " (warning)"
             lines.append(f"{label}: " + ", ".join(self.missing_optional))
-        else:
-            lines.append("optional catalogs: ready")
         lines.append(
             "status: ready"
             if self.ok(strict_optional=strict_optional)
