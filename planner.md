@@ -509,7 +509,16 @@ materialize reframed as the shared product step, INSERT behavior updated to
 committed blueprint, `.env.sample`, and config default all said `dense_500` but
 the overlay's `DBXCARTA_SCHEMAS` said `dense-1000`. Confirmed with the operator,
 the overlay was reconciled to `dense_500` so the materialized schema matches what
-ingest reads. Separately flagged (not fixed here): the committed dense
-`questions.json` `reference_sql` is stale, pointing at `schemapile_lakehouse.
-dense-1000`, a pre-existing issue independent of this phase that needs the question
-set regenerated against the real `dense-schema-example.dense_500` catalog.
+ingest reads. A pre-existing defect surfaced and was fixed in the same pass: the committed dense
+`questions.json` `reference_sql` pointed at `schemapile_lakehouse.dense-1000`,
+neither dense's catalog nor (after the `dense_500` reconciliation) its schema. The
+operator chose to regenerate the question set against the live `dense_500` tables.
+Ran the full live chain on `aws-partner-rk` (bootstrap -> publish-wheels ->
+`dbxcarta-submit materialize`, creating 500 tables in `dense-schema-example.
+dense_500`), then `dbxcarta-dense-generate-questions` with model
+`databricks-claude-sonnet-4-6` (target 60, temp 0.2). Result: 60 accepted, 0
+errored, all `reference_sql` validated on the warehouse and qualified as
+`dense-schema-example.dense_500`; no stale `schemapile_lakehouse`/`dense-1000`
+references remain. The `DENSE_QUESTION_MODEL` override lives in the local
+(gitignored) `examples/dense-schema/.env`; the committed default in `config.py`
+was left unchanged.

@@ -325,12 +325,14 @@ uv run dbxcarta-submit teardown --yes-i-mean-it
 dbxcarta jobs read Neo4j credentials from the Databricks secret scope:
 
 ```bash
+# Provision the Databricks secret scope with Neo4j credentials
 ./setup_secrets.sh --profile aws-partner-rk
 ```
 
 ### 7. Upload the question set
 
 ```bash
+# Upload questions.json to the path named by DBXCARTA_CLIENT_QUESTIONS
 uv run dbxcarta preset dbxcarta_finance_genie_example:preset --upload-questions
 ```
 
@@ -341,6 +343,7 @@ This uploads the package's `questions.json` to the path named by
 ### 8. Build and upload dbxcarta artifacts
 
 ```bash
+# Rebuild the per-package wheels and ship the bootstrap script
 uv run dbxcarta-submit publish-wheels
 ```
 
@@ -358,18 +361,21 @@ no separate `upload --all` step is needed.
 Submit the installed wheel's ingest entrypoint:
 
 ```bash
+# Submit the ingest job to build the semantic layer
 uv run dbxcarta-submit submit-entrypoint ingest
 ```
 
 Verify the result:
 
 ```bash
+# Verify the semantic layer was built
 uv run dbxcarta verify
 ```
 
 ### 10. Run the client evaluation
 
 ```bash
+# Submit the client evaluation job
 uv run dbxcarta-submit submit-entrypoint client
 ```
 
@@ -383,17 +389,22 @@ the parent dbxcarta repo's `.env`. Copy the sample and fill in your
 workspace, warehouse, chat endpoint, and Neo4j credentials:
 
 ```bash
+# Copy the local demo env template, which never inherits the parent repo .env
 cp examples/finance-genie/.env.sample examples/finance-genie/.env
-# edit examples/finance-genie/.env
+# then edit examples/finance-genie/.env
 ```
 
 Then run any of the demo subcommands from anywhere (they resolve `.env`
 relative to the package, not the current working directory):
 
 ```bash
+# Check connectivity and config before running the demo
 uv run --directory examples/finance-genie python -m dbxcarta_finance_genie_example.local_demo preflight
+# List the demo question set
 uv run --directory examples/finance-genie python -m dbxcarta_finance_genie_example.local_demo questions
+# Answer one question and show the retrieved graph context
 uv run --directory examples/finance-genie python -m dbxcarta_finance_genie_example.local_demo ask --question-id fg_q01 --show-context
+# Run an ad-hoc read-only SQL query against a base table
 uv run --directory examples/finance-genie python -m dbxcarta_finance_genie_example.local_demo sql "SELECT COUNT(*) FROM \`graph-enriched-lakehouse\`.\`graph-enriched-schema\`.accounts"
 ```
 
