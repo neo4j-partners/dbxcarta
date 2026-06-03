@@ -12,7 +12,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from dbxcarta.core.identifiers import quote_identifier, quote_qualified_name
-from dbxcarta.spark.ingest.transform.staging import parse_volume_path
+from dbxcarta.spark.ingest.transform.staging import split_volume_subpath
 
 if TYPE_CHECKING:
     from pyspark.sql import SparkSession
@@ -74,7 +74,7 @@ def preflight(spark: "SparkSession", settings: "SparkIngestSettings") -> None:
 
     _assert_materialized_tables_exist(spark, settings, catalogs)
 
-    parts = parse_volume_path(settings.dbxcarta_summary_volume)
+    parts = split_volume_subpath(settings.dbxcarta_summary_volume)
     vol_catalog, vol_schema, vol_name = parts[1], parts[2], parts[3]
     spark.sql(
         f"CREATE VOLUME IF NOT EXISTS `{vol_catalog}`.`{vol_schema}`.`{vol_name}`"

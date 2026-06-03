@@ -149,3 +149,27 @@ def inject_params() -> None:
         else:
             remaining.append(arg)
     sys.argv[1:] = remaining
+
+
+def read_required_warehouse_id(
+    override: str | None,
+    *,
+    operation: str,
+    extra_hint: str = "",
+) -> str:
+    """Return the SQL warehouse id from a CLI override or the environment.
+
+    ``override`` (a ``--warehouse-id`` flag value) wins when set; otherwise the
+    value comes from ``DATABRICKS_WAREHOUSE_ID``. Raises ``ValueError`` naming
+    ``operation`` when neither yields a non-blank id, with ``extra_hint``
+    appended when a caller has an additional escape (for example
+    ``--skip-validate``).
+    """
+    warehouse_id = (override or os.environ.get("DATABRICKS_WAREHOUSE_ID", "")).strip()
+    if not warehouse_id:
+        hint = f" {extra_hint}" if extra_hint else ""
+        raise ValueError(
+            f"DATABRICKS_WAREHOUSE_ID is required for {operation};"
+            f" set it in .env or pass --warehouse-id{hint}"
+        )
+    return warehouse_id

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import threading
 from typing import Any
 
 import pytest
 
 from dbxcarta.core.materialize import (
+    ExecuteFn,
     MaterializeStats,
     build_insert_statement,
     coerce_type,
@@ -182,7 +184,7 @@ def _two_table_schema() -> list[dict[str, Any]]:
 def test_spine_materializes_schema_with_constraints(workers: int) -> None:
     rec = _Recorder()
     stats = materialize_schemas(
-        _two_table_schema(), catalog="cat", execute=rec,
+        _two_table_schema(), catalog="cat", make_execute=lambda: rec,
         property_prefix="ex", workers=workers,
     )
     assert stats.schemas_created == 1
@@ -200,6 +202,48 @@ def test_spine_materializes_schema_with_constraints(workers: int) -> None:
     assert "'ex.source_id' = 'shop_db'" in joined
 
 
+def test_spine_parallel_executor_is_thread_confined() -> None:
+    """Each pool worker gets its own executor from the factory.
+
+    Proves the per-worker seam: no executor instance is ever touched by more
+    than one thread, and the factory is called more than once (the calling
+    thread plus at least one worker), so a non-thread-safe injected runner would
+    stay confined to its creating thread under ``workers > 1``.
+    """
+    lock = threading.Lock()
+    factory_calls = 0
+    usage: dict[int, set[int]] = {}  # executor instance id -> thread idents
+
+    def make_execute() -> ExecuteFn:
+        nonlocal factory_calls
+        with lock:
+            factory_calls += 1
+        token = object()  # unique per executor, kept alive by the closure below
+
+        def execute(statement: str, label: str) -> None:
+            with lock:
+                usage.setdefault(id(token), set()).add(threading.get_ident())
+
+        return execute
+
+    schemas = [{
+        "uc_schema": "s", "source_id": "src",
+        "tables": [
+            {"name": f"t{i}", "columns": [{"name": "c", "type": "int"}],
+             "primary_keys": [], "foreign_keys": [], "rows": []}
+            for i in range(40)
+        ],
+    }]
+    materialize_schemas(
+        schemas, catalog="cat", make_execute=make_execute,
+        property_prefix="ex", workers=4,
+    )
+
+    assert usage  # statements ran
+    assert all(len(threads) == 1 for threads in usage.values())
+    assert factory_calls >= 2  # calling thread + at least one worker
+
+
 def test_spine_skips_table_with_no_columns() -> None:
     schemas = [{
         "uc_schema": "s", "source_id": "src",
@@ -207,7 +251,7 @@ def test_spine_skips_table_with_no_columns() -> None:
                     "foreign_keys": [], "rows": []}],
     }]
     stats = materialize_schemas(
-        schemas, catalog="cat", execute=_Recorder(), property_prefix="ex"
+        schemas, catalog="cat", make_execute=_Recorder, property_prefix="ex"
     )
     assert stats.tables_created == 0
     assert stats.tables_skipped == 1
@@ -220,54 +264,64 @@ def test_spine_counts_type_fallbacks() -> None:
                     "primary_keys": [], "foreign_keys": [], "rows": []}],
     }]
     stats = materialize_schemas(
-        schemas, catalog="cat", execute=_Recorder(), property_prefix="ex"
+        schemas, catalog="cat", make_execute=_Recorder, property_prefix="ex"
     )
     assert stats.type_fallbacks == 1
 
 
-def test_spine_skip_mode_tolerates_failed_insert() -> None:
+# The error-handling paths run through ``_collect``, whose exception flow
+# differs between serial (direct call) and parallel (re-raised via
+# ``future.result``), so each is exercised in both modes.
+@pytest.mark.parametrize("workers", [1, 4])
+def test_spine_skip_mode_tolerates_failed_insert(workers: int) -> None:
     rec = _Recorder(fail_on="INSERT OVERWRITE")
     stats = materialize_schemas(
-        _two_table_schema(), catalog="cat", execute=rec,
-        property_prefix="ex", on_insert_error="skip",
+        _two_table_schema(), catalog="cat", make_execute=lambda: rec,
+        property_prefix="ex", on_insert_error="skip", workers=workers,
     )
     assert stats.rows_inserted == 0
     assert stats.tables_created == 2  # tables still created despite insert failures
 
 
-def test_spine_raise_mode_propagates_failed_insert() -> None:
+@pytest.mark.parametrize("workers", [1, 4])
+def test_spine_raise_mode_propagates_failed_insert(workers: int) -> None:
     rec = _Recorder(fail_on="INSERT OVERWRITE")
     with pytest.raises(RuntimeError):
         materialize_schemas(
-            _two_table_schema(), catalog="cat", execute=rec,
-            property_prefix="ex", on_insert_error="raise",
+            _two_table_schema(), catalog="cat", make_execute=lambda: rec,
+            property_prefix="ex", on_insert_error="raise", workers=workers,
         )
 
 
-def test_spine_skip_mode_tolerates_failed_table_create() -> None:
+@pytest.mark.parametrize("workers", [1, 4])
+def test_spine_skip_mode_tolerates_failed_table_create(workers: int) -> None:
     rec = _Recorder(fail_on="CREATE TABLE")
     stats = materialize_schemas(
-        _two_table_schema(), catalog="cat", execute=rec,
-        property_prefix="ex", on_table_error="skip",
+        _two_table_schema(), catalog="cat", make_execute=lambda: rec,
+        property_prefix="ex", on_table_error="skip", workers=workers,
     )
     assert stats.tables_created == 0
 
 
-def test_spine_raise_mode_propagates_failed_table_create() -> None:
+@pytest.mark.parametrize("workers", [1, 4])
+def test_spine_raise_mode_propagates_failed_table_create(workers: int) -> None:
     rec = _Recorder(fail_on="CREATE TABLE")
     with pytest.raises(RuntimeError):
         materialize_schemas(
-            _two_table_schema(), catalog="cat", execute=rec,
-            property_prefix="ex", on_table_error="raise",
+            _two_table_schema(), catalog="cat", make_execute=lambda: rec,
+            property_prefix="ex", on_table_error="raise", workers=workers,
         )
 
 
-def test_spine_skip_mode_does_not_swallow_non_warehouse_errors() -> None:
+@pytest.mark.parametrize("workers", [1, 4])
+def test_spine_skip_mode_does_not_swallow_non_warehouse_errors(workers: int) -> None:
     """skip mode tolerates warehouse failures, not programming errors.
 
     A non-warehouse exception (here a ValueError standing in for a bug or a
     malformed spec) must propagate even with on_table_error="skip", rather than
-    being logged as a skipped table and hiding the defect.
+    being logged as a skipped table and hiding the defect. In parallel mode the
+    error surfaces through ``future.result()`` rather than a direct call, so
+    both modes are checked.
     """
     def execute(statement: str, _label: str) -> None:
         if "CREATE TABLE" in statement:
@@ -275,8 +329,18 @@ def test_spine_skip_mode_does_not_swallow_non_warehouse_errors() -> None:
 
     with pytest.raises(ValueError, match="not a warehouse error"):
         materialize_schemas(
-            _two_table_schema(), catalog="cat", execute=execute,
-            property_prefix="ex", on_table_error="skip",
+            _two_table_schema(), catalog="cat", make_execute=lambda: execute,
+            property_prefix="ex", on_table_error="skip", workers=workers,
+        )
+
+
+@pytest.mark.parametrize("missing", ["uc_schema", "source_id"])
+def test_spine_rejects_schema_entry_missing_keys(missing: str) -> None:
+    entry = {"uc_schema": "s", "source_id": "src", "tables": []}
+    del entry[missing]
+    with pytest.raises(ValueError, match=f"missing required key.*{missing}"):
+        materialize_schemas(
+            [entry], catalog="cat", make_execute=_Recorder, property_prefix="ex"
         )
 
 
@@ -291,6 +355,6 @@ def test_spine_skips_pk_when_column_dropped() -> None:
         }],
     }]
     stats = materialize_schemas(
-        schemas, catalog="cat", execute=_Recorder(), property_prefix="ex"
+        schemas, catalog="cat", make_execute=_Recorder, property_prefix="ex"
     )
     assert stats.pk_constraints_added == 0

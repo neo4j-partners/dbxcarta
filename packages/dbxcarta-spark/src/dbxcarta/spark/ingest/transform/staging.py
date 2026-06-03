@@ -25,12 +25,15 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def parse_volume_path(path: str) -> list[str]:
-    """Validate a /Volumes path and return its parts (after lstrip).
+def split_volume_subpath(path: str) -> list[str]:
+    """Validate a /Volumes *subpath* and return its parts (after lstrip).
 
-    Requires at least /Volumes/<cat>/<schema>/<vol>/<subdir> (5 segments).
-    Raises RuntimeError for bare volume roots so neither preflight nor
-    resolve_transient_root silently accepts a path that will fail at runtime.
+    Distinct from :func:`dbxcarta.core.identifiers.parse_volume_path`, which
+    parses a bare four-part volume *root* into a ``(catalog, schema, volume)``
+    tuple. This one requires at least /Volumes/<cat>/<schema>/<vol>/<subdir>
+    (5 segments) and returns the full part list. Raises RuntimeError for bare
+    volume roots so neither preflight nor resolve_transient_root silently
+    accepts a path that will fail at runtime.
     """
     try:
         return uc_volume_parts(path)

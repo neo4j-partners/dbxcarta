@@ -8,7 +8,6 @@ the SQL and the safety checks.
 
 from __future__ import annotations
 
-import os
 import time
 from dataclasses import dataclass
 from enum import Enum
@@ -21,17 +20,6 @@ from dbxcarta.core.identifiers import (
     quote_identifier,
     validate_identifier,
 )
-
-
-def read_required_warehouse_id(override: str | None, *, operation: str) -> str:
-    """Return the SQL warehouse id from ``--warehouse-id`` or the env var."""
-    warehouse_id = (override or os.environ.get("DATABRICKS_WAREHOUSE_ID", "")).strip()
-    if not warehouse_id:
-        raise ValueError(
-            f"DATABRICKS_WAREHOUSE_ID is required for {operation}; set it in the "
-            "base .env or pass --warehouse-id."
-        )
-    return warehouse_id
 
 
 _POLL_INTERVAL_SEC = 2.0

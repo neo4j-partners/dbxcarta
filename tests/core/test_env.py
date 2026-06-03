@@ -180,3 +180,38 @@ def test_load_missing_file_is_silent_noop(tmp_path) -> None:
     _bootstrap.load_env_files([missing])
 
     assert _LAYER_KEY not in os.environ
+
+
+def test_read_required_warehouse_id_prefers_and_strips_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DATABRICKS_WAREHOUSE_ID", "ignored")
+    assert (
+        _bootstrap.read_required_warehouse_id(" wh-1 ", operation="bootstrap")
+        == "wh-1"
+    )
+
+
+def test_read_required_warehouse_id_falls_back_to_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DATABRICKS_WAREHOUSE_ID", "wh-env")
+    assert _bootstrap.read_required_warehouse_id(None, operation="bootstrap") == "wh-env"
+
+
+def test_read_required_warehouse_id_missing_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DATABRICKS_WAREHOUSE_ID", "   ")
+    with pytest.raises(ValueError, match="DATABRICKS_WAREHOUSE_ID"):
+        _bootstrap.read_required_warehouse_id(None, operation="bootstrap")
+
+
+def test_read_required_warehouse_id_appends_extra_hint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("DATABRICKS_WAREHOUSE_ID", raising=False)
+    with pytest.raises(ValueError, match="or use --skip-validate"):
+        _bootstrap.read_required_warehouse_id(
+            None, operation="SQL validation", extra_hint="or use --skip-validate"
+        )

@@ -22,14 +22,13 @@ from collections import deque
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
+from dbxcarta.core.env import read_required_warehouse_id
 from dbxcarta.core.materialize import sanitize_identifier
 from dbxcarta.core.questions import GeneratedPair, ValidationOutcome
+from dbxcarta.core.sql_safety import sql_targets_only_catalog
 from dbxcarta.core.workspace import build_workspace_client
 from dbxcarta_dense_schema_example.config import DenseSchemaConfig, load_config
-from dbxcarta_dense_schema_example.utils import (
-    load_dotenv_file,
-    read_required_warehouse_id,
-)
+from dbxcarta_dense_schema_example.utils import load_dotenv_file
 
 if TYPE_CHECKING:
     from databricks.sdk import WorkspaceClient
@@ -418,7 +417,7 @@ def _validate_all(
     empty = 0
     trivial = 0
     for pair in pairs:
-        if not _sql_targets_only_catalog(pair.sql, catalog):
+        if not sql_targets_only_catalog(pair.sql, catalog):
             errored += 1
             continue
         try:
@@ -448,43 +447,6 @@ def _validate_all(
         if target is not None and len(accepted) >= target:
             break
     return ValidationOutcome(accepted=accepted, errored=errored, empty=empty, trivial=trivial)
-
-
-_FORBIDDEN_SQL_RE = re.compile(
-    r"\b("
-    r"alter|call|copy|create|delete|drop|execute|grant|insert|merge|msck|"
-    r"optimize|refresh|repair|replace|revoke|truncate|update|use|vacuum"
-    r")\b",
-    re.IGNORECASE,
-)
-_TABLE_REF_RE = re.compile(r"\b(?:from|join)\s+([`A-Za-z0-9_.-]+)", re.IGNORECASE)
-
-
-def _sql_targets_only_catalog(sql: str, catalog: str) -> bool:
-    normalized = sql.strip()
-    lowered = normalized.lower()
-    if not lowered.startswith("select"):
-        return False
-    if ";" in normalized.rstrip(";"):
-        return False
-    if _FORBIDDEN_SQL_RE.search(normalized):
-        return False
-    if "information_schema" in lowered or re.search(r"\bsystem\s*\.", lowered):
-        return False
-    target = f"`{catalog.lower()}`"
-    if target not in lowered:
-        return False
-    for match in _TABLE_REF_RE.finditer(sql):
-        ref = match.group(1).strip()
-        if ref.startswith("`"):
-            if not ref.lower().startswith(target):
-                return False
-        elif "." in ref:
-            if not ref.lower().startswith(f"{catalog.lower()}."):
-                return False
-        else:
-            return False
-    return True
 
 
 def _format_questions(pairs: list[GeneratedPair]) -> list[dict[str, Any]]:

@@ -276,24 +276,26 @@ class SparkIngestSettings(BaseSettings):
 
         The shared core resolver is the single owner of the base-plus-tail rule.
         When both summary fields are supplied (every overlay today, and the
-        historical tests), this returns early and never touches
-        databricks_volume_path, so the change is behavior-neutral until Phase 6
-        removes the explicit values.
+        historical tests), derivation is skipped and databricks_volume_path is
+        never touched, so the change is behavior-neutral until Phase 6 removes
+        the explicit values. Mirrors ``ClientSettings._resolve_defaults``;
+        unlike the client, databricks_volume_path is optional here, so a missing
+        base when the sinks are also unset fails loudly rather than deriving
+        from nothing.
         """
-        if self.dbxcarta_summary_volume and self.dbxcarta_summary_table:
-            return self
-        if not self.databricks_volume_path:
-            raise ValueError(
-                "DBXCARTA_SUMMARY_VOLUME/DBXCARTA_SUMMARY_TABLE are unset and "
-                "cannot be derived: DATABRICKS_VOLUME_PATH is also unset."
+        if not (self.dbxcarta_summary_volume and self.dbxcarta_summary_table):
+            if not self.databricks_volume_path:
+                raise ValueError(
+                    "DBXCARTA_SUMMARY_VOLUME/DBXCARTA_SUMMARY_TABLE are unset and "
+                    "cannot be derived: DATABRICKS_VOLUME_PATH is also unset."
+                )
+            derived = derive_ops_config(self.databricks_volume_path)
+            self.dbxcarta_summary_volume = (
+                self.dbxcarta_summary_volume or derived.summary_volume
             )
-        derived = derive_ops_config(self.databricks_volume_path)
-        self.dbxcarta_summary_volume = (
-            self.dbxcarta_summary_volume or derived.summary_volume
-        )
-        self.dbxcarta_summary_table = (
-            self.dbxcarta_summary_table or derived.summary_table
-        )
+            self.dbxcarta_summary_table = (
+                self.dbxcarta_summary_table or derived.summary_table
+            )
         return self
 
     @model_validator(mode="after")

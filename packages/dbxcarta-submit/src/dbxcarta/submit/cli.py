@@ -358,11 +358,16 @@ def _handle_bootstrap(argv: list[str]) -> int:
     """
     import argparse
 
-    from dbxcarta.core.env import EnvFileError, load_env_files, resolve_env_files
+    from dbxcarta.core.env import (
+        EnvFileError,
+        load_env_files,
+        read_required_warehouse_id,
+        resolve_env_files,
+    )
     from dbxcarta.core.identifiers import check_not_protected, parse_volume_path
     from dbxcarta.core.workspace import build_workspace_client
 
-    from dbxcarta.submit.uc_admin import ensure_uc_volume, read_required_warehouse_id
+    from dbxcarta.submit.uc_admin import ensure_uc_volume
 
     try:
         files, cleaned_argv = resolve_env_files(argv)
@@ -436,13 +441,17 @@ def _handle_teardown(argv: list[str]) -> int:
     """
     import argparse
 
-    from dbxcarta.core.env import EnvFileError, load_env_files, resolve_env_files
+    from dbxcarta.core.env import (
+        EnvFileError,
+        load_env_files,
+        read_required_warehouse_id,
+        resolve_env_files,
+    )
     from dbxcarta.core.workspace import build_workspace_client
 
     from dbxcarta.submit.uc_admin import (
         drop_teardown_target,
         parse_teardown_targets,
-        read_required_warehouse_id,
     )
 
     try:

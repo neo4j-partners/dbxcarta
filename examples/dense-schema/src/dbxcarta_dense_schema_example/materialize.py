@@ -20,15 +20,13 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from dbxcarta.core.env import read_required_warehouse_id
 from dbxcarta.core.executor import catalog_exists, execute_ddl_blocking
 from dbxcarta.core.identifiers import quote_identifier
-from dbxcarta.core.materialize import MaterializeStats, materialize_schemas
+from dbxcarta.core.materialize import ExecuteFn, MaterializeStats, materialize_schemas
 from dbxcarta.core.workspace import build_workspace_client
 from dbxcarta_dense_schema_example.config import DenseSchemaConfig, load_config
-from dbxcarta_dense_schema_example.utils import (
-    load_dotenv_file,
-    read_required_warehouse_id,
-)
+from dbxcarta_dense_schema_example.utils import load_dotenv_file
 
 if TYPE_CHECKING:
     from databricks.sdk import WorkspaceClient
@@ -110,15 +108,22 @@ def materialize(
             label=f"CREATE CATALOG {config.catalog}",
         )
 
-    def execute(statement: str, label: str) -> None:
-        execute_ddl_blocking(ws, warehouse_id, statement, label=label)
+    def make_execute() -> ExecuteFn:
+        # The Databricks WorkspaceClient is safe for concurrent statement
+        # execution, so every worker shares one closure over it. The factory
+        # seam is the contract: a non-thread-safe runner would return a fresh
+        # per-worker instance here instead.
+        def execute(statement: str, label: str) -> None:
+            execute_ddl_blocking(ws, warehouse_id, statement, label=label)
+
+        return execute
 
     # Dense tolerates a failed table create or row insert (log and continue) so
     # one bad table never aborts a large run, and builds tables in parallel.
     return materialize_schemas(
         schemas,
         catalog=config.catalog,
-        execute=execute,
+        make_execute=make_execute,
         property_prefix="dense",
         workers=workers,
         on_insert_error="skip",

@@ -14,7 +14,6 @@ from dbxcarta.submit.uc_admin import (
     execute_statement,
     parse_teardown_target,
     parse_teardown_targets,
-    read_required_warehouse_id,
 )
 
 
@@ -233,16 +232,3 @@ def test_ensure_uc_volume_raises_when_create_fails() -> None:
     ws = _FakeWorkspaceClient(state=StatementState.FAILED, error_message="boom")
     with pytest.raises(RuntimeError, match="boom"):
         ensure_uc_volume(ws, "wh1", catalog="cat", schema="sch", volume="vol")
-
-
-def test_read_required_warehouse_id_prefers_override() -> None:
-    assert (
-        read_required_warehouse_id("wh-override", operation="bootstrap")
-        == "wh-override"
-    )
-
-
-def test_read_required_warehouse_id_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("DATABRICKS_WAREHOUSE_ID", raising=False)
-    with pytest.raises(ValueError, match="DATABRICKS_WAREHOUSE_ID"):
-        read_required_warehouse_id(None, operation="bootstrap")

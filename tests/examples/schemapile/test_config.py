@@ -3,7 +3,6 @@ from __future__ import annotations
 import pytest
 
 from dbxcarta_schemapile_example.config import load_config
-from dbxcarta_schemapile_example.utils import read_required_warehouse_id
 
 
 def _base_env(tmp_path, **overrides):
@@ -80,18 +79,3 @@ def test_volume_path_requires_env_ops_path(tmp_path):
     del env["DATABRICKS_VOLUME_PATH"]
     with pytest.raises(ValueError, match="DATABRICKS_VOLUME_PATH"):
         load_config(env)
-
-
-def test_read_required_warehouse_id_strips_override(monkeypatch):
-    monkeypatch.setenv("DATABRICKS_WAREHOUSE_ID", "ignored")
-
-    warehouse_id = read_required_warehouse_id(" wh-1 ", operation="test")
-
-    assert warehouse_id == "wh-1"
-
-
-def test_read_required_warehouse_id_rejects_blank_env(monkeypatch):
-    monkeypatch.setenv("DATABRICKS_WAREHOUSE_ID", "   ")
-
-    with pytest.raises(ValueError, match="DATABRICKS_WAREHOUSE_ID"):
-        read_required_warehouse_id(None, operation="test")

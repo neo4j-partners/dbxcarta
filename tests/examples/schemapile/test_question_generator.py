@@ -7,7 +7,6 @@ from dbxcarta_schemapile_example.config import SchemaPileConfig
 from dbxcarta_schemapile_example.question_generator import (
     _build_prompt,
     _first_message_text,
-    _sql_targets_only_catalog,
 )
 
 
@@ -68,37 +67,6 @@ def test_build_prompt_uses_materialized_identifier_names():
     assert "PK(c_9th_id)" in prompt
     assert "product_id -> product_catalog(product_id)" in prompt
     assert "Order Items(" not in prompt
-
-
-def test_sql_targets_only_catalog_accepts_safe_select():
-    sql = (
-        "SELECT * FROM `schemapile_lakehouse`.`sp_shop`.`orders` o "
-        "JOIN `schemapile_lakehouse`.`sp_shop`.`customers` c "
-        "ON o.customer_id = c.id"
-    )
-    assert _sql_targets_only_catalog(sql, "schemapile_lakehouse") is True
-
-
-def test_sql_targets_only_catalog_rejects_unqualified_table():
-    assert _sql_targets_only_catalog("SELECT * FROM orders", "schemapile_lakehouse") is False
-
-
-def test_sql_targets_only_catalog_rejects_other_catalog():
-    sql = "SELECT * FROM `other_catalog`.`sp_shop`.`orders`"
-    assert _sql_targets_only_catalog(sql, "schemapile_lakehouse") is False
-
-
-def test_sql_targets_only_catalog_rejects_multi_statement():
-    sql = (
-        "SELECT * FROM `schemapile_lakehouse`.`sp_shop`.`orders`; "
-        "DROP TABLE `schemapile_lakehouse`.`sp_shop`.`orders`"
-    )
-    assert _sql_targets_only_catalog(sql, "schemapile_lakehouse") is False
-
-
-def test_sql_targets_only_catalog_rejects_non_select():
-    sql = "DELETE FROM `schemapile_lakehouse`.`sp_shop`.`orders`"
-    assert _sql_targets_only_catalog(sql, "schemapile_lakehouse") is False
 
 
 def test_first_message_text_accepts_plain_dict():

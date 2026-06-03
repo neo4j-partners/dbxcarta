@@ -20,6 +20,7 @@ import hashlib
 import json
 import logging
 import re
+import threading
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -34,6 +35,15 @@ logger = logging.getLogger(__name__)
 # An injected SQL runner: ``execute(statement, label)`` runs one statement and
 # raises on any non-success. The label is for logging only.
 ExecuteFn = Callable[[str, str], None]
+
+# A factory that produces an :data:`ExecuteFn`. The spine calls it once for the
+# main thread and once per pool worker, so a single executor instance is never
+# shared across threads. A caller whose underlying resource is already
+# thread-safe (the Databricks ``WorkspaceClient``) returns the same closure each
+# call; a caller backed by a non-thread-safe resource (a DB-API connection or
+# cursor) returns a fresh per-thread one. The concurrency contract is thus
+# enforced by construction rather than assumed of the caller.
+ExecuteFactory = Callable[[], ExecuteFn]
 
 InsertErrorMode = Literal["raise", "skip"]
 TableErrorMode = Literal["raise", "skip"]
@@ -235,7 +245,7 @@ def materialize_schemas(
     schemas: list[dict[str, Any]],
     *,
     catalog: str,
-    execute: ExecuteFn,
+    make_execute: ExecuteFactory,
     property_prefix: str,
     type_map: Mapping[str, str] = DEFAULT_DELTA_TYPE_MAP,
     workers: int = 1,
@@ -253,6 +263,10 @@ def materialize_schemas(
 
     Choices passed in by the example:
 
+    - ``make_execute`` is an :data:`ExecuteFactory`. The schema-create and
+      foreign-key passes run on the calling thread through one executor; in
+      parallel mode each pool worker gets its own executor from the same
+      factory, so an injected SQL runner is never shared across threads.
     - ``property_prefix`` names the ``TBLPROPERTIES`` keys (``<prefix>.source_id``)
       and the schema comment.
     - ``type_map`` is the source-to-Delta type map.
@@ -266,26 +280,41 @@ def materialize_schemas(
     log = log or logger
     stats = MaterializeStats()
     catalog_q = quote_identifier(catalog)
+    # One executor for the calling thread: it runs the schema-create and the
+    # foreign-key second pass, neither of which is parallelized. Workers below
+    # get their own.
+    main_execute = make_execute()
 
     for schema_entry in schemas:
+        missing = [k for k in ("uc_schema", "source_id") if not schema_entry.get(k)]
+        if missing:
+            raise ValueError(
+                f"blueprint schema entry missing required key(s) {missing}:"
+                f" {schema_entry!r}"
+            )
         uc_schema = schema_entry["uc_schema"]
         source_id = schema_entry["source_id"]
         schema_q = quote_identifier(uc_schema)
         log.info("creating schema %s.%s", catalog, uc_schema)
-        execute(
+        main_execute(
             f"CREATE SCHEMA IF NOT EXISTS {catalog_q}.{schema_q}"
             f" COMMENT '{property_prefix} source: {escape_sql_string(source_id)}'",
             f"CREATE SCHEMA {uc_schema}",
         )
-        stats.schemas_created += 1
+        stats = stats + MaterializeStats(schemas_created=1)
 
+        # Serial reuses the main executor; parallel hands each pool thread its
+        # own via the factory so the injected runner is thread-confined.
+        table_execute = (
+            _per_thread_executor(make_execute) if workers > 1 else main_execute
+        )
         tables = schema_entry.get("tables", [])
         materialized: dict[str, _MaterializedTable] = {}
         total = len(tables)
         thunks: list[_BuildFn] = [
             functools.partial(
                 _materialize_table,
-                execute, catalog_q, schema_q, source_id, table,
+                table_execute, catalog_q, schema_q, source_id, table,
                 property_prefix=property_prefix, type_map=type_map,
                 on_insert_error=on_insert_error, log=log, progress=f"{idx}/{total}",
             )
@@ -311,9 +340,31 @@ def materialize_schemas(
                 materialized[result.safe_name] = result
 
         # Second pass: foreign keys, only after every table and its PK exists.
-        stats = stats + _add_foreign_keys(execute, catalog_q, schema_q, materialized, log)
+        stats = stats + _add_foreign_keys(
+            main_execute, catalog_q, schema_q, materialized, log
+        )
 
     return stats
+
+
+def _per_thread_executor(make_execute: ExecuteFactory) -> ExecuteFn:
+    """Wrap a factory so each calling thread lazily gets its own executor.
+
+    The thread pool reuses its threads, so the factory is called at most once
+    per worker thread (not once per table), and the returned executor is only
+    ever touched by the thread that created it. This is the per-thread-resource
+    pattern: it makes the "one executor per worker" contract true by
+    construction instead of trusting the injected runner to be thread-safe.
+    """
+    local = threading.local()
+
+    def execute(statement: str, label: str) -> None:
+        runner: ExecuteFn | None = getattr(local, "runner", None)
+        if runner is None:
+            runner = local.runner = make_execute()
+        runner(statement, label)
+
+    return execute
 
 
 def _collect(

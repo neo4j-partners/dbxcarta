@@ -134,8 +134,10 @@ class ClientSettings(BaseSettings):
         if not self.dbxcarta_embed_endpoint:
             self.dbxcarta_embed_endpoint = self.dbxcarta_embedding_endpoint
         # The ops-side values are one base path with a tail; the shared core
-        # resolver is the single owner of that rule. databricks_volume_path is
-        # required and already validated, so deriving here is always safe.
+        # resolver is the single owner of that rule. Mirrors
+        # ``SparkIngestSettings._resolve_summary_sinks``, except that
+        # databricks_volume_path is required (and already validated non-blank)
+        # here, so deriving is always safe and needs no missing-base guard.
         if not (
             self.dbxcarta_summary_volume
             and self.dbxcarta_summary_table
