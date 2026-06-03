@@ -16,7 +16,7 @@ from databricks.sdk import WorkspaceClient
 
 from dbxcarta.client.compare import compare_result_sets as _compare_result_sets
 from dbxcarta.client.embed import embed_questions as _embed_questions
-from dbxcarta.client.executor import fetch_rows
+from dbxcarta.core.executor import fetch_rows
 from dbxcarta.client.questions import Question
 from dbxcarta.client.settings import ClientSettings
 from dbxcarta.client.sql import parse_sql as _parse_sql

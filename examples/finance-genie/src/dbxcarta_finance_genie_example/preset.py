@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from dbxcarta.spark.presets import StandardPreset
+from dbxcarta.core.presets import StandardPreset
 
 preset = StandardPreset(
     questions_file=Path(__file__).resolve().parents[2] / "questions.json"

@@ -15,7 +15,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from dbxcarta.spark.contract import NodeLabel
-from dbxcarta.spark.databricks import uc_volume_parent, uc_volume_parts
+from dbxcarta.core.identifiers import uc_volume_parent, uc_volume_parts
 
 if TYPE_CHECKING:
     from pyspark.sql import DataFrame

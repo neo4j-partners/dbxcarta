@@ -60,7 +60,7 @@ def _setup(
     catalog: str,
     volume_path: str,
 ) -> None:
-    from dbxcarta.client.executor import execute_ddl, split_sql_statements
+    from dbxcarta.core.executor import execute_ddl, split_sql_statements
 
     raw = _SETUP_SQL.read_text()
     # Backtick-quote the catalog in USE CATALOG (hyphen requires quoting in SQL).
@@ -106,7 +106,7 @@ def _insert_data(
     catalog: str,
     volume_path: str,
 ) -> None:
-    from dbxcarta.client.executor import execute_ddl, split_sql_statements
+    from dbxcarta.core.executor import execute_ddl, split_sql_statements
 
     raw = _INSERT_SQL.read_text()
     sql = raw.replace("USE CATALOG ${catalog}", f"USE CATALOG `{catalog}`").replace("${catalog}", catalog)
@@ -145,7 +145,7 @@ def _teardown(
     warehouse_id: str,
     catalog: str,
 ) -> None:
-    from dbxcarta.client.executor import execute_ddl
+    from dbxcarta.core.executor import execute_ddl
 
     statements = [
         f"DROP SCHEMA IF EXISTS {schema} CASCADE"
@@ -232,8 +232,8 @@ def main() -> None:
         print("ERROR: DATABRICKS_WAREHOUSE_ID is not set.", file=sys.stderr)
         sys.exit(1)
 
-    from dbxcarta.client.executor import preflight_warehouse
-    from dbxcarta.client.databricks import build_workspace_client
+    from dbxcarta.core.executor import preflight_warehouse
+    from dbxcarta.core.workspace import build_workspace_client
 
     ws = build_workspace_client()
     preflight_warehouse(ws, warehouse_id)

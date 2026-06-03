@@ -121,8 +121,8 @@ def _no_workspace(monkeypatch: pytest.MonkeyPatch) -> None:
     # Keep a developer's exported overlay selection from steering the handler:
     # the tests drive env entirely through monkeypatch.setenv below.
     monkeypatch.delenv("DBXCARTA_ENV_FILE", raising=False)
-    monkeypatch.setattr("dbxcarta.spark.env.load_env_files", lambda files: None)
-    monkeypatch.setattr("dbxcarta.spark.databricks.build_workspace_client", _boom)
+    monkeypatch.setattr("dbxcarta.core.env.load_env_files", lambda files: None)
+    monkeypatch.setattr("dbxcarta.core.workspace.build_workspace_client", _boom)
     monkeypatch.setattr("dbxcarta.submit.uc_admin.ensure_uc_volume", _boom)
     monkeypatch.setattr("dbxcarta.submit.uc_admin.drop_teardown_target", _boom)
 

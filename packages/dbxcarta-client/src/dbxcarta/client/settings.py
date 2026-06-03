@@ -3,7 +3,8 @@ from __future__ import annotations
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from dbxcarta.client.databricks import (
+from dbxcarta.core.catalogs import resolve_catalogs
+from dbxcarta.core.identifiers import (
     split_qualified_name,
     validate_identifier,
     validate_serving_endpoint_name,
@@ -72,10 +73,16 @@ class ClientSettings(BaseSettings):
     @field_validator("dbxcarta_catalogs")
     @classmethod
     def _validate_catalogs(cls, v: str) -> str:
-        for part in v.split(","):
-            name = part.strip()
-            if name:
-                validate_identifier(name, label="catalog")
+        """Validate the multi-catalog list through the shared catalog rule.
+
+        Routes through :func:`resolve_catalogs` so the client accepts the same
+        ``catalog`` / ``catalog:layer`` list the pipeline does, stripping the
+        ``:layer`` suffix identically. A blank or separator-only list is the
+        single-catalog fallback and is left untouched, exactly as before.
+        """
+        names = [part.split(":", 1)[0].strip() for part in v.split(",")]
+        if any(names):
+            resolve_catalogs("", v)
         return v
 
     @field_validator("dbxcarta_summary_table")
@@ -126,11 +133,12 @@ class ClientSettings(BaseSettings):
     def resolved_catalogs(self) -> list[str]:
         """Catalogs the graph spans, order-preserving and de-duplicated.
 
-        Falls back to the single dbxcarta_catalog when dbxcarta_catalogs is
-        blank, preserving single-catalog behavior.
+        Delegates to the shared :func:`resolve_catalogs` so the client strips
+        the ``:layer`` suffix and falls back to the single ``dbxcarta_catalog``
+        the same way the pipeline does. This is the fix that unblocks a
+        ``catalog:layer`` client run.
         """
-        listed = [c.strip() for c in self.dbxcarta_catalogs.split(",") if c.strip()]
-        return list(dict.fromkeys(listed)) or [self.dbxcarta_catalog]
+        return resolve_catalogs(self.dbxcarta_catalog, self.dbxcarta_catalogs)
 
     @property
     def schemas_list(self) -> list[str]:

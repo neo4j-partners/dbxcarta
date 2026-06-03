@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
-from dbxcarta.client.databricks import build_workspace_client
+from dbxcarta.core.workspace import build_workspace_client
 from dbxcarta_dense_schema_example.config import DenseSchemaConfig, load_config
 from dbxcarta_dense_schema_example.materialize import _sanitize_name
 from dbxcarta_dense_schema_example.utils import (

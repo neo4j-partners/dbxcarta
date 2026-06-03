@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from dbxcarta.spark.presets import (
+from dbxcarta.core.presets import (
     Preset,
     QuestionsUploadable,
     ReadinessCheckable,

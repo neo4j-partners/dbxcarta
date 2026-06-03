@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from dbxcarta.client.databricks import quote_qualified_name
+from dbxcarta.core.identifiers import quote_qualified_name
 from dbxcarta.client.ids import schema_from_node_id
 
 if TYPE_CHECKING:

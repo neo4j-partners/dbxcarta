@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 from databricks.sdk.service.sql import StatementState
 
-from dbxcarta.client.executor import fetch_rows
+from dbxcarta.core.executor import fetch_rows
 
 
 def _response(

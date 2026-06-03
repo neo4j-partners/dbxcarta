@@ -16,7 +16,7 @@ import argparse
 import os
 import sys
 
-from dbxcarta.client.databricks import build_workspace_client
+from dbxcarta.core.workspace import build_workspace_client
 from dbxcarta.client.embed import embed_questions
 
 _DEFAULT_ENDPOINT = "databricks-gte-large-en"

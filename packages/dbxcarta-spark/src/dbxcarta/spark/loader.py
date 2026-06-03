@@ -5,7 +5,7 @@ from __future__ import annotations
 import importlib
 from typing import cast
 
-from dbxcarta.spark.presets import Preset
+from dbxcarta.core.presets import Preset
 
 
 def load_preset(spec: str) -> Preset:

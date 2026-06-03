@@ -12,39 +12,14 @@ from __future__ import annotations
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings
 
-from dbxcarta.spark.contract import DEFAULT_EMBEDDING_ENDPOINT
-from dbxcarta.spark.databricks import (
+from dbxcarta.core.catalogs import resolve_catalogs
+from dbxcarta.core.identifiers import (
     split_qualified_name,
     validate_identifier,
     validate_serving_endpoint_name,
     validate_uc_volume_subpath,
 )
-
-
-def resolve_catalogs(catalog: str, catalogs: str) -> list[str]:
-    """Catalogs to ingest, order-preserving and de-duplicated.
-
-    The single source of truth for "which catalogs does this run touch".
-    Both the readiness check and the pipeline resolve their catalog set
-    through this one function, so they can never disagree.
-
-    Each entry in ``catalogs`` is ``catalog`` or ``catalog:layer``; the
-    ``:layer`` suffix is stripped here. A blank list falls back to the single
-    ``catalog``, preserving the historical single-catalog behavior. Duplicates
-    are collapsed: a repeated catalog would otherwise double-count extract
-    totals and re-write every node. Every resolved name is validated with the
-    same rule the pipeline uses, so a malformed catalog fails loud wherever the
-    list is resolved.
-    """
-    listed: list[str] = []
-    for part in catalogs.split(","):
-        name = part.split(":", 1)[0].strip()
-        if name:
-            listed.append(name)
-    resolved = list(dict.fromkeys(listed)) or [catalog]
-    for name in resolved:
-        validate_identifier(name, label="catalog")
-    return resolved
+from dbxcarta.spark.contract import DEFAULT_EMBEDDING_ENDPOINT
 
 
 class SparkIngestSettings(BaseSettings):

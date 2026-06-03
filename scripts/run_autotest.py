@@ -43,7 +43,7 @@ def _now_iso() -> str:
 
 
 def _make_ws():
-    from dbxcarta.client.databricks import build_workspace_client
+    from dbxcarta.core.workspace import build_workspace_client
 
     return build_workspace_client()
 
@@ -88,7 +88,7 @@ def run_preflight() -> dict:
         return {"status": "fail", "errors": errors}
 
     try:
-        from dbxcarta.client.executor import preflight_warehouse
+        from dbxcarta.core.executor import preflight_warehouse
 
         ws = _make_ws()
         preflight_warehouse(ws, warehouse_id)

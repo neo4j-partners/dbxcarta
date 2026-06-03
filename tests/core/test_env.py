@@ -1,4 +1,4 @@
-"""Unit tests for `dbxcarta.spark.env.inject_params`."""
+"""Unit tests for `dbxcarta.core.env.inject_params`."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from dbxcarta.spark import env as _bootstrap
+from dbxcarta.core import env as _bootstrap
 
 
 def test_inject_params_overlays_key_value_args(

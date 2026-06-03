@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import contextlib
 import os
+import shutil
 import sys
+from collections.abc import Iterator
+from pathlib import Path
 from typing import TypedDict
 
-from dbxcarta.spark.env import select_overlay_path
+from dbxcarta.core.env import select_overlay_path
 
 from databricks_job_runner import (
     Compute,
@@ -79,6 +83,7 @@ _ENTRYPOINT_PINNED_CLOSURE: dict[str, tuple[str, ...]] = {
 _ENTRYPOINT_SMOKE_IMPORTS: dict[str, tuple[str, ...]] = {
     "ingest": (
         "databricks_job_runner",
+        "dbxcarta.core",
         "neo4j",
         "pydantic",
         "pydantic_core",
@@ -86,6 +91,7 @@ _ENTRYPOINT_SMOKE_IMPORTS: dict[str, tuple[str, ...]] = {
         "dotenv",
     ),
     "client": (
+        "dbxcarta.core",
         "neo4j",
         "pydantic",
         "pydantic_core",
@@ -224,6 +230,50 @@ def _print_help() -> None:
         pass
 
 
+# The entrypoint wheels the runner installs with --no-deps. Each must
+# physically carry ``dbxcarta/core`` because the bootstrap installs a single
+# application wheel by name and has no slot for a separate core wheel.
+_CORE_BUNDLE_PACKAGES: tuple[str, ...] = ("dbxcarta-spark", "dbxcarta-client")
+
+
+@contextlib.contextmanager
+def _core_bundled_into(project_dir: Path) -> Iterator[None]:
+    """Copy the core source into each entrypoint package for the wheel build.
+
+    The runner bootstrap installs one application wheel by name with
+    ``--no-deps`` and cannot resolve or pull a separate ``dbxcarta-core``
+    wheel, so the core modules must ride inside the spark and client wheels.
+    The source stays single in ``dbxcarta-core``: this copies ``dbxcarta/core``
+    into each entrypoint package's ``src/dbxcarta`` only for the duration of the
+    build, then removes it so the working tree is left unchanged. Both
+    entrypoint build backends set ``module-name = "dbxcarta"`` with
+    ``namespace = true``, so the copied ``core`` package is packaged alongside
+    the entrypoint's own modules.
+    """
+    from databricks_job_runner.errors import RunnerError
+
+    root = Path(project_dir)
+    core_src = root / "packages" / "dbxcarta-core" / "src" / "dbxcarta" / "core"
+    if not core_src.is_dir():
+        raise RunnerError(
+            f"core source not found at {core_src}; cannot bundle it into the "
+            "entrypoint wheels"
+        )
+    targets = [
+        root / "packages" / pkg / "src" / "dbxcarta" / "core"
+        for pkg in _CORE_BUNDLE_PACKAGES
+    ]
+    for target in targets:
+        if target.exists():
+            shutil.rmtree(target)
+        shutil.copytree(core_src, target)
+    try:
+        yield
+    finally:
+        for target in targets:
+            shutil.rmtree(target, ignore_errors=True)
+
+
 def _handle_publish_wheels(argv: list[str]) -> int:
     import argparse
 
@@ -245,13 +295,17 @@ def _handle_publish_wheels(argv: list[str]) -> int:
     # their wheel from the fixed Volume path. `upload_all` then ships the
     # runner bootstrap script the SparkPythonTask runs.
     try:
-        for wheel_package in dict.fromkeys(_ENTRYPOINT_WHEEL_PACKAGE.values()):
-            publish_wheel_stable(
-                runner.ws,
-                runner.project_dir,
-                runner.wheel_volume_dir,
-                wheel_package,
-            )
+        # Bundle the core source into each entrypoint package so the built
+        # wheels physically carry dbxcarta/core; the runner bootstrap installs
+        # them with --no-deps and cannot pull a separate core wheel.
+        with _core_bundled_into(runner.project_dir):
+            for wheel_package in dict.fromkeys(_ENTRYPOINT_WHEEL_PACKAGE.values()):
+                publish_wheel_stable(
+                    runner.ws,
+                    runner.project_dir,
+                    runner.wheel_volume_dir,
+                    wheel_package,
+                )
         runner.upload_all()
     except RunnerError as exc:
         print(f"error: {exc}", file=sys.stderr)
@@ -267,12 +321,9 @@ def _handle_bootstrap(argv: list[str]) -> int:
     """
     import argparse
 
-    from dbxcarta.spark.databricks import (
-        build_workspace_client,
-        check_not_protected,
-        parse_volume_path,
-    )
-    from dbxcarta.spark.env import EnvFileError, load_env_files, resolve_env_files
+    from dbxcarta.core.env import EnvFileError, load_env_files, resolve_env_files
+    from dbxcarta.core.identifiers import check_not_protected, parse_volume_path
+    from dbxcarta.core.workspace import build_workspace_client
 
     from dbxcarta.submit.uc_admin import ensure_uc_volume, read_required_warehouse_id
 
@@ -348,8 +399,8 @@ def _handle_teardown(argv: list[str]) -> int:
     """
     import argparse
 
-    from dbxcarta.spark.databricks import build_workspace_client
-    from dbxcarta.spark.env import EnvFileError, load_env_files, resolve_env_files
+    from dbxcarta.core.env import EnvFileError, load_env_files, resolve_env_files
+    from dbxcarta.core.workspace import build_workspace_client
 
     from dbxcarta.submit.uc_admin import (
         drop_teardown_target,

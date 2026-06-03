@@ -8,6 +8,7 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "dbxcarta-client",
+    "dbxcarta-core",
     "dbxcarta-dense-schema-example",
     "dbxcarta-finance-genie-example",
     "dbxcarta-schemapile-example",
@@ -38,6 +39,7 @@ default-groups = ["test", "ci"]
 
 [tool.uv.sources]
 dbxcarta-client = { workspace = true }
+dbxcarta-core = { workspace = true }
 dbxcarta-spark = { workspace = true }
 dbxcarta-submit = { workspace = true }
 dbxcarta-dense-schema-example = { workspace = true }
@@ -47,6 +49,7 @@ dbxcarta-schemapile-example = { workspace = true }
 [tool.uv.workspace]
 members = [
     "packages/dbxcarta-client",
+    "packages/dbxcarta-core",
     "packages/dbxcarta-spark",
     "packages/dbxcarta-submit",
     "examples/dense-schema",

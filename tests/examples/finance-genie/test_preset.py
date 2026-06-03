@@ -5,13 +5,13 @@ from pathlib import Path
 import pytest
 from dotenv import dotenv_values
 
-from dbxcarta.spark.loader import load_preset
-from dbxcarta.spark.presets import (
+from dbxcarta.core.presets import (
     Preset,
     QuestionsUploadable,
     ReadinessCheckable,
     StandardPreset,
 )
+from dbxcarta.spark.loader import load_preset
 from dbxcarta.spark.settings import SparkIngestSettings
 from dbxcarta_finance_genie_example import preset
 

@@ -15,7 +15,7 @@ from enum import Enum
 
 from databricks.sdk import WorkspaceClient
 
-from dbxcarta.spark.databricks import (
+from dbxcarta.core.identifiers import (
     check_not_protected,
     quote_identifier,
     validate_identifier,

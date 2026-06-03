@@ -13,8 +13,8 @@ from dotenv import load_dotenv
 
 from dbxcarta.client import parse_sql
 from dbxcarta.client.compare import compare_result_sets
-from dbxcarta.client.databricks import build_workspace_client
-from dbxcarta.client.executor import fetch_rows, preflight_warehouse
+from dbxcarta.core.executor import fetch_rows, preflight_warehouse
+from dbxcarta.core.workspace import build_workspace_client
 from dbxcarta.client.graph_rag import build_graph_rag_context
 from dbxcarta.client.local_generation import generate_sql_local
 from dbxcarta.client.questions import Question, load_questions

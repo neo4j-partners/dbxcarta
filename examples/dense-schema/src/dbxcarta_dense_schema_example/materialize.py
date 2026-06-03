@@ -18,7 +18,7 @@ from typing import Any
 
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.config import Config
-from dbxcarta.spark.databricks import quote_identifier
+from dbxcarta.core.identifiers import quote_identifier
 from dbxcarta_dense_schema_example.config import DenseSchemaConfig, load_config
 from dbxcarta_dense_schema_example.utils import (
     load_dotenv_file,

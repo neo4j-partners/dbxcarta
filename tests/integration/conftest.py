@@ -31,7 +31,7 @@ def _load_integration_env() -> None:
 
 @pytest.fixture(scope="session")
 def ws(_load_integration_env: None):
-    from dbxcarta.client.databricks import build_workspace_client
+    from dbxcarta.core.workspace import build_workspace_client
 
     return build_workspace_client()
 
@@ -40,7 +40,7 @@ def ws(_load_integration_env: None):
 def neo4j_driver(ws) -> Iterator:
     from neo4j import GraphDatabase
 
-    from dbxcarta.spark.databricks import read_workspace_secret
+    from dbxcarta.core.workspace import read_workspace_secret
 
     scope = os.environ["DATABRICKS_SECRET_SCOPE"]
     driver = GraphDatabase.driver(

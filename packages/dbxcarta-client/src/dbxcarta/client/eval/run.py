@@ -14,11 +14,11 @@ from typing import Any
 
 from databricks.sdk import WorkspaceClient
 
-from dbxcarta.client.databricks import (
-    build_workspace_client,
+from dbxcarta.core.identifiers import (
     quote_qualified_name,
     split_qualified_name,
 )
+from dbxcarta.core.workspace import build_workspace_client
 from dbxcarta.client.eval.arms import (
     _LLM_ARMS,
     _REFERENCE_ARM,
@@ -28,7 +28,7 @@ from dbxcarta.client.eval.arms import (
     _run_llm_arm,
     _run_reference_arm,
 )
-from dbxcarta.client.executor import preflight_warehouse
+from dbxcarta.core.executor import preflight_warehouse
 from dbxcarta.client.questions import (
     is_table_ref as _is_table_ref,
     load_questions as _load_questions,

@@ -3,7 +3,7 @@ from __future__ import annotations
 import sys
 from typing import TYPE_CHECKING
 
-from dbxcarta.spark.env import select_overlay_path
+from dbxcarta.core.env import select_overlay_path
 
 if TYPE_CHECKING:
     from databricks.sdk import WorkspaceClient
@@ -49,7 +49,7 @@ def _load_env(argv: list[str]) -> tuple[list[str] | None, int]:
     Returns ``(cleaned_argv, 0)`` on success, or ``(None, 2)`` after
     printing an :class:`EnvFileError` so the caller returns the code.
     """
-    from dbxcarta.spark.env import EnvFileError, load_env_files, resolve_env_files
+    from dbxcarta.core.env import EnvFileError, load_env_files, resolve_env_files
 
     try:
         env_files, cleaned = resolve_env_files(argv)
@@ -128,11 +128,11 @@ def _handle_preset(argv: list[str]) -> int:
     parser.add_argument("--strict-optional", action="store_true")
     args = parser.parse_args(argv)
 
-    from dbxcarta.spark.loader import load_preset
-    from dbxcarta.spark.presets import (
+    from dbxcarta.core.presets import (
         QuestionsUploadable,
         ReadinessCheckable,
     )
+    from dbxcarta.spark.loader import load_preset
 
     try:
         preset = load_preset(args.spec)
@@ -168,7 +168,7 @@ def _handle_preset(argv: list[str]) -> int:
 
 
 def _build_workspace_client() -> WorkspaceClient:
-    from dbxcarta.spark.databricks import build_workspace_client
+    from dbxcarta.core.workspace import build_workspace_client
 
     return build_workspace_client()
 
@@ -178,7 +178,7 @@ def _build_neo4j_driver(
 ) -> Driver:
     from neo4j import GraphDatabase
 
-    from dbxcarta.spark.databricks import read_workspace_secret
+    from dbxcarta.core.workspace import read_workspace_secret
 
     scope = settings.databricks_secret_scope
     return GraphDatabase.driver(

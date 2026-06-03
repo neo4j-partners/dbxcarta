@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from dbxcarta.spark.databricks import (
+from dbxcarta.core.identifiers import (
     UC_PROTECTED_NAMES,
     check_not_protected,
     parse_volume_path,

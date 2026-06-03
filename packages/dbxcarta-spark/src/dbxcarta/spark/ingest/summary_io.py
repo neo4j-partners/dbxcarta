@@ -12,7 +12,7 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from dbxcarta.spark.databricks import quote_qualified_name
+from dbxcarta.core.identifiers import quote_qualified_name
 from dbxcarta.spark.ingest.summary import RunSummary
 
 if TYPE_CHECKING:

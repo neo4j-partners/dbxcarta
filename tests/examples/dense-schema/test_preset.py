@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from dbxcarta.spark.loader import load_preset
-from dbxcarta.spark.presets import (
+from dbxcarta.core.presets import (
     Preset,
     QuestionsUploadable,
     ReadinessCheckable,
     StandardPreset,
 )
+from dbxcarta.spark.loader import load_preset
 from dbxcarta_dense_schema_example import preset
 
 

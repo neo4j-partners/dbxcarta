@@ -6,7 +6,7 @@ authors = [{ name = "Ryan Knight" }]
 requires-python = ">=3.12"
 dependencies = [
     "dbxcarta-client[graph]",
-    "dbxcarta-spark",
+    "dbxcarta-core",
     "databricks-sdk>=0.40",
     "python-dotenv",
     "orjson",
@@ -27,7 +27,7 @@ build-backend = "uv_build"
 
 [tool.uv.sources]
 dbxcarta-client = { workspace = true }
-dbxcarta-spark = { workspace = true }
+dbxcarta-core = { workspace = true }
 
 [tool.pytest.ini_options]
 addopts = "-m 'not live'"
