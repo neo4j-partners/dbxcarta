@@ -13,8 +13,9 @@ constraint naming, and the `MaterializeStats` tally) live in
 :mod:`dbxcarta.core.materialize`. Type coercion uses the shared default map;
 anything that does not match falls back to STRING, so every table that has
 data lands in UC and downstream evaluation reads it as text where the type was
-ambiguous. This module keeps only what is specific to schemapile: the CLI,
-provisioning the data catalog, and the warehouse executor.
+ambiguous. SQL runs through the shared
+:func:`dbxcarta.core.executor.execute_ddl_blocking` poller. This module keeps
+only what is specific to schemapile: the CLI and provisioning the data catalog.
 """
 
 from __future__ import annotations
@@ -26,7 +27,7 @@ import sys
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
-from dbxcarta.core.executor import catalog_exists, execute_ddl
+from dbxcarta.core.executor import catalog_exists, execute_ddl_blocking
 from dbxcarta.core.identifiers import quote_identifier
 from dbxcarta.core.materialize import MaterializeStats, materialize_schemas
 from dbxcarta.core.workspace import build_workspace_client
@@ -115,14 +116,15 @@ def materialize(
     # accounts CREATE CATALOG fails without a MANAGED LOCATION even with IF NOT
     # EXISTS, so a pre-created (e.g. UI-created) catalog must not be re-created.
     if not catalog_exists(ws, warehouse_id, config.catalog):
-        _execute(
+        execute_ddl_blocking(
             ws, warehouse_id,
             f"CREATE CATALOG IF NOT EXISTS {catalog_q}"
             " COMMENT 'schemapile materialize: data catalog'",
+            label=f"CREATE CATALOG {config.catalog}",
         )
 
     def execute(statement: str, label: str) -> None:
-        _execute(ws, warehouse_id, statement)
+        execute_ddl_blocking(ws, warehouse_id, statement, label=label)
 
     # schemapile walks tables serially (workers=1) and tolerates a failed table
     # create or row insert (log and continue) so one bad table never aborts the
@@ -137,18 +139,6 @@ def materialize(
         on_table_error="skip",
         log=logger,
     )
-
-
-def _execute(ws: "WorkspaceClient", warehouse_id: str, statement: str) -> None:
-    """Run one statement on the warehouse and raise on any non-success.
-
-    Delegates to the shared client executor, so a FAILED or timed-out statement
-    is surfaced as an error instead of being silently counted as a successful
-    materialization.
-    """
-    succeeded, error = execute_ddl(ws, warehouse_id, statement)
-    if not succeeded:
-        raise RuntimeError(f"statement failed ({error}):\n{statement}")
 
 
 if __name__ == "__main__":

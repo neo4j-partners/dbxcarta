@@ -7,6 +7,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from dbxcarta.core.config import derive_ops_config
+
 
 _PROJECT_CATALOGS_BLOCKLIST: frozenset[str] = frozenset({
     "graph-enriched-lakehouse",
@@ -62,10 +64,14 @@ def load_config(env: Mapping[str, str] | None = None) -> DenseSchemaConfig:
             e.get("DENSE_CANDIDATE_CACHE", f".cache/candidates_{table_count}.json")
         ),
         volume_path=volume_path,
-        questions_path=e.get(
-            "DBXCARTA_CLIENT_QUESTIONS",
-            f"{volume_path}/dbxcarta/dense_questions.json",
-        ),
+        # Single core rule for "given the ops volume root, where questions
+        # live"; dense's example-specific filename is the one parameter. The
+        # derived path is computed only when the var is unset, so a malformed
+        # volume_path is not validated on the explicit-value path.
+        questions_path=e.get("DBXCARTA_CLIENT_QUESTIONS")
+        or derive_ops_config(
+            volume_path, questions_filename="dense_questions.json"
+        ).client_questions,
         question_model=e.get(
             "DENSE_QUESTION_MODEL",
             "databricks-meta-llama-3-3-70b-instruct",

@@ -23,6 +23,7 @@ import re
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any, Literal
 
 from dbxcarta.core.identifiers import quote_identifier
@@ -37,6 +38,14 @@ ExecuteFn = Callable[[str, str], None]
 InsertErrorMode = Literal["raise", "skip"]
 TableErrorMode = Literal["raise", "skip"]
 
+# The failure types an injected ``execute`` raises for a warehouse-side error:
+# ``RuntimeError`` for a FAILED/CANCELED statement, ``TimeoutError`` for one
+# that never reached a terminal state. The skip-on-error paths catch exactly
+# these so a genuine warehouse failure is tolerated while a programming error
+# (a malformed spec, a bug) still propagates instead of masquerading as a
+# skipped table.
+_WAREHOUSE_ERRORS = (RuntimeError, TimeoutError)
+
 _CONSTRAINT_NAME_LIMIT = 255
 
 _DECIMAL_RE = re.compile(r"^(?:DECIMAL|NUMERIC|NUMBER|DEC)\s*\((\d+)\s*,\s*(\d+)\)$")
@@ -47,7 +56,7 @@ _NAME_SANITIZE_RE = re.compile(r"[^a-zA-Z0-9_]+")
 # with identical entries, so core owns it as the default. An example overrides
 # it only if its source ever needs different entries; this keeps a single map
 # today without hardcoding that the two sources must always agree.
-DEFAULT_DELTA_TYPE_MAP: Mapping[str, str] = {
+DEFAULT_DELTA_TYPE_MAP: Mapping[str, str] = MappingProxyType({
     "INT": "INT", "INTEGER": "INT", "INT4": "INT",
     "BIGINT": "BIGINT", "INT8": "BIGINT", "LONG": "BIGINT",
     "SMALLINT": "SMALLINT", "TINYINT": "TINYINT", "MEDIUMINT": "INT",
@@ -68,7 +77,7 @@ DEFAULT_DELTA_TYPE_MAP: Mapping[str, str] = {
     "BLOB": "BINARY", "BINARY": "BINARY", "VARBINARY": "BINARY",
     "BYTEA": "BINARY", "JSON": "STRING", "JSONB": "STRING",
     "UUID": "STRING", "ENUM": "STRING", "SET": "STRING",
-}
+})
 
 
 @dataclass
@@ -320,7 +329,7 @@ def _collect(
     """
     try:
         return produce()
-    except Exception as exc:  # noqa: BLE001 - tolerant by request via on_table_error
+    except _WAREHOUSE_ERRORS as exc:
         if on_table_error == "raise":
             raise
         log.error("table failed: %s", exc)
@@ -413,7 +422,7 @@ def _materialize_table(
             try:
                 execute(insert_sql, f"INSERT OVERWRITE {fq}")
                 stats.rows_inserted += len(kept_rows)
-            except Exception as exc:  # noqa: BLE001 - on_insert_error governs this
+            except _WAREHOUSE_ERRORS as exc:
                 if on_insert_error == "raise":
                     raise
                 log.warning("insert failed for %s: %s", fq, exc)
@@ -460,7 +469,7 @@ def _add_primary_key(
                 f"ALTER TABLE {fq} ALTER COLUMN {quote_identifier(col)} SET NOT NULL",
                 f"SET NOT NULL {fq}.{col}",
             )
-        except Exception as exc:  # noqa: BLE001 - tolerant: skip PK, keep the run
+        except _WAREHOUSE_ERRORS as exc:
             log.warning("set not null failed for %s.%s: %s", fq, col, exc)
             return
 
@@ -473,7 +482,7 @@ def _add_primary_key(
             f"ADD PRIMARY KEY {fq}",
         )
         stats.pk_constraints_added += 1
-    except Exception as exc:  # noqa: BLE001 - tolerant: skip PK, keep the run
+    except _WAREHOUSE_ERRORS as exc:
         log.warning("add primary key failed for %s: %s", fq, exc)
 
 
@@ -523,7 +532,7 @@ def _add_foreign_keys(
                     f"ADD FOREIGN KEY {child_fq} -> {parent_fq}",
                 )
                 stats.fk_constraints_added += 1
-            except Exception as exc:  # noqa: BLE001 - tolerant: keep the run
+            except _WAREHOUSE_ERRORS as exc:
                 log.warning(
                     "add foreign key failed for %s -> %s: %s",
                     child_fq, parent_fq, exc,

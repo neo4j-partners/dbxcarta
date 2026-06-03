@@ -12,6 +12,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from dbxcarta.core.config import derive_ops_config
+
 
 _PROJECT_CATALOGS_BLOCKLIST: frozenset[str] = frozenset({
     "graph-enriched-lakehouse",
@@ -130,10 +132,11 @@ def load_config(env: Mapping[str, str] | None = None) -> SchemaPileConfig:
         candidate_limit=int(e.get("SCHEMAPILE_CANDIDATE_LIMIT", "20")),
         catalog=catalog,
         volume_path=volume_path,
-        questions_path=e.get(
-            "DBXCARTA_CLIENT_QUESTIONS",
-            f"{volume_path}/dbxcarta/questions.json",
-        ),
+        # Single core rule for "given the ops volume root, where questions
+        # live". Derived only when the var is unset, so a malformed volume_path
+        # is not validated on the explicit-value path.
+        questions_path=e.get("DBXCARTA_CLIENT_QUESTIONS")
+        or derive_ops_config(volume_path).client_questions,
         question_model=e.get(
             "SCHEMAPILE_QUESTION_MODEL",
             "databricks-meta-llama-3-3-70b-instruct",

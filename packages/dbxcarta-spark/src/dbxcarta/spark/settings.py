@@ -13,7 +13,9 @@ from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings
 
 from dbxcarta.core.catalogs import resolve_catalogs
+from dbxcarta.core.config import derive_ops_config
 from dbxcarta.core.identifiers import (
+    parse_volume_path,
     split_qualified_name,
     validate_identifier,
     validate_serving_endpoint_name,
@@ -63,8 +65,15 @@ class SparkIngestSettings(BaseSettings):
     # within the same (catalog, schema), so listing many schemas produces
     # disjoint subgraphs by design.
     dbxcarta_schemas: str = ""
-    dbxcarta_summary_volume: str
-    dbxcarta_summary_table: str
+    # The ops volume root (/Volumes/<ops_catalog>/<ops_schema>/<volume>) the
+    # summary sinks derive from. Optional today because the overlays still set
+    # the summary fields explicitly; required only once Phase 6 removes them so
+    # derivation must fire. Kept blank in the historical tests that set the
+    # summary fields directly.
+    databricks_volume_path: str = ""
+    # Derivable from databricks_volume_path when blank (see _resolve_summary_sinks).
+    dbxcarta_summary_volume: str = ""
+    dbxcarta_summary_table: str = ""
     # Sample values
     dbxcarta_include_values: bool = True
     dbxcarta_sample_limit: int = 10
@@ -193,12 +202,27 @@ class SparkIngestSettings(BaseSettings):
             out[catalog] = layer
         return out
 
+    @field_validator("databricks_volume_path")
+    @classmethod
+    def _validate_volume_root(cls, v: str) -> str:
+        """Validate the ops volume root, allowing blank (not always supplied)."""
+        if not v.strip():
+            return ""
+        # Validate through the shared core rule (exactly /Volumes/<cat>/<schema>/
+        # <volume>, each part a safe identifier) rather than re-deriving it here.
+        parse_volume_path(v)
+        return v.rstrip("/")
+
     @field_validator("dbxcarta_summary_table")
     @classmethod
     def _validate_summary_table(cls, v: str) -> str:
         """Require summary history to target catalog.schema.table explicitly."""
-        # Persisted run history is a UC artifact, so require an explicit
-        # catalog.schema.table target rather than relying on workspace defaults.
+        # Blank is derived from databricks_volume_path in _resolve_summary_sinks;
+        # the derived value is well-formed by construction, so only validate
+        # input. Persisted run history is a UC artifact, so a supplied target
+        # must be an explicit catalog.schema.table rather than a workspace default.
+        if not v.strip():
+            return ""
         split_qualified_name(v, expected_parts=3, label="summary table")
         return v
 
@@ -206,6 +230,8 @@ class SparkIngestSettings(BaseSettings):
     @classmethod
     def _validate_summary_volume(cls, v: str) -> str:
         """Require a UC Volume subpath for JSON summary output."""
+        if not v.strip():
+            return ""
         return validate_uc_volume_subpath(v, label="DBXCARTA_SUMMARY_VOLUME")
 
     @field_validator("dbxcarta_embedding_batch_tables")
@@ -243,6 +269,32 @@ class SparkIngestSettings(BaseSettings):
     def _validate_embedding_endpoint(cls, v: str) -> str:
         """Reject endpoint names that cannot be safely interpolated into SQL."""
         return validate_serving_endpoint_name(v)
+
+    @model_validator(mode="after")
+    def _resolve_summary_sinks(self) -> "SparkIngestSettings":
+        """Derive the summary volume and table from the ops volume root when unset.
+
+        The shared core resolver is the single owner of the base-plus-tail rule.
+        When both summary fields are supplied (every overlay today, and the
+        historical tests), this returns early and never touches
+        databricks_volume_path, so the change is behavior-neutral until Phase 6
+        removes the explicit values.
+        """
+        if self.dbxcarta_summary_volume and self.dbxcarta_summary_table:
+            return self
+        if not self.databricks_volume_path:
+            raise ValueError(
+                "DBXCARTA_SUMMARY_VOLUME/DBXCARTA_SUMMARY_TABLE are unset and "
+                "cannot be derived: DATABRICKS_VOLUME_PATH is also unset."
+            )
+        derived = derive_ops_config(self.databricks_volume_path)
+        self.dbxcarta_summary_volume = (
+            self.dbxcarta_summary_volume or derived.summary_volume
+        )
+        self.dbxcarta_summary_table = (
+            self.dbxcarta_summary_table or derived.summary_table
+        )
+        return self
 
     @model_validator(mode="after")
     def _validate_feature_coherence(self) -> "SparkIngestSettings":

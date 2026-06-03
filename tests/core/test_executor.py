@@ -6,7 +6,8 @@ from databricks.sdk.service.sql import StatementState
 
 import pytest
 
-from dbxcarta.core.executor import catalog_exists, fetch_rows
+from dbxcarta.core import executor as executor_module
+from dbxcarta.core.executor import catalog_exists, execute_ddl_blocking, fetch_rows
 
 
 def _response(
@@ -130,3 +131,103 @@ def test_catalog_exists_raises_when_listing_fails() -> None:
     ws = _Workspace(_StatementExecution(response, {}))
     with pytest.raises(RuntimeError, match="permission denied"):
         catalog_exists(ws, "warehouse", "dense-schema-example")
+
+
+def _stmt(state, *, statement_id: str | None = "stmt-1", message: str | None = None):
+    error = SimpleNamespace(message=message) if message else None
+    return SimpleNamespace(
+        statement_id=statement_id,
+        status=SimpleNamespace(state=state, error=error),
+    )
+
+
+class _BlockingStatementExecution:
+    """Returns a scripted execute response, then a queue of get responses."""
+
+    def __init__(self, execute_response, get_responses=()):
+        self._execute_response = execute_response
+        self._get_responses = list(get_responses)
+        self.get_calls = 0
+
+    def execute_statement(self, **_kwargs):
+        return self._execute_response
+
+    def get_statement(self, _statement_id: str):
+        self.get_calls += 1
+        return self._get_responses.pop(0)
+
+
+def test_execute_ddl_blocking_succeeds_without_polling(monkeypatch) -> None:
+    monkeypatch.setattr(
+        executor_module, "time", SimpleNamespace(monotonic=lambda: 0.0, sleep=lambda _s: None)
+    )
+    execution = _BlockingStatementExecution(_stmt(StatementState.SUCCEEDED))
+    ws = _Workspace(execution)
+
+    assert execute_ddl_blocking(ws, "warehouse", "CREATE TABLE t") is None
+    assert execution.get_calls == 0
+
+
+def test_execute_ddl_blocking_polls_until_terminal(monkeypatch) -> None:
+    sleeps: list[float] = []
+    monkeypatch.setattr(
+        executor_module,
+        "time",
+        SimpleNamespace(monotonic=lambda: 0.0, sleep=sleeps.append),
+    )
+    execution = _BlockingStatementExecution(
+        _stmt(StatementState.RUNNING),
+        get_responses=[
+            _stmt(StatementState.RUNNING),
+            _stmt(StatementState.SUCCEEDED),
+        ],
+    )
+    ws = _Workspace(execution)
+
+    execute_ddl_blocking(ws, "warehouse", "INSERT OVERWRITE t", poll_interval_sec=3.0)
+
+    assert execution.get_calls == 2
+    assert sleeps == [3.0, 3.0]
+
+
+def test_execute_ddl_blocking_raises_on_failed_statement(monkeypatch) -> None:
+    monkeypatch.setattr(
+        executor_module, "time", SimpleNamespace(monotonic=lambda: 0.0, sleep=lambda _s: None)
+    )
+    execution = _BlockingStatementExecution(
+        _stmt(StatementState.FAILED, message="syntax error")
+    )
+    ws = _Workspace(execution)
+
+    with pytest.raises(RuntimeError, match="syntax error"):
+        execute_ddl_blocking(ws, "warehouse", "CREATE TABLE t", label="CREATE t")
+
+
+def test_execute_ddl_blocking_raises_without_statement_id(monkeypatch) -> None:
+    monkeypatch.setattr(
+        executor_module, "time", SimpleNamespace(monotonic=lambda: 0.0, sleep=lambda _s: None)
+    )
+    execution = _BlockingStatementExecution(
+        _stmt(StatementState.PENDING, statement_id=None)
+    )
+    ws = _Workspace(execution)
+
+    with pytest.raises(RuntimeError, match="no statement id"):
+        execute_ddl_blocking(ws, "warehouse", "CREATE TABLE t")
+
+
+def test_execute_ddl_blocking_times_out(monkeypatch) -> None:
+    # monotonic returns 0 for the start sample, then 1.0 thereafter so the
+    # deadline (start + 0) is immediately exceeded inside the poll loop.
+    ticks = iter([0.0, 1.0, 1.0])
+    monkeypatch.setattr(
+        executor_module,
+        "time",
+        SimpleNamespace(monotonic=lambda: next(ticks), sleep=lambda _s: None),
+    )
+    execution = _BlockingStatementExecution(_stmt(StatementState.RUNNING))
+    ws = _Workspace(execution)
+
+    with pytest.raises(TimeoutError, match="did not complete"):
+        execute_ddl_blocking(ws, "warehouse", "CREATE TABLE t", total_timeout_sec=0.0)
+    assert execution.get_calls == 0

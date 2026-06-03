@@ -1,6 +1,8 @@
 # Fix: foreign keys never became graph edges
 
-Status: code fix complete and unit-tested for `dense-schema` and `schemapile`, and verified end to end live on dense. Re-materialize declared 1000 PK and 1704 FK constraints; the re-ingest carried all 1704 to `fk_edges` and Neo4j `REFERENCES` (was 0); and a 5-question client smoke check confirmed `graph_rag` now separates from the other arms. Remaining: schemapile and finance-genie verification, then commit. See "Live verification (results)" below.
+Status: code fix complete and unit-tested for `dense-schema` and `schemapile`, and verified end to end live on dense. Re-materialize declared 1000 PK and 1704 FK constraints; the re-ingest carried all 1704 to `fk_edges` and Neo4j `REFERENCES` (was 0); and a 5-question client smoke check confirmed `graph_rag` now separates from the other arms. See "Live verification (results)" below.
+
+**Live verification PAUSED (2026-06-03).** The `schemapile_lakehouse`, `dense-schema-example`, and `dbxcarta-catalog.dense-ops` schemas were intentionally cleared for a clean slate, and the project is being migrated into the neocarta repo (see `migrate.md`). The dense fix is committed; the schemapile half of the fix (`examples/schemapile/.../materialize.py`) is still uncommitted but passes its unit tests. Remaining live steps (schemapile re-ingest, finance-genie) are blocked until the migration lands and the fixtures are repopulated — do not start a fresh ingest before then.
 
 ## What was wrong
 
@@ -62,11 +64,13 @@ Once the declared constraints exist, the ingest's declared path emits one edge p
 1. ~~Re-materialize dense.~~ Done: `pks=1000 fks=1704`, 0 warnings.
 2. ~~Re-run ingest and confirm the relationships now flow through.~~ Done: `fk_edges=1704`, Neo4j `REFERENCES=1704`.
 3. ~~Run the client and confirm `graph_rag` separates from `no_context` and `schema_dump`.~~ Done on a 5-question subset: `graph_rag` exec_rate 80% vs `schema_dump` 60% vs `no_context` 0%.
-4. Verify schemapile the same way when its fixture is materialized (regenerate/materialize fixture, re-ingest, confirm `fk_edges`/`REFERENCES`).
-5. Confirm finance-genie is unaffected. It runs against tables that should already carry declared constraints.
-6. Commit the materializer changes (and the client `dbxcarta_client_max_questions` knob).
+4. **[BLOCKED — catalogs cleared + migration in flight]** Verify schemapile the same way when its fixture is materialized (regenerate/materialize fixture, re-ingest, confirm `fk_edges`/`REFERENCES`). The schemapile code fix is done and unit-green; only the live run is parked.
+5. **[BLOCKED — same reason]** Confirm finance-genie is unaffected. It runs against tables that should already carry declared constraints.
+6. Commit the schemapile `materialize.py` change (the dense materializer + client `dbxcarta_client_max_questions` knob are already committed). Hold until it travels into the neocarta layout, or commit in place first — owner's call.
 7. Decide whether to keep `DBXCARTA_CLIENT_MAX_QUESTIONS=5` in the dense overlay (currently set for the smoke check) or reset it to 0 / remove it for the full evaluation.
 8. Optional: address the `criteria`-property warning on declared `REFERENCES` edges (see above).
+
+Loop note (2026-06-03): unit suite for the FK fix re-run green (14 passed: dense + schemapile materialize, client settings). Steps 1–3 done and recorded; steps 4–5 blocked on the migration; steps 6–8 are owner decisions.
 
 ## Test plan
 

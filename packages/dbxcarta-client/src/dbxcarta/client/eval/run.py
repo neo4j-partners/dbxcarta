@@ -38,6 +38,12 @@ from dbxcarta.client.summary import ClientRunSummary
 
 logger = logging.getLogger(__name__)
 
+# Arms whose primary input is the Neo4j graph from Ingest. The graph
+# precondition is gated on one of these being active: a run configured with
+# only no_context/reference arms legitimately never touches the graph, so
+# requiring one would change behavior on a valid in-order path.
+_GRAPH_ARMS = frozenset({"graph_rag", "schema_dump"})
+
 
 def _resolve_staging_table(settings: ClientSettings) -> str:
     parts = split_qualified_name(
@@ -64,6 +70,34 @@ def _preflight(ws: WorkspaceClient, settings: ClientSettings) -> None:
     if any(a in _STAGING_ARMS for a in active_arms) and not settings.dbxcarta_chat_endpoint:
         raise RuntimeError(
             "DBXCARTA_CHAT_ENDPOINT is required for LLM arms but is not set."
+        )
+
+    if any(a in _GRAPH_ARMS for a in active_arms):
+        _assert_graph_populated(settings)
+
+
+def _assert_graph_populated(settings: ClientSettings) -> None:
+    """Confirm Ingest populated the Neo4j graph before a graph-consuming arm runs.
+
+    The Client's primary input is the semantic graph; the graph_rag and
+    schema_dump arms read it. Running them before Ingest otherwise yields empty
+    retrievals and meaningless scores instead of a clear error. Checks for at
+    least one Table node, the unit those arms seed and dump from.
+    """
+    from neo4j import GraphDatabase
+
+    from dbxcarta.client.neo4j_utils import neo4j_credentials
+
+    uri, username, password = neo4j_credentials(settings)
+    with GraphDatabase.driver(uri, auth=(username, password)) as driver:
+        with driver.session() as session:
+            count = session.run("MATCH (t:Table) RETURN count(t) AS c").single()["c"]
+    if count == 0:
+        raise RuntimeError(
+            "Neo4j graph has no Table nodes; run the Ingest job before the "
+            "Client. The graph_rag and schema_dump arms read the ingested "
+            "graph, so an empty graph produces empty retrievals rather than "
+            "scores."
         )
 
 
@@ -180,13 +214,11 @@ def manage_questions(spark: Any, settings: ClientSettings, questions_path: str) 
     """
     from pyspark.sql.types import StringType, StructField, StructType
 
-    parts = settings.dbxcarta_summary_table.split(".")
-    if len(parts) != 3:
-        raise RuntimeError(
-            f"Cannot derive questions table from "
-            f"DBXCARTA_SUMMARY_TABLE={settings.dbxcarta_summary_table!r}. "
-            "Expected catalog.schema.table."
-        )
+    parts = split_qualified_name(
+        settings.dbxcarta_summary_table,
+        expected_parts=3,
+        label="summary table",
+    )
     target_table = f"{parts[0]}.{parts[1]}.client_questions"
 
     questions = _load_questions(questions_path)

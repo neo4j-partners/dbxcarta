@@ -262,6 +262,24 @@ def test_spine_raise_mode_propagates_failed_table_create() -> None:
         )
 
 
+def test_spine_skip_mode_does_not_swallow_non_warehouse_errors() -> None:
+    """skip mode tolerates warehouse failures, not programming errors.
+
+    A non-warehouse exception (here a ValueError standing in for a bug or a
+    malformed spec) must propagate even with on_table_error="skip", rather than
+    being logged as a skipped table and hiding the defect.
+    """
+    def execute(statement: str, _label: str) -> None:
+        if "CREATE TABLE" in statement:
+            raise ValueError("not a warehouse error")
+
+    with pytest.raises(ValueError, match="not a warehouse error"):
+        materialize_schemas(
+            _two_table_schema(), catalog="cat", execute=execute,
+            property_prefix="ex", on_table_error="skip",
+        )
+
+
 def test_spine_skips_pk_when_column_dropped() -> None:
     schemas = [{
         "uc_schema": "s", "source_id": "src",

@@ -54,10 +54,13 @@ _SUMMARY_TABLE_COLUMNS_SQL = """\
 def preflight(spark: "SparkSession", settings: "SparkIngestSettings") -> None:
     """Fail fast on any mis-provisioned dependency.
 
-    Three checks:
+    Four checks:
       1. Catalog + information_schema readable.
-      2. Summary volume + summary table exist (create if not).
-      3. When any embedding flag is on, the endpoint answers a trivial ai_query
+      2. The Materialize stage produced tables (stage precondition: Ingest
+         reads the materialized tables, so an empty catalog means Materialize
+         did not run or wrote nowhere this run can see).
+      3. Summary volume + summary table exist (create if not).
+      4. When any embedding flag is on, the endpoint answers a trivial ai_query
          and returns a vector of the expected dimension.
     """
     from py4j.protocol import Py4JJavaError  # type: ignore[import-untyped]
@@ -68,6 +71,8 @@ def preflight(spark: "SparkSession", settings: "SparkIngestSettings") -> None:
         spark.sql(
             f"SELECT 1 FROM {quote_identifier(catalog)}.information_schema.schemata LIMIT 1"
         ).collect()
+
+    _assert_materialized_tables_exist(spark, settings, catalogs)
 
     parts = parse_volume_path(settings.dbxcarta_summary_volume)
     vol_catalog, vol_schema, vol_name = parts[1], parts[2], parts[3]
@@ -126,4 +131,47 @@ def preflight(spark: "SparkSession", settings: "SparkIngestSettings") -> None:
     logger.info(
         "[dbxcarta] preflight passed: %s information_schema accessible, volume and table ready",
         ", ".join(catalogs),
+    )
+
+
+def _assert_materialized_tables_exist(
+    spark: "SparkSession",
+    settings: "SparkIngestSettings",
+    catalogs: list[str],
+) -> None:
+    """Confirm the Materialize stage left at least one table for Ingest to read.
+
+    Ingest's primary input is the materialized tables; running it before
+    Materialize (or against a catalog that materialized nothing this run can
+    see) otherwise produces a silently empty graph instead of a clear error.
+    The check counts user tables in ``information_schema.tables`` across the
+    resolved catalogs, scoped to the configured schemas when
+    ``DBXCARTA_SCHEMAS`` is set and to all non-system schemas when it is blank
+    (how schemapile runs). Finding one table anywhere in scope is enough; a
+    single ``LIMIT 1`` probe per catalog keeps this O(1), not catalog-scale.
+    """
+    schema_list = [
+        s.strip() for s in settings.dbxcarta_schemas.split(",") if s.strip()
+    ]
+    schema_filter = ""
+    if schema_list:
+        in_list = ", ".join(f"'{s}'" for s in schema_list)
+        schema_filter = f" AND table_schema IN ({in_list})"
+
+    for catalog in catalogs:
+        rows = spark.sql(
+            f"SELECT 1 FROM {quote_identifier(catalog)}.information_schema.tables"
+            f" WHERE table_schema <> 'information_schema'{schema_filter} LIMIT 1"
+        ).take(1)
+        if rows:
+            return
+
+    scope = (
+        f"schemas {schema_list}" if schema_list else "any non-system schema"
+    )
+    raise RuntimeError(
+        f"[dbxcarta] preflight: no tables found in {', '.join(catalogs)}"
+        f" ({scope}). The Materialize stage must run before Ingest: run the"
+        " example's materialize step first so the catalog holds tables to"
+        " ingest."
     )
