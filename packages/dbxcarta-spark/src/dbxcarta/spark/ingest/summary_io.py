@@ -34,12 +34,22 @@ def load_summary_from_volume(
     volume_path: str,
     *,
     run_id: str | None = None,
+    job_name: str = "dbxcarta",
 ) -> dict[str, Any] | None:
     """Load a run summary JSON from a UC Volume (the file emitted by `emit_json`).
 
-    `emit_json` writes `{job_name}_{run_id}_{ts}.json` files. With `run_id`
-    set, filter for that token; otherwise scan newest-first by filename and
-    return the first summary with `status == 'success'`.
+    `emit_json` writes `{job_name}_{run_id}_{ts}.json` files. Every job type
+    (ingest `dbxcarta`, `dbxcarta_materialize`, `dbxcarta_client`) writes into
+    the same shared volume, so selection must be scoped to one `job_name` or a
+    caller asking for an ingest summary can be handed a materialize or client
+    summary that happens to sort first. `job_name` defaults to `"dbxcarta"`,
+    the ingest job that `verify` consumes.
+
+    With `run_id` set, match the exact `{job_name}_{run_id}_` filename token;
+    otherwise scan newest-first by filename and return the first summary whose
+    content has `status == 'success'` and `job_name == job_name`. The content
+    guard is required because `"dbxcarta"` is also a filename prefix of
+    `"dbxcarta_materialize"` and `"dbxcarta_client"`.
 
     Returns the parsed dict, or `None` if no matching file exists. Raises
     `LoadSummaryError` if `run_id` matches multiple files (ambiguity).
@@ -55,7 +65,9 @@ def load_summary_from_volume(
 
     if run_id:
         matched = [
-            e for e in candidates if e.name is not None and e.name.startswith(f"dbxcarta_{run_id}_")
+            e
+            for e in candidates
+            if e.name is not None and e.name.startswith(f"{job_name}_{run_id}_")
         ]
         if not matched:
             return None
@@ -78,7 +90,7 @@ def load_summary_from_volume(
             raise LoadSummaryError(f"summary file has no contents: {entry.name}")
         content = downloaded.contents.read()
         loaded = cast("dict[str, Any]", json.loads(content))
-        if loaded.get("status") == "success":
+        if loaded.get("status") == "success" and loaded.get("job_name") == job_name:
             return loaded
     return None
 
