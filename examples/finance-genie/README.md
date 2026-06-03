@@ -14,14 +14,15 @@ repeat on every change. Each numbered section under [Setup Flow](#setup-flow)
 explains a step in more detail.
 
 ```bash
-# Install dbxcarta and this example preset
+# Install dbxcarta into the workspace virtualenv
 uv sync
+# Install this example preset in editable mode
 uv pip install -e examples/finance-genie/
 
 # Select the Finance Genie overlay for every dbxcarta command
 export DBXCARTA_ENV_FILE=examples/finance-genie/dbxcarta-overlay.env
 
-# Confirm each ingested catalog holds a data schema (section 2 creates them)
+# Confirm each ingested catalog holds a data schema; section 2 creates them
 uv run dbxcarta preset dbxcarta_finance_genie_example:preset --check-ready
 
 # Provision the ops plane: catalog, finance_genie_ops schema, dbxcarta-ops volume
@@ -39,7 +40,9 @@ target rebuilds the wheels from current source and builds the semantic layer, so
 run it first and let it finish, then run `-client`:
 
 ```bash
+# Rebuild the wheels from source, submit ingest, build the semantic layer
 make e2e-finance-genie-ingest
+# Submit the client evaluation once ingest finishes
 make e2e-finance-genie-client
 ```
 
@@ -56,6 +59,7 @@ job finishes, but the actual evaluation scores are in the job's stdout, not in
 the make output. Print them with the run ID the submit step echoes:
 
 ```bash
+# Print the client job's stdout, where the evaluation scores are
 uv run dbxcarta-submit logs <run-id>
 ```
 
@@ -194,7 +198,9 @@ repo root —
 ingest first, then the client evaluation once ingest finishes:
 
 ```bash
+# Rebuild the wheels from source, submit ingest, build the semantic layer
 make e2e-finance-genie-ingest
+# Submit the client evaluation once ingest finishes
 make e2e-finance-genie-client
 ```
 
@@ -217,7 +223,9 @@ Run these commands from the dbxcarta repo unless a step says otherwise.
 ### 1. Install dbxcarta and the example preset
 
 ```bash
+# Install dbxcarta into the workspace virtualenv
 uv sync
+# Install this example preset in editable mode
 uv pip install -e examples/finance-genie/
 ```
 
@@ -255,6 +263,7 @@ sample/embedding flags, client arms). Select it by exporting
 `DBXCARTA_ENV_FILE` once. No root `.env` edit, ever:
 
 ```bash
+# Select the Finance Genie overlay for every dbxcarta command
 export DBXCARTA_ENV_FILE=examples/finance-genie/dbxcarta-overlay.env
 ```
 
@@ -275,6 +284,7 @@ Readiness confirms each ingested catalog (silver and gold) holds at least one
 data schema beyond the auto-created `information_schema` and `default`:
 
 ```bash
+# Confirm each ingested catalog holds at least one data schema
 uv run dbxcarta preset dbxcarta_finance_genie_example:preset --check-ready
 ```
 
@@ -290,6 +300,7 @@ set. `bootstrap` reads the overlay's `DATABRICKS_VOLUME_PATH`, is idempotent, an
 does not create the upstream medallion data catalogs:
 
 ```bash
+# Create the ops catalog, finance_genie_ops schema, and dbxcarta-ops volume
 uv run dbxcarta-submit bootstrap
 ```
 
@@ -305,6 +316,7 @@ run `teardown` (it drops the overlay's `DBXCARTA_TEARDOWN_TARGET`,
 `schema:dbxcarta-catalog.finance_genie_ops`):
 
 ```bash
+# Drop only the finance_genie_ops schema, leaving the shared ops catalog intact
 uv run dbxcarta-submit teardown --yes-i-mean-it
 ```
 

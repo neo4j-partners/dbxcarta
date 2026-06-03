@@ -143,6 +143,7 @@ worklog/
 .mcp.json
 outputs/
 examples/**/.cache/
+.cache/
 docs/proposals/
 
 # docker-tests: throwaway local Neo4j creds (template is .env.example)

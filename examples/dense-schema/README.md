@@ -16,19 +16,23 @@ one-time setup; the two make targets are the loop you repeat on every change.
 The [Setup flow](#setup-flow) section explains each step in more detail.
 
 ```bash
-# Install dbxcarta and this example
+# Install dbxcarta into the workspace virtualenv
 uv sync
+# Install this example package in editable mode
 uv pip install -e examples/dense-schema/
 
-# Configure .env, then bootstrap the ops plane and the data catalog, and
-# materialize the committed blueprint (dense_500) as a serverless Spark job.
-cp examples/dense-schema/.env.sample examples/dense-schema/.env   # edit profile + warehouse
+# Copy the env template, then edit it for your profile and warehouse
+cp examples/dense-schema/.env.sample examples/dense-schema/.env
+# Create the ops plane and the dense-schema-example data catalog
 uv run dbxcarta-submit bootstrap --env-file examples/dense-schema/dbxcarta-overlay.env
+# Stage the committed dense_500 blueprint and run the serverless materialize job
 uv run dbxcarta-submit materialize --env-file examples/dense-schema/dbxcarta-overlay.env
 
-# Select the overlay, then upload the matching question set.
+# Point every dbxcarta command at the dense-schema overlay
 export DBXCARTA_ENV_FILE=examples/dense-schema/dbxcarta-overlay.env
+# Confirm the dense_500 schema and its tables are materialized
 uv run dbxcarta preset dbxcarta_dense_schema_example:preset --check-ready
+# Upload the matching question set to the ops volume
 uv run dbxcarta preset dbxcarta_dense_schema_example:preset --upload-questions
 ```
 
@@ -37,7 +41,9 @@ target rebuilds the wheels from current source and builds the semantic layer, so
 run it first and let it finish, then run `-client`:
 
 ```bash
+# Rebuild the wheels from source, submit ingest, build the semantic layer
 make e2e-dense-schema-ingest
+# Submit the client evaluation once ingest finishes
 make e2e-dense-schema-client
 ```
 
@@ -65,7 +71,9 @@ runs in two make targets from the repo root — ingest first, then the client
 evaluation once ingest finishes:
 
 ```bash
+# Rebuild the wheels from source, submit ingest, build the semantic layer
 make e2e-dense-schema-ingest
+# Submit the client evaluation once ingest finishes
 make e2e-dense-schema-client
 ```
 
@@ -81,7 +89,9 @@ shell. `make help` lists the targets for every example.
 Run these commands from the dbxcarta repo unless a step says otherwise.
 
 ```bash
+# Install dbxcarta into the workspace virtualenv
 uv sync
+# Install this example package in editable mode
 uv pip install -e examples/dense-schema/
 ```
 
@@ -91,6 +101,7 @@ truth, so no generation step is required for a normal run. To regenerate it,
 write a fresh blueprint and commit it over the existing file:
 
 ```bash
+# Regenerate the dense_500 blueprint and write it over the committed file
 uv run dbxcarta-dense-generate --tables 500 \
   --output examples/dense-schema/blueprint/candidates_500.json
 ```
@@ -102,6 +113,7 @@ catalog from the overlay's `DBXCARTA_CATALOG`. It is idempotent, so re-running i
 changes nothing; the `-ingest` make target also runs it first:
 
 ```bash
+# Provision the ops plane and create the dense-schema-example data catalog
 uv run dbxcarta-submit bootstrap --env-file examples/dense-schema/dbxcarta-overlay.env
 ```
 
@@ -112,6 +124,7 @@ Volume, then submits the `dbxcarta-materialize` job, which creates the `dense_50
 schema and its tables in the data catalog that bootstrap already created:
 
 ```bash
+# Stage the blueprint to the volume and run the serverless materialize job
 uv run dbxcarta-submit materialize --env-file examples/dense-schema/dbxcarta-overlay.env
 ```
 
@@ -122,15 +135,20 @@ catalog and dense's ops schema. The shared `dbxcarta-catalog` is left intact for
 the other examples:
 
 ```bash
+# Drop the data catalog and dense's ops schema, leaving the shared catalog intact
 uv run dbxcarta-submit teardown --env-file examples/dense-schema/dbxcarta-overlay.env --yes-i-mean-it
 ```
 
 Then use the preset with the normal dbxcarta operational CLI:
 
 ```bash
+# Confirm the dense_500 schema and its tables are materialized
 uv run dbxcarta preset dbxcarta_dense_schema_example:preset --check-ready
+# Upload the question set to the ops volume
 uv run dbxcarta preset dbxcarta_dense_schema_example:preset --upload-questions
+# Submit the ingest job to build the semantic layer
 uv run dbxcarta-submit submit-entrypoint ingest
+# Submit the client evaluation job
 uv run dbxcarta-submit submit-entrypoint client
 ```
 
