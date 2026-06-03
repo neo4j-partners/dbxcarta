@@ -33,16 +33,19 @@ jobs:
             tests: tests/submit
           - layer: boundary
             package: dbxcarta-spark
-            extra_package: dbxcarta-client
+            extra_package: dbxcarta-client dbxcarta-materialize
             tests: tests/boundary
           - layer: finance-genie
             package: dbxcarta-finance-genie-example
+            extra_package: dbxcarta-spark
             tests: tests/examples/finance-genie
           - layer: schemapile
             package: dbxcarta-schemapile-example
+            extra_package: dbxcarta-spark
             tests: tests/examples/schemapile
           - layer: dense-schema
             package: dbxcarta-dense-schema-example
+            extra_package: dbxcarta-spark
             tests: tests/examples/dense-schema
     steps:
       - name: Check out repository
@@ -70,7 +73,9 @@ jobs:
       - name: Sync package test environment
         run: |
           args="--package ${{ matrix.package }}"
-          [[ -n "${{ matrix.extra_package }}" ]] && args="$args --package ${{ matrix.extra_package }}"
+          for extra_package in ${{ matrix.extra_package }}; do
+            args="$args --package $extra_package"
+          done
           [[ -n "${{ matrix.extras }}" ]] && args="$args --extra ${{ matrix.extras }}"
           uv sync --frozen $args --extra test --no-default-groups
 
