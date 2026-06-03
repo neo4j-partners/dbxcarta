@@ -73,19 +73,15 @@ def execute_statement(ws: WorkspaceClient, warehouse_id: str, statement: str) ->
         raise RuntimeError(f"statement {state}{detail}\n{statement}")
 
 
-def ensure_uc_volume(
-    ws: WorkspaceClient,
-    warehouse_id: str,
-    *,
-    catalog: str,
-    schema: str,
-    volume: str,
-) -> None:
-    """Create the catalog, schema, and volume if missing (idempotent)."""
+def ensure_uc_catalog(ws: WorkspaceClient, warehouse_id: str, *, catalog: str) -> None:
+    """Create the catalog if missing (idempotent).
+
+    Used for both the ops catalog (via :func:`ensure_uc_volume`) and the data
+    catalog named by ``DBXCARTA_CATALOG``, so the protected-name guard and the
+    Default-Storage skip-if-exists handling live in one place.
+    """
     check_not_protected(catalog, label="catalog")
     catalog_q = quote_identifier(catalog)
-    schema_q = quote_identifier(schema)
-    volume_q = quote_identifier(volume)
     # Skip CREATE CATALOG when the catalog already exists: on Default-Storage
     # accounts the statement fails without a MANAGED LOCATION even with IF NOT
     # EXISTS, so a pre-created (e.g. UI-created) catalog must not be re-created.
@@ -96,6 +92,21 @@ def ensure_uc_volume(
             f"CREATE CATALOG IF NOT EXISTS {catalog_q}"
             " COMMENT 'dbxcarta bootstrap: example catalog'",
         )
+
+
+def ensure_uc_volume(
+    ws: WorkspaceClient,
+    warehouse_id: str,
+    *,
+    catalog: str,
+    schema: str,
+    volume: str,
+) -> None:
+    """Create the catalog, schema, and volume if missing (idempotent)."""
+    ensure_uc_catalog(ws, warehouse_id, catalog=catalog)
+    catalog_q = quote_identifier(catalog)
+    schema_q = quote_identifier(schema)
+    volume_q = quote_identifier(volume)
     execute_statement(
         ws,
         warehouse_id,

@@ -199,7 +199,13 @@ def test_spine_materializes_schema_with_constraints(workers: int) -> None:
     assert "CREATE SCHEMA IF NOT EXISTS `cat`.`shop`" in joined
     assert "COMMENT 'ex source: shop_db'" in joined
     assert "INSERT OVERWRITE TABLE `cat`.`shop`.`orders`" in joined
-    assert "ADD CONSTRAINT `pk_orders` PRIMARY KEY" in joined
+    # The primary key is folded into the CREATE: its column carries inline
+    # NOT NULL and the table ends with an inline CONSTRAINT ... PRIMARY KEY
+    # clause, so the former SET-NOT-NULL and ADD-PRIMARY-KEY ALTERs are gone.
+    assert "`id` INT NOT NULL" in joined
+    assert "CONSTRAINT `pk_orders` PRIMARY KEY (`id`)" in joined
+    assert "SET NOT NULL" not in joined
+    assert "ADD CONSTRAINT `pk_" not in joined
     assert "FOREIGN KEY (`customer_id`) REFERENCES `cat`.`shop`.`customers`" in joined
     assert "'ex.source_id' = 'shop_db'" in joined
 

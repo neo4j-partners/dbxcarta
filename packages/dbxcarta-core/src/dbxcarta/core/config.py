@@ -26,17 +26,29 @@ from dbxcarta.core.identifiers import parse_volume_path
 # default below. It stays an argument so one rule serves every example.
 DEFAULT_QUESTIONS_FILENAME = "questions.json"
 
+# The blueprint filename is likewise a per-example choice (dense ships
+# ``candidates_<n>.json``, schemapile ``candidates_random_1000.json``), so it is
+# an argument with a generic default rather than a hardcoded constant. The
+# materialize submit path stages the committed blueprint to this Volume path and
+# the materialize Spark job reads it from there, the way client questions are.
+DEFAULT_BLUEPRINT_FILENAME = "blueprint.json"
+
 # Fixed tails appended to the one base. Kept as constants so the two test
 # surfaces (the resolver unit test and the committed-overlay golden test) assert
 # against one definition rather than two hand-copied literals.
 _VOLUME_SUBDIR = "dbxcarta"
 _RUNS_TAIL = "runs"
+_BLUEPRINT_TAIL = "blueprint"
 _SUMMARY_TABLE_NAME = "dbxcarta_run_summary"
 
 
 @dataclass(frozen=True)
 class DerivedOpsConfig:
     """The ops-side values derived from one volume-path base.
+
+    ``blueprint_volume`` is where the committed materialize blueprint is staged
+    on the ops Volume for the materialize Spark job to read, mirroring
+    ``client_questions``.
 
     ``teardown_schema_target`` is the ``<ops_catalog>.<ops_schema>`` schema half
     of ``DBXCARTA_TEARDOWN_TARGET``. The ``catalog:`` half is the data catalog,
@@ -48,6 +60,7 @@ class DerivedOpsConfig:
     summary_volume: str
     summary_table: str
     client_questions: str
+    blueprint_volume: str
     teardown_schema_target: str
 
 
@@ -55,6 +68,7 @@ def derive_ops_config(
     volume_path: str,
     *,
     questions_filename: str = DEFAULT_QUESTIONS_FILENAME,
+    blueprint_filename: str = DEFAULT_BLUEPRINT_FILENAME,
 ) -> DerivedOpsConfig:
     """Derive the ops-side config from ``DATABRICKS_VOLUME_PATH``.
 
@@ -68,5 +82,6 @@ def derive_ops_config(
         summary_volume=f"{base}/{_VOLUME_SUBDIR}/{_RUNS_TAIL}",
         summary_table=f"{ops_catalog}.{ops_schema}.{_SUMMARY_TABLE_NAME}",
         client_questions=f"{base}/{_VOLUME_SUBDIR}/{questions_filename}",
+        blueprint_volume=f"{base}/{_VOLUME_SUBDIR}/{_BLUEPRINT_TAIL}/{blueprint_filename}",
         teardown_schema_target=f"{ops_catalog}.{ops_schema}",
     )

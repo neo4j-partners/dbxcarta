@@ -174,8 +174,9 @@ def main() -> None:
       entrypoint.
     - `dbxcarta-submit publish-wheels` publishes the stable per-package
       wheels and ships the bootstrap script.
-    - `dbxcarta-submit bootstrap` creates the catalog, schema, and volume the
-      selected overlay names in `DATABRICKS_VOLUME_PATH`.
+    - `dbxcarta-submit bootstrap` creates the data catalog the selected overlay
+      names in `DBXCARTA_CATALOG`, plus the ops catalog, schema, and volume it
+      names in `DATABRICKS_VOLUME_PATH`.
     - `dbxcarta-submit teardown` drops the catalog and/or schema targets the
       selected overlay names in `DBXCARTA_TEARDOWN_TARGET` (comma-separated).
     """
@@ -217,8 +218,9 @@ def _print_help() -> None:
         "  submit-entrypoint {ingest|client}   Submit a wheel entrypoint as a Databricks job.\n"
         "  publish-wheels                      Publish the ingest and client wheels to the\n"
         "                                      stable Volume path and ship the bootstrap script.\n"
-        "  bootstrap                           Create the catalog, schema, and volume named by\n"
-        "                                      the overlay's DATABRICKS_VOLUME_PATH (idempotent).\n"
+        "  bootstrap                           Create the data catalog (DBXCARTA_CATALOG) and the\n"
+        "                                      ops catalog/schema/volume (DATABRICKS_VOLUME_PATH),\n"
+        "                                      idempotent.\n"
         "  teardown                            Drop the catalog/schema targets named by the overlay's\n"
         "                                      DBXCARTA_TEARDOWN_TARGET (needs --yes-i-mean-it).\n"
         "\n"
@@ -340,10 +342,12 @@ def _handle_publish_wheels(argv: list[str]) -> int:
 
 
 def _handle_bootstrap(argv: list[str]) -> int:
-    """Create the catalog/schema/volume named by the overlay's volume path.
+    """Create the data catalog and the ops catalog/schema/volume.
 
-    Runs locally against a SQL warehouse. Idempotent: every object is created
-    only if missing, so the make targets can run it before each ingest.
+    The data catalog comes from ``DBXCARTA_CATALOG``; the ops catalog, schema,
+    and volume come from the overlay's ``DATABRICKS_VOLUME_PATH``. Runs locally
+    against a SQL warehouse. Idempotent: every object is created only if
+    missing, so the make targets can run it before each ingest.
     """
     import argparse
 
@@ -353,9 +357,13 @@ def _handle_bootstrap(argv: list[str]) -> int:
         read_required_warehouse_id,
         resolve_env_files,
     )
-    from dbxcarta.core.identifiers import check_not_protected, parse_volume_path
+    from dbxcarta.core.identifiers import (
+        check_not_protected,
+        parse_volume_path,
+        validate_identifier,
+    )
     from dbxcarta.core.workspace import build_workspace_client
-    from dbxcarta.submit.uc_admin import ensure_uc_volume
+    from dbxcarta.submit.uc_admin import ensure_uc_catalog, ensure_uc_volume
 
     try:
         files, cleaned_argv = resolve_env_files(argv)
@@ -367,8 +375,9 @@ def _handle_bootstrap(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         prog="dbxcarta-submit bootstrap",
         description=(
-            "Create the catalog, schema, and volume named by the overlay's "
-            "DATABRICKS_VOLUME_PATH. Idempotent; safe to run before every ingest."
+            "Create the data catalog (DBXCARTA_CATALOG) and the ops catalog, "
+            "schema, and volume (DATABRICKS_VOLUME_PATH). Idempotent; safe to "
+            "run before every ingest."
         ),
     )
     parser.add_argument("--warehouse-id", default=None, help="Override DATABRICKS_WAREHOUSE_ID.")
@@ -387,18 +396,31 @@ def _handle_bootstrap(argv: list[str]) -> int:
             file=sys.stderr,
         )
         return 2
+    data_catalog = os.environ.get("DBXCARTA_CATALOG", "").strip()
+    if not data_catalog:
+        print(
+            "error: DBXCARTA_CATALOG is not set; select an example overlay "
+            "with --env-file or DBXCARTA_ENV_FILE.",
+            file=sys.stderr,
+        )
+        return 2
     try:
         catalog, schema, volume = parse_volume_path(volume_path)
         # Refuse a protected catalog before the dry-run print, so --dry-run
         # surfaces a typo'd /Volumes/main/... the same way teardown does.
         check_not_protected(catalog, label="catalog")
+        # Validate the data catalog up front too, so a malformed or protected
+        # DBXCARTA_CATALOG fails before any DDL runs and before the dry-run print.
+        validate_identifier(data_catalog, label="data catalog")
+        check_not_protected(data_catalog, label="catalog")
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
     if args.dry_run:
         print(
-            f"[bootstrap] would ensure catalog={catalog} schema={schema} volume={volume}",
+            f"[bootstrap] would ensure data catalog={data_catalog} and "
+            f"ops catalog={catalog} schema={schema} volume={volume}",
             file=sys.stderr,
         )
         return 0
@@ -406,11 +428,15 @@ def _handle_bootstrap(argv: list[str]) -> int:
     try:
         warehouse_id = read_required_warehouse_id(args.warehouse_id, operation="bootstrap")
         ws = build_workspace_client()
+        ensure_uc_catalog(ws, warehouse_id, catalog=data_catalog)
         ensure_uc_volume(ws, warehouse_id, catalog=catalog, schema=schema, volume=volume)
     except (ValueError, RuntimeError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
-    print(f"[bootstrap] ensured {catalog}.{schema}.{volume}", file=sys.stderr)
+    print(
+        f"[bootstrap] ensured data catalog {data_catalog} and {catalog}.{schema}.{volume}",
+        file=sys.stderr,
+    )
     return 0
 
 

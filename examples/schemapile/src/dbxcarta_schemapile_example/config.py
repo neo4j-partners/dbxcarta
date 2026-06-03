@@ -28,6 +28,10 @@ _PROJECT_CATALOGS_BLOCKLIST: frozenset[str] = frozenset(
     }
 )
 
+# The blueprint is committed under the example dir, not generated into .cache,
+# so the default resolves against the package location rather than the cwd.
+_BLUEPRINT_DIR = Path(__file__).resolve().parents[2] / "blueprint"
+
 
 @dataclass(frozen=True)
 class SchemaPileConfig:
@@ -121,7 +125,7 @@ def load_config(env: Mapping[str, str] | None = None) -> SchemaPileConfig:
         require_data=_truthy(e.get("SCHEMAPILE_REQUIRE_DATA", "false")),
         slice_cache=Path(e.get("SCHEMAPILE_SLICE_CACHE", ".cache/slice_random_1000.json")),
         candidate_cache=Path(
-            e.get("SCHEMAPILE_CANDIDATE_CACHE", ".cache/candidates_random_1000.json")
+            e.get("SCHEMAPILE_CANDIDATE_CACHE") or _BLUEPRINT_DIR / "candidates_random_1000.json"
         ),
         candidate_min_tables=int(e.get("SCHEMAPILE_CANDIDATE_MIN_TABLES", "3")),
         candidate_max_tables=int(e.get("SCHEMAPILE_CANDIDATE_MAX_TABLES", "20")),

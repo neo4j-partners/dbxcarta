@@ -93,22 +93,6 @@ def _run_materialize(schemas: list[dict[str, Any]]):
     return ws.statement_execution.statements, stats
 
 
-def test_materialize_emits_primary_key_ddl():
-    statements, stats = _run_materialize(_two_table_schemas())
-    cat = quote_identifier("dbxcarta_data")
-
-    # PK columns are set NOT NULL.
-    assert any(
-        f"ALTER TABLE {cat}.`shop`.`users` ALTER COLUMN `id` SET NOT NULL" in s for s in statements
-    )
-    # PRIMARY KEY constraint is added.
-    assert any(
-        f"ALTER TABLE {cat}.`shop`.`users` ADD CONSTRAINT `pk_users` PRIMARY KEY (`id`)" in s
-        for s in statements
-    )
-    assert stats.pk_constraints_added == 2
-
-
 def test_materialize_emits_foreign_key_ddl_in_second_pass():
     statements, stats = _run_materialize(_two_table_schemas())
     cat = quote_identifier("dbxcarta_data")
@@ -122,10 +106,15 @@ def test_materialize_emits_foreign_key_ddl_in_second_pass():
     )
     assert stats.fk_constraints_added == 1
 
-    # The FK must be emitted only after the parent table's PK exists.
-    parent_pk_idx = next(i for i, s in enumerate(statements) if "ADD CONSTRAINT `pk_users`" in s)
+    # The FK must be emitted only after the parent table (which now carries its
+    # PK inline) is created.
+    parent_create_idx = next(
+        i
+        for i, s in enumerate(statements)
+        if f"CREATE TABLE IF NOT EXISTS {cat}.`shop`.`users`" in s
+    )
     fk_idx = statements.index(fk_stmt)
-    assert fk_idx > parent_pk_idx
+    assert fk_idx > parent_create_idx
 
 
 def test_materialize_skips_fk_when_target_not_materialized():

@@ -23,6 +23,10 @@ _PROJECT_CATALOGS_BLOCKLIST: frozenset[str] = frozenset(
     }
 )
 
+# The blueprint is committed under the example dir, not generated into .cache,
+# so the default resolves against the package location rather than the cwd.
+_BLUEPRINT_DIR = Path(__file__).resolve().parents[2] / "blueprint"
+
 
 @dataclass(frozen=True)
 class DenseSchemaConfig:
@@ -63,7 +67,7 @@ def load_config(env: Mapping[str, str] | None = None) -> DenseSchemaConfig:
         uc_schema=uc_schema,
         seed=int(e.get("DENSE_SEED", "42")),
         candidate_cache=Path(
-            e.get("DENSE_CANDIDATE_CACHE", f".cache/candidates_{table_count}.json")
+            e.get("DENSE_CANDIDATE_CACHE") or _BLUEPRINT_DIR / f"candidates_{table_count}.json"
         ),
         volume_path=volume_path,
         # Single core rule for "given the ops volume root, where questions

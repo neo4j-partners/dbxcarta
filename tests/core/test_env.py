@@ -203,3 +203,32 @@ def test_read_required_warehouse_id_appends_extra_hint(
         _bootstrap.read_required_warehouse_id(
             None, operation="SQL validation", extra_hint="or use --skip-validate"
         )
+
+
+def test_read_materialize_workers_defaults_to_five() -> None:
+    assert _bootstrap.read_materialize_workers({}) == 5
+
+
+def test_read_materialize_workers_blank_uses_default() -> None:
+    assert _bootstrap.read_materialize_workers({"DBXCARTA_MATERIALIZE_WORKERS": "  "}) == 5
+
+
+def test_read_materialize_workers_reads_override() -> None:
+    assert _bootstrap.read_materialize_workers({"DBXCARTA_MATERIALIZE_WORKERS": "8"}) == 8
+
+
+def test_read_materialize_workers_reads_process_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DBXCARTA_MATERIALIZE_WORKERS", "3")
+    assert _bootstrap.read_materialize_workers() == 3
+
+
+def test_read_materialize_workers_rejects_below_one() -> None:
+    with pytest.raises(ValueError, match=">= 1"):
+        _bootstrap.read_materialize_workers({"DBXCARTA_MATERIALIZE_WORKERS": "0"})
+
+
+def test_read_materialize_workers_rejects_non_integer() -> None:
+    with pytest.raises(ValueError, match="must be an integer"):
+        _bootstrap.read_materialize_workers({"DBXCARTA_MATERIALIZE_WORKERS": "many"})

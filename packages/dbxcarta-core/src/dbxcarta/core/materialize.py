@@ -280,9 +280,10 @@ def materialize_schemas(
 
     For each entry in ``schemas`` (each a dict with ``uc_schema``,
     ``source_id``, and ``tables``), creates the schema, creates every table
-    (inserting sample rows and adding the primary key in a first pass), then
-    adds foreign-key constraints in a second pass after all tables exist. The
-    caller is responsible for creating the catalog itself before calling this.
+    (with its primary key folded inline into the CREATE and its sample rows
+    inserted, in a first pass), then adds foreign-key constraints in a second
+    pass after all tables exist. The caller is responsible for creating the
+    catalog itself before calling this.
 
     Choices passed in by the example:
 
@@ -411,7 +412,14 @@ def _materialize_table(
     log: logging.Logger,
     progress: str = "",
 ) -> tuple[_MaterializedTable | None, MaterializeStats]:
-    """Create one table, insert its rows, and add its primary key.
+    """Create one table (with its primary key folded into the CREATE) and insert its rows.
+
+    The primary key is declared inline: its columns carry ``NOT NULL`` and the
+    statement ends with an inline ``CONSTRAINT ... PRIMARY KEY (...)`` clause, so
+    one ``CREATE`` replaces the former create / set-not-null / add-constraint
+    sequence. A key whose columns did not all survive sanitization is dropped
+    (no clause emitted) rather than partially declared. Foreign keys remain a
+    second pass, since they reference tables that may not exist yet.
 
     Returns ``(record, stats)``; ``record`` is ``None`` when the table is
     skipped (unusable name, no columns, no coercible columns, or a tolerated
@@ -442,7 +450,7 @@ def _materialize_table(
         log.warning("skipping table without columns: %s", raw_name)
         return None, stats
 
-    col_defs: list[str] = []
+    typed_cols: list[tuple[str, str]] = []  # (safe column name, Delta type)
     safe_col_names: list[str] = []
     keep_col_mask: list[bool] = []
     for col in columns:
@@ -454,14 +462,30 @@ def _materialize_table(
         delta_type, fellback = coerce_type(raw_type, type_map)
         if fellback:
             stats.type_fallbacks += 1
-        col_defs.append(f"{quote_identifier(safe_col)} {delta_type}")
+        typed_cols.append((safe_col, delta_type))
         safe_col_names.append(safe_col)
         keep_col_mask.append(True)
 
-    if not col_defs:
+    if not typed_cols:
         stats.tables_skipped += 1
         log.warning("skipping table without coercible columns: %s", raw_name)
         return None, stats
+
+    safe_col_set = frozenset(safe_col_names)
+    # Primary key, folded into the CREATE: a valid key declares its columns NOT
+    # NULL and an inline CONSTRAINT clause in the one statement, so UC's
+    # NOT-NULL-before-PK requirement is satisfied without a follow-up ALTER. An
+    # invalid key resolves to no columns, so no clause is emitted.
+    pk_cols = _resolve_primary_key_columns(table.get("primary_keys") or [], safe_col_set)
+    pk_col_set = frozenset(pk_cols)
+    col_defs = [
+        f"{quote_identifier(name)} {delta_type}" + (" NOT NULL" if name in pk_col_set else "")
+        for name, delta_type in typed_cols
+    ]
+    if pk_cols:
+        pk_name = constraint_name("pk", [safe_name])
+        pk_cols_clause = ", ".join(quote_identifier(c) for c in pk_cols)
+        col_defs.append(f"CONSTRAINT {quote_identifier(pk_name)} PRIMARY KEY ({pk_cols_clause})")
 
     fks_json = json.dumps(table.get("foreign_keys") or [])
     pks_json = json.dumps(table.get("primary_keys") or [])
@@ -484,6 +508,10 @@ def _materialize_table(
         log.warning("table create failed for %s: %s", fq, exc)
         return None, MaterializeStats()
     stats.tables_created += 1
+    # The PK landed with the table, since it is part of the CREATE that just
+    # succeeded, so it is counted here rather than after a separate ALTER.
+    if pk_cols:
+        stats.pk_constraints_added += 1
 
     raw_rows = table.get("rows") or []
     if raw_rows:
@@ -502,16 +530,6 @@ def _materialize_table(
                     raise
                 log.warning("insert failed for %s: %s", fq, exc)
 
-    safe_col_set = frozenset(safe_col_names)
-    _add_primary_key(
-        execute,
-        fq,
-        safe_name,
-        table.get("primary_keys") or [],
-        safe_col_set,
-        stats,
-        log,
-    )
     return (
         _MaterializedTable(
             safe_name=safe_name,
@@ -522,48 +540,20 @@ def _materialize_table(
     )
 
 
-def _add_primary_key(
-    execute: ExecuteFn,
-    fq: str,
-    safe_name: str,
-    primary_keys: list[str],
-    column_set: frozenset[str],
-    stats: MaterializeStats,
-    log: logging.Logger,
-) -> None:
-    """Add a PRIMARY KEY constraint, setting its columns NOT NULL first.
+def _resolve_primary_key_columns(primary_keys: list[str], column_set: frozenset[str]) -> list[str]:
+    """Return the sanitized PK columns to fold into the CREATE, or ``[]``.
 
-    UC requires PK columns to be NOT NULL. If any PK column was dropped during
-    sanitization or never landed as a real column, the whole constraint is
-    skipped, since a partial PK would be wrong. Each ALTER is tolerant: a
-    failure logs a warning and continues so one bad table does not abort the run.
+    UC requires PK columns to be NOT NULL, which the inline CREATE declares
+    alongside the constraint. If any PK column was dropped during sanitization
+    or never landed as a real column, the whole key is dropped (an empty list,
+    so no inline clause is emitted), since a partial PK would be wrong. Pure: it
+    decides which columns the caller declares, and runs no SQL.
     """
     safe_pk_cols = [sanitize_identifier(c, prefix="c") for c in primary_keys]
     safe_pk_cols = [c for c in safe_pk_cols if c and c in column_set]
-    if len(safe_pk_cols) != len(primary_keys) or not safe_pk_cols:
-        return
-
-    for col in safe_pk_cols:
-        try:
-            execute(
-                f"ALTER TABLE {fq} ALTER COLUMN {quote_identifier(col)} SET NOT NULL",
-                f"SET NOT NULL {fq}.{col}",
-            )
-        except _WAREHOUSE_ERRORS as exc:
-            log.warning("set not null failed for %s.%s: %s", fq, col, exc)
-            return
-
-    pk_name = constraint_name("pk", [safe_name])
-    cols_clause = ", ".join(quote_identifier(c) for c in safe_pk_cols)
-    try:
-        execute(
-            f"ALTER TABLE {fq} ADD CONSTRAINT {quote_identifier(pk_name)}"
-            f" PRIMARY KEY ({cols_clause})",
-            f"ADD PRIMARY KEY {fq}",
-        )
-        stats.pk_constraints_added += 1
-    except _WAREHOUSE_ERRORS as exc:
-        log.warning("add primary key failed for %s: %s", fq, exc)
+    if not safe_pk_cols or len(safe_pk_cols) != len(primary_keys):
+        return []
+    return safe_pk_cols
 
 
 def _add_foreign_keys(

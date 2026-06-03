@@ -80,107 +80,108 @@ foreign keys second) stays.
 
 ## Fix part 2: run materialize as a Spark job
 
-Ingest and Client already run as Databricks jobs. Materialize joins them. Spark
-plus Delta is the native tool for creating tables and loading data, and the
-cluster runs the SQL, so the client thread pool, the `make_execute` factory, and
-the thread-safety question all go away.
+Ingest and Client already run as Databricks jobs. Materialize joins them, on
+serverless Spark, as its own job. Spark plus Delta is the native tool for
+creating tables and loading data, and the cluster runs the SQL, so the client
+thread pool, the `make_execute` factory, and the thread-safety question all go
+away.
 
 ```
-   AFTER: the compute does the work
+   AFTER: pure planner in core, the Spark shell runs it
 
-   dbxcarta-submit                         Databricks job (Spark)
-   +-------------------+   submit job      +-----------------------------+
-   | stage blueprint   | ----------------> |  driver runs spark.sql()    |
-   | forward overlay   |                   |  CREATE TABLE (+ inline PK) |
-   +-------------------+                   |  INSERT sample rows         |
-                                           |  then FK pass               |
-                                           +-----------------------------+
+   dbxcarta-submit                  Databricks job (serverless Spark)
+   +-----------------+  submit job  +-------------------------------------+
+   | upload blueprint| -----------> |  shell: owns SparkSession + a       |
+   | forward overlay |              |  bounded pool (default 5 workers)   |
+   +-----------------+              |                                     |
+                                    |  core (pure): builds the SQL        |
+                                    |    - CREATE TABLE (+ inline PK)     |
+                                    |    - INSERT sample rows             |
+                                    |    - FK statements (2nd pass)       |
+                                    |  shell: runs it via spark.sql,      |
+                                    |  pools the table creates, skips     |
+                                    |  failures, tallies stats            |
+                                    +-------------------------------------+
 ```
 
-- The driver issues each statement with `spark.sql(...)`. There is one driver
-  thread, so nothing in the client runs in parallel and there is no
-  thread-safety rule to enforce.
-- Core stays Spark-free and SDK-free. The shared spine still takes one injected
-  runner, and the Spark entrypoint supplies `lambda sql, label: spark.sql(sql)`.
-  The factory and the worker count are removed.
-- This matches the rest of the pipeline, which is already job-based.
+- **Core is pure and threadless.** It builds the statements (schema DDL, each
+  table's `CREATE` plus optional `INSERT`, and the FK pass given which tables
+  succeeded). It opens nothing and spawns nothing, so it is trivially testable.
+- **The Spark shell owns concurrency.** It holds the `SparkSession`, runs the
+  statements with `spark.sql`, and pools the independent table creates in a
+  small bounded `ThreadPoolExecutor` (default 5). The pool runs over
+  `SparkSession`, which is thread-safe, so there is no contract on an opaque
+  callable. This is the functional-core / imperative-shell split, and a bounded
+  driver pool is a documented Databricks pattern for concurrent metadata work.
 
-## Open decisions
+## Decisions made
 
-Committing to a Spark job raises real choices. Each has a suggested default;
-the ones marked NEEDS A CALL change behavior or operational shape and want a
-deliberate answer.
+- **Run as a serverless Spark job, on its own.** Serverless needs no cluster
+  sizing and starts fast, which suits a metadata-heavy, data-light task. A
+  standalone job (not a task in a shared DAG) keeps it decoupled and re-runnable;
+  the operator sequences bootstrap, materialize, ingest, client.
+- **The pool lives in the Spark shell; core stays pure.** Core builds SQL, the
+  shell runs and parallelizes it. This removes threads from core entirely.
+- **Bounded driver pool, default 5.** A small `ThreadPoolExecutor` overlaps the
+  per-`CREATE` round trips. The foreign-key pass stays serial and after. The
+  worker count is a tunable.
+- **Blueprint is committed to git and staged to a Volume.** The candidate JSON
+  moves out of `.cache` into a committed example path
+  (`examples/<name>/blueprint/`). Git is the source of truth, and
+  `dbxcarta-submit materialize` uploads it to the ops Volume for the cluster to
+  read, the same way client questions are uploaded.
+  - dense commits cleanly: synthetic, seed-deterministic, 2.3 MB.
+  - schemapile (144 KB): safe to commit with attribution. Every schema in
+    SchemaPile-Perm is permissively licensed (MIT, Apache-2.0, BSD, Unlicense,
+    CC0), there is no share-alike or non-commercial clause, and PII is already
+    imputed upstream. Add a short attribution note and keep the source URLs that
+    the data already carries (see Attribution).
+- **The data catalog is created in bootstrap.** `dbxcarta-submit bootstrap`,
+  which already creates the ops catalog and volume, also creates the data
+  catalog from `DBXCARTA_CATALOG`, carrying over the Default-Storage
+  MANAGED-LOCATION handling and the protected-name guard. The job assumes the
+  catalog exists.
+- **One shared Spark entrypoint, parameterized by the overlay.** Like ingest and
+  client, materialize is a single entrypoint driven by env config, not one copy
+  per example. This reframes materialize as a shared product step configured per
+  example; Blueprint stays the only truly example-specific stage. The four-stage
+  doc wording will be updated to match in the docs phase.
+- **Config surface grows by one tunable.** The blueprint Volume path is derived
+  from `DATABRICKS_VOLUME_PATH` (`{volume}/dbxcarta/blueprint/<filename>`, with
+  the filename a per-example code default, like the questions filename), so it
+  needs no new variable. Add one int, `DBXCARTA_MATERIALIZE_WORKERS` (default 5,
+  validated `>= 1`).
+- **Persist a materialize summary record.** Reuse the existing run-summary sink
+  with `job_name="dbxcarta_materialize"`, so all three stages report run history
+  to one place.
+- **Sample rows: one `INSERT OVERWRITE` per table, via `spark.sql`.** This is one
+  Delta commit per table, not the many-inserts-into-one-table anti-pattern, so
+  there is no small-files problem. It reuses the core `build_insert_statement`
+  and preserves today's let-Delta-cast-the-literal behavior with minimal code. A
+  typed DataFrame write is the more idiomatic Spark load and the upgrade path,
+  but it needs an explicit cast layer for the loosely-typed blueprint values and
+  gives no speed gain at this row count, so it is deferred.
+- **Job output goes through `logging`, not `print`.** The stats line is emitted
+  with `logger.info(...)`.
+- **The warehouse poller stays for bootstrap and teardown.**
+  `execute_ddl_blocking` still serves those local-warehouse paths. Only
+  materialize stops using it.
 
-### 1. How the blueprint reaches the cluster (NEEDS A CALL)
+## Attribution (schemapile blueprint)
 
-The candidate JSON (the Blueprint output) is a local file under `.cache/`
-today. A cluster cannot read the operator's disk.
+The SchemaPile license check is settled: the derived 144 KB slice is safe to
+commit. SchemaPile-Perm contains only permissively licensed schemas (about 92%
+MIT or Apache-2.0, the rest BSD, Unlicense, or CC0), with no share-alike and no
+non-commercial restriction, and it is itself published as a processed derivative
+of those sources. The only obligation is attribution. When committing the
+schemapile blueprint:
 
-- Suggested default: stage it to a UC Volume from `dbxcarta-submit`, the same
-  way client questions are already uploaded, and pass the volume path to the
-  job.
-- Open: which volume. The ops volume root already exists from bootstrap, so a
-  `.../dbxcarta/blueprint/<example>.json` tail is the natural home.
+- Add a short note crediting SchemaPile (https://github.com/amsterdata/schemapile)
+  and stating the file is a curated derivative slice.
+- Keep the per-schema source URLs the SchemaPile data already carries, so
+  provenance back to the original repositories is preserved.
 
-### 2. DDL parallelism on the driver (NEEDS A CALL)
-
-`spark.sql` runs from the driver and is serial unless threaded. Table creation
-is metadata work, so serial is simpler but slower for 500 tables.
-
-- Suggested default: start serial. Measure. It removes all concurrency code.
-- If serial is too slow: a small driver-side thread pool over `spark.sql` is
-  safe, because `SparkSession` is thread-safe by design. The difference from
-  today is that the contract sits on a known Spark type, not an opaque injected
-  callable.
-- Open: accept serial, or keep a bounded driver pool for table creation.
-
-### 3. Who creates the data catalog (NEEDS A CALL)
-
-Today materialize creates the data catalog itself, including the
-Default-Storage MANAGED LOCATION quirk handling.
-
-- Option: move data-catalog creation into `dbxcarta-submit bootstrap`, which
-  already creates the ops catalog and volume, so the job only creates schemas
-  and tables.
-- Suggested default: move it to bootstrap, so the job assumes the catalog
-  exists. This keeps catalog provisioning in one place.
-
-### 4. How sample rows are written
-
-- Suggested default: keep rendering `INSERT` via `spark.sql`, reusing the core
-  `build_insert_statement`. This preserves today's behavior, where a quoted
-  string literal is cast to the column type by Delta.
-- Alternative: build a typed Spark DataFrame and write it. More native, but it
-  needs a source-to-Spark type map and careful handling of the messy schemapile
-  values. Defer unless inserts become a bottleneck.
-
-### 5. Where the entrypoint lives
-
-- Suggested default: a thin Spark entrypoint per example that reads the staged
-  blueprint, builds the `spark.sql` runner, and calls the core spine. The spine
-  stays in `dbxcarta.core.materialize` and stays Spark-free.
-- The warehouse poller `execute_ddl_blocking` stays for bootstrap and teardown,
-  which still run locally against a warehouse. Only materialize stops using it.
-
-### 6. Submit surface and sequencing
-
-- Suggested default: a `dbxcarta-submit materialize` command that stages the
-  blueprint, forwards the overlay as job params, and submits the job. It runs
-  after bootstrap and before ingest.
-
-### 7. Local dev loop
-
-- Materialize is easy to run locally today. As a job, the loop becomes submit
-  and wait.
-- Suggested default: keep the core spine unit-tested with a fake runner, and
-  allow the Spark entrypoint to run against a local `SparkSession` for dev.
-
-### 8. Stats and reporting
-
-- Materialize prints `MaterializeStats` to stderr today. As a job that output
-  lands in job logs.
-- Suggested default: log the stats line in the job. Add a summary record only
-  if run history needs it, matching how ingest and client report.
+dense is unaffected (synthetic, no third-party data).
 
 ## What changes and what stays the same
 
@@ -189,8 +190,11 @@ Changes:
 - `CREATE TABLE` carries inline `NOT NULL` and `PRIMARY KEY`, so the
   SET-NOT-NULL and ADD-PK statements go away.
 - The client thread pool, `make_execute`, and the executor factory are removed.
-- Materialize runs as a Spark job; the cluster runs the SQL.
-- The blueprint is staged to a UC Volume instead of read from local disk.
+- The core spine becomes pure statement builders; the Spark shell runs and pools
+  them.
+- Materialize runs as a serverless Spark job; the cluster runs the SQL.
+- The blueprint is committed to git and uploaded to a UC Volume, instead of read
+  from local disk only.
 
 Stays the same:
 
@@ -198,14 +202,228 @@ Stays the same:
 - The two-phase order: all tables first, then foreign keys.
 - Skip-on-error behavior: a bad table is skipped and the run continues. The
   matrix is just smaller, because there are fewer statements per table.
-- The core spine stays Spark-free and SDK-free, driven by one injected runner.
 
 ## Why this is better than a thread pool plus a docstring
 
-- Thread-safety stops being a written rule passed across a boundary. With the
-  job running the SQL on one driver thread, nothing in the client runs in
-  parallel, so there is nothing to make thread-safe.
+- Thread-safety stops being a written rule on an opaque callable. Core has no
+  threads, and the only pool runs over `SparkSession`, a known thread-safe type,
+  in the Spark shell on the cluster driver.
 - The code that builds SQL gets simpler, because each table is one CREATE plus
   an optional INSERT, not a four-statement sequence with four failure branches.
 - It uses Databricks the way Databricks is meant to be used: the cluster runs
   the work, not a hand-built thread pool in the client.
+
+## Implementation plan (phased, plain English)
+
+The **execution-seam reshape** is a complete cutover: purifying core breaks the
+old per-example shells, so the old path must die in the same move the new Spark
+job replaces it. There is no in-between state where core is reshaped while the
+old shells still drive it, and no "build the new package against the current core
+API, test it, then cut to Spark" two-step, which would rewrite the new package
+twice across the seam change.
+
+But not everything bundled with that reshape actually depends on it. Two
+workstreams touch only the SQL the builders emit and where the blueprint and
+config live, not the threading seam: folding the constraints into `CREATE TABLE`,
+and committing the blueprint plus its config. Both are additive, both carry
+forward into the cutover unchanged, so each lands as its own prep phase before
+it, the same way bootstrap's data-catalog creation does. That leaves the cutover
+as just the irreducible seam reshape and its unavoidable consequences.
+
+Order matters: bootstrap must create the data catalog, the constraints must fold
+into `CREATE TABLE`, and the blueprint must live at its committed path, all
+before the cutover can run end to end. Those are the three prep phases, and they
+land in that order ahead of it.
+
+### Discovery: map the test surface first
+
+Before touching code, inventory every test that exercises the materialize spine
+and the old per-example shells, and decide for each whether it moves, is
+rewritten, or is deleted. The output is a short up-front list, for example:
+
+- `tests/core/test_materialize.py` changes in two steps. The constraint fold
+  (Phase 2) updates its CREATE-table assertions and the failure-matrix cases
+  while core still executes. The cutover (Phase 4) rewrites it into pure SQL-text
+  assertions, since core no longer executes or threads, so the tests then check
+  the statements it builds, not how they ran.
+- A new `tests/materialize/` covers the Spark shell: the bounded pool, the
+  skip-on-error tally, the FK second pass, and the summary record.
+- Tests on the dense and schemapile `materialize.py` shells are deleted with that
+  code in the cutover. (There is no separate `dbxcarta materialize` CLI command;
+  the only entry points are the two example console scripts.)
+- The executor tests stay, because bootstrap and teardown still use
+  `execute_ddl_blocking`.
+
+Each test change lands in the phase that lands its code: the fold's test updates
+in Phase 2, the relocation's in Phase 3, the seam rewrite and new shell tests in
+Phase 4. Doing the inventory once up front means each phase knows its test impact
+instead of discovering it mid-change.
+
+### Phase 1: Bootstrap creates the data catalog (prep, additive) — DONE
+
+What: Extend `dbxcarta-submit bootstrap` so that, alongside the ops catalog and
+volume it already makes, it also creates the data catalog from
+`DBXCARTA_CATALOG`. Carry over the Default-Storage MANAGED-LOCATION handling and
+the protected-name guard it already uses.
+
+Why: The materialize job assumes the data catalog exists, so this prerequisite
+must land before the job can run end to end. It is purely additive and touches
+none of the materialize execution path.
+
+Status: Done. The catalog-create logic was factored out of `ensure_uc_volume`
+into a reusable `ensure_uc_catalog` in `uc_admin.py` (one source for the
+protected-name guard and the Default-Storage skip-if-exists). `_handle_bootstrap`
+now reads `DBXCARTA_CATALOG` (failing loudly if unset), validates it up front,
+creates the data catalog ahead of the ops volume, and reports both in the
+`--dry-run` and success output. Existing unit tests pass unchanged.
+
+### Phase 2: Fold the constraints (prep, additive)
+
+What: In core's `_materialize_table`, build `CREATE TABLE` with inline `NOT NULL`
+on the primary-key columns and an inline `CONSTRAINT ... PRIMARY KEY (...)`
+clause. Delete the separate `SET NOT NULL` and `ADD PRIMARY KEY` execution that
+`_add_primary_key` runs today (the function collapses, since UC's
+NOT-NULL-before-PK requirement is now satisfied inline). The PK-column validity
+check (every PK column survived sanitization, else no key) stays, but now gates
+whether the inline clause is emitted rather than whether a follow-up `ALTER`
+runs. Foreign keys remain a second pass. The failure matrix shrinks from four
+cases to two: `CREATE` (with its inline constraints) fails -> skip the table;
+`INSERT` fails -> skip the rows, keep the table. Update the core materialize
+tests for the new `CREATE` SQL and the smaller matrix.
+
+Note a deliberate behavior shift: today a table whose `ADD PRIMARY KEY` fails
+still lands without its key (`_add_primary_key` is tolerant). After folding, an
+invalid inline PK sinks the whole `CREATE`, so the table is skipped. That is the
+intended design of the fold, not a regression.
+
+Why: This changes only the SQL the builder emits and the error branches around
+the `CREATE` call. It does not touch `materialize_schemas`'s pool or the
+per-thread executor seam, so it lands cleanly on the current client-driven path,
+which keeps running with fewer statements per table. The folded `CREATE` logic
+carries into pure core unchanged in the cutover, so none of this is rework.
+
+Done when: The current client-driven materialize still creates tables, rows, and
+primary keys, now with one `CREATE` per table instead of three statements; core
+tests assert the inline-constraint SQL and the two-case matrix; the suite passes.
+
+Status: Done. `_materialize_table` now resolves the PK columns up front
+(`_resolve_primary_key_columns`, a pure replacement for the deleted
+`_add_primary_key`), declares them `NOT NULL` inline, and appends an inline
+`CONSTRAINT ... PRIMARY KEY (...)` clause to the `CREATE`; `pk_constraints_added`
+is tallied when that `CREATE` succeeds. The separate `SET NOT NULL` / `ADD
+PRIMARY KEY` ALTERs are gone, so the matrix is `CREATE` fails -> skip table,
+`INSERT` fails -> skip rows. Core `test_materialize.py` asserts the inline SQL;
+the obsolete PK-DDL assertions in the example-shell materialize tests (which
+Phase 4 deletes) were removed rather than rewritten. Suite passes apart from a
+pre-existing bootstrap test failure from Phase 1's uncommitted submit changes
+and three live-Databricks integration tests.
+
+### Phase 3: Commit the blueprint and add config (prep, additive)
+
+What: Move the blueprint JSON out of `.cache` into `examples/<name>/blueprint/`,
+keeping the table-count-keyed filename, and point the current example shells at
+the committed location. Derive the Volume path from `DATABRICKS_VOLUME_PATH`
+(`{volume}/dbxcarta/blueprint/<filename>`, the filename a per-example code
+default, like the questions filename), so no new path variable is needed. Add
+`DBXCARTA_MATERIALIZE_WORKERS` (int, default 5, validated `>= 1`) to the config
+surface; the cutover's Spark shell reads it, but it is defined here. Generation
+stays a separate manual step; the committed file is the source of truth.
+
+Why: Both are additive. The committed blueprint just gains a stable home the
+current shells can already read, and the config variable is defined ahead of its
+consumer. Nothing here depends on the seam reshape.
+
+Done when: The blueprint lives at the committed path, the current shells read it
+from there, `DBXCARTA_MATERIALIZE_WORKERS` is defined and validated, and the
+suite passes.
+
+Status: Done. The canonical blueprints were relocated out of `.cache` into the
+committed `examples/<name>/blueprint/`: dense `candidates_500.json` (the
+`table_count=500` default, 2.3 MB, via `git mv` to keep history) and schemapile
+`candidates_random_1000.json` (144 KB, previously under the gitignored
+`examples/schemapile/.cache/`, now committable). Both example configs derive the
+`candidate_cache` default from a new `_BLUEPRINT_DIR` anchored to the package
+location (`Path(__file__).resolve().parents[2] / "blueprint"`) so it resolves
+regardless of cwd; schemapile's `.env`/`.env.sample` `SCHEMAPILE_CANDIDATE_CACHE`
+now points at `blueprint/candidates_random_1000.json`. The Volume path is derived
+in `derive_ops_config` as a new `blueprint_volume` field
+(`{volume}/dbxcarta/blueprint/<filename>`, filename a per-example arg defaulting
+to `DEFAULT_BLUEPRINT_FILENAME`), mirroring `client_questions`, so no new path
+variable is added. `DBXCARTA_MATERIALIZE_WORKERS` (int, default 5, validated
+`>= 1`) is defined in core `env.read_materialize_workers`, the natural shared
+config surface for the Phase 4 materialize Spark shell to consume. New unit tests
+cover the worker reader and the blueprint-path derivation; the suite passes.
+
+Decisions/notes (Phase 3):
+- `DBXCARTA_MATERIALIZE_WORKERS` and `blueprint_volume` were placed in core
+  (`env.py`, `config.py`) since the plan says they are defined here but consumed
+  by the Phase 4 `dbxcarta-materialize` package, which bundles core. Core is
+  SDK/Spark-free and already the shared host+cluster config surface.
+- Generation stays decoupled: the dense generator still writes to
+  `.cache/candidates_<tables>.json`; promoting a freshly generated blueprint into
+  `blueprint/` is the manual commit step. The schemapile select step writes to
+  `candidate_cache`, which now resolves to `blueprint/`, so re-running it
+  regenerates the committed artifact in place.
+- The non-default `.cache/candidates_1000.json` (4.6 MB dense variant) was left
+  in place. The plan blesses only the 2.3 MB default; relocating or removing the
+  1000-table variant is left for the operator to decide.
+
+### Phase 4: The cutover
+
+This is the one move. Everything here lands together, so the repo goes straight
+from the old path to the new one with no broken intermediate state. With the fold
+(Phase 2) and the committed blueprint plus config (Phase 3) already in, this
+phase carries only the seam reshape and its unavoidable consequences.
+
+What:
+
+- **Purify core.** Strip execution and threading out of core: the thread pool in
+  `materialize_schemas`, the `ExecuteFactory`/`ExecuteFn` seam, `make_execute`,
+  and `_per_thread_executor` all go. Core only builds strings: the schema DDL,
+  each table's `CREATE` (with the inline constraints from Phase 2) plus optional
+  `INSERT`, and the FK statements given which tables succeeded.
+- **New `dbxcarta-materialize` package.** A sibling wheel of `dbxcarta-client`
+  and `dbxcarta-spark`, namespace-packaged (`module-name = "dbxcarta"`,
+  `namespace = true`) with core bundled in at publish, and a
+  `dbxcarta-materialize` console script. It owns the `SparkSession`, asks core
+  for the statements, runs them with `spark.sql`, overlaps the independent table
+  creates in a bounded `ThreadPoolExecutor` (default 5, from
+  `DBXCARTA_MATERIALIZE_WORKERS`), runs the FK pass serially after, writes one
+  run-summary record with `job_name="dbxcarta_materialize"`, and logs the stats
+  line with `logger.info`.
+- **Submit as a job.** Add `dbxcarta-submit materialize`: it uploads the
+  committed blueprint to the ops Volume (the way client questions are uploaded),
+  forwards the overlay's `KEY=VALUE` pairs as job parameters, and submits a
+  standalone serverless Spark job running the `dbxcarta-materialize` entrypoint.
+  Wire the entrypoint into the five per-entrypoint registries in
+  `submit/cli.py`: `_ENTRYPOINT_WHEEL_PACKAGE`, `_ENTRYPOINT_CONSOLE_SCRIPT`,
+  `_ENTRYPOINT_PINNED_CLOSURE` (a neo4j-free closure, like the client one),
+  `_ENTRYPOINT_SMOKE_IMPORTS`, and `_ENTRYPOINT_JVM_PROBE_CLASS` (`None`). It uses
+  the shared `runner`, not the ingest runner, so it skips the maven preflight.
+  `publish-wheels` and `_assert_wheel_bundles_core` grow the third package.
+- **Delete the old path.** Remove the per-example `materialize.py` shells (dense
+  and schemapile) and their `dbxcarta-dense-materialize` /
+  `dbxcarta-schemapile-materialize` console scripts. Keep `execute_ddl_blocking`;
+  bootstrap and teardown still use it.
+- **Apply the test moves** decided in Discovery: the core tests become pure
+  SQL-text assertions, the new `tests/materialize/` covers the Spark shell, and
+  the example-shell tests are deleted.
+
+Done when: `dbxcarta-submit materialize --env-file examples/<name>/...` uploads
+the blueprint and runs a serverless job to completion that creates the tables,
+rows, and primary keys and adds the foreign keys; a summary record is written;
+the old shells are gone; and the suite passes against the new shape.
+
+### Phase 5: Attribution and docs
+
+What: Add the SchemaPile attribution note next to the committed schemapile
+blueprint (credit SchemaPile, mark it a curated derivative slice, keep the
+per-schema source URLs). Update the four-stage wording in the docs to describe
+materialize as a shared product step configured per example, with Blueprint as
+the only truly example-specific stage.
+
+Why: Attribution is the one license obligation, and the docs should match the
+new shape.
+
+Done when: The attribution note ships with the blueprint and the docs read
+correctly.

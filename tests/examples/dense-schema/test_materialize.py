@@ -134,17 +134,6 @@ def _two_table_schema() -> list[dict[str, object]]:
     ]
 
 
-def test_materialize_emits_primary_key_ddl() -> None:
-    ws = _FakeWorkspaceClient(catalogs=["dense-schema-example"])
-
-    stats = materialize(ws, "wh1", _dense_config(), _two_table_schema(), workers=1)
-
-    stmts = ws.statement_execution.statements
-    assert any("ALTER TABLE" in s and "ALTER COLUMN `id` SET NOT NULL" in s for s in stmts)
-    assert any("ADD CONSTRAINT `pk_hr_employees` PRIMARY KEY (`id`)" in s for s in stmts)
-    assert stats.pk_constraints_added == 2
-
-
 def test_materialize_emits_foreign_key_ddl_in_second_pass() -> None:
     ws = _FakeWorkspaceClient(catalogs=["dense-schema-example"])
 
