@@ -140,6 +140,8 @@ fabric.properties
 
 worklog/
 .codex/
+# Ephemeral Claude Code scheduled-task locks (sessionId/pid/timestamps).
+.claude/*.lock
 .mcp.json
 outputs/
 examples/**/.cache/

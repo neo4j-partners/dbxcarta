@@ -43,8 +43,6 @@ def sql_targets_only_catalog(sql: str, catalog: str) -> bool:
     if "information_schema" in lowered or re.search(r"\bsystem\s*\.", lowered):
         return False
     target = f"`{catalog.lower()}`"
-    if target not in lowered:
-        return False
     for match in _TABLE_REF_RE.finditer(sql):
         ref = match.group(1).strip()
         if ref.startswith("`"):
