@@ -131,7 +131,22 @@ def test_spark_root_does_not_load_client_eval() -> None:
     assert not leaked, f"Forbidden modules loaded by dbxcarta.spark: {sorted(leaked)}"
 
 
-@pytest.mark.parametrize("layer", ["core", "spark", "client"])
+def test_materialize_root_does_not_load_sibling_layers_or_neo4j() -> None:
+    # dbxcarta.materialize is a sibling of spark and client over core. It owns
+    # the Spark shell, so pyspark is a legitimate dependency, but it must never
+    # reach into either sibling layer or pull in Neo4j.
+    forbidden = {
+        "dbxcarta.spark",
+        "dbxcarta.client",
+        "neo4j",
+    }
+
+    leaked = _matching_modules(_loaded_modules_after("import dbxcarta.materialize"), forbidden)
+
+    assert not leaked, f"Forbidden modules loaded by dbxcarta.materialize: {sorted(leaked)}"
+
+
+@pytest.mark.parametrize("layer", ["core", "spark", "client", "materialize"])
 def test_layer_root_does_not_load_job_runner(layer: str) -> None:
     # The job runner is the dependency the whole split exists to keep out
     # of the core and client closures. Importing either layer must not
@@ -144,7 +159,10 @@ def test_layer_root_does_not_load_job_runner(layer: str) -> None:
     assert not leaked, f"dbxcarta.{layer} loaded the job runner: {sorted(leaked)}"
 
 
-@pytest.mark.parametrize("distribution", ["dbxcarta-core", "dbxcarta-spark", "dbxcarta-client"])
+@pytest.mark.parametrize(
+    "distribution",
+    ["dbxcarta-core", "dbxcarta-spark", "dbxcarta-client", "dbxcarta-materialize"],
+)
 def test_distribution_does_not_require_job_runner(distribution: str) -> None:
     # A module-load check alone would miss a re-declared dependency that
     # is simply never imported at module top level. Guard the published
@@ -156,6 +174,7 @@ def test_source_imports_preserve_layer_boundaries() -> None:
     forbidden_by_layer: dict[str, tuple[str, ...]] = {
         "client": ("dbxcarta.spark",),
         "core": ("dbxcarta.spark", "dbxcarta.client"),
+        "materialize": ("dbxcarta.spark", "dbxcarta.client"),
         "spark": ("dbxcarta.client",),
     }
     violations: list[str] = []

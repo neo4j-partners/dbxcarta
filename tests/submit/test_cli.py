@@ -148,8 +148,10 @@ def test_bootstrap_dry_run_reports_names_without_workspace(
 ) -> None:
     _no_workspace(monkeypatch)
     monkeypatch.setenv("DATABRICKS_VOLUME_PATH", "/Volumes/cat/sch/vol")
+    monkeypatch.setenv("DBXCARTA_CATALOG", "dense_data")
     assert cli._handle_bootstrap(["--dry-run"]) == 0
     err = capsys.readouterr().err
+    assert "data catalog=dense_data" in err
     assert "catalog=cat" in err
     assert "schema=sch" in err
     assert "volume=vol" in err
@@ -160,6 +162,7 @@ def test_bootstrap_dry_run_refuses_protected_catalog(
 ) -> None:
     _no_workspace(monkeypatch)
     monkeypatch.setenv("DATABRICKS_VOLUME_PATH", "/Volumes/main/sch/vol")
+    monkeypatch.setenv("DBXCARTA_CATALOG", "dense_data")
     assert cli._handle_bootstrap(["--dry-run"]) == 2
 
 

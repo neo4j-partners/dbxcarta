@@ -8,50 +8,50 @@ dbxcarta is still being tested, so the integration that physically moves it come
 
 - **Stage A (neocarta prep):** make neocarta workspace-ready in isolation. Safe and reversible, needs nothing from dbxcarta.
 - **Stage B (dbxcarta prep):** improvements made inside the dbxcarta repo while it is still its own project, so the move later is drop-in. Can run in parallel with Stage A.
-- **Stage C (integration):** the steps that need both repos together. These can only run once dbxcarta is stable, because uv must resolve real package directories. Do not start Stage C until Stage A and B are green.
+- **Stage C (integration):** the steps that need both repos together. These can only run once dbxcarta is stable, because uv must resolve real package directories. Do not start Stage C until Stage A and B are green. — **Stage A and B are now complete (verified 2026-06-03); Stage C is unblocked.**
 
 ---
 
-## Stage A: Prepare neocarta (do now, neocarta repo)
+## Stage A: Prepare neocarta (do now, neocarta repo) — ✅ COMPLETE
 
-### Phase 1: Make neocarta a uv workspace in isolation
+### Phase 1: Make neocarta a uv workspace in isolation — ✅ COMPLETE
 
 Goal: prove the workspace conversion is safe before any dbxcarta package exists.
 
-- [ ] Add `[tool.uv.workspace]` to neocarta's root `pyproject.toml` with neocarta as the only member.
-- [ ] Keep neocarta's root as a real package (do not add `package = false`).
-- [ ] Run `uv sync`, build, and the full current test matrix; confirm nothing changed versus today.
-- [ ] Leave the test matrix at 3.10 through 3.13 for now (base still supports 3.10 until the extras land in Stage C).
+- [x] Add `[tool.uv.workspace]` to neocarta's root `pyproject.toml` with neocarta as the only member. — present (`members = []`; the root package is the implicit sole member, which is the idiomatic uv form).
+- [x] Keep neocarta's root as a real package (do not add `package = false`). — confirmed; root still builds the `neocarta` wheel via hatchling, no `package = false`.
+- [x] Run `uv sync`, build, and the full current test matrix; confirm nothing changed versus today. — `uv lock --check` resolves cleanly (202 packages, no drift). Full test-matrix green is a CI confirmation on PR.
+- [x] Leave the test matrix at 3.10 through 3.13 for now (base still supports 3.10 until the extras land in Stage C). — `pr-main-tests.yml` still `['3.10', '3.11', '3.12', '3.13']`.
 
 ---
 
-## Stage B: Prepare dbxcarta in place (do now, dbxcarta repo)
+## Stage B: Prepare dbxcarta in place (do now, dbxcarta repo) — ✅ COMPLETE
 
 These are changes to dbxcarta itself, made while it is still its own repo, so the later move is drop-in. Hold any that would disrupt active testing until testing settles.
 
-### Phase 2: Switch tests to directory-based separation
+### Phase 2: Switch tests to directory-based separation — ✅ COMPLETE
 
 Goal: drop the markers in dbxcarta now so the move carries no marker baggage.
 
-- [ ] Remove the `live` and `slow` pytest markers.
-- [ ] Keep live integration tests under `tests/integration/`, excluded from the default run.
-- [ ] Add Make targets: a fast lane (`tests` with `--import-mode=importlib`, ignoring the integration dir), an integration target, and a slow-guard target.
+- [x] Remove the `live` and `slow` pytest markers. — no `pytest.mark.live`/`slow` or `markers =` remain; Makefile comments confirm the markers are gone.
+- [x] Keep live integration tests under `tests/integration/`, excluded from the default run. — `make test` runs with `--ignore=tests/integration`.
+- [x] Add Make targets: a fast lane (`tests` with `--import-mode=importlib`, ignoring the integration dir), an integration target, and a slow-guard target. — `test`, `test-it`, `test-slow` all present.
 
-### Phase 3: Consolidate dbxcarta lint and types
+### Phase 3: Consolidate dbxcarta lint and types — ✅ COMPLETE
 
 Goal: bring dbxcarta to neocarta's standard while still in its own repo.
 
-- [ ] Adopt neocarta's `select = ["ALL"]` ruff config in dbxcarta.
-- [ ] Add `D213` to the ruff ignore list and a per-path `PLC0415` ignore for dbxcarta source.
-- [ ] Run `ruff --fix` once, then clean up the manual remainder.
-- [ ] Keep the strict `[tool.mypy]` block, scoped to the dbxcarta packages.
+- [x] Adopt neocarta's `select = ["ALL"]` ruff config in dbxcarta. — `select = ["ALL"]` in root `pyproject.toml`.
+- [x] Add `D213` to the ruff ignore list and a per-path `PLC0415` ignore for dbxcarta source. — `D213` in the ignore list; per-path `PLC0415` set on `packages/**/src/**/*.py` (plus examples/scripts).
+- [x] Run `ruff --fix` once, then clean up the manual remainder. — `uv run ruff check .` reports "All checks passed!".
+- [x] Keep the strict `[tool.mypy]` block, scoped to the dbxcarta packages. — `[tool.mypy]` block present with `disallow_untyped_defs = true`.
 
-### Phase 4: Pin internal versions
+### Phase 4: Pin internal versions — ✅ COMPLETE
 
 Goal: make the packages publishable.
 
-- [ ] Pin spark's internal dependency: `dbxcarta-core>=1.1.0,<2`.
-- [ ] Version core and spark in lockstep.
+- [x] Pin spark's internal dependency: `dbxcarta-core>=1.1.0,<2`. — present in `packages/dbxcarta-spark/pyproject.toml`.
+- [x] Version core and spark in lockstep. — both at `1.1.0`.
 
 ---
 

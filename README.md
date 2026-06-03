@@ -29,20 +29,54 @@ canonical architecture reference.
 
 ## Packages
 
-dbxcarta is split into three packages: the Spark and client libraries plus
-the operator-local `dbxcarta-submit` CLI. There is no top-level `dbxcarta`
-import surface; library consumers import the layer they need.
+dbxcarta is split into five packages layered over a shared, Spark-free core.
+`dbxcarta-core` is the foundation. `dbxcarta-spark`, `dbxcarta-client`, and
+`dbxcarta-materialize` are sibling layers that each depend on core but never on
+one another. `dbxcarta-submit` is the operator-local CLI that builds and submits
+the jobs. There is no top-level `dbxcarta` import surface; library consumers
+import the layer they need.
+
+```
+┌───────────────────────────────────────────────────────────────────────────┐
+│ examples/   finance-genie · schemapile · dense-schema                       │
+│ overlay env + preset object                    depend on → client, core     │
+└───────────────────────────────────────────────────────────────────────────┘
+                                     │
+        ┌────────────────────────────┼────────────────────────────┐
+        ▼                            ▼                            ▼
+┌──────────────────────┐  ┌──────────────────────┐  ┌──────────────────────┐
+│ dbxcarta-spark       │  │ dbxcarta-client      │  │ dbxcarta-materialize │
+│ UC ingest to Neo4j   │  │ retrieval + eval     │  │ build demo tables    │
+│ +pyspark +neo4j      │  │ +requests            │  │ +pyspark (shell)     │
+└──────────────────────┘  └──────────────────────┘  └──────────────────────┘
+        │                            │                            │
+        └────────────────────────────┼────────────────────────────┘
+                                     ▼
+┌───────────────────────────────────────────────────────────────────────────┐
+│ dbxcarta-core      Spark-free shared foundation · databricks-sdk only       │
+│ identifiers · catalogs · workspace · executor · presets · env ·             │
+│ materialize (pure SQL builders) · questions · config · volume_io            │
+└───────────────────────────────────────────────────────────────────────────┘
+
+   dbxcarta-submit   operator CLI · depends on core + databricks-job-runner
+                     builds wheels, uploads, and submits the spark / client /
+                     materialize jobs. Runs locally; never on the cluster.
+```
 
 | Capability | Distribution | Import path | Console script |
 |------------|--------------|-------------|----------------|
+| Shared Spark-free foundation: identifiers, the `catalog:layer` rule, workspace/secret access, SQL warehouse runner, preset protocols, env-overlay loader, pure materialize SQL builders | `dbxcarta-core` | `dbxcarta.core` | — |
 | Databricks Spark ingest, graph contract, IDs, validators, verification, preset runner | `dbxcarta-spark` | `dbxcarta.spark` | `dbxcarta`, `dbxcarta-ingest` |
 | Retrieval runtime and Text2SQL eval harness | `dbxcarta-client` | `dbxcarta.client` | `dbxcarta-client`, `dbxcarta-embed-probe` |
+| Serverless Spark job that builds the demo tables from a committed blueprint | `dbxcarta-materialize` | `dbxcarta.materialize` | `dbxcarta-materialize` |
 | Operator CLI to build, upload, and submit Databricks jobs | `dbxcarta-submit` | `dbxcarta.submit` | `dbxcarta-submit` |
 
 **Layer responsibilities:**
 
+- **Core** is the shared bottom layer every other package builds on: identifier and path quoting, the single `catalog:layer` parsing rule, workspace/secret access, the SQL warehouse runner, the preset capability protocols, the `.env` overlay loader, and the pure table-materialize SQL builders. It pulls in only the Databricks SDK, never Spark, Neo4j, or the job runner. The boundaries are enforced by `tests/boundary/test_import_boundaries.py`.
 - **Spark** owns the concrete Unity Catalog ingest implementation, the graph contract, verification, Databricks validators, preset capability protocols, and the `dbxcarta` domain CLI for verify and preset.
 - **Client** owns retrieval primitives and the Text2SQL eval harness.
+- **Materialize** is the serverless Spark job that creates the demo tables: core builds the `CREATE` / `INSERT` / foreign-key SQL as pure strings, and this layer owns the `SparkSession` and the bounded thread pool that runs them.
 - **Submit** owns the operator CLI that builds, uploads, and submits Databricks jobs. It is the only layer that depends on `databricks-job-runner`, runs on the operator's machine, and is never installed on the cluster.
 
 This repository uses a clean boundary cutover. Old top-level imports are deleted
