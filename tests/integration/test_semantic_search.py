@@ -12,10 +12,8 @@ Requires:
 
 from __future__ import annotations
 
-import requests
 import pytest
-
-pytestmark = pytest.mark.live
+import requests
 
 _TOP_K = 10
 _SAMPLE = 5
@@ -55,8 +53,7 @@ def test_embedding_endpoint_returns_correct_dimension(neo4j_driver, ws, run_summ
 
     with neo4j_driver.session() as session:
         row = session.run(
-            "SHOW VECTOR INDEXES YIELD name, options "
-            "WHERE name = 'table_embedding'"
+            "SHOW VECTOR INDEXES YIELD name, options WHERE name = 'table_embedding'"
         ).single()
     assert row is not None, "Vector index 'table_embedding' not found"
     expected_dim = row["options"]["indexConfig"]["vector.dimensions"]
@@ -81,10 +78,12 @@ def test_table_semantic_self_ranking(neo4j_driver, run_summary) -> None:
         pytest.skip("Table embeddings not enabled in the latest run")
 
     with neo4j_driver.session() as session:
-        rows = list(session.run(
-            "MATCH (n:Table) WHERE n.embedding IS NOT NULL "
-            f"RETURN n.id AS id, n.embedding AS vector LIMIT {_SAMPLE}"
-        ))
+        rows = list(
+            session.run(
+                "MATCH (n:Table) WHERE n.embedding IS NOT NULL "
+                f"RETURN n.id AS id, n.embedding AS vector LIMIT {_SAMPLE}"
+            )
+        )
 
     if not rows:
         pytest.skip("No Table nodes with embedding vectors found")
@@ -128,18 +127,22 @@ def test_graph_expansion_from_vector_search(neo4j_driver, run_summary) -> None:
         pytest.skip("No Table nodes with embedding vectors found")
 
     with neo4j_driver.session() as session:
-        top_tables = list(session.run(
-            "CALL db.index.vector.queryNodes('table_embedding', 5, $vec) "
-            "YIELD node RETURN node.id AS id",
-            vec=probe["vector"],
-        ))
+        top_tables = list(
+            session.run(
+                "CALL db.index.vector.queryNodes('table_embedding', 5, $vec) "
+                "YIELD node RETURN node.id AS id",
+                vec=probe["vector"],
+            )
+        )
         assert top_tables, "Vector search returned no Table nodes"
 
         top_id = top_tables[0]["id"]
-        columns = list(session.run(
-            "MATCH (t:Table {id: $id})-[:HAS_COLUMN]->(c:Column) RETURN c.id AS id",
-            id=top_id,
-        ))
+        columns = list(
+            session.run(
+                "MATCH (t:Table {id: $id})-[:HAS_COLUMN]->(c:Column) RETURN c.id AS id",
+                id=top_id,
+            )
+        )
 
     assert columns, (
         f"Graph expansion from Table '{top_id}' returned no Column nodes — "

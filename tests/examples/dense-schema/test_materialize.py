@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from databricks.sdk.service.sql import StatementState
-
 from dbxcarta_dense_schema_example.config import load_config
 from dbxcarta_dense_schema_example.materialize import materialize
 
@@ -20,9 +19,9 @@ class _FakeResult:
 
 class _FakeManifest:
     def __init__(self, columns: list[str]) -> None:
-        self.schema = type("_S", (), {"columns": [
-            type("_C", (), {"name": name})() for name in columns
-        ]})()
+        self.schema = type(
+            "_S", (), {"columns": [type("_C", (), {"name": name})() for name in columns]}
+        )()
 
 
 class _FakeResponse:
@@ -62,10 +61,12 @@ class _FakeWorkspaceClient:
 
 
 def _dense_config():
-    return load_config({
-        "DBXCARTA_CATALOG": "dense-schema-example",
-        "DATABRICKS_VOLUME_PATH": "/Volumes/dbxcarta-catalog/dense-ops/dbxcarta-ops",
-    })
+    return load_config(
+        {
+            "DBXCARTA_CATALOG": "dense-schema-example",
+            "DATABRICKS_VOLUME_PATH": "/Volumes/dbxcarta-catalog/dense-ops/dbxcarta-ops",
+        }
+    )
 
 
 def test_materialize_creates_data_catalog_before_schemas() -> None:
@@ -76,10 +77,7 @@ def test_materialize_creates_data_catalog_before_schemas() -> None:
 
     stmts = ws.statement_execution.statements
     assert stmts[0].startswith("SHOW CATALOGS")
-    assert any(
-        s.startswith("CREATE CATALOG IF NOT EXISTS `dense-schema-example`")
-        for s in stmts
-    )
+    assert any(s.startswith("CREATE CATALOG IF NOT EXISTS `dense-schema-example`") for s in stmts)
 
 
 def test_materialize_skips_create_when_catalog_exists() -> None:
@@ -139,44 +137,27 @@ def _two_table_schema() -> list[dict[str, object]]:
 def test_materialize_emits_primary_key_ddl() -> None:
     ws = _FakeWorkspaceClient(catalogs=["dense-schema-example"])
 
-    stats = materialize(
-        ws, "wh1", _dense_config(), _two_table_schema(), workers=1
-    )
+    stats = materialize(ws, "wh1", _dense_config(), _two_table_schema(), workers=1)
 
     stmts = ws.statement_execution.statements
-    assert any(
-        "ALTER TABLE" in s and "ALTER COLUMN `id` SET NOT NULL" in s
-        for s in stmts
-    )
-    assert any(
-        "ADD CONSTRAINT `pk_hr_employees` PRIMARY KEY (`id`)" in s
-        for s in stmts
-    )
+    assert any("ALTER TABLE" in s and "ALTER COLUMN `id` SET NOT NULL" in s for s in stmts)
+    assert any("ADD CONSTRAINT `pk_hr_employees` PRIMARY KEY (`id`)" in s for s in stmts)
     assert stats.pk_constraints_added == 2
 
 
 def test_materialize_emits_foreign_key_ddl_in_second_pass() -> None:
     ws = _FakeWorkspaceClient(catalogs=["dense-schema-example"])
 
-    stats = materialize(
-        ws, "wh1", _dense_config(), _two_table_schema(), workers=1
-    )
+    stats = materialize(ws, "wh1", _dense_config(), _two_table_schema(), workers=1)
 
     stmts = ws.statement_execution.statements
-    cross_fk = next(
-        s for s in stmts
-        if "ADD CONSTRAINT `fk_hr_tasks__created_by_id`" in s
-    )
+    cross_fk = next(s for s in stmts if "ADD CONSTRAINT `fk_hr_tasks__created_by_id`" in s)
     assert "FOREIGN KEY (`created_by_id`)" in cross_fk
-    assert (
-        "REFERENCES `dense-schema-example`.`dense-1000`.`hr_employees`"
-        " (`id`)" in cross_fk
-    )
+    assert "REFERENCES `dense-schema-example`.`dense-1000`.`hr_employees` (`id`)" in cross_fk
 
     # Self-referential FK on hr_employees is handled in the same pass.
     assert any(
-        "ADD CONSTRAINT `fk_hr_employees__parent_id`" in s
-        and "FOREIGN KEY (`parent_id`)" in s
+        "ADD CONSTRAINT `fk_hr_employees__parent_id`" in s and "FOREIGN KEY (`parent_id`)" in s
         for s in stmts
     )
     assert stats.fk_constraints_added == 2

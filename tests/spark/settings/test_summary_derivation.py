@@ -9,10 +9,9 @@ load fails loudly rather than producing a wrong sink.
 from __future__ import annotations
 
 import pytest
-from pydantic import ValidationError
-
 from dbxcarta.core.config import derive_ops_config
 from dbxcarta.spark.settings import SparkIngestSettings
+from pydantic import ValidationError
 
 _VOLUME = "/Volumes/dbxcarta-catalog/dense-ops/dbxcarta-ops"
 _REQUIRED: dict[str, str] = {

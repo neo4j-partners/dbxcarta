@@ -19,15 +19,15 @@ from dbxcarta.spark.contract import (
 from dbxcarta.spark.ingest.contract_expr import id_expr
 
 if TYPE_CHECKING:
+    from dbxcarta.spark.ingest.fk.common import FKEdge
     from pyspark.sql import DataFrame, SparkSession
     from pyspark.sql.types import StructType
 
-    from dbxcarta.spark.ingest.fk.common import FKEdge
-
 
 def build_database_nodes(
-    spark: "SparkSession", catalogs: "list[str]",
-) -> "DataFrame":
+    spark: SparkSession,
+    catalogs: list[str],
+) -> DataFrame:
     """Build one Database node per ingested catalog.
 
     A single-catalog run passes a one-element list, so the historical
@@ -38,18 +38,20 @@ def build_database_nodes(
     """
     from pyspark.sql import Row
 
-    return spark.createDataFrame([
-        Row(
-            id=generate_id(c),
-            name=c,
-            contract_version=CONTRACT_VERSION,
-            embedding_text=c,
-        )
-        for c in catalogs
-    ])
+    return spark.createDataFrame(
+        [
+            Row(
+                id=generate_id(c),
+                name=c,
+                contract_version=CONTRACT_VERSION,
+                embedding_text=c,
+            )
+            for c in catalogs
+        ]
+    )
 
 
-def build_schema_nodes(schemata_df: "DataFrame") -> "DataFrame":
+def build_schema_nodes(schemata_df: DataFrame) -> DataFrame:
     """Build Schema nodes from information_schema.schemata rows.
 
     Computes `embedding_text` inline (while `catalog_name` is still in
@@ -60,8 +62,7 @@ def build_schema_nodes(schemata_df: "DataFrame") -> "DataFrame":
     from pyspark.sql.functions import col, expr, lit
 
     return (
-        schemata_df
-        .withColumn("id", id_expr("catalog_name", "schema_name"))
+        schemata_df.withColumn("id", id_expr("catalog_name", "schema_name"))
         .withColumn("name", col("schema_name"))
         .withColumn("contract_version", lit(CONTRACT_VERSION))
         .withColumn("embedding_text", expr(EMBEDDING_TEXT_EXPR[NodeLabel.SCHEMA]))
@@ -70,8 +71,9 @@ def build_schema_nodes(schemata_df: "DataFrame") -> "DataFrame":
 
 
 def build_table_nodes(
-    tables_df: "DataFrame", layer_map: "dict[str, str] | None" = None,
-) -> "DataFrame":
+    tables_df: DataFrame,
+    layer_map: dict[str, str] | None = None,
+) -> DataFrame:
     """Build Table nodes from information_schema.tables rows.
 
     Computes `embedding_text` inline (while `table_catalog` / `table_schema`
@@ -88,13 +90,10 @@ def build_table_nodes(
 
     layer_expr = lit(None).cast(StringType())
     for catalog, layer in (layer_map or {}).items():
-        layer_expr = when(col("table_catalog") == catalog, lit(layer)).otherwise(
-            layer_expr
-        )
+        layer_expr = when(col("table_catalog") == catalog, lit(layer)).otherwise(layer_expr)
 
     return (
-        tables_df
-        .withColumn("id", id_expr("table_catalog", "table_schema", "table_name"))
+        tables_df.withColumn("id", id_expr("table_catalog", "table_schema", "table_name"))
         .withColumn("name", col("table_name"))
         .withColumn("catalog", col("table_catalog"))
         .withColumn("schema", col("table_schema"))
@@ -102,14 +101,22 @@ def build_table_nodes(
         .withColumn("contract_version", lit(CONTRACT_VERSION))
         .withColumn("embedding_text", expr(EMBEDDING_TEXT_EXPR[NodeLabel.TABLE]))
         .select(
-            "id", "name", "catalog", "schema", "layer", "comment",
-            "table_type", "created", "last_altered", "contract_version",
+            "id",
+            "name",
+            "catalog",
+            "schema",
+            "layer",
+            "comment",
+            "table_type",
+            "created",
+            "last_altered",
+            "contract_version",
             "embedding_text",
         )
     )
 
 
-def build_column_nodes(columns_df: "DataFrame") -> "DataFrame":
+def build_column_nodes(columns_df: DataFrame) -> DataFrame:
     """Build Column nodes from information_schema.columns rows.
 
     Converts Databricks YES/NO nullability strings into booleans while
@@ -124,8 +131,9 @@ def build_column_nodes(columns_df: "DataFrame") -> "DataFrame":
     from pyspark.sql.functions import col, expr, lit, when
 
     return (
-        columns_df
-        .withColumn("id", id_expr("table_catalog", "table_schema", "table_name", "column_name"))
+        columns_df.withColumn(
+            "id", id_expr("table_catalog", "table_schema", "table_name", "column_name")
+        )
         .withColumn("name", col("column_name"))
         .withColumn("catalog", col("table_catalog"))
         .withColumn("schema", col("table_schema"))
@@ -137,14 +145,22 @@ def build_column_nodes(columns_df: "DataFrame") -> "DataFrame":
         .withColumn("contract_version", lit(CONTRACT_VERSION))
         .withColumn("embedding_text", expr(EMBEDDING_TEXT_EXPR[NodeLabel.COLUMN]))
         .select(
-            "id", "name", "catalog", "schema", "table", "data_type",
-            "is_nullable", "ordinal_position", "comment",
-            "contract_version", "embedding_text",
+            "id",
+            "name",
+            "catalog",
+            "schema",
+            "table",
+            "data_type",
+            "is_nullable",
+            "ordinal_position",
+            "comment",
+            "contract_version",
+            "embedding_text",
         )
     )
 
 
-def build_has_schema_rel(schemata_df: "DataFrame") -> "DataFrame":
+def build_has_schema_rel(schemata_df: DataFrame) -> DataFrame:
     """Build Database -> Schema edges for every schema in scope.
 
     The Database source id is derived from each row's `catalog_name`, so a
@@ -153,34 +169,33 @@ def build_has_schema_rel(schemata_df: "DataFrame") -> "DataFrame":
     `id_expr("catalog_name")` applies the same normalization.
     """
     return (
-        schemata_df
-        .withColumn("source_id", id_expr("catalog_name"))
+        schemata_df.withColumn("source_id", id_expr("catalog_name"))
         .withColumn("target_id", id_expr("catalog_name", "schema_name"))
         .select("source_id", "target_id")
     )
 
 
-def build_has_table_rel(tables_df: "DataFrame") -> "DataFrame":
+def build_has_table_rel(tables_df: DataFrame) -> DataFrame:
     """Build Schema -> Table edges for every table in scope."""
     return (
-        tables_df
-        .withColumn("source_id", id_expr("table_catalog", "table_schema"))
+        tables_df.withColumn("source_id", id_expr("table_catalog", "table_schema"))
         .withColumn("target_id", id_expr("table_catalog", "table_schema", "table_name"))
         .select("source_id", "target_id")
     )
 
 
-def build_has_column_rel(columns_df: "DataFrame") -> "DataFrame":
+def build_has_column_rel(columns_df: DataFrame) -> DataFrame:
     """Build Table -> Column edges for every column in scope."""
     return (
-        columns_df
-        .withColumn("source_id", id_expr("table_catalog", "table_schema", "table_name"))
-        .withColumn("target_id", id_expr("table_catalog", "table_schema", "table_name", "column_name"))
+        columns_df.withColumn("source_id", id_expr("table_catalog", "table_schema", "table_name"))
+        .withColumn(
+            "target_id", id_expr("table_catalog", "table_schema", "table_name", "column_name")
+        )
         .select("source_id", "target_id")
     )
 
 
-def references_schema() -> "StructType":
+def references_schema() -> StructType:
     """The canonical REFERENCES 5-col schema — single source of truth.
 
     Both the bounded declared path (`build_references_rel`, list[FKEdge] ->
@@ -189,16 +204,18 @@ def references_schema() -> "StructType":
     """
     from pyspark.sql.types import DoubleType, StringType, StructField, StructType
 
-    return StructType([
-        StructField("source_id", StringType(), False),
-        StructField("target_id", StringType(), False),
-        StructField("confidence", DoubleType(), False),
-        StructField("source", StringType(), False),
-        StructField("criteria", StringType(), True),
-    ])
+    return StructType(
+        [
+            StructField("source_id", StringType(), False),
+            StructField("target_id", StringType(), False),
+            StructField("confidence", DoubleType(), False),
+            StructField("source", StringType(), False),
+            StructField("criteria", StringType(), True),
+        ]
+    )
 
 
-def to_references_rel(df: "DataFrame") -> "DataFrame":
+def to_references_rel(df: DataFrame) -> DataFrame:
     """Project a Spark-native inference frame onto `references_schema`.
 
     DataFrame -> DataFrame, no driver collect. Casts each column to the
@@ -209,22 +226,18 @@ def to_references_rel(df: "DataFrame") -> "DataFrame":
     from pyspark.sql.functions import col
 
     fields = references_schema().fields
-    return df.select(*[
-        col(f.name).cast(f.dataType).alias(f.name) for f in fields
-    ])
+    return df.select(*[col(f.name).cast(f.dataType).alias(f.name) for f in fields])
 
 
 def build_references_rel(
-    spark: "SparkSession", edges: "list[FKEdge]",
-) -> "DataFrame":
+    spark: SparkSession,
+    edges: list[FKEdge],
+) -> DataFrame:
     """Wrap FKEdge dataclasses in the canonical REFERENCES 5-col schema.
 
     Source-agnostic: accepts edges with any EdgeSource tag (DECLARED,
     INFERRED_METADATA). The enum `.value` is serialized at this
     tuple boundary — no magic strings downstream.
     """
-    tuples = [
-        (e.source_id, e.target_id, e.confidence, e.source.value, e.criteria)
-        for e in edges
-    ]
+    tuples = [(e.source_id, e.target_id, e.confidence, e.source.value, e.criteria) for e in edges]
     return spark.createDataFrame(tuples, schema=references_schema())

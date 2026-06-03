@@ -7,9 +7,8 @@ from dbxcarta.core.env import select_overlay_path
 
 if TYPE_CHECKING:
     from databricks.sdk import WorkspaceClient
-    from neo4j import Driver
-
     from dbxcarta.spark.settings import SparkIngestSettings
+    from neo4j import Driver
 
 
 def main() -> None:
@@ -75,8 +74,8 @@ def _handle_verify(argv: list[str]) -> int:
     )
     args = parser.parse_args(argv)
 
-    from dbxcarta.spark.settings import SparkIngestSettings
     from dbxcarta.spark.ingest.summary_io import LoadSummaryError, load_summary_from_volume
+    from dbxcarta.spark.settings import SparkIngestSettings
     from dbxcarta.spark.verify import verify_run
 
     settings = SparkIngestSettings()
@@ -89,7 +88,10 @@ def _handle_verify(argv: list[str]) -> int:
         return 2
     if summary is None:
         scope_msg = f"run_id={args.run_id!r}" if args.run_id else "most recent status='success' run"
-        print(f"error: no run summary found in {settings.dbxcarta_summary_volume} for {scope_msg}.", file=sys.stderr)
+        print(
+            f"error: no run summary found in {settings.dbxcarta_summary_volume} for {scope_msg}.",
+            file=sys.stderr,
+        )
         return 2
 
     driver = _build_neo4j_driver(ws, settings)
@@ -155,7 +157,10 @@ def _handle_preset(argv: list[str]) -> int:
 
     if args.upload_questions:
         if not isinstance(preset, QuestionsUploadable):
-            print(f"error: preset {args.spec!r} does not implement upload_questions()", file=sys.stderr)
+            print(
+                f"error: preset {args.spec!r} does not implement upload_questions()",
+                file=sys.stderr,
+            )
             return 2
         ws = _build_workspace_client()
         preset.upload_questions(ws)
@@ -173,12 +178,9 @@ def _build_workspace_client() -> WorkspaceClient:
     return build_workspace_client()
 
 
-def _build_neo4j_driver(
-    ws: WorkspaceClient, settings: SparkIngestSettings
-) -> Driver:
-    from neo4j import GraphDatabase
-
+def _build_neo4j_driver(ws: WorkspaceClient, settings: SparkIngestSettings) -> Driver:
     from dbxcarta.core.workspace import read_workspace_secret
+    from neo4j import GraphDatabase
 
     scope = settings.databricks_secret_scope
     return GraphDatabase.driver(

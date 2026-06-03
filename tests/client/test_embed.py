@@ -7,7 +7,6 @@ from types import SimpleNamespace
 
 import pytest
 from databricks.sdk.errors import DatabricksError
-
 from dbxcarta.client.embed import EMBED_MAX_BATCH, embed_questions
 from dbxcarta.client.eval import arms
 from dbxcarta.client.questions import Question
@@ -25,8 +24,7 @@ class _RecordingApiClient:
         inputs = body["input"]
         self.batch_sizes.append(len(inputs))
         items = [
-            {"index": i, "embedding": [float(hash(text) % 1000)]}
-            for i, text in enumerate(inputs)
+            {"index": i, "embedding": [float(hash(text) % 1000)]} for i, text in enumerate(inputs)
         ]
         # Endpoint does not guarantee response order; force callers to sort.
         items.reverse()
@@ -80,9 +78,7 @@ def test_batch_over_endpoint_limit_returns_error() -> None:
                 "for databricks-gte-large-en"
             )
 
-    embeddings, error = embed_questions(
-        _Workspace(_RejectingApiClient()), "ep", ["a", "b"]
-    )
+    embeddings, error = embed_questions(_Workspace(_RejectingApiClient()), "ep", ["a", "b"])
 
     assert embeddings is None
     assert error is not None
@@ -107,23 +103,15 @@ def _questions(n: int) -> list[Question]:
 
 
 def test_graph_rag_raises_when_embedding_fails(monkeypatch) -> None:
-    monkeypatch.setattr(
-        arms, "_embed_questions", lambda *_a, **_k: (None, "boom")
-    )
+    monkeypatch.setattr(arms, "_embed_questions", lambda *_a, **_k: (None, "boom"))
     with pytest.raises(RuntimeError, match="graph_rag embedding failed"):
-        arms._run_graph_rag_arm(
-            None, None, _settings(), _questions(3), None, None, "staging"
-        )
+        arms._run_graph_rag_arm(None, None, _settings(), _questions(3), None, None, "staging")
 
 
 def test_graph_rag_raises_on_embedding_count_mismatch(monkeypatch) -> None:
-    monkeypatch.setattr(
-        arms, "_embed_questions", lambda *_a, **_k: ([[0.1]], None)
-    )
+    monkeypatch.setattr(arms, "_embed_questions", lambda *_a, **_k: ([[0.1]], None))
     with pytest.raises(RuntimeError, match="misaligned embeddings"):
-        arms._run_graph_rag_arm(
-            None, None, _settings(), _questions(3), None, None, "staging"
-        )
+        arms._run_graph_rag_arm(None, None, _settings(), _questions(3), None, None, "staging")
 
 
 def test_retrieval_concurrency_default(monkeypatch) -> None:
@@ -148,9 +136,7 @@ def test_retrieval_concurrency_rejects_non_positive(monkeypatch) -> None:
 def test_graph_rag_preserves_question_order_after_parallel_retrieval(
     monkeypatch,
 ) -> None:
-    import dbxcarta.client.generation as generation
-    import dbxcarta.client.graph_retriever as graph_retriever
-    import dbxcarta.client.trace as trace
+    from dbxcarta.client import generation, graph_retriever, trace
 
     recorded_prompt_ids: list[str] = []
     emitted_trace_ids: list[str] = []
@@ -179,26 +165,22 @@ def test_graph_rag_preserves_question_order_after_parallel_retrieval(
             self.closed = True
 
     def fake_generate_sql_batch(
-        _spark, _endpoint, questions_with_prompts, _staging_table, _arm,
-        *, refresh=False,
+        _spark,
+        _endpoint,
+        questions_with_prompts,
+        _staging_table,
+        _arm,
+        *,
+        refresh=False,
     ):
-        recorded_prompt_ids.extend(
-            item["question_id"] for item in questions_with_prompts
-        )
-        return {
-            item["question_id"]: ("SELECT 1", None)
-            for item in questions_with_prompts
-        }
+        recorded_prompt_ids.extend(item["question_id"] for item in questions_with_prompts)
+        return {item["question_id"]: ("SELECT 1", None) for item in questions_with_prompts}
 
-    monkeypatch.setattr(arms, "_embed_questions", lambda *_a, **_k: (
-        [[0.1], [0.2], [0.3]], None
-    ))
+    monkeypatch.setattr(arms, "_embed_questions", lambda *_a, **_k: ([[0.1], [0.2], [0.3]], None))
     monkeypatch.setenv(arms._RETRIEVAL_CONCURRENCY_ENV, "3")
     monkeypatch.setattr(graph_retriever, "GraphRetriever", RetrieverStub)
     monkeypatch.setattr(generation, "generate_sql_batch", fake_generate_sql_batch)
-    monkeypatch.setattr(
-        arms, "fetch_rows", lambda *_a, **_k: (["one"], [[1]], None)
-    )
+    monkeypatch.setattr(arms, "fetch_rows", lambda *_a, **_k: (["one"], [[1]], None))
     monkeypatch.setattr(
         trace,
         "emit_retrieval_traces",
@@ -229,7 +211,7 @@ def test_graph_rag_preserves_question_order_after_parallel_retrieval(
 
 
 def test_graph_rag_closes_retriever_when_worker_fails(monkeypatch) -> None:
-    import dbxcarta.client.graph_retriever as graph_retriever
+    from dbxcarta.client import graph_retriever
 
     instances = []
 
@@ -244,9 +226,7 @@ def test_graph_rag_closes_retriever_when_worker_fails(monkeypatch) -> None:
         def close(self) -> None:
             self.closed = True
 
-    monkeypatch.setattr(arms, "_embed_questions", lambda *_a, **_k: (
-        [[0.1]], None
-    ))
+    monkeypatch.setattr(arms, "_embed_questions", lambda *_a, **_k: ([[0.1]], None))
     monkeypatch.setenv(arms._RETRIEVAL_CONCURRENCY_ENV, "1")
     monkeypatch.setattr(graph_retriever, "GraphRetriever", FailingRetriever)
 

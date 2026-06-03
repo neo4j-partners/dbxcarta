@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import pytest
-
 from dbxcarta_dense_schema_example.config import load_config
 
 

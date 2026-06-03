@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import pytest
-
 from databricks_job_runner import BootstrapConfig, ClassicCluster, Serverless
 from databricks_job_runner.errors import RunnerError
-
 from dbxcarta.submit import cli
 
 
@@ -33,17 +31,13 @@ def test_submit_ingest_rejects_serverless_compute(
     monkeypatch.setattr(cli, "_ingest_runner", lambda: stub)
 
     with pytest.raises(RunnerError, match="Neo4j Spark Connector"):
-        cli._submit_bootstrap_entrypoint(
-            "ingest", compute_mode="serverless", no_wait=True
-        )
+        cli._submit_bootstrap_entrypoint("ingest", compute_mode="serverless", no_wait=True)
     assert stub.submitted == []
 
 
 def test_submit_unknown_entrypoint_raises() -> None:
     with pytest.raises(RunnerError, match="unknown wheel entrypoint"):
-        cli._submit_bootstrap_entrypoint(
-            "bogus", compute_mode=None, no_wait=True
-        )
+        cli._submit_bootstrap_entrypoint("bogus", compute_mode=None, no_wait=True)
 
 
 def test_submit_ingest_builds_bootstrap_with_probe_and_closure(
@@ -114,9 +108,7 @@ def test_smoke_imports_name_only_shared_environment_packages() -> None:
     # content is guaranteed at build time instead (_assert_wheel_bundles_core),
     # so the smoke lists must name only shared-environment (closure) packages.
     for entrypoint, modules in cli._ENTRYPOINT_SMOKE_IMPORTS.items():
-        wheel_modules = [
-            m for m in modules if m == "dbxcarta" or m.startswith("dbxcarta.")
-        ]
+        wheel_modules = [m for m in modules if m == "dbxcarta" or m.startswith("dbxcarta.")]
         assert not wheel_modules, (
             f"{entrypoint} smoke imports name wheel modules {wheel_modules}; "
             "the smoke check runs before the wheel target joins sys.path"

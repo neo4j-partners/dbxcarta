@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from databricks.sdk import WorkspaceClient
 from databricks.sdk.service.sql import (
     Disposition,
     ExecuteStatementRequestOnWaitTimeout,
@@ -13,6 +12,9 @@ from databricks.sdk.service.sql import (
     StatementState,
     StatementStatus,
 )
+
+if TYPE_CHECKING:
+    from databricks.sdk import WorkspaceClient
 
 
 def _statement_error(status: StatementStatus | None, state: StatementState | None) -> str:
@@ -81,11 +83,7 @@ def fetch_rows(
 
     if state == StatementState.SUCCEEDED:
         columns: list[str] = []
-        if (
-            response.manifest
-            and response.manifest.schema
-            and response.manifest.schema.columns
-        ):
+        if response.manifest and response.manifest.schema and response.manifest.schema.columns:
             columns = [
                 col.name or f"col_{index + 1}"
                 for index, col in enumerate(response.manifest.schema.columns)
@@ -120,9 +118,7 @@ def catalog_exists(ws: WorkspaceClient, warehouse_id: str, catalog: str) -> bool
     """
     _, rows, error = fetch_rows(ws, warehouse_id, "SHOW CATALOGS")
     if error is not None or rows is None:
-        raise RuntimeError(
-            f"could not list catalogs to check for {catalog!r}: {error}"
-        )
+        raise RuntimeError(f"could not list catalogs to check for {catalog!r}: {error}")
     return any(row and row[0] == catalog for row in rows)
 
 
@@ -254,8 +250,7 @@ def split_sql_statements(sql: str) -> list[str]:
     # trailing segment with no final semicolon
     segment = "".join(current).strip()
     has_sql = any(
-        line and not line.startswith("--")
-        for line in (raw.strip() for raw in segment.splitlines())
+        line and not line.startswith("--") for line in (raw.strip() for raw in segment.splitlines())
     )
     if has_sql:
         result.append(segment)

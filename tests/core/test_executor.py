@@ -2,10 +2,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from databricks.sdk.service.sql import StatementState
-
 import pytest
-
+from databricks.sdk.service.sql import StatementState
 from dbxcarta.core import executor as executor_module
 from dbxcarta.core.executor import catalog_exists, execute_ddl_blocking, fetch_rows
 
@@ -22,9 +20,7 @@ def _response(
         statement_id=statement_id,
         status=SimpleNamespace(state=StatementState.SUCCEEDED),
         manifest=SimpleNamespace(
-            schema=SimpleNamespace(
-                columns=[SimpleNamespace(name=name) for name in names]
-            )
+            schema=SimpleNamespace(columns=[SimpleNamespace(name=name) for name in names])
         ),
         result=SimpleNamespace(
             data_array=first_rows or [],
@@ -101,11 +97,7 @@ def test_fetch_rows_uses_fallback_name_for_unnamed_columns() -> None:
 
 def _catalogs_workspace(*names: str) -> _Workspace:
     rows = [[name] for name in names]
-    return _Workspace(
-        _StatementExecution(
-            _response(first_rows=rows, column_names=["catalog"]), {}
-        )
-    )
+    return _Workspace(_StatementExecution(_response(first_rows=rows, column_names=["catalog"]), {}))
 
 
 def test_catalog_exists_true_when_present() -> None:
@@ -194,9 +186,7 @@ def test_execute_ddl_blocking_raises_on_failed_statement(monkeypatch) -> None:
     monkeypatch.setattr(
         executor_module, "time", SimpleNamespace(monotonic=lambda: 0.0, sleep=lambda _s: None)
     )
-    execution = _BlockingStatementExecution(
-        _stmt(StatementState.FAILED, message="syntax error")
-    )
+    execution = _BlockingStatementExecution(_stmt(StatementState.FAILED, message="syntax error"))
     ws = _Workspace(execution)
 
     with pytest.raises(RuntimeError, match="syntax error"):
@@ -207,9 +197,7 @@ def test_execute_ddl_blocking_raises_without_statement_id(monkeypatch) -> None:
     monkeypatch.setattr(
         executor_module, "time", SimpleNamespace(monotonic=lambda: 0.0, sleep=lambda _s: None)
     )
-    execution = _BlockingStatementExecution(
-        _stmt(StatementState.PENDING, statement_id=None)
-    )
+    execution = _BlockingStatementExecution(_stmt(StatementState.PENDING, statement_id=None))
     ws = _Workspace(execution)
 
     with pytest.raises(RuntimeError, match="no statement id"):

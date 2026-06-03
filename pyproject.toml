@@ -58,11 +58,7 @@ members = [
 ]
 
 [tool.pytest.ini_options]
-addopts = "-m 'not live and not slow' --import-mode=importlib"
-markers = [
-    "live: tests that require a live Databricks profile, Neo4j, and a previously-loaded catalog (default pytest skips these)",
-    "slow: heavier guard/regression tests kept separate from the fast unit suite",
-]
+addopts = "--import-mode=importlib"
 
 [tool.mypy]
 python_version = "3.12"
@@ -74,3 +70,138 @@ no_implicit_optional = true
 check_untyped_defs = true
 warn_unused_ignores = true
 strict_equality = true
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.format]
+docstring-code-format = true
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+    "C90",     # McCabe complexity
+    "COM812",  # Conflicts with the formatter
+    "CPY",     # No copyright
+    "D205",    # Blank line after summary — multiline summaries add clarity
+    "D212",    # Conflicts with Google convention (D213)
+    "D213",    # Multi-line summary on second line — dbxcarta uses first-line summaries
+    "FIX002",  # Line contains TODO
+    "PERF203", # Rarely useful
+    "PLR09",   # Too many something (args, statements, etc.)
+    "TD002",   # Missing author in TODO
+    "TD003",   # Missing issue link in TODO
+
+    # Intentionally lenient
+    "ANN401",  # Any in type annotations
+    "ARG001",  # Unused function arguments — needed for interface conformance
+    "BLE",     # Blind exceptions
+    "B006",    # Mutable default arguments — lists are read-only in this codebase
+    "E501",    # Line too long — unavoidable in data/SQL code
+    "INP001",  # Implicit namespace packages — intentional
+    "PLR2004", # Magic value comparisons — too noisy in data code
+    "SLF001",  # Private member access — often necessary
+    "T201",    # print — will migrate to logging in a future PR
+    "TID252",  # Relative imports are fine
+
+    # Boolean handling
+    "FBT001",  # Boolean type hint positional argument
+    "FBT002",  # Boolean default value positional argument
+    "FBT003",  # Boolean positional value in call
+
+    # Stylistic pandas preferences — existing style is fine
+    "PD003",   # .isnull() vs .isna()
+    "PD011",   # .values vs .to_numpy()
+    "PERF401", # Replace for loop with list comprehension — often less readable
+
+    # Internal SQL construction, not user-facing injection risk
+    "S608",    # Hardcoded SQL expression
+    # Intentional silent pass (e.g. best-effort parsing)
+    "S110",    # try-except-pass
+    "SIM117",  # Merge nested with statements — nested is often more readable
+
+    # Exception details
+    "EM101",   # Raw string in exception
+    "EM102",   # f-string in exception
+    "TRY003",  # Long exception messages outside exception class
+    "TRY300",  # Consider moving return to else block — reduces readability
+    "TRY301",  # Abstract raise to inner function — overly pedantic
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = [
+    "S101",    # assert is idiomatic in pytest
+    "ANN",     # Type hints optional in tests
+    "D",       # Docstrings optional in tests
+    "N999",    # _IT suffix is a deliberate integration-test naming convention
+    "N812",    # `functions as F` is the canonical PySpark import alias
+    "PLC0415", # Lazy imports acceptable in tests
+    "PT011",   # Broad pytest.raises is acceptable for fixture/contract tests
+    "ARG001",  # Unused fixture/stub arguments are needed for interface conformance
+    "ARG002",  # Unused method arguments on fakes/stubs
+    "ARG005",  # Unused lambda arguments on stubs
+    "S105",    # Hardcoded "secret" strings are test fixtures, not real secrets
+    "S106",    # Hardcoded password-like kwargs are test fixtures
+    "S108",    # Hardcoded /tmp paths are test fixtures
+    "S603",    # subprocess calls in tests run trusted, fixed commands
+    "N802",    # Test helper naming follows fixture/test conventions
+    "DTZ001",  # Naive datetimes are deliberate in deterministic test fixtures
+    "ERA001",  # Commented-out code in tests is illustrative
+    "RUF043",  # Unraw regex pattern in pytest.raises match is fine
+]
+# Missing-docstring presence rules (D1xx) and the PySpark `functions as F`
+# alias (N812) are ignored only for dbxcarta source, examples, and scripts.
+# dbxcarta source predates neocarta's docstring gate; backfilling docstrings is
+# tracked as its own change, not part of the lint-config migration. Scoping
+# these per-path (rather than repo-wide) keeps neocarta's own docstring
+# enforcement intact when the configs merge. Re-enable per package as docstrings land.
+"packages/**/src/**/*.py" = [
+    "D100",    # Missing docstring in public module
+    "D101",    # Missing docstring in public class
+    "D102",    # Missing docstring in public method
+    "D103",    # Missing docstring in public function
+    "D105",    # Missing docstring in magic method
+    "D107",    # Missing docstring in __init__
+    "N812",    # `functions as F` is the canonical PySpark import alias
+    "PLC0415", # Lazy imports are intentional for optional Spark deps
+]
+"examples/**/*.py" = [
+    "D100",    # Missing docstring in public module
+    "D101",    # Missing docstring in public class
+    "D102",    # Missing docstring in public method
+    "D103",    # Missing docstring in public function
+    "D105",    # Missing docstring in magic method
+    "D107",    # Missing docstring in __init__
+    "N812",    # `functions as F` is the canonical PySpark import alias
+    "PLC0415", # Lazy imports are intentional for optional Spark deps
+    "B007",    # Unused loop control variables are intentional in example walks
+    "S311",    # random is used for sampling/demo data, not for crypto
+    "S603",    # subprocess calls run trusted, fixed example commands
+]
+"scripts/**/*.py" = [
+    "D100",    # Missing docstring in public module
+    "D101",    # Missing docstring in public class
+    "D102",    # Missing docstring in public method
+    "D103",    # Missing docstring in public function
+    "D105",    # Missing docstring in magic method
+    "D107",    # Missing docstring in __init__
+    "N812",    # `functions as F` is the canonical PySpark import alias
+    "PLC0415", # Lazy imports are intentional for optional Spark deps
+    "ANN",     # Type hints optional in developer/CI scripts
+    "S603",    # subprocess calls run trusted, fixed dev/CI commands
+    "S607",    # Partial executable paths are fine for dev/CI tooling
+    "PLW1510", # subprocess.run without check= is intentional (returncode inspected)
+]
+
+[tool.ruff.lint.flake8-annotations]
+allow-star-arg-any = true
+
+[tool.ruff.lint.pep8-naming]
+# Only field_validator is always a classmethod. dbxcarta's model_validators
+# all run mode="after" (instance methods taking `self`), so model_validator is
+# intentionally NOT listed here (it is in neocarta, which uses before-mode).
+classmethod-decorators = ["field_validator"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+ignore-var-parameters = true  # ignore missing documentation for *args and **kwargs parameters

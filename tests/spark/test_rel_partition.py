@@ -11,7 +11,6 @@ path is asserted directly, without standing up Spark.
 from __future__ import annotations
 
 import pytest
-
 from dbxcarta.spark.run import _rel_partition
 
 

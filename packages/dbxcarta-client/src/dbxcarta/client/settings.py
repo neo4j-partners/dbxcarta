@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-from pydantic import field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
-
 from dbxcarta.core.catalogs import resolve_catalogs
 from dbxcarta.core.config import derive_ops_config
 from dbxcarta.core.identifiers import (
@@ -12,6 +9,8 @@ from dbxcarta.core.identifiers import (
     validate_serving_endpoint_name,
     validate_uc_volume_subpath,
 )
+from pydantic import field_validator, model_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class ClientSettings(BaseSettings):
@@ -144,12 +143,8 @@ class ClientSettings(BaseSettings):
             and self.dbxcarta_client_questions
         ):
             derived = derive_ops_config(self.databricks_volume_path)
-            self.dbxcarta_summary_volume = (
-                self.dbxcarta_summary_volume or derived.summary_volume
-            )
-            self.dbxcarta_summary_table = (
-                self.dbxcarta_summary_table or derived.summary_table
-            )
+            self.dbxcarta_summary_volume = self.dbxcarta_summary_volume or derived.summary_volume
+            self.dbxcarta_summary_table = self.dbxcarta_summary_table or derived.summary_table
             self.dbxcarta_client_questions = (
                 self.dbxcarta_client_questions or derived.client_questions
             )

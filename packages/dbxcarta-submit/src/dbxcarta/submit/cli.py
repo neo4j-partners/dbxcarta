@@ -4,11 +4,8 @@ import contextlib
 import os
 import shutil
 import sys
-from collections.abc import Iterator
 from pathlib import Path
-from typing import TypedDict
-
-from dbxcarta.core.env import select_overlay_path
+from typing import TYPE_CHECKING, TypedDict
 
 from databricks_job_runner import (
     Compute,
@@ -17,6 +14,10 @@ from databricks_job_runner import (
     Serverless,
     maven_libraries_preflight,
 )
+from dbxcarta.core.env import select_overlay_path
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 _ENTRYPOINT_WHEEL_PACKAGE: dict[str, str] = {
     "ingest": "dbxcarta-spark",
@@ -35,9 +36,7 @@ _ENTRYPOINT_CONSOLE_SCRIPT: dict[str, str] = {
 # subtree. ``pydantic``/``pydantic-core`` are deliberately NOT excluded:
 # the ingest and client code require pydantic v2 and the DBR-bundled
 # version is not guaranteed to match.
-_DBR_PROVIDED_PACKAGES: frozenset[str] = frozenset(
-    {"pyspark", "py4j", "databricks-sdk"}
-)
+_DBR_PROVIDED_PACKAGES: frozenset[str] = frozenset({"pyspark", "py4j", "databricks-sdk"})
 
 # Fully pinned dependency closures installed by the runner bootstrap into
 # the shared driver environment with ``--no-deps``. These are curated
@@ -104,9 +103,7 @@ _ENTRYPOINT_SMOKE_IMPORTS: dict[str, tuple[str, ...]] = {
 
 # The Neo4j Spark Connector stays a pinned JVM cluster library (pip
 # cannot install it). Only the ingest path probes and asserts it.
-_NEO4J_MAVEN_COORDINATES = (
-    "org.neo4j:neo4j-connector-apache-spark_2.13:5.3.10_for_spark_3"
-)
+_NEO4J_MAVEN_COORDINATES = "org.neo4j:neo4j-connector-apache-spark_2.13:5.3.10_for_spark_3"
 _INGEST_JVM_PROBE_CLASS = "org.neo4j.spark.DataSource"
 
 _ENTRYPOINT_JVM_PROBE_CLASS: dict[str, str | None] = {
@@ -227,10 +224,8 @@ def _print_help() -> None:
         "\n"
         "Commands passed through to databricks-job-runner:"
     )
-    try:
+    with contextlib.suppress(SystemExit):
         runner.main(["--help"])
-    except SystemExit:
-        pass
 
 
 # The entrypoint wheels the runner installs with --no-deps. Each must
@@ -259,12 +254,10 @@ def _core_bundled_into(project_dir: Path) -> Iterator[None]:
     core_src = root / "packages" / "dbxcarta-core" / "src" / "dbxcarta" / "core"
     if not core_src.is_dir():
         raise RunnerError(
-            f"core source not found at {core_src}; cannot bundle it into the "
-            "entrypoint wheels"
+            f"core source not found at {core_src}; cannot bundle it into the entrypoint wheels"
         )
     targets = [
-        root / "packages" / pkg / "src" / "dbxcarta" / "core"
-        for pkg in _CORE_BUNDLE_PACKAGES
+        root / "packages" / pkg / "src" / "dbxcarta" / "core" for pkg in _CORE_BUNDLE_PACKAGES
     ]
     for target in targets:
         if target.exists():
@@ -335,13 +328,9 @@ def _handle_publish_wheels(argv: list[str]) -> int:
                     runner.wheel_volume_dir,
                     wheel_package,
                 )
-                built = find_latest_wheel(
-                    runner.project_dir / "dist", wheel_package
-                )
+                built = find_latest_wheel(runner.project_dir / "dist", wheel_package)
                 if built is None:
-                    raise RunnerError(
-                        f"no built wheel found for {wheel_package} in dist/"
-                    )
+                    raise RunnerError(f"no built wheel found for {wheel_package} in dist/")
                 _assert_wheel_bundles_core(built)
         runner.upload_all()
     except RunnerError as exc:
@@ -366,7 +355,6 @@ def _handle_bootstrap(argv: list[str]) -> int:
     )
     from dbxcarta.core.identifiers import check_not_protected, parse_volume_path
     from dbxcarta.core.workspace import build_workspace_client
-
     from dbxcarta.submit.uc_admin import ensure_uc_volume
 
     try:
@@ -383,9 +371,7 @@ def _handle_bootstrap(argv: list[str]) -> int:
             "DATABRICKS_VOLUME_PATH. Idempotent; safe to run before every ingest."
         ),
     )
-    parser.add_argument(
-        "--warehouse-id", default=None, help="Override DATABRICKS_WAREHOUSE_ID."
-    )
+    parser.add_argument("--warehouse-id", default=None, help="Override DATABRICKS_WAREHOUSE_ID.")
     parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -412,20 +398,15 @@ def _handle_bootstrap(argv: list[str]) -> int:
 
     if args.dry_run:
         print(
-            f"[bootstrap] would ensure catalog={catalog} schema={schema} "
-            f"volume={volume}",
+            f"[bootstrap] would ensure catalog={catalog} schema={schema} volume={volume}",
             file=sys.stderr,
         )
         return 0
 
     try:
-        warehouse_id = read_required_warehouse_id(
-            args.warehouse_id, operation="bootstrap"
-        )
+        warehouse_id = read_required_warehouse_id(args.warehouse_id, operation="bootstrap")
         ws = build_workspace_client()
-        ensure_uc_volume(
-            ws, warehouse_id, catalog=catalog, schema=schema, volume=volume
-        )
+        ensure_uc_volume(ws, warehouse_id, catalog=catalog, schema=schema, volume=volume)
     except (ValueError, RuntimeError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
@@ -448,7 +429,6 @@ def _handle_teardown(argv: list[str]) -> int:
         resolve_env_files,
     )
     from dbxcarta.core.workspace import build_workspace_client
-
     from dbxcarta.submit.uc_admin import (
         drop_teardown_target,
         parse_teardown_targets,
@@ -468,9 +448,7 @@ def _handle_teardown(argv: list[str]) -> int:
             "DBXCARTA_TEARDOWN_TARGET. Requires --yes-i-mean-it; destructive."
         ),
     )
-    parser.add_argument(
-        "--warehouse-id", default=None, help="Override DATABRICKS_WAREHOUSE_ID."
-    )
+    parser.add_argument("--warehouse-id", default=None, help="Override DATABRICKS_WAREHOUSE_ID.")
     parser.add_argument(
         "--yes-i-mean-it",
         action="store_true",
@@ -503,16 +481,13 @@ def _handle_teardown(argv: list[str]) -> int:
         return 0
     if not args.yes_i_mean_it:
         print(
-            f"[teardown] refusing to drop {described} without "
-            "--yes-i-mean-it; nothing changed.",
+            f"[teardown] refusing to drop {described} without --yes-i-mean-it; nothing changed.",
             file=sys.stderr,
         )
         return 0
 
     try:
-        warehouse_id = read_required_warehouse_id(
-            args.warehouse_id, operation="teardown"
-        )
+        warehouse_id = read_required_warehouse_id(args.warehouse_id, operation="teardown")
         ws = build_workspace_client()
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
@@ -575,18 +550,14 @@ def _submit_bootstrap_entrypoint(
     # Compute strategy; there is no public equivalent. Pinned to
     # databricks-job-runner==0.6.2 in the closures above, so the surface is
     # stable for this code's lifetime.
-    if name == "ingest" and _is_serverless_compute(
-        submit_runner._compute(compute_mode)
-    ):
+    if name == "ingest" and _is_serverless_compute(submit_runner._compute(compute_mode)):
         raise RunnerError(
             "dbxcarta ingest uses the Neo4j Spark Connector, which is not "
             "supported on Databricks serverless jobs compute. Use classic "
             "compute with `--compute cluster`."
         )
 
-    wheel_volume_path = (
-        f"{submit_runner.wheel_volume_dir}/{stable_wheel_name(wheel_package)}"
-    )
+    wheel_volume_path = f"{submit_runner.wheel_volume_dir}/{stable_wheel_name(wheel_package)}"
 
     bootstrap = BootstrapConfig(
         wheel_volume_path=wheel_volume_path,

@@ -20,7 +20,6 @@ from typing import Any, cast
 from dbxcarta_schemapile_example.config import SchemaPileConfig, load_config
 from dbxcarta_schemapile_example.utils import load_dotenv_file
 
-
 CANDIDATE_FORMAT_VERSION = 2
 
 _ROW_CAP_PER_TABLE = 20
@@ -87,7 +86,9 @@ def main() -> int:
         ),
     )
     parser.add_argument(
-        "--dotenv", type=Path, default=Path(__file__).resolve().parents[2] / ".env",
+        "--dotenv",
+        type=Path,
+        default=Path(__file__).resolve().parents[2] / ".env",
         help="Path to the .env file to load before reading variables (default: example directory .env)",
     )
     args = parser.parse_args()
@@ -96,8 +97,7 @@ def main() -> int:
 
     if not config.slice_cache.is_file():
         raise FileNotFoundError(
-            f"Slice cache not found at {config.slice_cache}."
-            " Run dbxcarta-schemapile-slice first."
+            f"Slice cache not found at {config.slice_cache}. Run dbxcarta-schemapile-slice first."
         )
 
     slice_data = _load_slice(config.slice_cache)
@@ -118,8 +118,7 @@ def main() -> int:
     }
     config.candidate_cache.write_text(json.dumps(payload, indent=2))
     print(
-        f"[schemapile] wrote {len(candidates)} candidate schema(s) to"
-        f" {config.candidate_cache}",
+        f"[schemapile] wrote {len(candidates)} candidate schema(s) to {config.candidate_cache}",
         file=sys.stderr,
     )
     return 0
@@ -155,12 +154,14 @@ def select_candidates(
             f" fk_density={density:.2f}"
             f" data_tables={sum(1 for t in tables if t.has_values)}"
         )
-        candidates.append(CandidateSchema(
-            source_id=source_id,
-            uc_schema=uc_schema,
-            rationale=rationale,
-            tables=tables,
-        ))
+        candidates.append(
+            CandidateSchema(
+                source_id=source_id,
+                uc_schema=uc_schema,
+                rationale=rationale,
+                tables=tables,
+            )
+        )
     return candidates
 
 
@@ -174,9 +175,7 @@ def _passes_filters(tables: tuple[TableSpec, ...], config: SchemaPileConfig) -> 
     fk_edges = sum(len(t.foreign_keys) for t in tables)
     if fk_edges < config.candidate_min_fk_edges:
         return False
-    if config.candidate_require_data and not any(t.has_values for t in tables):
-        return False
-    return True
+    return not (config.candidate_require_data and not any(t.has_values for t in tables))
 
 
 def _density(tables: tuple[TableSpec, ...]) -> float:
@@ -205,14 +204,16 @@ def _build_tables(raw_tables: dict[str, Any]) -> tuple[TableSpec, ...]:
         )
         rows = _extract_rows(columns)
         has_values = bool(rows)
-        specs.append(TableSpec(
-            name=name,
-            columns=cols,
-            primary_keys=pks,
-            foreign_keys=fks,
-            has_values=has_values,
-            rows=rows,
-        ))
+        specs.append(
+            TableSpec(
+                name=name,
+                columns=cols,
+                primary_keys=pks,
+                foreign_keys=fks,
+                has_values=has_values,
+                rows=rows,
+            )
+        )
     return tuple(specs)
 
 
@@ -240,8 +241,7 @@ def _extract_rows(columns: dict[str, Any]) -> tuple[tuple[Any, ...], ...]:
     column_order = list(columns.keys())
     return tuple(
         tuple(
-            columns_with_values[name][row_idx]
-            if name in columns_with_values else None
+            columns_with_values[name][row_idx] if name in columns_with_values else None
             for name in column_order
         )
         for row_idx in range(n)
@@ -254,9 +254,7 @@ def _sanitize_schema_name(source_id: str, *, used: set[str]) -> str:
     base = base.removesuffix(".sql")
     base = _SANITIZE_INVALID.sub("_", base)
     base = base.strip("_") or "schema"
-    if _SANITIZE_LEADING_DIGIT.match(base):
-        base = f"sp_{base}"
-    elif not base.startswith("sp_"):
+    if _SANITIZE_LEADING_DIGIT.match(base) or not base.startswith("sp_"):
         base = f"sp_{base}"
     candidate = base
     counter = 1
@@ -269,6 +267,7 @@ def _sanitize_schema_name(source_id: str, *, used: set[str]) -> str:
 def _load_slice(path: Path) -> dict[str, Any]:
     try:
         import orjson
+
         return cast("dict[str, Any]", orjson.loads(path.read_bytes()))
     except ImportError:
         return cast("dict[str, Any]", json.loads(path.read_text()))

@@ -8,8 +8,8 @@ overlays still set them).
 
 from __future__ import annotations
 
-from dbxcarta.core.config import derive_ops_config
 from dbxcarta.client.settings import ClientSettings
+from dbxcarta.core.config import derive_ops_config
 
 _VOLUME = "/Volumes/dbxcarta-catalog/finance_genie_ops/dbxcarta-ops"
 _REQUIRED: dict[str, str] = {

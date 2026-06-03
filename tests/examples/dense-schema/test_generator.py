@@ -7,7 +7,6 @@ import os
 from pathlib import Path
 
 import pytest
-
 from dbxcarta_dense_schema_example.config import DenseSchemaConfig
 from dbxcarta_dense_schema_example.generator import generate_candidates_json
 from dbxcarta_dense_schema_example.question_generator import (
@@ -67,9 +66,7 @@ def test_rows_match_column_count():
 
 def test_fk_edges_exist():
     result = generate_candidates_json(500, "dense_500")
-    total_fks = sum(
-        len(t["foreign_keys"]) for t in result["schemas"][0]["tables"]
-    )
+    total_fks = sum(len(t["foreign_keys"]) for t in result["schemas"][0]["tables"])
     assert total_fks > 500, f"Expected >500 FK edges, got {total_fks}"
 
 
@@ -116,9 +113,7 @@ def test_descriptive_values_use_faker_data():
     description_idx = [c["name"] for c in employees["columns"]].index("description")
 
     assert employees["rows"][0][name_idx] != "Name 1"
-    assert not employees["rows"][0][description_idx].startswith(
-        "Sample description row"
-    )
+    assert not employees["rows"][0][description_idx].startswith("Sample description row")
 
 
 def test_unsupported_table_count_raises():

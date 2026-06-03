@@ -10,15 +10,8 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from databricks.sdk import WorkspaceClient
-
-from dbxcarta.core.identifiers import (
-    quote_qualified_name,
-    split_qualified_name,
-)
-from dbxcarta.core.workspace import build_workspace_client
 from dbxcarta.client.eval.arms import (
     _LLM_ARMS,
     _REFERENCE_ARM,
@@ -28,13 +21,23 @@ from dbxcarta.client.eval.arms import (
     _run_llm_arm,
     _run_reference_arm,
 )
-from dbxcarta.core.executor import preflight_warehouse
 from dbxcarta.client.questions import (
     is_table_ref as _is_table_ref,
+)
+from dbxcarta.client.questions import (
     load_questions as _load_questions,
 )
 from dbxcarta.client.settings import ClientSettings
 from dbxcarta.client.summary import ClientRunSummary
+from dbxcarta.core.executor import preflight_warehouse
+from dbxcarta.core.identifiers import (
+    quote_qualified_name,
+    split_qualified_name,
+)
+from dbxcarta.core.workspace import build_workspace_client
+
+if TYPE_CHECKING:
+    from databricks.sdk import WorkspaceClient
 
 logger = logging.getLogger(__name__)
 
@@ -68,9 +71,7 @@ def _preflight(ws: WorkspaceClient, settings: ClientSettings) -> None:
 
     active_arms = settings.arms
     if any(a in _STAGING_ARMS for a in active_arms) and not settings.dbxcarta_chat_endpoint:
-        raise RuntimeError(
-            "DBXCARTA_CHAT_ENDPOINT is required for LLM arms but is not set."
-        )
+        raise RuntimeError("DBXCARTA_CHAT_ENDPOINT is required for LLM arms but is not set.")
 
     if any(a in _GRAPH_ARMS for a in active_arms):
         _assert_graph_populated(settings)
@@ -84,9 +85,8 @@ def _assert_graph_populated(settings: ClientSettings) -> None:
     retrievals and meaningless scores instead of a clear error. Checks for at
     least one Table node, the unit those arms seed and dump from.
     """
-    from neo4j import GraphDatabase
-
     from dbxcarta.client.neo4j_utils import neo4j_credentials
+    from neo4j import GraphDatabase
 
     uri, username, password = neo4j_credentials(settings)
     with GraphDatabase.driver(uri, auth=(username, password)) as driver:
@@ -124,9 +124,9 @@ def run_client() -> None:
             )
             questions = questions[:capped]
     active_arms = settings.arms
-    staging_table = _resolve_staging_table(settings) if any(
-        a in _STAGING_ARMS for a in active_arms
-    ) else ""
+    staging_table = (
+        _resolve_staging_table(settings) if any(a in _STAGING_ARMS for a in active_arms) else ""
+    )
 
     summary = ClientRunSummary(
         run_id=run_id,
@@ -140,6 +140,7 @@ def run_client() -> None:
     schema_text: str | None = None
     if "schema_dump" in active_arms:
         from dbxcarta.client.schema_dump import fetch_schema_dump
+
         schema_text = fetch_schema_dump(settings)
 
     # Shared across arms: each question's reference SQL runs at most once.
@@ -156,13 +157,24 @@ def run_client() -> None:
                 _run_reference_arm(questions, summary, ref_cache)
             elif arm in _LLM_ARMS:
                 _run_llm_arm(
-                    spark, ws, settings, questions, summary, ref_cache, arm,
+                    spark,
+                    ws,
+                    settings,
+                    questions,
+                    summary,
+                    ref_cache,
+                    arm,
                     staging_table,
                     schema_text=schema_text if arm == "schema_dump" else None,
                 )
             elif arm == "graph_rag":
                 _run_graph_rag_arm(
-                    spark, ws, settings, questions, summary, ref_cache,
+                    spark,
+                    ws,
+                    settings,
+                    questions,
+                    summary,
+                    ref_cache,
                     staging_table,
                 )
             else:
@@ -198,9 +210,7 @@ def _emit_summary(
         summary.emit(spark, volume_path, table_name)
     except Exception:
         if primary_error is not None:
-            logger.exception(
-                "[dbxcarta_client] failed to emit run summary after run failure"
-            )
+            logger.exception("[dbxcarta_client] failed to emit run summary after run failure")
             return
         raise
 
@@ -223,13 +233,15 @@ def manage_questions(spark: Any, settings: ClientSettings, questions_path: str) 
 
     questions = _load_questions(questions_path)
 
-    schema = StructType([
-        StructField("question_id", StringType(), nullable=False),
-        StructField("question", StringType()),
-        StructField("notes", StringType()),
-        StructField("reference_sql", StringType()),
-        StructField("schema", StringType()),
-    ])
+    schema = StructType(
+        [
+            StructField("question_id", StringType(), nullable=False),
+            StructField("question", StringType()),
+            StructField("notes", StringType()),
+            StructField("reference_sql", StringType()),
+            StructField("schema", StringType()),
+        ]
+    )
     rows = [
         (
             q.question_id,

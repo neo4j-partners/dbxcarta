@@ -18,7 +18,6 @@ import re
 import sys
 from pathlib import Path
 
-
 _DEFAULT_EXCLUDE: set[str] = {"single_table_filter"}
 _SCHEMA_RE = re.compile(r"`([^`]+)`\.\`([^`]+)`\.\`[^`]+`")
 

@@ -1,4 +1,4 @@
-"""Dump the three context blocks used for SchemaPile question generation.
+r"""Dump the three context blocks used for SchemaPile question generation.
 
 Produces a Markdown document with three fenced sections: the schema dump,
 the foreign-key list, and the sample-value list.
@@ -31,7 +31,6 @@ load_dotenv(_EXAMPLE_DIR / ".env")
 from dbxcarta.client.neo4j_utils import neo4j_credentials  # noqa: E402
 from dbxcarta.client.schema_dump import fetch_schema_dump  # noqa: E402
 from dbxcarta.client.settings import ClientSettings  # noqa: E402
-
 
 _FK_CYPHER = """
 MATCH (db:Database {name: $catalog})-[:HAS_SCHEMA]->(s1:Schema)
@@ -71,8 +70,7 @@ def _format_fk_list(rows: list[dict]) -> str:
             continue
         seen.add(key)
         lines.append(
-            f"{left} -> {right}  "
-            f"# source={row['source']}, confidence={row['confidence']:.2f}"
+            f"{left} -> {right}  # source={row['source']}, confidence={row['confidence']:.2f}"
         )
     return "\n".join(lines) if lines else "(no FK edges met the confidence floor)"
 
@@ -89,14 +87,18 @@ def _format_values(rows: list[dict], max_values: int, max_chars: int) -> str:
         if not clipped:
             continue
         joined = ", ".join(clipped)
-        lines.append(
-            f"{row['schema_name']}.{row['table_name']}.{row['col_name']}: {joined}"
-        )
+        lines.append(f"{row['schema_name']}.{row['table_name']}.{row['col_name']}: {joined}")
     return "\n".join(lines) if lines else "(no sample values present)"
 
 
-def _emit_doc(schema_text: str, fk_text: str, values_text: str, catalog: str,
-              schema_count: int, threshold: float) -> str:
+def _emit_doc(
+    schema_text: str,
+    fk_text: str,
+    values_text: str,
+    catalog: str,
+    schema_count: int,
+    threshold: float,
+) -> str:
     return f"""# Question-Generation Context (schemapile_lakehouse)
 
 Generated from the live Neo4j graph for catalog `{catalog}` across
@@ -151,15 +153,21 @@ Format: `schema.table.column: value1, value2, value3, ...`.
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--confidence", type=float, default=0.8,
+        "--confidence",
+        type=float,
+        default=0.8,
         help="Minimum REFERENCES confidence to include (default: 0.8)",
     )
     parser.add_argument(
-        "--max-values", type=int, default=20,
+        "--max-values",
+        type=int,
+        default=20,
         help="Max sample values per column (default: 20)",
     )
     parser.add_argument(
-        "--max-value-chars", type=int, default=80,
+        "--max-value-chars",
+        type=int,
+        default=80,
         help="Max characters per sample value before truncation (default: 80)",
     )
     args = parser.parse_args(argv)
@@ -190,14 +198,16 @@ def main(argv: list[str] | None = None) -> int:
     fk_text = _format_fk_list(fk_rows)
     values_text = _format_values(value_rows, args.max_values, args.max_value_chars)
 
-    sys.stdout.write(_emit_doc(
-        schema_text=schema_text,
-        fk_text=fk_text,
-        values_text=values_text,
-        catalog=settings.dbxcarta_catalog,
-        schema_count=len(schemas),
-        threshold=args.confidence,
-    ))
+    sys.stdout.write(
+        _emit_doc(
+            schema_text=schema_text,
+            fk_text=fk_text,
+            values_text=values_text,
+            catalog=settings.dbxcarta_catalog,
+            schema_count=len(schemas),
+            threshold=args.confidence,
+        )
+    )
     return 0
 
 

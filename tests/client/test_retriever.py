@@ -88,10 +88,7 @@ def test_context_bundle_values_in_dedicated_section() -> None:
     bundle = _make_bundle()
     lines = bundle.to_text().splitlines()
     # Column line for status has no inline sample values.
-    status_col_line = next(
-        line for line in lines
-        if line.startswith("  status") and "(" in line
-    )
+    status_col_line = next(line for line in lines if line.startswith("  status") and "(" in line)
     assert "Sample values" not in status_col_line
     # Values appear under "Sample values:" instead.
     text = "\n".join(lines)
@@ -333,8 +330,7 @@ def test_fetch_columns_emits_true_hyphenated_name_not_normalized_id() -> None:
                     "schema_name": "graph-enriched-schema",
                     "table_name": "accounts",
                     "col_id": (
-                        "graph_enriched_finance_silver."
-                        "graph_enriched_schema.accounts.account_id"
+                        "graph_enriched_finance_silver.graph_enriched_schema.accounts.account_id"
                     ),
                     "col_name": "account_id",
                     "data_type": "BIGINT",
@@ -350,8 +346,7 @@ def test_fetch_columns_emits_true_hyphenated_name_not_normalized_id() -> None:
     )
 
     assert columns[0].table_fqn == (
-        "`graph-enriched-finance-silver`."
-        "`graph-enriched-schema`.`accounts`"
+        "`graph-enriched-finance-silver`.`graph-enriched-schema`.`accounts`"
     )
 
 

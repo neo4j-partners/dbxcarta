@@ -10,14 +10,14 @@ assertions move with the rule table.
 
 from __future__ import annotations
 
-from dbxcarta.spark.contract import EdgeSource, REFERENCES_PROPERTIES
+from dbxcarta.spark.contract import REFERENCES_PROPERTIES, EdgeSource
 from dbxcarta.spark.ingest.fk.common import PKEvidence
 from dbxcarta.spark.ingest.fk.inference import (
     build_columns_frame,
     build_pk_gate,
     infer_metadata_edges,
 )
-from dbxcarta.spark.ingest.fk.metadata import NameMatchKind, _SCORE_TABLE
+from dbxcarta.spark.ingest.fk.metadata import _SCORE_TABLE, NameMatchKind
 
 _CAT = "main"
 _SA = "dbxcarta_fk_test"
@@ -31,12 +31,21 @@ _S_SUFFIX_UOH_COMMENT = _SCORE_TABLE[
 ]  # 0.82
 
 _COL_FIELDS = (
-    "table_catalog", "table_schema", "table_name", "column_name",
-    "data_type", "comment",
+    "table_catalog",
+    "table_schema",
+    "table_name",
+    "column_name",
+    "data_type",
+    "comment",
 )
 _CON_FIELDS = (
-    "table_catalog", "table_schema", "table_name", "column_name",
-    "constraint_type", "ordinal_position", "constraint_name",
+    "table_catalog",
+    "table_schema",
+    "table_name",
+    "column_name",
+    "constraint_type",
+    "ordinal_position",
+    "constraint_name",
 )
 _EXPECTED_COLUMNS = ("source_id", "target_id", "confidence", "source", "criteria")
 
@@ -55,15 +64,17 @@ def _constraints_schema():
         StructType,
     )
 
-    return StructType([
-        StructField("table_catalog", StringType(), True),
-        StructField("table_schema", StringType(), True),
-        StructField("table_name", StringType(), True),
-        StructField("column_name", StringType(), True),
-        StructField("constraint_type", StringType(), True),
-        StructField("ordinal_position", IntegerType(), True),
-        StructField("constraint_name", StringType(), True),
-    ])
+    return StructType(
+        [
+            StructField("table_catalog", StringType(), True),
+            StructField("table_schema", StringType(), True),
+            StructField("table_name", StringType(), True),
+            StructField("column_name", StringType(), True),
+            StructField("constraint_type", StringType(), True),
+            StructField("ordinal_position", IntegerType(), True),
+            StructField("constraint_name", StringType(), True),
+        ]
+    )
 
 
 def _columns_df(spark, rows: list[tuple]):
@@ -76,7 +87,13 @@ def _constraints_df(spark, rows: list[tuple]):
 
 def _pk(schema: str, table: str, column: str = "id") -> tuple:
     return (
-        _CAT, schema, table, column, "PRIMARY KEY", 1, f"{schema}_{table}_pk",
+        _CAT,
+        schema,
+        table,
+        column,
+        "PRIMARY KEY",
+        1,
+        f"{schema}_{table}_pk",
     )
 
 
@@ -86,7 +103,11 @@ def _run(spark, col_rows, con_rows, declared_df=None):
     cf = build_columns_frame(columns_df)
     pk_gate, composite_pk_count = build_pk_gate(cf, constraints_df)
     edges_df, counts, composite = infer_metadata_edges(
-        spark, cf, pk_gate, declared_df, composite_pk_count=composite_pk_count,
+        spark,
+        cf,
+        pk_gate,
+        declared_df,
+        composite_pk_count=composite_pk_count,
     )
     rows = edges_df.collect()
     edges = {(r["source_id"], r["target_id"]): r["confidence"] for r in rows}
@@ -108,21 +129,22 @@ def _v5fk_columns() -> list[tuple]:
 
 
 def _v5fk_constraints() -> list[tuple]:
-    return [
-        _pk(_SA, t) for t in ("customers", "orders", "order_items", "shipments")
-    ]
+    return [_pk(_SA, t) for t in ("customers", "orders", "order_items", "shipments")]
 
 
 # --- Declared-FK rediscovery -------------------------------------------------
 
+
 def test_v5fk_rediscovers_three_declared_fks(local_spark) -> None:
     edges, counts, _composite, df = _run(
-        local_spark, _v5fk_columns(), _v5fk_constraints(),
+        local_spark,
+        _v5fk_columns(),
+        _v5fk_constraints(),
     )
     expected = {
-        (f"{_CAT}.{_SA}.orders.customer_id",   f"{_CAT}.{_SA}.customers.id"),
+        (f"{_CAT}.{_SA}.orders.customer_id", f"{_CAT}.{_SA}.customers.id"),
         (f"{_CAT}.{_SA}.order_items.order_id", f"{_CAT}.{_SA}.orders.id"),
-        (f"{_CAT}.{_SA}.shipments.order_id",   f"{_CAT}.{_SA}.orders.id"),
+        (f"{_CAT}.{_SA}.shipments.order_id", f"{_CAT}.{_SA}.orders.id"),
     }
     assert expected == set(edges), f"got {set(edges)}"
     for pair in expected:
@@ -140,19 +162,24 @@ def test_declared_prior_pair_suppression(local_spark) -> None:
         schema=["source_id", "target_id"],
     )
     edges, counts, _composite, _df = _run(
-        local_spark, _v5fk_columns(), _v5fk_constraints(), declared_df=prior,
+        local_spark,
+        _v5fk_columns(),
+        _v5fk_constraints(),
+        declared_df=prior,
     )
     assert (
         f"{_CAT}.{_SA}.orders.customer_id",
         f"{_CAT}.{_SA}.customers.id",
     ) not in edges
     assert (
-        f"{_CAT}.{_SA}.order_items.order_id", f"{_CAT}.{_SA}.orders.id",
+        f"{_CAT}.{_SA}.order_items.order_id",
+        f"{_CAT}.{_SA}.orders.id",
     ) in edges
     assert counts.accepted == 2
 
 
 # --- No-declared-PK heuristic recovery ---------------------------------------
+
 
 def test_heuristic_recovers_with_comment_overlap(local_spark) -> None:
     """Zero declared PKs: the `id` name heuristic gates the target and
@@ -165,7 +192,8 @@ def test_heuristic_recovers_with_comment_overlap(local_spark) -> None:
     ]
     edges, _counts, _composite, _df = _run(local_spark, cols, [])
     suffix_edge = (
-        f"{_CAT}.{_SA}.orders.customer_id", f"{_CAT}.{_SA}.customers.id",
+        f"{_CAT}.{_SA}.orders.customer_id",
+        f"{_CAT}.{_SA}.customers.id",
     )
     assert suffix_edge in edges
     assert edges[suffix_edge] == _S_SUFFIX_UOH_COMMENT
@@ -179,6 +207,7 @@ def test_heuristic_without_comment_drops_below_threshold(local_spark) -> None:
 
 
 # --- Tie-break attenuation ---------------------------------------------------
+
 
 def test_tie_break_drops_fanout(local_spark) -> None:
     """`user_id` fans out to three stem-matching `user*` tables in one schema.
@@ -221,6 +250,7 @@ def test_tie_break_preserves_two_way_pair(local_spark) -> None:
 
 # --- Schema / catalog isolation ---------------------------------------------
 
+
 def test_cross_schema_candidates_rejected(local_spark) -> None:
     cols = [
         (_CAT, _SA, "customers", "id", "BIGINT", None),
@@ -250,7 +280,8 @@ def test_same_catalog_schema_pair_inferred(local_spark) -> None:
     cons = [("bronze", _SA, "customers", "id", "PRIMARY KEY", 1, "customers_pk")]
     edges, _counts, _composite, _df = _run(local_spark, cols, cons)
     assert (
-        f"bronze.{_SA}.orders.customer_id", f"bronze.{_SA}.customers.id",
+        f"bronze.{_SA}.orders.customer_id",
+        f"bronze.{_SA}.customers.id",
     ) in edges
 
 
@@ -267,6 +298,7 @@ def test_generic_id_exact_matches_are_not_inferred(local_spark) -> None:
 
 
 # --- Type compatibility ------------------------------------------------------
+
 
 def test_type_equiv_accepts_int_and_bigint(local_spark) -> None:
     cols = [
@@ -289,6 +321,7 @@ def test_type_mismatch_blocks_match(local_spark) -> None:
 
 
 # --- Composite PK accounting -------------------------------------------------
+
 
 def test_composite_pk_counted_not_indexed(local_spark) -> None:
     """A two-column declared PK is counted and never gates a target.
@@ -314,9 +347,12 @@ def test_composite_pk_counted_not_indexed(local_spark) -> None:
 
 # --- Column-parity guard ----------------------------------------------------
 
+
 def test_edges_df_columns_match_references_properties(local_spark) -> None:
     _edges, _counts, _composite, df = _run(
-        local_spark, _v5fk_columns(), _v5fk_constraints(),
+        local_spark,
+        _v5fk_columns(),
+        _v5fk_constraints(),
     )
     assert tuple(df.columns) == _EXPECTED_COLUMNS
     assert set(REFERENCES_PROPERTIES).issubset(set(df.columns))

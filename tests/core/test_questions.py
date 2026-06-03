@@ -3,14 +3,16 @@ from __future__ import annotations
 import dataclasses
 
 import pytest
-
 from dbxcarta.core.questions import GeneratedPair, ValidationOutcome
 
 
 def test_generated_pair_is_frozen() -> None:
     pair = GeneratedPair(
-        uc_schema="s", source_id="src", shape="aggregation",
-        question="how many?", sql="SELECT 1",
+        uc_schema="s",
+        source_id="src",
+        shape="aggregation",
+        question="how many?",
+        sql="SELECT 1",
     )
     with pytest.raises(dataclasses.FrozenInstanceError):
         pair.question = "changed"  # type: ignore[misc]

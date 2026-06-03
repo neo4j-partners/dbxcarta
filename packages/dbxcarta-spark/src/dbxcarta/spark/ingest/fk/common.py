@@ -9,13 +9,14 @@ once in schema_graph.
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from dbxcarta.spark.contract import EdgeSource, generate_id
 
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 _TYPE_EQUIV: dict[str, str] = {
     "BIGINT": "INTEGER",
@@ -42,9 +43,10 @@ class ColumnMeta:
     comment: str | None
 
     @classmethod
-    def from_row(cls, row: Mapping[str, Any]) -> "ColumnMeta":
+    def from_row(cls, row: Mapping[str, Any]) -> ColumnMeta:
         """Spark-Row → ColumnMeta conversion; the only place that renames
-        `table_catalog` → `catalog`, `column_name` → `column`, etc."""
+        `table_catalog` → `catalog`, `column_name` → `column`, etc.
+        """
         return cls(
             catalog=row["table_catalog"],
             schema=row["table_schema"],
@@ -76,7 +78,7 @@ class ConstraintRow:
     constraint_name: str
 
     @classmethod
-    def from_row(cls, row: Mapping[str, Any]) -> "ConstraintRow":
+    def from_row(cls, row: Mapping[str, Any]) -> ConstraintRow:
         return cls(
             table_catalog=row["table_catalog"],
             table_schema=row["table_schema"],
@@ -95,7 +97,8 @@ class ConstraintRow:
 @dataclass(frozen=True, slots=True)
 class DeclaredPair:
     """A declared-FK endpoint pair; frozen so accidental swaps can't mutate
-    the suppression set."""
+    the suppression set.
+    """
 
     source_id: str
     target_id: str
@@ -107,7 +110,8 @@ class FKEdge:
     strategies, tuple-converted once in schema_graph.build_references_rel.
 
     `source` is an EdgeSource enum (not a magic string); the DataFrame builder
-    serializes `.value` at the tuple boundary."""
+    serializes `.value` at the tuple boundary.
+    """
 
     source_id: str
     target_id: str
@@ -123,14 +127,15 @@ class PKIndex:
 
     Deliberately does *not* include heuristic `id` / `{table}_id` fallbacks;
     those are inferred from column names inside pk_kind via
-    build_id_cols_index. Keeping this type pure to its declared source."""
+    build_id_cols_index. Keeping this type pure to its declared source.
+    """
 
     pk_cols: dict[str, frozenset[str]]
     unique_leftmost: dict[str, frozenset[str]]
     composite_pk_count: int
 
     @classmethod
-    def from_constraints(cls, rows: list[ConstraintRow]) -> "PKIndex":
+    def from_constraints(cls, rows: list[ConstraintRow]) -> PKIndex:
         pk_by_constraint: dict[tuple[str, str, str], list[str]] = {}
         pk_table_by_constraint: dict[tuple[str, str, str], str] = {}
         unique_leftmost_build: dict[str, set[str]] = {}
@@ -161,6 +166,7 @@ class PKIndex:
 
 # --- Shared primitives ------------------------------------------------------
 
+
 def canonicalize(data_type: str) -> tuple[str, str | None]:
     """Reduce a declared type to (family, detail) for equality comparison.
 
@@ -183,7 +189,8 @@ def types_compatible(a: str, b: str) -> bool:
 
 def build_id_cols_index(columns: list[ColumnMeta]) -> dict[str, list[str]]:
     """Inferred from the column list, not from declared constraint metadata.
-    Used by pk_kind's name-heuristic fallback branch."""
+    Used by pk_kind's name-heuristic fallback branch.
+    """
     index: dict[str, list[str]] = {}
     for c in columns:
         if c.column.lower().endswith("_id"):

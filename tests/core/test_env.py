@@ -7,7 +7,6 @@ import sys
 from pathlib import Path
 
 import pytest
-
 from dbxcarta.core import env as _bootstrap
 
 
@@ -55,26 +54,20 @@ def test_resolve_no_overlay_is_base_only(monkeypatch: pytest.MonkeyPatch) -> Non
     assert argv == ["--run-id", "r1"]
 
 
-def test_resolve_cli_option_wins_over_env_var(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_resolve_cli_option_wins_over_env_var(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     cli_overlay = tmp_path / "cli.env"
     _write_env(cli_overlay, "X", "1")
     env_overlay = tmp_path / "env.env"
     _write_env(env_overlay, "X", "2")
     monkeypatch.setenv(_bootstrap._ENV_FILE_KEY, str(env_overlay))
 
-    files, argv = _bootstrap.resolve_env_files(
-        ["--env-file", str(cli_overlay), "spec"]
-    )
+    files, argv = _bootstrap.resolve_env_files(["--env-file", str(cli_overlay), "spec"])
 
     assert files == [cli_overlay, _bootstrap._BASE_ENV_FILE]
     assert argv == ["spec"]
 
 
-def test_resolve_env_var_used_when_no_cli_option(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_resolve_env_var_used_when_no_cli_option(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     env_overlay = tmp_path / "env.env"
     _write_env(env_overlay, "X", "2")
     monkeypatch.setenv(_bootstrap._ENV_FILE_KEY, str(env_overlay))
@@ -156,9 +149,7 @@ def test_select_overlay_env_var_fallback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv(_bootstrap._ENV_FILE_KEY, "/from/env.env")
-    assert _bootstrap.select_overlay_path(["submit-entrypoint", "ingest"]) == Path(
-        "/from/env.env"
-    )
+    assert _bootstrap.select_overlay_path(["submit-entrypoint", "ingest"]) == Path("/from/env.env")
 
 
 def test_select_overlay_malformed_flag_is_no_selection(
@@ -186,10 +177,7 @@ def test_read_required_warehouse_id_prefers_and_strips_override(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("DATABRICKS_WAREHOUSE_ID", "ignored")
-    assert (
-        _bootstrap.read_required_warehouse_id(" wh-1 ", operation="bootstrap")
-        == "wh-1"
-    )
+    assert _bootstrap.read_required_warehouse_id(" wh-1 ", operation="bootstrap") == "wh-1"
 
 
 def test_read_required_warehouse_id_falls_back_to_env(

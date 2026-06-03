@@ -4,7 +4,6 @@ import threading
 from typing import Any
 
 import pytest
-
 from dbxcarta.core.materialize import (
     ExecuteFn,
     MaterializeStats,
@@ -16,7 +15,6 @@ from dbxcarta.core.materialize import (
     render_sql_value,
     sanitize_identifier,
 )
-
 
 # --- coerce_type ---------------------------------------------------------
 
@@ -155,16 +153,17 @@ def _two_table_schema() -> list[dict[str, Any]]:
             "tables": [
                 {
                     "name": "customers",
-                    "columns": [{"name": "id", "type": "int"},
-                                {"name": "name", "type": "text"}],
+                    "columns": [{"name": "id", "type": "int"}, {"name": "name", "type": "text"}],
                     "primary_keys": ["id"],
                     "foreign_keys": [],
                     "rows": [[1, "Ada"], [2, "Grace"]],
                 },
                 {
                     "name": "orders",
-                    "columns": [{"name": "id", "type": "int"},
-                                {"name": "customer_id", "type": "int"}],
+                    "columns": [
+                        {"name": "id", "type": "int"},
+                        {"name": "customer_id", "type": "int"},
+                    ],
                     "primary_keys": ["id"],
                     "foreign_keys": [
                         {
@@ -184,8 +183,11 @@ def _two_table_schema() -> list[dict[str, Any]]:
 def test_spine_materializes_schema_with_constraints(workers: int) -> None:
     rec = _Recorder()
     stats = materialize_schemas(
-        _two_table_schema(), catalog="cat", make_execute=lambda: rec,
-        property_prefix="ex", workers=workers,
+        _two_table_schema(),
+        catalog="cat",
+        make_execute=lambda: rec,
+        property_prefix="ex",
+        workers=workers,
     )
     assert stats.schemas_created == 1
     assert stats.tables_created == 2
@@ -226,17 +228,28 @@ def test_spine_parallel_executor_is_thread_confined() -> None:
 
         return execute
 
-    schemas = [{
-        "uc_schema": "s", "source_id": "src",
-        "tables": [
-            {"name": f"t{i}", "columns": [{"name": "c", "type": "int"}],
-             "primary_keys": [], "foreign_keys": [], "rows": []}
-            for i in range(40)
-        ],
-    }]
+    schemas = [
+        {
+            "uc_schema": "s",
+            "source_id": "src",
+            "tables": [
+                {
+                    "name": f"t{i}",
+                    "columns": [{"name": "c", "type": "int"}],
+                    "primary_keys": [],
+                    "foreign_keys": [],
+                    "rows": [],
+                }
+                for i in range(40)
+            ],
+        }
+    ]
     materialize_schemas(
-        schemas, catalog="cat", make_execute=make_execute,
-        property_prefix="ex", workers=4,
+        schemas,
+        catalog="cat",
+        make_execute=make_execute,
+        property_prefix="ex",
+        workers=4,
     )
 
     assert usage  # statements ran
@@ -245,11 +258,15 @@ def test_spine_parallel_executor_is_thread_confined() -> None:
 
 
 def test_spine_skips_table_with_no_columns() -> None:
-    schemas = [{
-        "uc_schema": "s", "source_id": "src",
-        "tables": [{"name": "empty", "columns": [], "primary_keys": [],
-                    "foreign_keys": [], "rows": []}],
-    }]
+    schemas = [
+        {
+            "uc_schema": "s",
+            "source_id": "src",
+            "tables": [
+                {"name": "empty", "columns": [], "primary_keys": [], "foreign_keys": [], "rows": []}
+            ],
+        }
+    ]
     stats = materialize_schemas(
         schemas, catalog="cat", make_execute=_Recorder, property_prefix="ex"
     )
@@ -258,26 +275,40 @@ def test_spine_skips_table_with_no_columns() -> None:
 
 
 def test_spine_counts_type_fallbacks() -> None:
-    schemas = [{
-        "uc_schema": "s", "source_id": "src",
-        "tables": [{"name": "t", "columns": [{"name": "c", "type": "mystery"}],
-                    "primary_keys": [], "foreign_keys": [], "rows": []}],
-    }]
+    schemas = [
+        {
+            "uc_schema": "s",
+            "source_id": "src",
+            "tables": [
+                {
+                    "name": "t",
+                    "columns": [{"name": "c", "type": "mystery"}],
+                    "primary_keys": [],
+                    "foreign_keys": [],
+                    "rows": [],
+                }
+            ],
+        }
+    ]
     stats = materialize_schemas(
         schemas, catalog="cat", make_execute=_Recorder, property_prefix="ex"
     )
     assert stats.type_fallbacks == 1
 
 
-# The error-handling paths run through ``_collect``, whose exception flow
-# differs between serial (direct call) and parallel (re-raised via
-# ``future.result``), so each is exercised in both modes.
+# Each build applies its own create/insert error policy inside _materialize_table;
+# in parallel mode the exception surfaces through ``future.result`` rather than a
+# direct call, so each policy is exercised in both modes.
 @pytest.mark.parametrize("workers", [1, 4])
 def test_spine_skip_mode_tolerates_failed_insert(workers: int) -> None:
     rec = _Recorder(fail_on="INSERT OVERWRITE")
     stats = materialize_schemas(
-        _two_table_schema(), catalog="cat", make_execute=lambda: rec,
-        property_prefix="ex", on_insert_error="skip", workers=workers,
+        _two_table_schema(),
+        catalog="cat",
+        make_execute=lambda: rec,
+        property_prefix="ex",
+        on_insert_error="skip",
+        workers=workers,
     )
     assert stats.rows_inserted == 0
     assert stats.tables_created == 2  # tables still created despite insert failures
@@ -288,17 +319,64 @@ def test_spine_raise_mode_propagates_failed_insert(workers: int) -> None:
     rec = _Recorder(fail_on="INSERT OVERWRITE")
     with pytest.raises(RuntimeError):
         materialize_schemas(
-            _two_table_schema(), catalog="cat", make_execute=lambda: rec,
-            property_prefix="ex", on_insert_error="raise", workers=workers,
+            _two_table_schema(),
+            catalog="cat",
+            make_execute=lambda: rec,
+            property_prefix="ex",
+            on_insert_error="raise",
+            workers=workers,
         )
+
+
+@pytest.mark.parametrize("workers", [1, 4])
+def test_spine_insert_raise_is_independent_of_table_skip(workers: int) -> None:
+    """on_insert_error and on_table_error are independent policies.
+
+    A failed insert under ``on_insert_error="raise"`` must propagate even when
+    ``on_table_error="skip"``. The table-create policy must not swallow an
+    insert error: regression test for the previously conflated handling where a
+    single wrapper above both statements applied the table policy to both.
+    """
+    rec = _Recorder(fail_on="INSERT OVERWRITE")
+    with pytest.raises(RuntimeError):
+        materialize_schemas(
+            _two_table_schema(),
+            catalog="cat",
+            make_execute=lambda: rec,
+            property_prefix="ex",
+            on_insert_error="raise",
+            on_table_error="skip",
+            workers=workers,
+        )
+
+
+@pytest.mark.parametrize("workers", [1, 4])
+def test_spine_table_skip_does_not_swallow_insert_raise_converse(workers: int) -> None:
+    """Converse: a tolerated CREATE failure must not abort the run even when
+    ``on_insert_error="raise"``. The create policy governs the create only."""
+    rec = _Recorder(fail_on="CREATE TABLE")
+    stats = materialize_schemas(
+        _two_table_schema(),
+        catalog="cat",
+        make_execute=lambda: rec,
+        property_prefix="ex",
+        on_table_error="skip",
+        on_insert_error="raise",
+        workers=workers,
+    )
+    assert stats.tables_created == 0
 
 
 @pytest.mark.parametrize("workers", [1, 4])
 def test_spine_skip_mode_tolerates_failed_table_create(workers: int) -> None:
     rec = _Recorder(fail_on="CREATE TABLE")
     stats = materialize_schemas(
-        _two_table_schema(), catalog="cat", make_execute=lambda: rec,
-        property_prefix="ex", on_table_error="skip", workers=workers,
+        _two_table_schema(),
+        catalog="cat",
+        make_execute=lambda: rec,
+        property_prefix="ex",
+        on_table_error="skip",
+        workers=workers,
     )
     assert stats.tables_created == 0
 
@@ -308,8 +386,12 @@ def test_spine_raise_mode_propagates_failed_table_create(workers: int) -> None:
     rec = _Recorder(fail_on="CREATE TABLE")
     with pytest.raises(RuntimeError):
         materialize_schemas(
-            _two_table_schema(), catalog="cat", make_execute=lambda: rec,
-            property_prefix="ex", on_table_error="raise", workers=workers,
+            _two_table_schema(),
+            catalog="cat",
+            make_execute=lambda: rec,
+            property_prefix="ex",
+            on_table_error="raise",
+            workers=workers,
         )
 
 
@@ -323,14 +405,19 @@ def test_spine_skip_mode_does_not_swallow_non_warehouse_errors(workers: int) -> 
     error surfaces through ``future.result()`` rather than a direct call, so
     both modes are checked.
     """
+
     def execute(statement: str, _label: str) -> None:
         if "CREATE TABLE" in statement:
             raise ValueError("not a warehouse error")
 
     with pytest.raises(ValueError, match="not a warehouse error"):
         materialize_schemas(
-            _two_table_schema(), catalog="cat", make_execute=lambda: execute,
-            property_prefix="ex", on_table_error="skip", workers=workers,
+            _two_table_schema(),
+            catalog="cat",
+            make_execute=lambda: execute,
+            property_prefix="ex",
+            on_table_error="skip",
+            workers=workers,
         )
 
 
@@ -339,21 +426,25 @@ def test_spine_rejects_schema_entry_missing_keys(missing: str) -> None:
     entry = {"uc_schema": "s", "source_id": "src", "tables": []}
     del entry[missing]
     with pytest.raises(ValueError, match=f"missing required key.*{missing}"):
-        materialize_schemas(
-            [entry], catalog="cat", make_execute=_Recorder, property_prefix="ex"
-        )
+        materialize_schemas([entry], catalog="cat", make_execute=_Recorder, property_prefix="ex")
 
 
 def test_spine_skips_pk_when_column_dropped() -> None:
-    schemas = [{
-        "uc_schema": "s", "source_id": "src",
-        "tables": [{
-            "name": "t",
-            "columns": [{"name": "keep", "type": "int"}],
-            "primary_keys": ["keep", "!!!"],  # one PK column sanitizes away
-            "foreign_keys": [], "rows": [],
-        }],
-    }]
+    schemas = [
+        {
+            "uc_schema": "s",
+            "source_id": "src",
+            "tables": [
+                {
+                    "name": "t",
+                    "columns": [{"name": "keep", "type": "int"}],
+                    "primary_keys": ["keep", "!!!"],  # one PK column sanitizes away
+                    "foreign_keys": [],
+                    "rows": [],
+                }
+            ],
+        }
+    ]
     stats = materialize_schemas(
         schemas, catalog="cat", make_execute=_Recorder, property_prefix="ex"
     )

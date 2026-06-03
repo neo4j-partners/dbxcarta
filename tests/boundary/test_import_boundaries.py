@@ -9,7 +9,6 @@ from pathlib import Path
 
 import pytest
 
-
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -48,21 +47,12 @@ def _imported_modules(path: Path) -> set[str]:
 
 
 def _layer_source_files(layer: str) -> list[Path]:
-    package_root = (
-        _REPO_ROOT
-        / "packages"
-        / f"dbxcarta-{layer}"
-        / "src"
-        / "dbxcarta"
-        / layer
-    )
+    package_root = _REPO_ROOT / "packages" / f"dbxcarta-{layer}" / "src" / "dbxcarta" / layer
     return sorted(package_root.rglob("*.py"))
 
 
 def _matches_forbidden(module: str, forbidden: tuple[str, ...]) -> bool:
-    return any(
-        module == prefix or module.startswith(f"{prefix}.") for prefix in forbidden
-    )
+    return any(module == prefix or module.startswith(f"{prefix}.") for prefix in forbidden)
 
 
 def _requirement_names(distribution: str) -> set[str]:
@@ -154,9 +144,7 @@ def test_layer_root_does_not_load_job_runner(layer: str) -> None:
     assert not leaked, f"dbxcarta.{layer} loaded the job runner: {sorted(leaked)}"
 
 
-@pytest.mark.parametrize(
-    "distribution", ["dbxcarta-core", "dbxcarta-spark", "dbxcarta-client"]
-)
+@pytest.mark.parametrize("distribution", ["dbxcarta-core", "dbxcarta-spark", "dbxcarta-client"])
 def test_distribution_does_not_require_job_runner(distribution: str) -> None:
     # A module-load check alone would miss a re-declared dependency that
     # is simply never imported at module top level. Guard the published

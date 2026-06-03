@@ -14,13 +14,12 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from dbxcarta.spark.contract import NodeLabel
 from dbxcarta.core.identifiers import uc_volume_parent, uc_volume_parts
 
 if TYPE_CHECKING:
-    from pyspark.sql import DataFrame
-
+    from dbxcarta.spark.contract import NodeLabel
     from dbxcarta.spark.settings import SparkIngestSettings
+    from pyspark.sql import DataFrame
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +45,7 @@ def split_volume_subpath(path: str) -> list[str]:
         ) from exc
 
 
-def resolve_transient_root(settings: "SparkIngestSettings") -> str:
+def resolve_transient_root(settings: SparkIngestSettings) -> str:
     """Return the root for short-lived per-batch embedding materializations.
 
     A sibling "staging" directory under the same UC volume as
@@ -59,7 +58,7 @@ def resolve_transient_root(settings: "SparkIngestSettings") -> str:
     return f"{uc_volume_parent(summary_root)}/staging"
 
 
-def resolve_ledger_path(settings: "SparkIngestSettings") -> str:
+def resolve_ledger_path(settings: SparkIngestSettings) -> str:
     """Return the Delta ledger root.
 
     Sibling "ledger" directory under the same UC volume as the summary volume
@@ -115,7 +114,7 @@ def transient_path(transient_root: str, label: NodeLabel, batch_tag: str) -> str
     return f"{transient_root.rstrip('/')}/{label.value.lower()}_{batch_tag}"
 
 
-def materialize_transient(df: "DataFrame", path: str) -> "DataFrame":
+def materialize_transient(df: DataFrame, path: str) -> DataFrame:
     """Write df to a transient Delta `path` and read it back.
 
     This freezes one ai_query pass for a single batch: the failure-count
@@ -125,11 +124,6 @@ def materialize_transient(df: "DataFrame", path: str) -> "DataFrame":
     nothing accumulates. overwriteSchema is enabled so a re-used path from an
     interrupted prior run cannot wedge on a schema diff.
     """
-    (
-        df.write.format("delta")
-        .mode("overwrite")
-        .option("overwriteSchema", "true")
-        .save(path)
-    )
+    (df.write.format("delta").mode("overwrite").option("overwriteSchema", "true").save(path))
     logger.info("[dbxcarta] materialized transient batch at %s", path)
     return df.sparkSession.read.format("delta").load(path)

@@ -10,10 +10,14 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from collections.abc import Iterator
+from typing import TYPE_CHECKING
 
 import pytest
 from dotenv import load_dotenv
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 
 @pytest.fixture(scope="session", autouse=True)
 def _load_integration_env() -> None:
@@ -38,9 +42,8 @@ def ws(_load_integration_env: None):
 
 @pytest.fixture(scope="session")
 def neo4j_driver(ws) -> Iterator:
-    from neo4j import GraphDatabase
-
     from dbxcarta.core.workspace import read_workspace_secret
+    from neo4j import GraphDatabase
 
     scope = os.environ["DATABRICKS_SECRET_SCOPE"]
     driver = GraphDatabase.driver(

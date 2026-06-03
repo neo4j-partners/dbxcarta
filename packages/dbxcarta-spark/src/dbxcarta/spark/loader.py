@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import importlib
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
-from dbxcarta.core.presets import Preset
+if TYPE_CHECKING:
+    from dbxcarta.core.presets import Preset
 
 
 def load_preset(spec: str) -> Preset:
@@ -19,8 +20,6 @@ def load_preset(spec: str) -> Preset:
     """
     module_path, sep, attr = spec.partition(":")
     if not sep or not module_path or not attr:
-        raise ValueError(
-            f"invalid preset spec {spec!r}: expected 'module.path:attr'"
-        )
+        raise ValueError(f"invalid preset spec {spec!r}: expected 'module.path:attr'")
     module = importlib.import_module(module_path)
-    return cast(Preset, getattr(module, attr))
+    return cast("Preset", getattr(module, attr))

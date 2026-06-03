@@ -7,10 +7,9 @@ schema via the FKEdge dataclass.
 
 from __future__ import annotations
 
-from dbxcarta.spark.contract import EdgeSource, REFERENCES_PROPERTIES
+from dbxcarta.spark.contract import REFERENCES_PROPERTIES, EdgeSource
 from dbxcarta.spark.ingest.fk.common import FKEdge
 from dbxcarta.spark.ingest.schema_graph import build_references_rel
-
 
 _EXPECTED_COLUMNS = ("source_id", "target_id", "confidence", "source", "criteria")
 
@@ -21,17 +20,23 @@ def _declared_edges() -> list[FKEdge]:
         FKEdge(
             source_id="main.dbxcarta_test_sales.orders.customer_id",
             target_id="main.dbxcarta_test_sales.customers.id",
-            confidence=1.0, source=EdgeSource.DECLARED, criteria=None,
+            confidence=1.0,
+            source=EdgeSource.DECLARED,
+            criteria=None,
         ),
         FKEdge(
             source_id="main.dbxcarta_test_sales.order_items.order_id",
             target_id="main.dbxcarta_test_sales.orders.id",
-            confidence=1.0, source=EdgeSource.DECLARED, criteria=None,
+            confidence=1.0,
+            source=EdgeSource.DECLARED,
+            criteria=None,
         ),
         FKEdge(
             source_id="main.dbxcarta_test_sales.order_items.product_id",
             target_id="main.dbxcarta_test_inventory.products.id",
-            confidence=1.0, source=EdgeSource.DECLARED, criteria=None,
+            confidence=1.0,
+            source=EdgeSource.DECLARED,
+            criteria=None,
         ),
     ]
 
@@ -62,8 +67,11 @@ def test_build_references_source_tag_is_serialized_from_enum(local_spark) -> Non
     """Non-declared EdgeSource values round-trip as their string .value."""
     edges = [
         FKEdge(
-            source_id="cat.s.t.a", target_id="cat.s.t.b",
-            confidence=0.85, source=EdgeSource.INFERRED_METADATA, criteria=None,
+            source_id="cat.s.t.a",
+            target_id="cat.s.t.b",
+            confidence=0.85,
+            source=EdgeSource.INFERRED_METADATA,
+            criteria=None,
         ),
     ]
     rows = {r["source"] for r in build_references_rel(local_spark, edges).collect()}

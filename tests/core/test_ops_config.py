@@ -7,16 +7,13 @@ committed-overlay characterization net lives in ``test_ops_config_golden.py``.
 from __future__ import annotations
 
 import pytest
-
 from dbxcarta.core.config import DEFAULT_QUESTIONS_FILENAME, derive_ops_config
 
 
 def test_derives_all_values_from_one_base() -> None:
     cfg = derive_ops_config("/Volumes/dbxcarta-catalog/dense-ops/dbxcarta-ops")
 
-    assert cfg.summary_volume == (
-        "/Volumes/dbxcarta-catalog/dense-ops/dbxcarta-ops/dbxcarta/runs"
-    )
+    assert cfg.summary_volume == ("/Volumes/dbxcarta-catalog/dense-ops/dbxcarta-ops/dbxcarta/runs")
     assert cfg.summary_table == "dbxcarta-catalog.dense-ops.dbxcarta_run_summary"
     assert cfg.client_questions == (
         "/Volumes/dbxcarta-catalog/dense-ops/dbxcarta-ops/dbxcarta/questions.json"

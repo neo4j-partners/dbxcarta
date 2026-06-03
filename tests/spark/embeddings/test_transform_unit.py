@@ -10,9 +10,7 @@ from __future__ import annotations
 import hashlib
 
 import pytest
-
 from dbxcarta.spark.ingest.transform.embeddings import _validate_embedding, add_embedding_column
-
 
 EXPECTED_DIM = 1024
 
@@ -27,14 +25,18 @@ def _emb_raw_struct(spark, rows):
         StructType,
     )
 
-    raw_type = StructType([
-        StructField("result", ArrayType(DoubleType())),
-        StructField("errorMessage", StringType()),
-    ])
-    schema = StructType([
-        StructField("id", StringType()),
-        StructField("_emb_raw", raw_type),
-    ])
+    raw_type = StructType(
+        [
+            StructField("result", ArrayType(DoubleType())),
+            StructField("errorMessage", StringType()),
+        ]
+    )
+    schema = StructType(
+        [
+            StructField("id", StringType()),
+            StructField("_emb_raw", raw_type),
+        ]
+    )
     return spark.createDataFrame(rows, schema=schema)
 
 
@@ -88,15 +90,14 @@ def test_embedding_text_drop_source_inspection() -> None:
 
     source = inspect.getsource(add_embedding_column)
     assert '.drop("embedding_text")' in source
-    assert 'embedding_text_hash' in source
+    assert "embedding_text_hash" in source
 
 
 def test_wrong_shape_row_counted_as_failure(local_spark) -> None:
     """compute_failure_stats counts a dimension-mismatch row as a failure
     because _validate_embedding nulls its embedding column."""
-    from pyspark.sql.functions import col
-
     from dbxcarta.spark.ingest.transform.embeddings import compute_failure_stats
+    from pyspark.sql.functions import col
 
     df = _emb_raw_struct(
         local_spark,
@@ -170,10 +171,16 @@ def test_ledger_all_rows_hit_misses_empty(local_spark) -> None:
     and hits carry the stored embedding vector from the ledger."""
     from datetime import datetime
 
-    from pyspark.sql.functions import sha2, expr
-    from pyspark.sql.types import ArrayType, DoubleType, StringType, StructField, StructType, TimestampType
-
     from dbxcarta.spark.ingest.transform.ledger import split_by_ledger
+    from pyspark.sql.functions import expr, sha2
+    from pyspark.sql.types import (
+        ArrayType,
+        DoubleType,
+        StringType,
+        StructField,
+        StructType,
+        TimestampType,
+    )
 
     endpoint = "test-model"
     stored_vec = [0.5] * 4
@@ -187,13 +194,15 @@ def test_ledger_all_rows_hit_misses_empty(local_spark) -> None:
     df_hashed = input_df.withColumn("_curr_hash", sha2(expr(text_expr), 256))
     hash_map = {r["id"]: r["_curr_hash"] for r in df_hashed.collect()}
 
-    ledger_schema = StructType([
-        StructField("id", StringType()),
-        StructField("embedding_text_hash", StringType()),
-        StructField("embedding", ArrayType(DoubleType())),
-        StructField("embedding_model", StringType()),
-        StructField("embedded_at", TimestampType()),
-    ])
+    ledger_schema = StructType(
+        [
+            StructField("id", StringType()),
+            StructField("embedding_text_hash", StringType()),
+            StructField("embedding", ArrayType(DoubleType())),
+            StructField("embedding_model", StringType()),
+            StructField("embedded_at", TimestampType()),
+        ]
+    )
     ts = datetime(2026, 1, 1)
     ledger_df = local_spark.createDataFrame(
         [
@@ -215,10 +224,16 @@ def test_ledger_hash_mismatch_is_miss(local_spark) -> None:
     """A row whose embedding_text_hash differs from the ledger is a miss."""
     from datetime import datetime
 
-    from pyspark.sql.functions import sha2, expr
-    from pyspark.sql.types import ArrayType, DoubleType, StringType, StructField, StructType, TimestampType
-
     from dbxcarta.spark.ingest.transform.ledger import split_by_ledger
+    from pyspark.sql.functions import expr, sha2
+    from pyspark.sql.types import (
+        ArrayType,
+        DoubleType,
+        StringType,
+        StructField,
+        StructType,
+        TimestampType,
+    )
 
     endpoint = "test-model"
     stored_vec = [0.5] * 4
@@ -226,13 +241,15 @@ def test_ledger_hash_mismatch_is_miss(local_spark) -> None:
     input_df = local_spark.createDataFrame([("n1", "hello")], ["id", "value"])
     df_hashed = input_df.withColumn("_curr_hash", sha2(expr("value"), 256))
 
-    ledger_schema = StructType([
-        StructField("id", StringType()),
-        StructField("embedding_text_hash", StringType()),
-        StructField("embedding", ArrayType(DoubleType())),
-        StructField("embedding_model", StringType()),
-        StructField("embedded_at", TimestampType()),
-    ])
+    ledger_schema = StructType(
+        [
+            StructField("id", StringType()),
+            StructField("embedding_text_hash", StringType()),
+            StructField("embedding", ArrayType(DoubleType())),
+            StructField("embedding_model", StringType()),
+            StructField("embedded_at", TimestampType()),
+        ]
+    )
     # Stale hash — different from the current "hello"
     ledger_df = local_spark.createDataFrame(
         [("n1", "stale-hash-value", stored_vec, endpoint, datetime(2026, 1, 1))],
@@ -249,10 +266,16 @@ def test_ledger_model_mismatch_is_miss(local_spark) -> None:
     """A row whose embedding_model differs from the current endpoint is a miss."""
     from datetime import datetime
 
-    from pyspark.sql.functions import sha2, expr
-    from pyspark.sql.types import ArrayType, DoubleType, StringType, StructField, StructType, TimestampType
-
     from dbxcarta.spark.ingest.transform.ledger import split_by_ledger
+    from pyspark.sql.functions import expr, sha2
+    from pyspark.sql.types import (
+        ArrayType,
+        DoubleType,
+        StringType,
+        StructField,
+        StructType,
+        TimestampType,
+    )
 
     current_endpoint = "new-model"
     stored_vec = [0.5] * 4
@@ -261,13 +284,15 @@ def test_ledger_model_mismatch_is_miss(local_spark) -> None:
     df_hashed = input_df.withColumn("_curr_hash", sha2(expr("value"), 256))
     current_hash = df_hashed.collect()[0]["_curr_hash"]
 
-    ledger_schema = StructType([
-        StructField("id", StringType()),
-        StructField("embedding_text_hash", StringType()),
-        StructField("embedding", ArrayType(DoubleType())),
-        StructField("embedding_model", StringType()),
-        StructField("embedded_at", TimestampType()),
-    ])
+    ledger_schema = StructType(
+        [
+            StructField("id", StringType()),
+            StructField("embedding_text_hash", StringType()),
+            StructField("embedding", ArrayType(DoubleType())),
+            StructField("embedding_model", StringType()),
+            StructField("embedded_at", TimestampType()),
+        ]
+    )
     # Same hash but old model
     ledger_df = local_spark.createDataFrame(
         [("n1", current_hash, stored_vec, "old-model", datetime(2026, 1, 1))],
@@ -286,10 +311,8 @@ def test_embedding_text_hash_is_sha256_of_text(local_spark) -> None:
 
     input_df = local_spark.createDataFrame([("s", "t")], ["table_schema", "name"])
     text_expr = "concat_ws('.', table_schema, name)"
-    df = (
-        input_df
-        .withColumn("embedding_text", expr(text_expr))
-        .withColumn("embedding_text_hash", sha2("embedding_text", 256))
+    df = input_df.withColumn("embedding_text", expr(text_expr)).withColumn(
+        "embedding_text_hash", sha2("embedding_text", 256)
     )
     row = df.collect()[0]
     assert row["embedding_text"] == "s.t"

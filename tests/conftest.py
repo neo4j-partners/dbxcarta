@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Iterator
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 
 @pytest.fixture(scope="session")
@@ -40,8 +43,7 @@ def local_spark() -> Iterator:
     from pyspark.sql import SparkSession
 
     spark = (
-        SparkSession.builder
-        .master("local[1]")
+        SparkSession.builder.master("local[1]")
         .appName("dbxcarta-tests")
         .config("spark.ui.enabled", "false")
         .config("spark.sql.shuffle.partitions", "1")

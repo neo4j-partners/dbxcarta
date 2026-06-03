@@ -9,10 +9,8 @@ infra — the boundary itself.
 from __future__ import annotations
 
 import pytest
-from pydantic import ValidationError
-
 from dbxcarta.spark.settings import SparkIngestSettings
-
+from pydantic import ValidationError
 
 _BASE = {
     "databricks_secret_scope": "dbxcarta-neo4j-test",

@@ -3,11 +3,9 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any
 
-from dbxcarta.core.identifiers import quote_identifier
 from databricks.sdk.service.sql import StatementState
-
+from dbxcarta.core.identifiers import quote_identifier
 from dbxcarta_schemapile_example.materialize import materialize
-
 
 # The materialize plumbing (coerce_type, sanitize_identifier, escape/render,
 # build_insert_statement, constraint_name) now lives in dbxcarta.core and is
@@ -32,9 +30,7 @@ class _FakeStatementExecution:
         status = SimpleNamespace(state=StatementState.SUCCEEDED, error=None)
         if statement.strip().upper().startswith("SHOW CATALOGS"):
             columns = [SimpleNamespace(name="catalog")]
-            manifest = SimpleNamespace(
-                schema=SimpleNamespace(columns=columns)
-            )
+            manifest = SimpleNamespace(schema=SimpleNamespace(columns=columns))
             result = SimpleNamespace(
                 data_array=[[c] for c in self._existing_catalogs],
                 next_chunk_index=None,
@@ -45,9 +41,7 @@ class _FakeStatementExecution:
                 result=result,
                 statement_id="stmt-1",
             )
-        return SimpleNamespace(
-            status=status, manifest=None, result=None, statement_id="stmt-1"
-        )
+        return SimpleNamespace(status=status, manifest=None, result=None, statement_id="stmt-1")
 
 
 class _FakeWorkspaceClient:
@@ -105,13 +99,11 @@ def test_materialize_emits_primary_key_ddl():
 
     # PK columns are set NOT NULL.
     assert any(
-        f"ALTER TABLE {cat}.`shop`.`users` ALTER COLUMN `id` SET NOT NULL" in s
-        for s in statements
+        f"ALTER TABLE {cat}.`shop`.`users` ALTER COLUMN `id` SET NOT NULL" in s for s in statements
     )
     # PRIMARY KEY constraint is added.
     assert any(
-        f"ALTER TABLE {cat}.`shop`.`users` ADD CONSTRAINT `pk_users`"
-        " PRIMARY KEY (`id`)" in s
+        f"ALTER TABLE {cat}.`shop`.`users` ADD CONSTRAINT `pk_users` PRIMARY KEY (`id`)" in s
         for s in statements
     )
     assert stats.pk_constraints_added == 2
@@ -121,9 +113,7 @@ def test_materialize_emits_foreign_key_ddl_in_second_pass():
     statements, stats = _run_materialize(_two_table_schemas())
     cat = quote_identifier("dbxcarta_data")
 
-    fk_stmt = next(
-        (s for s in statements if "FOREIGN KEY" in s), None
-    )
+    fk_stmt = next((s for s in statements if "FOREIGN KEY" in s), None)
     assert fk_stmt is not None
     assert (
         f"ALTER TABLE {cat}.`shop`.`orders` ADD CONSTRAINT `fk_orders__user_id`"
@@ -133,10 +123,7 @@ def test_materialize_emits_foreign_key_ddl_in_second_pass():
     assert stats.fk_constraints_added == 1
 
     # The FK must be emitted only after the parent table's PK exists.
-    parent_pk_idx = next(
-        i for i, s in enumerate(statements)
-        if "ADD CONSTRAINT `pk_users`" in s
-    )
+    parent_pk_idx = next(i for i, s in enumerate(statements) if "ADD CONSTRAINT `pk_users`" in s)
     fk_idx = statements.index(fk_stmt)
     assert fk_idx > parent_pk_idx
 

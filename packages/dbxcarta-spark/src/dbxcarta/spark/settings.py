@@ -9,9 +9,6 @@ Internal DTOs elsewhere are `@dataclass`, per the skill's decision table.
 
 from __future__ import annotations
 
-from pydantic import field_validator, model_validator
-from pydantic_settings import BaseSettings
-
 from dbxcarta.core.catalogs import resolve_catalogs
 from dbxcarta.core.config import derive_ops_config
 from dbxcarta.core.identifiers import (
@@ -22,6 +19,8 @@ from dbxcarta.core.identifiers import (
     validate_uc_volume_subpath,
 )
 from dbxcarta.spark.contract import DEFAULT_EMBEDDING_ENDPOINT
+from pydantic import field_validator, model_validator
+from pydantic_settings import BaseSettings
 
 
 class SparkIngestSettings(BaseSettings):
@@ -137,8 +136,7 @@ class SparkIngestSettings(BaseSettings):
         """Reject negative: 0 means unlimited (disabled), > 0 is the cap."""
         if v < 0:
             raise ValueError(
-                "DBXCARTA_FK_MAX_COLUMNS must be >= 0"
-                f" (got {v}); 0 disables the guardrail"
+                f"DBXCARTA_FK_MAX_COLUMNS must be >= 0 (got {v}); 0 disables the guardrail"
             )
         return v
 
@@ -271,7 +269,7 @@ class SparkIngestSettings(BaseSettings):
         return validate_serving_endpoint_name(v)
 
     @model_validator(mode="after")
-    def _resolve_summary_sinks(self) -> "SparkIngestSettings":
+    def _resolve_summary_sinks(self) -> SparkIngestSettings:
         """Derive the summary volume and table from the ops volume root when unset.
 
         The shared core resolver is the single owner of the base-plus-tail rule.
@@ -290,26 +288,19 @@ class SparkIngestSettings(BaseSettings):
                     "cannot be derived: DATABRICKS_VOLUME_PATH is also unset."
                 )
             derived = derive_ops_config(self.databricks_volume_path)
-            self.dbxcarta_summary_volume = (
-                self.dbxcarta_summary_volume or derived.summary_volume
-            )
-            self.dbxcarta_summary_table = (
-                self.dbxcarta_summary_table or derived.summary_table
-            )
+            self.dbxcarta_summary_volume = self.dbxcarta_summary_volume or derived.summary_volume
+            self.dbxcarta_summary_table = self.dbxcarta_summary_table or derived.summary_table
         return self
 
     @model_validator(mode="after")
-    def _validate_feature_coherence(self) -> "SparkIngestSettings":
+    def _validate_feature_coherence(self) -> SparkIngestSettings:
         """Cross-field sanity checks.
 
         Fail at Settings construction (job startup) rather than halfway through
         a run. Value embeddings require sample-values to be enabled: there are
         no Value nodes to embed otherwise.
         """
-        if (
-            self.dbxcarta_include_embeddings_values
-            and not self.dbxcarta_include_values
-        ):
+        if self.dbxcarta_include_embeddings_values and not self.dbxcarta_include_values:
             raise ValueError(
                 "DBXCARTA_INCLUDE_EMBEDDINGS_VALUES=true requires"
                 " DBXCARTA_INCLUDE_VALUES=true (nothing to embed otherwise)"

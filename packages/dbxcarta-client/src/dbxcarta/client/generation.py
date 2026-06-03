@@ -15,9 +15,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _input_hash(
-    endpoint: str, arm: str, questions_with_prompts: list[dict]
-) -> str:
+def _input_hash(endpoint: str, arm: str, questions_with_prompts: list[dict]) -> str:
     """Stable hash of everything that determines the model output.
 
     Question order is preserved (not sorted) because it is deterministic from
@@ -29,9 +27,7 @@ def _input_hash(
         {
             "endpoint": endpoint,
             "arm": arm,
-            "items": [
-                [q["question_id"], q["prompt"]] for q in questions_with_prompts
-            ],
+            "items": [[q["question_id"], q["prompt"]] for q in questions_with_prompts],
         },
         ensure_ascii=False,
     )
@@ -47,7 +43,7 @@ def _results_from_rows(rows: list) -> dict[str, tuple[str | None, str | None]]:
             results[qid] = (None, "ai_query returned null struct")
         else:
             error = response["errorMessage"]
-            results[qid] = (response["result"], error if error else None)
+            results[qid] = (response["result"], error or None)
     return results
 
 
@@ -128,10 +124,7 @@ def generate_sql_batch(
         arm,
         len(want_ids),
     )
-    rows = [
-        Row(question_id=q["question_id"], prompt=q["prompt"])
-        for q in questions_with_prompts
-    ]
+    rows = [Row(question_id=q["question_id"], prompt=q["prompt"]) for q in questions_with_prompts]
     df = spark.createDataFrame(rows)
 
     enriched = df.withColumn(

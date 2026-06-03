@@ -10,17 +10,18 @@ from __future__ import annotations
 
 import os
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, NamedTuple
-
-from databricks.sdk import WorkspaceClient
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from dbxcarta.client.compare import compare_result_sets as _compare_result_sets
 from dbxcarta.client.embed import embed_questions as _embed_questions
-from dbxcarta.core.executor import fetch_rows
-from dbxcarta.client.questions import Question
-from dbxcarta.client.settings import ClientSettings
 from dbxcarta.client.sql import parse_sql as _parse_sql
-from dbxcarta.client.summary import ClientRunSummary
+from dbxcarta.core.executor import fetch_rows
+
+if TYPE_CHECKING:
+    from databricks.sdk import WorkspaceClient
+    from dbxcarta.client.questions import Question
+    from dbxcarta.client.settings import ClientSettings
+    from dbxcarta.client.summary import ClientRunSummary
 
 _REFERENCE_ARM = "reference"
 _LLM_ARMS = {"no_context", "schema_dump"}
@@ -40,10 +41,7 @@ def _retrieval_concurrency() -> int:
         return _RETRIEVAL_CONCURRENCY
     value = int(raw)
     if value < 1:
-        raise ValueError(
-            f"{_RETRIEVAL_CONCURRENCY_ENV} must be a positive integer, "
-            f"got {value!r}"
-        )
+        raise ValueError(f"{_RETRIEVAL_CONCURRENCY_ENV} must be a positive integer, got {value!r}")
     return value
 
 
@@ -62,15 +60,11 @@ class _ReferenceCache:
     SQL once per arm.
     """
 
-    def __init__(
-        self, ws: WorkspaceClient, warehouse_id: str, timeout_sec: int
-    ) -> None:
+    def __init__(self, ws: WorkspaceClient, warehouse_id: str, timeout_sec: int) -> None:
         self._ws = ws
         self._warehouse_id = warehouse_id
         self._timeout_sec = timeout_sec
-        self._cache: dict[
-            str, tuple[list[str] | None, list[list[Any]] | None, str | None]
-        ] = {}
+        self._cache: dict[str, tuple[list[str] | None, list[list[Any]] | None, str | None]] = {}
 
     def get(
         self, question_id: str, reference_sql: str
@@ -141,9 +135,7 @@ def _execute_and_grade(
     if gradable:
         if reference_sql is None or gen_rows is None:
             raise RuntimeError("gradable SQL missing reference or generated rows")
-        correct, _ = _grade_correct(
-            gen_cols, gen_rows, reference_sql, question_id, ref_cache
-        )
+        correct, _ = _grade_correct(gen_cols, gen_rows, reference_sql, question_id, ref_cache)
     return _ExecGrade(executed, non_empty, gradable, correct, error)
 
 
@@ -227,9 +219,7 @@ def _run_llm_arm(
 
         if cleaned_sql is None:
             raise RuntimeError("parser reported success but produced no SQL")
-        graded = _execute_and_grade(
-            ws, settings, cleaned_sql, q.reference_sql, qid, ref_cache
-        )
+        graded = _execute_and_grade(ws, settings, cleaned_sql, q.reference_sql, qid, ref_cache)
         summary.add_result(
             question_id=qid,
             question=q.question,
@@ -289,9 +279,7 @@ def _run_graph_rag_arm(
         # propagates and aborts the run (retriever closed in the finally
         # below).
         contexts: dict[str, Any] = {}
-        with ThreadPoolExecutor(
-            max_workers=_retrieval_concurrency()
-        ) as executor:
+        with ThreadPoolExecutor(max_workers=_retrieval_concurrency()) as executor:
             future_to_qid = {
                 executor.submit(
                     build_graph_rag_context,
@@ -301,7 +289,7 @@ def _run_graph_rag_arm(
                     embedding=emb,
                     retriever=retriever,
                 ): q.question_id
-                for q, emb in zip(questions, embeddings)
+                for q, emb in zip(questions, embeddings, strict=False)
             }
             for future, qid in future_to_qid.items():
                 contexts[qid] = future.result()
@@ -313,9 +301,7 @@ def _run_graph_rag_arm(
             context = contexts[qid]
             bundle = context.bundle
             context_text = context.context_text
-            questions_with_prompts.append(
-                {"question_id": qid, "prompt": context.prompt}
-            )
+            questions_with_prompts.append({"question_id": qid, "prompt": context.prompt})
 
             final_col_ids = [c.column_id for c in bundle.columns if c.column_id]
             sch_scores = schema_scores_from_seeds(
@@ -335,9 +321,7 @@ def _run_graph_rag_arm(
                 tbl_seed_scores=bundle.tbl_seed_scores,
                 schema_scores=sch_scores,
                 chosen_schemas=(
-                    bundle.selected_schemas
-                    if bundle.selected_schemas
-                    else chosen_schemas_from_columns(bundle.columns)
+                    bundle.selected_schemas or chosen_schemas_from_columns(bundle.columns)
                 ),
                 expansion_tbl_ids=bundle.expansion_tbl_ids,
                 final_col_ids=final_col_ids,
@@ -385,9 +369,7 @@ def _run_graph_rag_arm(
 
         if cleaned_sql is None:
             raise RuntimeError("parser reported success but produced no SQL")
-        graded = _execute_and_grade(
-            ws, settings, cleaned_sql, q.reference_sql, qid, ref_cache
-        )
+        graded = _execute_and_grade(ws, settings, cleaned_sql, q.reference_sql, qid, ref_cache)
 
         trace.generated_sql = cleaned_sql
         trace.parsed = True
@@ -412,6 +394,4 @@ def _run_graph_rag_arm(
             context_purity=trace.context_purity,
         )
 
-    emit_retrieval_traces(
-        spark, list(traces.values()), _client_retrieval_table(settings)
-    )
+    emit_retrieval_traces(spark, list(traces.values()), _client_retrieval_table(settings))

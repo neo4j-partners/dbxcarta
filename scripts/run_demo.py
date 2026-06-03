@@ -47,7 +47,8 @@ _DEMO_SCHEMAS = [
     "dbxcarta_test_events",
 ]
 # Teardown includes external schema and legacy backward-compat schemas for full cleanup.
-_TEARDOWN_SCHEMAS = _DEMO_SCHEMAS + [
+_TEARDOWN_SCHEMAS = [
+    *_DEMO_SCHEMAS,
     "dbxcarta_test_external",
     "dbxcarta_fk_test",
     "dbxcarta_fk_test_b",
@@ -55,7 +56,7 @@ _TEARDOWN_SCHEMAS = _DEMO_SCHEMAS + [
 
 
 def _setup(
-    ws: "WorkspaceClient",
+    ws: WorkspaceClient,
     warehouse_id: str,
     catalog: str,
     volume_path: str,
@@ -66,7 +67,9 @@ def _setup(
     # Backtick-quote the catalog in USE CATALOG (hyphen requires quoting in SQL).
     # All other ${catalog} occurrences in the fixture are in comments.
     # Catalog context for all other statements is set via the execute_statement API parameter.
-    sql = raw.replace("USE CATALOG ${catalog}", f"USE CATALOG `{catalog}`").replace("${catalog}", catalog)
+    sql = raw.replace("USE CATALOG ${catalog}", f"USE CATALOG `{catalog}`").replace(
+        "${catalog}", catalog
+    )
     if volume_path:
         sql = sql.replace("${volume_path}", volume_path)
     statements = split_sql_statements(sql)
@@ -101,7 +104,7 @@ def _setup(
 
 
 def _insert_data(
-    ws: "WorkspaceClient",
+    ws: WorkspaceClient,
     warehouse_id: str,
     catalog: str,
     volume_path: str,
@@ -109,7 +112,9 @@ def _insert_data(
     from dbxcarta.core.executor import execute_ddl, split_sql_statements
 
     raw = _INSERT_SQL.read_text()
-    sql = raw.replace("USE CATALOG ${catalog}", f"USE CATALOG `{catalog}`").replace("${catalog}", catalog)
+    sql = raw.replace("USE CATALOG ${catalog}", f"USE CATALOG `{catalog}`").replace(
+        "${catalog}", catalog
+    )
     statements = split_sql_statements(sql)
     total = len(statements)
 
@@ -141,16 +146,13 @@ def _insert_data(
 
 
 def _teardown(
-    ws: "WorkspaceClient",
+    ws: WorkspaceClient,
     warehouse_id: str,
     catalog: str,
 ) -> None:
     from dbxcarta.core.executor import execute_ddl
 
-    statements = [
-        f"DROP SCHEMA IF EXISTS {schema} CASCADE"
-        for schema in _TEARDOWN_SCHEMAS
-    ]
+    statements = [f"DROP SCHEMA IF EXISTS {schema} CASCADE" for schema in _TEARDOWN_SCHEMAS]
     total = len(statements)
 
     print(f"Tearing down demo schemas in catalog '{catalog}'...")
@@ -178,7 +180,7 @@ def _print_next_steps(catalog: str, volume_path: str) -> None:
         if volume_path
         else "/Volumes/<catalog>/<schema>/<volume>/demo_questions.json"
     )
-    print("""
+    print(f"""
 Next steps
 ----------
 1. Confirm these values in .env:
@@ -205,7 +207,7 @@ Next steps
 4. To tear down the schemas after the demo:
 
    uv run python scripts/run_demo.py --catalog {catalog} --teardown
-""".format(catalog=catalog, schemas=schemas, questions=questions))
+""")
 
 
 def main() -> None:

@@ -12,7 +12,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-
 from dbxcarta.spark.ingest.preflight import _assert_materialized_tables_exist
 
 

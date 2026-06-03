@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from dbxcarta_schemapile_example.candidate_selector import (
     _sanitize_schema_name,
     select_candidates,
 )
 from dbxcarta_schemapile_example.config import SchemaPileConfig
-from pathlib import Path
 
 
 def _config() -> SchemaPileConfig:
@@ -101,34 +102,38 @@ def test_extract_rows_no_values_anywhere_returns_empty():
 def test_select_candidates_keeps_schemas_with_fks():
     config = _config()
     slice_data = {
-        "ecommerce.sql": _entry({
-            "customers": {
-                "columns": [
-                    {"name": "id", "type": "INT"},
-                    {"name": "name", "type": "VARCHAR(255)"},
-                ],
-                "pks": ["id"],
-                "fks": [],
-            },
-            "orders": {
-                "columns": [
-                    {"name": "id", "type": "INT"},
-                    {"name": "customer_id", "type": "INT"},
-                ],
-                "pks": ["id"],
-                "fks": [
-                    {
-                        "COLUMNS": ["customer_id"],
-                        "FOREIGN_TABLE": "customers",
-                        "REFERRED_COLUMNS": ["id"],
-                    }
-                ],
-            },
-        }),
-        "no_fk.sql": _entry({
-            "a": {"columns": [{"name": "x", "type": "INT"}]},
-            "b": {"columns": [{"name": "y", "type": "INT"}]},
-        }),
+        "ecommerce.sql": _entry(
+            {
+                "customers": {
+                    "columns": [
+                        {"name": "id", "type": "INT"},
+                        {"name": "name", "type": "VARCHAR(255)"},
+                    ],
+                    "pks": ["id"],
+                    "fks": [],
+                },
+                "orders": {
+                    "columns": [
+                        {"name": "id", "type": "INT"},
+                        {"name": "customer_id", "type": "INT"},
+                    ],
+                    "pks": ["id"],
+                    "fks": [
+                        {
+                            "COLUMNS": ["customer_id"],
+                            "FOREIGN_TABLE": "customers",
+                            "REFERRED_COLUMNS": ["id"],
+                        }
+                    ],
+                },
+            }
+        ),
+        "no_fk.sql": _entry(
+            {
+                "a": {"columns": [{"name": "x", "type": "INT"}]},
+                "b": {"columns": [{"name": "y", "type": "INT"}]},
+            }
+        ),
     }
     candidates = select_candidates(slice_data, config)
     assert len(candidates) == 1
@@ -139,14 +144,15 @@ def test_select_candidates_keeps_schemas_with_fks():
 
 def test_select_candidates_drops_outside_size_window():
     big_tables: dict[str, dict[str, object]] = {
-        f"t{i}": {"columns": [{"name": "id", "type": "INT"}], "fks": []}
-        for i in range(50)
+        f"t{i}": {"columns": [{"name": "id", "type": "INT"}], "fks": []} for i in range(50)
     }
-    big_tables["t0"]["fks"] = [{
-        "COLUMNS": ["id"],
-        "FOREIGN_TABLE": "t1",
-        "REFERRED_COLUMNS": ["id"],
-    }]
+    big_tables["t0"]["fks"] = [
+        {
+            "COLUMNS": ["id"],
+            "FOREIGN_TABLE": "t1",
+            "REFERRED_COLUMNS": ["id"],
+        }
+    ]
     slice_data = {"too_big.sql": _entry(big_tables)}
     cfg = _config()
     # candidate_max_tables defaults to 20 in our test config, so 50 should drop

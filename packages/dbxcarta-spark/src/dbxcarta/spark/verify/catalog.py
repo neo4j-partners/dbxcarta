@@ -22,21 +22,29 @@ _COMPLEX_TYPE_FAMILIES = ("STRUCT", "ARRAY", "MAP", "VARIANT", "INTERVAL")
 
 
 def check(
-    driver: "Driver",
+    driver: Driver,
     summary: dict[str, Any],
     *,
-    ws: "WorkspaceClient",
+    ws: WorkspaceClient,
     warehouse_id: str,
     catalog: str,
 ) -> list[Violation]:
     if not warehouse_id:
-        return [Violation(
-            code="catalog.no_warehouse",
-            message="DATABRICKS_WAREHOUSE_ID not set; catalog-vs-graph checks skipped.",
-        )]
+        return [
+            Violation(
+                code="catalog.no_warehouse",
+                message="DATABRICKS_WAREHOUSE_ID not set; catalog-vs-graph checks skipped.",
+            )
+        ]
     out: list[Violation] = []
-    out.extend(_check_id_normalization(driver, summary, ws=ws, warehouse_id=warehouse_id, catalog=catalog))
-    out.extend(_check_complex_type_round_trip(driver, summary, ws=ws, warehouse_id=warehouse_id, catalog=catalog))
+    out.extend(
+        _check_id_normalization(driver, summary, ws=ws, warehouse_id=warehouse_id, catalog=catalog)
+    )
+    out.extend(
+        _check_complex_type_round_trip(
+            driver, summary, ws=ws, warehouse_id=warehouse_id, catalog=catalog
+        )
+    )
     return out
 
 
@@ -75,7 +83,7 @@ def _schema_filter(
 
 
 def _exec(
-    ws: "WorkspaceClient",
+    ws: WorkspaceClient,
     warehouse_id: str,
     statement: str,
     parameters: list[StatementParameterListItem] | None = None,
@@ -98,25 +106,31 @@ def _exec(
 
 
 def _check_id_normalization(
-    driver: "Driver",
+    driver: Driver,
     summary: dict[str, Any],
     *,
-    ws: "WorkspaceClient",
+    ws: WorkspaceClient,
     warehouse_id: str,
     catalog: str,
 ) -> list[Violation]:
     """Sampled column IDs must exist in Neo4j; Python generate_id must equal the
-    Spark SQL id_expr equivalent byte-for-byte."""
+    Spark SQL id_expr equivalent byte-for-byte.
+    """
     out: list[Violation] = []
     schemas = summary.get("schemas") or []
     schema_filter, schema_params = _schema_filter(schemas)
 
-    rows = _exec(ws, warehouse_id, (
-        "SELECT table_catalog, table_schema, table_name, column_name"
-        " FROM IDENTIFIER(:tbl)"
-        f" WHERE table_schema != 'information_schema'{schema_filter}"
-        " LIMIT 500"
-    ), [_str_param("tbl", _columns_table(catalog)), *schema_params])
+    rows = _exec(
+        ws,
+        warehouse_id,
+        (
+            "SELECT table_catalog, table_schema, table_name, column_name"
+            " FROM IDENTIFIER(:tbl)"
+            f" WHERE table_schema != 'information_schema'{schema_filter}"
+            " LIMIT 500"
+        ),
+        [_str_param("tbl", _columns_table(catalog)), *schema_params],
+    )
     if rows:
         sample = random.sample(rows, min(50, len(rows)))
         missing: list[str] = []
@@ -128,18 +142,25 @@ def _check_id_normalization(
                 if not found:
                     missing.append(expected_id)
         if missing:
-            out.append(Violation(
-                code="catalog.column_id_missing_in_neo4j",
-                message=f"{len(missing)} column id(s) sampled from {catalog} not found in Neo4j.",
-                details={"missing_count": len(missing), "examples": missing[:5]},
-            ))
+            out.append(
+                Violation(
+                    code="catalog.column_id_missing_in_neo4j",
+                    message=f"{len(missing)} column id(s) sampled from {catalog} not found in Neo4j.",
+                    details={"missing_count": len(missing), "examples": missing[:5]},
+                )
+            )
 
-    sql_rows = _exec(ws, warehouse_id, (
-        "SELECT table_catalog, table_schema, table_name, column_name,"
-        " lower(translate(concat_ws('.', table_catalog, table_schema, table_name, column_name), ' -', '__')) AS sql_id"
-        " FROM IDENTIFIER(:tbl)"
-        " LIMIT 100"
-    ), [_str_param("tbl", _columns_table(catalog))])
+    sql_rows = _exec(
+        ws,
+        warehouse_id,
+        (
+            "SELECT table_catalog, table_schema, table_name, column_name,"
+            " lower(translate(concat_ws('.', table_catalog, table_schema, table_name, column_name), ' -', '__')) AS sql_id"
+            " FROM IDENTIFIER(:tbl)"
+            " LIMIT 100"
+        ),
+        [_str_param("tbl", _columns_table(catalog))],
+    )
     mismatches: list[tuple[str, str]] = []
     for row in sql_rows:
         table_catalog, table_schema, table_name, column_name, sql_id = row
@@ -147,19 +168,21 @@ def _check_id_normalization(
         if py_id != sql_id:
             mismatches.append((py_id, sql_id))
     if mismatches:
-        out.append(Violation(
-            code="catalog.python_spark_id_drift",
-            message=f"Python generate_id() differs from Spark SQL id_expr() for {len(mismatches)} row(s).",
-            details={"count": len(mismatches), "examples": mismatches[:3]},
-        ))
+        out.append(
+            Violation(
+                code="catalog.python_spark_id_drift",
+                message=f"Python generate_id() differs from Spark SQL id_expr() for {len(mismatches)} row(s).",
+                details={"count": len(mismatches), "examples": mismatches[:3]},
+            )
+        )
     return out
 
 
 def _check_complex_type_round_trip(
-    driver: "Driver",
+    driver: Driver,
     summary: dict[str, Any],
     *,
-    ws: "WorkspaceClient",
+    ws: WorkspaceClient,
     warehouse_id: str,
     catalog: str,
 ) -> list[Violation]:
@@ -175,16 +198,21 @@ def _check_complex_type_round_trip(
     schema_filter, schema_params = _schema_filter(schemas)
     with driver.session() as s:
         for prefix in _COMPLEX_TYPE_FAMILIES:
-            rows = _exec(ws, warehouse_id, (
-                "SELECT table_catalog, table_schema, table_name, column_name, data_type"
-                " FROM IDENTIFIER(:tbl)"
-                f" WHERE upper(data_type) LIKE :prefix{schema_filter}"
-                " LIMIT 1"
-            ), [
-                _str_param("tbl", _columns_table(catalog)),
-                _str_param("prefix", f"{prefix}%"),
-                *schema_params,
-            ])
+            rows = _exec(
+                ws,
+                warehouse_id,
+                (
+                    "SELECT table_catalog, table_schema, table_name, column_name, data_type"
+                    " FROM IDENTIFIER(:tbl)"
+                    f" WHERE upper(data_type) LIKE :prefix{schema_filter}"
+                    " LIMIT 1"
+                ),
+                [
+                    _str_param("tbl", _columns_table(catalog)),
+                    _str_param("prefix", f"{prefix}%"),
+                    *schema_params,
+                ],
+            )
             if not rows:
                 continue
             table_catalog, table_schema, table_name, column_name, data_type = rows[0]
@@ -193,15 +221,19 @@ def _check_complex_type_round_trip(
                 "MATCH (n:Column {id: $id}) RETURN n.data_type AS dt", id=expected_id
             ).single()
             if node is None:
-                out.append(Violation(
-                    code=f"catalog.complex_type_column_missing.{prefix}",
-                    message=f"Column node not found for {prefix} sample id={expected_id}.",
-                    details={"id": expected_id, "family": prefix},
-                ))
+                out.append(
+                    Violation(
+                        code=f"catalog.complex_type_column_missing.{prefix}",
+                        message=f"Column node not found for {prefix} sample id={expected_id}.",
+                        details={"id": expected_id, "family": prefix},
+                    )
+                )
             elif node["dt"] != data_type:
-                out.append(Violation(
-                    code=f"catalog.complex_type_data_type_drift.{prefix}",
-                    message=f"data_type mismatch for {prefix} sample id={expected_id}.",
-                    details={"id": expected_id, "stored": node["dt"], "expected": data_type},
-                ))
+                out.append(
+                    Violation(
+                        code=f"catalog.complex_type_data_type_drift.{prefix}",
+                        message=f"data_type mismatch for {prefix} sample id={expected_id}.",
+                        details={"id": expected_id, "stored": node["dt"], "expected": data_type},
+                    )
+                )
     return out

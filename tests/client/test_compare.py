@@ -9,10 +9,10 @@ from dbxcarta.client.compare import (
     stringify_cell,
 )
 
-
 # ---------------------------------------------------------------------------
 # stringify_cell
 # ---------------------------------------------------------------------------
+
 
 def test_stringify_cell_none():
     assert stringify_cell(None) == "NULL"
@@ -29,6 +29,7 @@ def test_stringify_cell_casefold():
 # ---------------------------------------------------------------------------
 # normalize_row — value-sort, column names and order irrelevant
 # ---------------------------------------------------------------------------
+
 
 def test_normalize_row_sorts_values():
     assert normalize_row(["Beta", "Alpha"]) == ("alpha", "beta")
@@ -57,6 +58,7 @@ def test_normalize_row_different_values_not_equal():
 # ---------------------------------------------------------------------------
 # project_to_ref_columns
 # ---------------------------------------------------------------------------
+
 
 def test_project_strips_extra_column_by_name():
     gen_cols = ["name", "id", "amount"]
@@ -87,6 +89,7 @@ def test_project_no_op_when_name_not_subset():
 # ---------------------------------------------------------------------------
 # compare_result_sets — core grader correctness
 # ---------------------------------------------------------------------------
+
 
 def test_exact_match():
     ok, msg = compare_result_sets(["name"], [["Alpha"]], ["name"], [["Alpha"]])
@@ -124,7 +127,7 @@ def test_extra_id_column_aliased_aggregate_passes():
 
 def test_genuinely_wrong_values_fail():
     """Wrong data is not recovered by either alias fix or subset search."""
-    ok, msg = compare_result_sets(
+    ok, _msg = compare_result_sets(
         ["name", "total"],
         [["Alpha", 999], ["Beta", 300]],
         ["name", "sum(amount)"],
@@ -135,18 +138,22 @@ def test_genuinely_wrong_values_fail():
 
 def test_row_count_mismatch_fails():
     """Row count difference is rejected for small result sets."""
-    ok, msg = compare_result_sets(
-        ["name"], [["Alpha"], ["Beta"], ["Gamma"]],
-        ["name"], [["Alpha"], ["Beta"]],
+    ok, _msg = compare_result_sets(
+        ["name"],
+        [["Alpha"], ["Beta"], ["Gamma"]],
+        ["name"],
+        [["Alpha"], ["Beta"]],
     )
     assert ok is False
 
 
 def test_different_row_values_fail():
     """Gen returning different values is correctly rejected."""
-    ok, msg = compare_result_sets(
-        ["name"], [["Alice"], ["Bob"]],
-        ["name"], [["Alpha"], ["Beta"]],
+    ok, _msg = compare_result_sets(
+        ["name"],
+        [["Alice"], ["Bob"]],
+        ["name"],
+        [["Alpha"], ["Beta"]],
     )
     assert ok is False
 
@@ -178,8 +185,10 @@ def test_subset_search_max_extra_cols_guard():
 
 def test_row_ordering_irrelevant():
     ok, _ = compare_result_sets(
-        ["name"], [["Beta"], ["Alpha"]],
-        ["name"], [["Alpha"], ["Beta"]],
+        ["name"],
+        [["Beta"], ["Alpha"]],
+        ["name"],
+        [["Alpha"], ["Beta"]],
     )
     assert ok is True
 

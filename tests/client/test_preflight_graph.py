@@ -9,9 +9,10 @@ Two contracts are covered:
 
 from __future__ import annotations
 
-import pytest
+from typing import Self
 
-import dbxcarta.client.eval.run as run
+import pytest
+from dbxcarta.client.eval import run
 from dbxcarta.client.settings import ClientSettings
 
 _BASE_SETTINGS: dict[str, str] = {
@@ -36,7 +37,7 @@ def test_graph_check_skipped_without_graph_arm(monkeypatch, tmp_path) -> None:
     settings = _make(tmp_path, dbxcarta_client_arms="reference")
     calls: list[ClientSettings] = []
     monkeypatch.setattr(run, "preflight_warehouse", lambda ws, wid: None)
-    monkeypatch.setattr(run, "_assert_graph_populated", lambda s: calls.append(s))
+    monkeypatch.setattr(run, "_assert_graph_populated", calls.append)
 
     run._preflight(object(), settings)
 
@@ -48,7 +49,7 @@ def test_graph_check_runs_for_graph_arm(monkeypatch, tmp_path, arm: str) -> None
     settings = _make(tmp_path, dbxcarta_client_arms=arm)
     calls: list[ClientSettings] = []
     monkeypatch.setattr(run, "preflight_warehouse", lambda ws, wid: None)
-    monkeypatch.setattr(run, "_assert_graph_populated", lambda s: calls.append(s))
+    monkeypatch.setattr(run, "_assert_graph_populated", calls.append)
 
     run._preflight(object(), settings)
 
@@ -67,7 +68,7 @@ class _FakeSession:
     def __init__(self, count: int) -> None:
         self._count = count
 
-    def __enter__(self) -> "_FakeSession":
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *exc: object) -> bool:
@@ -81,7 +82,7 @@ class _FakeDriver:
     def __init__(self, count: int) -> None:
         self._count = count
 
-    def __enter__(self) -> "_FakeDriver":
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *exc: object) -> bool:
@@ -98,9 +99,7 @@ def _patch_neo4j(monkeypatch, count: int) -> None:
         "dbxcarta.client.neo4j_utils.neo4j_credentials",
         lambda settings: ("uri", "user", "pass"),
     )
-    monkeypatch.setattr(
-        neo4j.GraphDatabase, "driver", lambda uri, auth: _FakeDriver(count)
-    )
+    monkeypatch.setattr(neo4j.GraphDatabase, "driver", lambda uri, auth: _FakeDriver(count))
 
 
 def test_assert_graph_populated_passes_with_tables(monkeypatch, tmp_path) -> None:

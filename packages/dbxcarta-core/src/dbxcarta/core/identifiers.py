@@ -38,8 +38,7 @@ def split_qualified_name(
     parts = value.split(".")
     if expected_parts is not None and len(parts) != expected_parts:
         raise ValueError(
-            f"Invalid Databricks {label}: {value!r}; expected "
-            f"{expected_parts} dot-separated parts"
+            f"Invalid Databricks {label}: {value!r}; expected {expected_parts} dot-separated parts"
         )
     for part in parts:
         validate_identifier(part, label=f"{label} part")
@@ -79,10 +78,7 @@ def parse_volume_path(value: str) -> tuple[str, str, str]:
     """
     parts = value.strip().strip("/").split("/")
     if len(parts) != 4 or parts[0] != "Volumes":
-        raise ValueError(
-            f"volume path must be /Volumes/<catalog>/<schema>/<volume>, "
-            f"got {value!r}"
-        )
+        raise ValueError(f"volume path must be /Volumes/<catalog>/<schema>/<volume>, got {value!r}")
     catalog, schema, volume = parts[1], parts[2], parts[3]
     validate_identifier(catalog, label="volume catalog")
     validate_identifier(schema, label="volume schema")
@@ -100,10 +96,9 @@ def validate_uc_volume_subpath(value: str, *, label: str = "UC Volume path") -> 
     parts = value.rstrip("/").lstrip("/").split("/")
     if len(parts) < 5 or parts[0] != "Volumes":
         raise ValueError(
-            f"{label} must be /Volumes/<catalog>/<schema>/<volume>/<subdir>, "
-            f"got {value!r}"
+            f"{label} must be /Volumes/<catalog>/<schema>/<volume>/<subdir>, got {value!r}"
         )
-    for name, part in zip(("catalog", "schema", "volume"), parts[1:4]):
+    for name, part in zip(("catalog", "schema", "volume"), parts[1:4], strict=False):
         validate_identifier(part, label=f"volume {name}")
     for part in parts[4:]:
         if not part or part in (".", "..") or not _VOLUME_SUBPATH_PART_RE.match(part):

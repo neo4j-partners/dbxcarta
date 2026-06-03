@@ -14,13 +14,15 @@ keeps its own model transport and post-generation handling.
 from __future__ import annotations
 
 from dataclasses import dataclass
-
-from databricks.sdk import WorkspaceClient
+from typing import TYPE_CHECKING
 
 from dbxcarta.client.embed import embed_questions
 from dbxcarta.client.prompt import graph_rag_prompt
-from dbxcarta.client.retriever import ContextBundle, Retriever
-from dbxcarta.client.settings import ClientSettings
+
+if TYPE_CHECKING:
+    from databricks.sdk import WorkspaceClient
+    from dbxcarta.client.retriever import ContextBundle, Retriever
+    from dbxcarta.client.settings import ClientSettings
 
 
 @dataclass(frozen=True)
@@ -59,9 +61,7 @@ def build_graph_rag_context(
     batch); otherwise a ``GraphRetriever`` is constructed and closed here.
     """
     if embedding is None:
-        embeddings, embed_error = embed_questions(
-            ws, settings.dbxcarta_embed_endpoint, [question]
-        )
+        embeddings, embed_error = embed_questions(ws, settings.dbxcarta_embed_endpoint, [question])
         if embeddings is None:
             raise RuntimeError(
                 f"graph_rag embedding failed against "

@@ -16,8 +16,6 @@ from pathlib import Path
 
 from dbxcarta.core.presets import StandardPreset
 
-preset = StandardPreset(
-    questions_file=Path(__file__).resolve().parents[2] / "questions.json"
-)
+preset = StandardPreset(questions_file=Path(__file__).resolve().parents[2] / "questions.json")
 
 __all__ = ["preset"]

@@ -16,7 +16,7 @@ import subprocess
 import sys
 import tarfile
 import zipfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -129,14 +129,12 @@ def write_provenance(dist: Path, output: Path) -> int:
 
     payload: dict[str, Any] = {
         "schema_version": 1,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "project": read_project_metadata(Path("pyproject.toml")),
         "source": {
             "git_commit": git(["rev-parse", "HEAD"]),
             "git_dirty": git_dirty(),
-            "lockfile_sha256": sha256_file(Path("uv.lock"))
-            if Path("uv.lock").exists()
-            else None,
+            "lockfile_sha256": sha256_file(Path("uv.lock")) if Path("uv.lock").exists() else None,
         },
         "environment": {
             "python": sys.version.split()[0],

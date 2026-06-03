@@ -25,13 +25,14 @@ import json
 import logging
 import sys
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from dbxcarta.core.env import read_required_warehouse_id
 from dbxcarta.core.executor import catalog_exists, execute_ddl_blocking
 from dbxcarta.core.identifiers import quote_identifier
 from dbxcarta.core.materialize import ExecuteFn, MaterializeStats, materialize_schemas
 from dbxcarta.core.workspace import build_workspace_client
+
 from dbxcarta_schemapile_example.config import SchemaPileConfig, load_config
 from dbxcarta_schemapile_example.utils import load_dotenv_file
 
@@ -51,7 +52,9 @@ def main() -> int:
         ),
     )
     parser.add_argument(
-        "--dotenv", type=Path, default=Path(__file__).resolve().parents[2] / ".env",
+        "--dotenv",
+        type=Path,
+        default=Path(__file__).resolve().parents[2] / ".env",
         help="Path to the .env file to load (default: example directory .env)",
     )
     parser.add_argument(
@@ -79,8 +82,7 @@ def main() -> int:
     payload = json.loads(config.candidate_cache.read_text())
     schemas = payload.get("schemas") or []
     if not schemas:
-        print("[schemapile] candidate JSON has no schemas; nothing to do.",
-              file=sys.stderr)
+        print("[schemapile] candidate JSON has no schemas; nothing to do.", file=sys.stderr)
         return 1
 
     ws = build_workspace_client()
@@ -98,7 +100,7 @@ def main() -> int:
 
 
 def materialize(
-    ws: "WorkspaceClient",
+    ws: WorkspaceClient,
     warehouse_id: str,
     config: SchemaPileConfig,
     schemas: list[dict[str, Any]],
@@ -115,7 +117,8 @@ def materialize(
     # EXISTS, so a pre-created (e.g. UI-created) catalog must not be re-created.
     if not catalog_exists(ws, warehouse_id, config.catalog):
         execute_ddl_blocking(
-            ws, warehouse_id,
+            ws,
+            warehouse_id,
             f"CREATE CATALOG IF NOT EXISTS {catalog_q}"
             " COMMENT 'schemapile materialize: data catalog'",
             label=f"CREATE CATALOG {config.catalog}",

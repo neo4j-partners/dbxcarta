@@ -18,15 +18,25 @@ _CAT = "main"
 _SCHEMA = "shop"
 
 _COL_FIELDS = (
-    "table_catalog", "table_schema", "table_name", "column_name",
-    "data_type", "comment",
+    "table_catalog",
+    "table_schema",
+    "table_name",
+    "column_name",
+    "data_type",
+    "comment",
 )
 _CON_FIELDS = (
-    "table_catalog", "table_schema", "table_name", "column_name",
-    "constraint_type", "ordinal_position", "constraint_name",
+    "table_catalog",
+    "table_schema",
+    "table_name",
+    "column_name",
+    "constraint_type",
+    "ordinal_position",
+    "constraint_name",
 )
 _EDGE = (
-    f"{_CAT}.{_SCHEMA}.orders.customer_id", f"{_CAT}.{_SCHEMA}.customers.id",
+    f"{_CAT}.{_SCHEMA}.orders.customer_id",
+    f"{_CAT}.{_SCHEMA}.customers.id",
 )
 
 
@@ -44,15 +54,17 @@ def _constraints_schema():
         StructType,
     )
 
-    return StructType([
-        StructField("table_catalog", StringType(), True),
-        StructField("table_schema", StringType(), True),
-        StructField("table_name", StringType(), True),
-        StructField("column_name", StringType(), True),
-        StructField("constraint_type", StringType(), True),
-        StructField("ordinal_position", IntegerType(), True),
-        StructField("constraint_name", StringType(), True),
-    ])
+    return StructType(
+        [
+            StructField("table_catalog", StringType(), True),
+            StructField("table_schema", StringType(), True),
+            StructField("table_name", StringType(), True),
+            StructField("column_name", StringType(), True),
+            StructField("constraint_type", StringType(), True),
+            StructField("ordinal_position", IntegerType(), True),
+            StructField("constraint_name", StringType(), True),
+        ]
+    )
 
 
 def _columns(spark):
@@ -75,7 +87,11 @@ def test_metadata_skips_declared_prior_pair(local_spark) -> None:
     pk_gate, composite = build_pk_gate(cf, _constraints(local_spark))
     prior = local_spark.createDataFrame([_EDGE], schema=["source_id", "target_id"])
     edges_df, _counts, _c = infer_metadata_edges(
-        local_spark, cf, pk_gate, prior, composite_pk_count=composite,
+        local_spark,
+        cf,
+        pk_gate,
+        prior,
+        composite_pk_count=composite,
     )
     emitted = {(r["source_id"], r["target_id"]) for r in edges_df.collect()}
     assert _EDGE not in emitted
@@ -84,13 +100,15 @@ def test_metadata_skips_declared_prior_pair(local_spark) -> None:
 def test_fk_result_releases_cached_inferred_edges(local_spark) -> None:
     from pyspark.sql.types import DoubleType, StringType, StructField, StructType
 
-    edge_schema = StructType([
-        StructField("source_id", StringType(), False),
-        StructField("target_id", StringType(), False),
-        StructField("confidence", DoubleType(), False),
-        StructField("source", StringType(), False),
-        StructField("criteria", StringType(), True),
-    ])
+    edge_schema = StructType(
+        [
+            StructField("source_id", StringType(), False),
+            StructField("target_id", StringType(), False),
+            StructField("confidence", DoubleType(), False),
+            StructField("source", StringType(), False),
+            StructField("criteria", StringType(), True),
+        ]
+    )
     metadata_df = local_spark.createDataFrame(
         [("s", "t", 0.9, EdgeSource.INFERRED_METADATA.value, None)],
         schema=edge_schema,

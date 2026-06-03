@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -58,7 +58,7 @@ class ClientRunSummary:
     catalog: str
     schemas: list[str]
     arms: list[str]
-    started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     ended_at: datetime | None = None
     status: str = "running"
     error: str | None = None
@@ -131,8 +131,12 @@ class ClientRunSummary:
             for ar in qr.arm_results:
                 if ar.arm not in counts:
                     counts[ar.arm] = {
-                        "attempted": 0, "parsed": 0, "executed": 0,
-                        "non_empty": 0, "correct": 0, "gradable": 0,
+                        "attempted": 0,
+                        "parsed": 0,
+                        "executed": 0,
+                        "non_empty": 0,
+                        "correct": 0,
+                        "gradable": 0,
                     }
                     retrieval[ar.arm] = {"top1": [], "recall": [], "purity": []}
                 counts[ar.arm]["attempted"] += 1
@@ -169,14 +173,16 @@ class ClientRunSummary:
             if rv["top1"]:
                 self.arm_top1_schema_match_rate[arm] = round(sum(rv["top1"]) / len(rv["top1"]), 3)
             if rv["recall"]:
-                self.arm_schema_in_context_rate[arm] = round(sum(rv["recall"]) / len(rv["recall"]), 3)
+                self.arm_schema_in_context_rate[arm] = round(
+                    sum(rv["recall"]) / len(rv["recall"]), 3
+                )
             if rv["purity"]:
                 self.arm_mean_context_purity[arm] = round(sum(rv["purity"]) / len(rv["purity"]), 3)
 
     def finish(self, *, status: str, error: str | None = None) -> None:
         self.status = status
         self.error = error
-        self.ended_at = datetime.now(timezone.utc)
+        self.ended_at = datetime.now(UTC)
         self._compute_aggregates()
 
     def _to_delta_dict(self) -> dict:
@@ -262,30 +268,32 @@ class ClientRunSummary:
             TimestampType,
         )
 
-        schema = StructType([
-            StructField("run_id", StringType(), nullable=False),
-            StructField("job_name", StringType()),
-            StructField("catalog", StringType()),
-            StructField("schemas", ArrayType(StringType())),
-            StructField("arms", ArrayType(StringType())),
-            StructField("started_at", TimestampType()),
-            StructField("ended_at", TimestampType()),
-            StructField("status", StringType()),
-            StructField("error", StringType()),
-            StructField("arm_attempted", MapType(StringType(), LongType())),
-            StructField("arm_parsed", MapType(StringType(), LongType())),
-            StructField("arm_executed", MapType(StringType(), LongType())),
-            StructField("arm_non_empty", MapType(StringType(), LongType())),
-            StructField("arm_correct", MapType(StringType(), LongType())),
-            StructField("arm_gradable", MapType(StringType(), LongType())),
-            StructField("arm_parse_rate", MapType(StringType(), DoubleType())),
-            StructField("arm_execution_rate", MapType(StringType(), DoubleType())),
-            StructField("arm_non_empty_rate", MapType(StringType(), DoubleType())),
-            StructField("arm_correct_rate", MapType(StringType(), DoubleType())),
-            StructField("arm_top1_schema_match_rate", MapType(StringType(), DoubleType())),
-            StructField("arm_schema_in_context_rate", MapType(StringType(), DoubleType())),
-            StructField("arm_mean_context_purity", MapType(StringType(), DoubleType())),
-        ])
+        schema = StructType(
+            [
+                StructField("run_id", StringType(), nullable=False),
+                StructField("job_name", StringType()),
+                StructField("catalog", StringType()),
+                StructField("schemas", ArrayType(StringType())),
+                StructField("arms", ArrayType(StringType())),
+                StructField("started_at", TimestampType()),
+                StructField("ended_at", TimestampType()),
+                StructField("status", StringType()),
+                StructField("error", StringType()),
+                StructField("arm_attempted", MapType(StringType(), LongType())),
+                StructField("arm_parsed", MapType(StringType(), LongType())),
+                StructField("arm_executed", MapType(StringType(), LongType())),
+                StructField("arm_non_empty", MapType(StringType(), LongType())),
+                StructField("arm_correct", MapType(StringType(), LongType())),
+                StructField("arm_gradable", MapType(StringType(), LongType())),
+                StructField("arm_parse_rate", MapType(StringType(), DoubleType())),
+                StructField("arm_execution_rate", MapType(StringType(), DoubleType())),
+                StructField("arm_non_empty_rate", MapType(StringType(), DoubleType())),
+                StructField("arm_correct_rate", MapType(StringType(), DoubleType())),
+                StructField("arm_top1_schema_match_rate", MapType(StringType(), DoubleType())),
+                StructField("arm_schema_in_context_rate", MapType(StringType(), DoubleType())),
+                StructField("arm_mean_context_purity", MapType(StringType(), DoubleType())),
+            ]
+        )
         quoted = quote_qualified_name(table_name, expected_parts=3)
         row = Row(**self._to_delta_dict())
         (

@@ -18,7 +18,6 @@ from pathlib import Path
 from dbxcarta_schemapile_example.config import SchemaPileConfig, load_config
 from dbxcarta_schemapile_example.utils import load_dotenv_file
 
-
 _UPSTREAM_REPO_URL = "https://github.com/amsterdata/schemapile"
 
 
@@ -58,8 +57,7 @@ def preflight(config: SchemaPileConfig) -> None:
     """Reject unusable configurations before any work happens."""
     if not config.repo.is_dir():
         raise FileNotFoundError(
-            f"SCHEMAPILE_REPO={config.repo} is not a directory."
-            f" Clone {_UPSTREAM_REPO_URL} first."
+            f"SCHEMAPILE_REPO={config.repo} is not a directory. Clone {_UPSTREAM_REPO_URL} first."
         )
     if not config.upstream_slice_script.is_file():
         raise FileNotFoundError(
@@ -115,15 +113,25 @@ def _run_slice(config: SchemaPileConfig) -> int:
     config.slice_cache.parent.mkdir(parents=True, exist_ok=True)
     sidecar = _params_sidecar(config.slice_cache)
     args = [
-        "uv", "run", str(config.upstream_slice_script),
-        "--input", str(config.input_path),
-        "--output", str(config.slice_cache.resolve()),
-        "--target-tables", str(config.target_tables),
-        "--strategy", config.strategy,
-        "--seed", str(config.seed),
-        "--min-tables", str(config.min_tables),
-        "--max-tables", str(config.max_tables),
-        "--min-fk-edges", str(config.min_fk_edges),
+        "uv",
+        "run",
+        str(config.upstream_slice_script),
+        "--input",
+        str(config.input_path),
+        "--output",
+        str(config.slice_cache.resolve()),
+        "--target-tables",
+        str(config.target_tables),
+        "--strategy",
+        config.strategy,
+        "--seed",
+        str(config.seed),
+        "--min-tables",
+        str(config.min_tables),
+        "--max-tables",
+        str(config.max_tables),
+        "--min-fk-edges",
+        str(config.min_fk_edges),
     ]
     if config.require_self_contained:
         args.append("--require-self-contained")
@@ -141,8 +149,7 @@ def _run_slice(config: SchemaPileConfig) -> int:
 
     sidecar.write_text(json.dumps(_params_fingerprint(config), indent=2))
     print(
-        f"[schemapile] slice written to {config.slice_cache}"
-        f" (params recorded in {sidecar.name})",
+        f"[schemapile] slice written to {config.slice_cache} (params recorded in {sidecar.name})",
         file=sys.stderr,
     )
     return 0

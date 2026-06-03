@@ -14,16 +14,18 @@ identical across examples, so they live here once.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from dbxcarta.core.catalogs import resolve_catalogs
 from dbxcarta.core.identifiers import quote_identifier
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from databricks.sdk import WorkspaceClient
 
 
@@ -84,9 +86,7 @@ class ReadinessReport:
                 label += " (warning)"
             lines.append(f"{label}: " + ", ".join(self.missing_optional))
         lines.append(
-            "status: ready"
-            if self.ok(strict_optional=strict_optional)
-            else "status: not ready"
+            "status: ready" if self.ok(strict_optional=strict_optional) else "status: not ready"
         )
         return "\n".join(lines)
 
@@ -95,16 +95,14 @@ class ReadinessReport:
 class ReadinessCheckable(Protocol):
     """Optional capability: a preset can report on the UC data it expects."""
 
-    def readiness(self, ws: "WorkspaceClient", warehouse_id: str) -> ReadinessReport:
-        ...
+    def readiness(self, ws: WorkspaceClient, warehouse_id: str) -> ReadinessReport: ...
 
 
 @runtime_checkable
 class QuestionsUploadable(Protocol):
     """Optional capability: a preset can ship and upload a demo question set."""
 
-    def upload_questions(self, ws: "WorkspaceClient") -> None:
-        ...
+    def upload_questions(self, ws: WorkspaceClient) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -120,7 +118,7 @@ class StandardPreset:
 
     questions_file: Path
 
-    def readiness(self, ws: "WorkspaceClient", warehouse_id: str) -> ReadinessReport:
+    def readiness(self, ws: WorkspaceClient, warehouse_id: str) -> ReadinessReport:
         """Report whether each ingested catalog holds a data schema.
 
         Resolves the catalog list from DBXCARTA_CATALOG and DBXCARTA_CATALOGS
@@ -152,17 +150,15 @@ class StandardPreset:
             missing_optional=(),
         )
 
-    def upload_questions(self, ws: "WorkspaceClient") -> None:
+    def upload_questions(self, ws: WorkspaceClient) -> None:
         dest = os.environ.get("DBXCARTA_CLIENT_QUESTIONS", "")
         if not dest:
             raise RuntimeError(
-                "DBXCARTA_CLIENT_QUESTIONS is not set;"
-                " cannot determine upload destination."
+                "DBXCARTA_CLIENT_QUESTIONS is not set; cannot determine upload destination."
             )
         if not dest.startswith("/Volumes/") or not dest.endswith(".json"):
             raise ValueError(
-                "DBXCARTA_CLIENT_QUESTIONS must be a /Volumes/... .json path,"
-                f" got {dest!r}"
+                f"DBXCARTA_CLIENT_QUESTIONS must be a /Volumes/... .json path, got {dest!r}"
             )
         _validate_questions_file(self.questions_file)
         _ensure_parent_dir(ws, dest)
@@ -171,7 +167,7 @@ class StandardPreset:
 
 
 def _has_data_schema(
-    ws: "WorkspaceClient",
+    ws: WorkspaceClient,
     warehouse_id: str,
     catalog: str,
 ) -> bool:
@@ -183,7 +179,7 @@ def _has_data_schema(
 
 
 def _fetch_schema_names(
-    ws: "WorkspaceClient",
+    ws: WorkspaceClient,
     warehouse_id: str,
     catalog: str,
 ) -> list[str]:
@@ -192,8 +188,7 @@ def _fetch_schema_names(
     response = ws.statement_execution.execute_statement(
         warehouse_id=warehouse_id,
         statement=(
-            "SELECT schema_name FROM"
-            f" {quote_identifier(catalog)}.information_schema.schemata"
+            f"SELECT schema_name FROM {quote_identifier(catalog)}.information_schema.schemata"
         ),
         wait_timeout="50s",
         on_wait_timeout=ExecuteStatementRequestOnWaitTimeout.CANCEL,
@@ -202,14 +197,12 @@ def _fetch_schema_names(
     return [row[0] for row in rows if row]
 
 
-def _ensure_parent_dir(ws: "WorkspaceClient", dest: str) -> None:
+def _ensure_parent_dir(ws: WorkspaceClient, dest: str) -> None:
     from databricks.sdk.errors import ResourceAlreadyExists
 
     parent = dest.rsplit("/", 1)[0]
-    try:
+    with contextlib.suppress(ResourceAlreadyExists):
         ws.files.create_directory(parent)
-    except ResourceAlreadyExists:
-        pass
 
 
 def _validate_questions_file(path: Path) -> None:
@@ -222,9 +215,7 @@ def _validate_questions_file(path: Path) -> None:
     model when it loads the uploaded file at query time.
     """
     if not path.is_file():
-        raise FileNotFoundError(
-            f"questions file not found at {path}; generate it first"
-        )
+        raise FileNotFoundError(f"questions file not found at {path}; generate it first")
     try:
         questions = json.loads(path.read_text())
     except json.JSONDecodeError as exc:
@@ -233,10 +224,10 @@ def _validate_questions_file(path: Path) -> None:
         raise ValueError(f"questions file must be a non-empty JSON array: {path}")
     for item in questions:
         if not isinstance(item, dict):
-            raise ValueError(f"each question must be a JSON object: {path}")
+            # ValueError is the deliberate, uniform error contract for an
+            # invalid questions file (not a programmer type error).
+            raise ValueError(f"each question must be a JSON object: {path}")  # noqa: TRY004
         for field in ("question_id", "question"):
             value = item.get(field)
             if not isinstance(value, str) or not value.strip():
-                raise ValueError(
-                    f"each question needs a non-empty {field!r}: {path}"
-                )
+                raise ValueError(f"each question needs a non-empty {field!r}: {path}")

@@ -17,8 +17,8 @@ from dbxcarta.spark.ingest.fk.common import (
     types_compatible,
 )
 
-
 # --- types_compatible / canonicalize ----------------------------------------
+
 
 def test_canonicalize_int_family_collapses_to_integer() -> None:
     assert canonicalize("BIGINT") == ("INTEGER", None)
@@ -57,30 +57,47 @@ def test_types_compatible_int_and_string() -> None:
 
 # --- pk_kind: declared beats heuristic --------------------------------------
 
+
 def _col(table: str, column: str) -> ColumnMeta:
     return ColumnMeta(
-        catalog="c", schema="s", table=table, column=column,
-        data_type="BIGINT", comment=None,
+        catalog="c",
+        schema="s",
+        table=table,
+        column=column,
+        data_type="BIGINT",
+        comment=None,
     )
 
 
 def test_pk_kind_declared_pk_wins() -> None:
-    rows = [ConstraintRow(
-        table_catalog="c", table_schema="s", table_name="users",
-        column_name="id", constraint_type="PRIMARY KEY",
-        ordinal_position=1, constraint_name="users_pk",
-    )]
+    rows = [
+        ConstraintRow(
+            table_catalog="c",
+            table_schema="s",
+            table_name="users",
+            column_name="id",
+            constraint_type="PRIMARY KEY",
+            ordinal_position=1,
+            constraint_name="users_pk",
+        )
+    ]
     idx = PKIndex.from_constraints(rows)
     tgt = _col("users", "id")
     assert pk_kind(tgt, idx, build_id_cols_index([tgt])) is PKEvidence.DECLARED_PK
 
 
 def test_pk_kind_unique_leftmost_classifies_as_unique_or_heur() -> None:
-    rows = [ConstraintRow(
-        table_catalog="c", table_schema="s", table_name="t",
-        column_name="key", constraint_type="UNIQUE",
-        ordinal_position=1, constraint_name="t_uniq",
-    )]
+    rows = [
+        ConstraintRow(
+            table_catalog="c",
+            table_schema="s",
+            table_name="t",
+            column_name="key",
+            constraint_type="UNIQUE",
+            ordinal_position=1,
+            constraint_name="t_uniq",
+        )
+    ]
     idx = PKIndex.from_constraints(rows)
     tgt = _col("t", "key")
     assert pk_kind(tgt, idx, {}) is PKEvidence.UNIQUE_OR_HEUR
@@ -110,18 +127,27 @@ def test_pk_kind_returns_none_for_non_pk_like_column() -> None:
 
 # --- PKIndex.from_constraints -----------------------------------------------
 
+
 def test_pk_index_composite_pk_counted_not_indexed() -> None:
     """A two-column declared PK does not populate pk_cols."""
     rows = [
         ConstraintRow(
-            table_catalog="c", table_schema="s", table_name="junction",
-            column_name="left_id", constraint_type="PRIMARY KEY",
-            ordinal_position=1, constraint_name="junction_pk",
+            table_catalog="c",
+            table_schema="s",
+            table_name="junction",
+            column_name="left_id",
+            constraint_type="PRIMARY KEY",
+            ordinal_position=1,
+            constraint_name="junction_pk",
         ),
         ConstraintRow(
-            table_catalog="c", table_schema="s", table_name="junction",
-            column_name="right_id", constraint_type="PRIMARY KEY",
-            ordinal_position=2, constraint_name="junction_pk",
+            table_catalog="c",
+            table_schema="s",
+            table_name="junction",
+            column_name="right_id",
+            constraint_type="PRIMARY KEY",
+            ordinal_position=2,
+            constraint_name="junction_pk",
         ),
     ]
     idx = PKIndex.from_constraints(rows)
@@ -133,7 +159,7 @@ def test_build_id_cols_index_groups_by_table_and_filters_non_id_suffix() -> None
     cols = [
         _col("users", "id"),
         _col("users", "user_id"),
-        _col("users", "email"),         # no _id suffix → excluded
+        _col("users", "email"),  # no _id suffix → excluded
         _col("orders", "order_id"),
     ]
     index = build_id_cols_index(cols)

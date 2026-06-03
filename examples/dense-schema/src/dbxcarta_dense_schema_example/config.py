@@ -3,21 +3,25 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from dbxcarta.core.config import derive_ops_config
 
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
-_PROJECT_CATALOGS_BLOCKLIST: frozenset[str] = frozenset({
-    "graph-enriched-lakehouse",
-    "dbxcarta-catalog",
-    "main",
-    "hive_metastore",
-    "samples",
-    "system",
-})
+_PROJECT_CATALOGS_BLOCKLIST: frozenset[str] = frozenset(
+    {
+        "graph-enriched-lakehouse",
+        "dbxcarta-catalog",
+        "main",
+        "hive_metastore",
+        "samples",
+        "system",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -45,9 +49,7 @@ def load_config(env: Mapping[str, str] | None = None) -> DenseSchemaConfig:
     e = env if env is not None else os.environ
     catalog = _required(e, "DBXCARTA_CATALOG")
     if catalog.casefold() in _PROJECT_CATALOGS_BLOCKLIST:
-        raise ValueError(
-            f"DBXCARTA_CATALOG={catalog!r} collides with a known project catalog"
-        )
+        raise ValueError(f"DBXCARTA_CATALOG={catalog!r} collides with a known project catalog")
     table_count = int(e.get("DENSE_TABLE_COUNT", "500"))
     uc_schema = e.get("DENSE_SCHEMA_NAME", f"dense_{table_count}")
     # The ops plane is separate from the data catalog. DATABRICKS_VOLUME_PATH
@@ -85,7 +87,5 @@ def load_config(env: Mapping[str, str] | None = None) -> DenseSchemaConfig:
 def _required(env: Mapping[str, str], key: str) -> str:
     val = env.get(key, "").strip()
     if not val:
-        raise ValueError(
-            f"{key} is not set; check examples/dense-schema/.env"
-        )
+        raise ValueError(f"{key} is not set; check examples/dense-schema/.env")
     return val

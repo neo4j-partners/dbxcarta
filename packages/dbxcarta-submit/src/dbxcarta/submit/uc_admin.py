@@ -11,8 +11,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 from enum import Enum
-
-from databricks.sdk import WorkspaceClient
+from typing import TYPE_CHECKING
 
 from dbxcarta.core.executor import catalog_exists
 from dbxcarta.core.identifiers import (
@@ -21,6 +20,8 @@ from dbxcarta.core.identifiers import (
     validate_identifier,
 )
 
+if TYPE_CHECKING:
+    from databricks.sdk import WorkspaceClient
 
 _POLL_INTERVAL_SEC = 2.0
 # Cap on polling past the initial 50s server-side wait, generous enough to
@@ -150,18 +151,14 @@ def parse_teardown_target(value: str) -> TeardownTarget:
         catalog, dot, schema = rest.partition(".")
         if not dot:
             raise ValueError(
-                "schema teardown target must be 'schema:<catalog>.<schema>', "
-                f"got {value!r}"
+                f"schema teardown target must be 'schema:<catalog>.<schema>', got {value!r}"
             )
         validate_identifier(catalog, label="teardown catalog")
         validate_identifier(schema, label="teardown schema")
         check_not_protected(catalog, label="catalog")
-        return TeardownTarget(
-            kind=TeardownKind.SCHEMA, catalog=catalog, schema=schema
-        )
+        return TeardownTarget(kind=TeardownKind.SCHEMA, catalog=catalog, schema=schema)
     raise ValueError(
-        f"DBXCARTA_TEARDOWN_TARGET prefix must be 'schema' or 'catalog', "
-        f"got {prefix!r}"
+        f"DBXCARTA_TEARDOWN_TARGET prefix must be 'schema' or 'catalog', got {prefix!r}"
     )
 
 
@@ -175,11 +172,7 @@ def parse_teardown_targets(value: str) -> list[TeardownTarget]:
     ``catalog:``/``schema:`` prefix apply per target. A value with no parseable
     target is a hard error rather than a silent no-op.
     """
-    targets = [
-        parse_teardown_target(item)
-        for item in value.split(",")
-        if item.strip()
-    ]
+    targets = [parse_teardown_target(item) for item in value.split(",") if item.strip()]
     if not targets:
         raise ValueError(
             "DBXCARTA_TEARDOWN_TARGET must name at least one "
@@ -188,19 +181,13 @@ def parse_teardown_targets(value: str) -> list[TeardownTarget]:
     return targets
 
 
-def drop_teardown_target(
-    ws: WorkspaceClient, warehouse_id: str, target: TeardownTarget
-) -> None:
+def drop_teardown_target(ws: WorkspaceClient, warehouse_id: str, target: TeardownTarget) -> None:
     """Drop exactly the target schema or catalog, cascading."""
     catalog_q = quote_identifier(target.catalog)
     if target.kind is TeardownKind.CATALOG:
-        execute_statement(
-            ws, warehouse_id, f"DROP CATALOG IF EXISTS {catalog_q} CASCADE"
-        )
+        execute_statement(ws, warehouse_id, f"DROP CATALOG IF EXISTS {catalog_q} CASCADE")
         return
     if target.schema is None:  # unreachable: SCHEMA kind always sets schema
         raise ValueError("schema teardown target is missing its schema name")
     schema_q = quote_identifier(target.schema)
-    execute_statement(
-        ws, warehouse_id, f"DROP SCHEMA IF EXISTS {catalog_q}.{schema_q} CASCADE"
-    )
+    execute_statement(ws, warehouse_id, f"DROP SCHEMA IF EXISTS {catalog_q}.{schema_q} CASCADE")

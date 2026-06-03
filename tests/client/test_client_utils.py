@@ -6,7 +6,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-
 from dbxcarta.client import compare_result_sets, parse_sql
 from dbxcarta.client.eval.run import (
     _is_table_ref,
@@ -16,10 +15,10 @@ from dbxcarta.client.schema_dump import _format_schema
 from dbxcarta.client.settings import ClientSettings
 from dbxcarta.client.summary import ClientRunSummary
 
-
 # ---------------------------------------------------------------------------
 # _parse_sql
 # ---------------------------------------------------------------------------
+
 
 def test_parse_sql_plain_select():
     sql, ok = parse_sql("SELECT * FROM t")
@@ -71,6 +70,7 @@ def test_parse_sql_case_insensitive_fence():
 # _resolve_staging_table
 # ---------------------------------------------------------------------------
 
+
 def _fake_settings(summary_table: str):
     return SimpleNamespace(dbxcarta_summary_table=summary_table)
 
@@ -100,6 +100,7 @@ def test_resolve_staging_table_rejects_invalid_identifier():
 # ---------------------------------------------------------------------------
 # _format_schema
 # ---------------------------------------------------------------------------
+
 
 def _rows(*specs, catalog="cat"):
     return [
@@ -158,6 +159,7 @@ def test_format_schema_omits_none_comment():
 # ClientRunSummary._compute_aggregates (via finish)
 # ---------------------------------------------------------------------------
 
+
 def _make_summary():
     return ClientRunSummary(
         run_id="test-1",
@@ -209,9 +211,36 @@ def test_finish_records_status_and_time():
 
 def test_compute_aggregates_correct_rate():
     summary = _make_summary()
-    summary.add_result("q1", "q?", "no_context", parsed=True, executed=True, non_empty=True, correct=True, gradable=True)
-    summary.add_result("q2", "q?", "no_context", parsed=True, executed=True, non_empty=True, correct=False, gradable=True)
-    summary.add_result("q3", "q?", "no_context", parsed=True, executed=True, non_empty=True, correct=False, gradable=False)
+    summary.add_result(
+        "q1",
+        "q?",
+        "no_context",
+        parsed=True,
+        executed=True,
+        non_empty=True,
+        correct=True,
+        gradable=True,
+    )
+    summary.add_result(
+        "q2",
+        "q?",
+        "no_context",
+        parsed=True,
+        executed=True,
+        non_empty=True,
+        correct=False,
+        gradable=True,
+    )
+    summary.add_result(
+        "q3",
+        "q?",
+        "no_context",
+        parsed=True,
+        executed=True,
+        non_empty=True,
+        correct=False,
+        gradable=False,
+    )
     summary.finish(status="success")
 
     assert summary.arm_correct["no_context"] == 1
@@ -254,6 +283,7 @@ def test_emit_stdout_skips_incomplete_retrieval_metrics(capsys):
 # ---------------------------------------------------------------------------
 # _is_table_ref
 # ---------------------------------------------------------------------------
+
 
 def test_is_table_ref_three_part_name():
     assert _is_table_ref("cat.schema.table")
@@ -312,6 +342,7 @@ def test_client_settings_rejects_unsafe_chat_endpoint() -> None:
 # _compare_result_sets
 # ---------------------------------------------------------------------------
 
+
 def test_compare_exact_match():
     cols = ["id", "name"]
     rows = [[1, "Alice"], [2, "Bob"]]
@@ -338,15 +369,13 @@ def test_compare_gen_missing_rows_is_mismatch():
 
 def test_compare_gen_superset_of_ref_is_mismatch():
     """Generated with extra rows is a mismatch for small result sets."""
-    correct, err = compare_result_sets(
-        ["id"], [[1], [2], [3]], ["id"], [[1], [3]]
-    )
+    correct, err = compare_result_sets(["id"], [[1], [2], [3]], ["id"], [[1], [3]])
     assert not correct
     assert err is not None
 
 
 def test_compare_value_mismatch():
-    correct, err = compare_result_sets(["id"], [[1], [2]], ["id"], [[1], [3]])
+    correct, _err = compare_result_sets(["id"], [[1], [2]], ["id"], [[1], [3]])
     assert not correct
 
 
@@ -354,9 +383,7 @@ def test_compare_case_insensitive_strings():
     """'High' and 'high' should compare equal — the SQL filter case sensitivity
     is the model's problem, but the comparator should not double-penalize when
     the reference itself returns a case-different string."""
-    correct, err = compare_result_sets(
-        ["tier"], [["High"]], ["tier"], [["high"]]
-    )
+    correct, err = compare_result_sets(["tier"], [["High"]], ["tier"], [["high"]])
     assert correct, err
 
 
@@ -376,7 +403,7 @@ def test_compare_projection_rejects_when_ref_has_extra_columns():
     gen_rows = [[1], [2]]
     ref_cols = ["id", "name"]
     ref_rows = [[1, "Alice"], [2, "Bob"]]
-    correct, err = compare_result_sets(gen_cols, gen_rows, ref_cols, ref_rows)
+    correct, _err = compare_result_sets(gen_cols, gen_rows, ref_cols, ref_rows)
     assert not correct
 
 
@@ -407,5 +434,5 @@ def test_compare_large_identical_rows():
 def test_compare_large_sample_mismatch():
     gen_rows = [[i, "gen"] for i in range(600)]
     ref_rows = [[i, "ref"] for i in range(600)]
-    correct, err = compare_result_sets(["id", "label"], gen_rows, ["id", "label"], ref_rows)
+    correct, _err = compare_result_sets(["id", "label"], gen_rows, ["id", "label"], ref_rows)
     assert not correct

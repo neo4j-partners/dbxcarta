@@ -13,10 +13,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from dbxcarta.core.identifiers import quote_qualified_name
-from dbxcarta.spark.ingest.summary import RunSummary
 
 if TYPE_CHECKING:
     from databricks.sdk import WorkspaceClient
+    from dbxcarta.spark.ingest.summary import RunSummary
     from pyspark.sql import SparkSession
     from pyspark.sql.types import StructType
 
@@ -29,7 +29,7 @@ class LoadSummaryError(Exception):
 
 
 def load_summary_from_volume(
-    ws: "WorkspaceClient",
+    ws: WorkspaceClient,
     volume_path: str,
     *,
     run_id: str | None = None,
@@ -45,19 +45,16 @@ def load_summary_from_volume(
     """
     entries = list(ws.files.list_directory_contents(directory_path=volume_path))
     candidates = [
-        e for e in entries
-        if e.name is not None
-        and e.name.startswith("dbxcarta_")
-        and e.name.endswith(".json")
+        e
+        for e in entries
+        if e.name is not None and e.name.startswith("dbxcarta_") and e.name.endswith(".json")
     ]
     if not candidates:
         return None
 
     if run_id:
         matched = [
-            e for e in candidates
-            if e.name is not None
-            and e.name.startswith(f"dbxcarta_{run_id}_")
+            e for e in candidates if e.name is not None and e.name.startswith(f"dbxcarta_{run_id}_")
         ]
         if not matched:
             return None
@@ -72,14 +69,14 @@ def load_summary_from_volume(
         if downloaded.contents is None:
             raise LoadSummaryError(f"summary file has no contents: {target.name}")
         content = downloaded.contents.read()
-        return cast(dict[str, Any], json.loads(content))
+        return cast("dict[str, Any]", json.loads(content))
 
     for entry in sorted(candidates, key=lambda e: e.name or "", reverse=True):
         downloaded = ws.files.download(file_path=f"{volume_path}/{entry.name}")
         if downloaded.contents is None:
             raise LoadSummaryError(f"summary file has no contents: {entry.name}")
         content = downloaded.contents.read()
-        loaded = cast(dict[str, Any], json.loads(content))
+        loaded = cast("dict[str, Any]", json.loads(content))
         if loaded.get("status") == "success":
             return loaded
     return None
@@ -130,7 +127,7 @@ def emit_json(summary: RunSummary, volume_path: str) -> None:
     path.write_text(json.dumps(summary.to_json_dict(), indent=2))
 
 
-def summary_table_schema() -> "StructType":
+def summary_table_schema() -> StructType:
     """Return the explicit Delta schema for the run-summary history table.
 
     Exposed as a function rather than inlined in ``emit_delta`` so a test can
@@ -155,33 +152,35 @@ def summary_table_schema() -> "StructType":
         TimestampType,
     )
 
-    return StructType([
-        StructField("run_id", StringType(), nullable=False),
-        StructField("job_name", StringType()),
-        StructField("contract_version", StringType()),
-        StructField("catalog", StringType()),
-        StructField("schemas", ArrayType(StringType())),
-        StructField("started_at", TimestampType()),
-        StructField("ended_at", TimestampType()),
-        StructField("status", StringType()),
-        StructField("row_counts", MapType(StringType(), LongType())),
-        StructField("neo4j_counts", MapType(StringType(), LongType())),
-        StructField("error", StringType()),
-        StructField("value_sampling_warning", StringType()),
-        StructField("embedding_model", StringType()),
-        StructField("embedding_flags", MapType(StringType(), BooleanType())),
-        StructField("embedding_attempts", MapType(StringType(), LongType())),
-        StructField("embedding_successes", MapType(StringType(), LongType())),
-        StructField("embedding_failure_rate_per_label", MapType(StringType(), DoubleType())),
-        StructField("embedding_failure_rate", DoubleType()),
-        StructField("embedding_failure_threshold", LongType()),
-        StructField("embedding_ledger_hits", MapType(StringType(), LongType())),
-        StructField("verify_ok", BooleanType()),
-        StructField("verify_violation_count", LongType()),
-    ])
+    return StructType(
+        [
+            StructField("run_id", StringType(), nullable=False),
+            StructField("job_name", StringType()),
+            StructField("contract_version", StringType()),
+            StructField("catalog", StringType()),
+            StructField("schemas", ArrayType(StringType())),
+            StructField("started_at", TimestampType()),
+            StructField("ended_at", TimestampType()),
+            StructField("status", StringType()),
+            StructField("row_counts", MapType(StringType(), LongType())),
+            StructField("neo4j_counts", MapType(StringType(), LongType())),
+            StructField("error", StringType()),
+            StructField("value_sampling_warning", StringType()),
+            StructField("embedding_model", StringType()),
+            StructField("embedding_flags", MapType(StringType(), BooleanType())),
+            StructField("embedding_attempts", MapType(StringType(), LongType())),
+            StructField("embedding_successes", MapType(StringType(), LongType())),
+            StructField("embedding_failure_rate_per_label", MapType(StringType(), DoubleType())),
+            StructField("embedding_failure_rate", DoubleType()),
+            StructField("embedding_failure_threshold", LongType()),
+            StructField("embedding_ledger_hits", MapType(StringType(), LongType())),
+            StructField("verify_ok", BooleanType()),
+            StructField("verify_violation_count", LongType()),
+        ]
+    )
 
 
-def emit_delta(summary: RunSummary, spark: "SparkSession", table_name: str) -> None:
+def emit_delta(summary: RunSummary, spark: SparkSession, table_name: str) -> None:
     """Append one summary row to the configured Delta history table.
 
     The explicit schema keeps Spark from inferring unstable map and
@@ -201,9 +200,7 @@ def emit_delta(summary: RunSummary, spark: "SparkSession", table_name: str) -> N
     )
 
 
-def emit(
-    summary: RunSummary, spark: "SparkSession", volume_path: str, table_name: str
-) -> None:
+def emit(summary: RunSummary, spark: SparkSession, volume_path: str, table_name: str) -> None:
     """Emit the run summary through all configured sinks."""
     emit_stdout(summary)
     emit_json(summary, volume_path)

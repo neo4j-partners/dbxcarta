@@ -22,10 +22,7 @@ def test_rejects_other_catalog() -> None:
 
 
 def test_rejects_multi_statement() -> None:
-    sql = (
-        "SELECT * FROM `cat`.`sp_shop`.`orders`; "
-        "DROP TABLE `cat`.`sp_shop`.`orders`"
-    )
+    sql = "SELECT * FROM `cat`.`sp_shop`.`orders`; DROP TABLE `cat`.`sp_shop`.`orders`"
     assert sql_targets_only_catalog(sql, "cat") is False
 
 

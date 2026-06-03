@@ -17,7 +17,6 @@ from dbxcarta.spark.ingest.summary import RunSummary
 from dbxcarta.spark.settings import SparkIngestSettings
 from dbxcarta.spark.verify.references import _check_accounting
 
-
 _BASE = {
     "databricks_secret_scope": "dbxcarta-neo4j-test",
     "dbxcarta_catalog": "main",
@@ -100,7 +99,9 @@ def test_guardrail_skip_does_not_break_declared_fk_accounting() -> None:
 
 def test_skipped_result_is_all_none_for_the_load_contract() -> None:
     r = _skipped_result()
-    assert r.declared_edges_df is None and r.declared_edge_count == 0
-    assert r.metadata_edges_df is None and r.metadata_edge_count == 0
+    assert r.declared_edges_df is None
+    assert r.declared_edge_count == 0
+    assert r.metadata_edges_df is None
+    assert r.metadata_edge_count == 0
     # Honors the FKDiscoveryResult None-edge contract: unpersist is a no-op.
     r.unpersist_cached()

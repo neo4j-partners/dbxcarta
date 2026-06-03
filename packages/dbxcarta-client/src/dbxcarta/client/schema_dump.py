@@ -10,8 +10,12 @@ except ModuleNotFoundError as exc:  # pragma: no cover - dependency guard
         "package with the 'graph' extra: pip install 'dbxcarta-client[graph]'"
     ) from exc
 
+from typing import TYPE_CHECKING
+
 from dbxcarta.client.neo4j_utils import neo4j_credentials
-from dbxcarta.client.settings import ClientSettings
+
+if TYPE_CHECKING:
+    from dbxcarta.client.settings import ClientSettings
 
 _CYPHER = """
 MATCH (db:Database)-[:HAS_SCHEMA]->(s:Schema)

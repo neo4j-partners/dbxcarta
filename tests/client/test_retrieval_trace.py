@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dbxcarta.client.ids import catalog_from_node_id, schema_from_node_id
+from dbxcarta.client.retriever import ColumnEntry
 from dbxcarta.client.trace import (
     RetrievalTrace,
     chosen_schemas_from_columns,
@@ -10,8 +11,6 @@ from dbxcarta.client.trace import (
     emit_retrieval_traces,
     schema_scores_from_seeds,
 )
-from dbxcarta.client.retriever import ColumnEntry
-
 
 # ---------------------------------------------------------------------------
 # schema_from_node_id
@@ -143,20 +142,20 @@ def test_chosen_schemas_empty() -> None:
 
 
 def _trace(target_schema: str | None, **kwargs) -> RetrievalTrace:
-    defaults = dict(
-        run_id="r1",
-        question_id="q1",
-        question="test?",
-        col_seed_ids=[],
-        col_seed_scores=[],
-        tbl_seed_ids=[],
-        tbl_seed_scores=[],
-        schema_scores={},
-        chosen_schemas=[],
-        expansion_tbl_ids=[],
-        final_col_ids=[],
-        rendered_context="",
-    )
+    defaults = {
+        "run_id": "r1",
+        "question_id": "q1",
+        "question": "test?",
+        "col_seed_ids": [],
+        "col_seed_scores": [],
+        "tbl_seed_ids": [],
+        "tbl_seed_scores": [],
+        "schema_scores": {},
+        "chosen_schemas": [],
+        "expansion_tbl_ids": [],
+        "final_col_ids": [],
+        "rendered_context": "",
+    }
     defaults.update(kwargs)
     return RetrievalTrace(target_schema=target_schema, **defaults)
 

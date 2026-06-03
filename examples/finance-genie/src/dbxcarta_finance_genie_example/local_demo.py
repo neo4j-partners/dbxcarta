@@ -9,17 +9,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from dotenv import load_dotenv
-
 from dbxcarta.client import parse_sql
 from dbxcarta.client.compare import compare_result_sets
-from dbxcarta.core.executor import fetch_rows, preflight_warehouse
-from dbxcarta.core.workspace import build_workspace_client
 from dbxcarta.client.graph_rag import build_graph_rag_context
 from dbxcarta.client.local_generation import generate_sql_local
 from dbxcarta.client.questions import Question, load_questions
 from dbxcarta.client.schema_dump import fetch_schema_dump
 from dbxcarta.client.settings import ClientSettings
+from dbxcarta.core.executor import fetch_rows, preflight_warehouse
+from dbxcarta.core.workspace import build_workspace_client
+from dotenv import load_dotenv
 
 # The bundled questions.json and the standalone .env both live at the example
 # root, two levels up from this module, the same place the dbxcarta preset reads
@@ -231,9 +230,7 @@ def run_graph_rag_question(
         print(context.prompt)
         print()
 
-    raw_sql = generate_sql_local(
-        ws, settings.dbxcarta_chat_endpoint, context.prompt
-    )
+    raw_sql = generate_sql_local(ws, settings.dbxcarta_chat_endpoint, context.prompt)
     generated_sql, parse_ok = parse_sql(raw_sql)
     if not parse_ok or not generated_sql:
         raise RuntimeError(f"generated response was not valid SQL: {raw_sql!r}")

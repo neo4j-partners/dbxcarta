@@ -25,6 +25,7 @@ from dbxcarta.core.executor import catalog_exists, execute_ddl_blocking
 from dbxcarta.core.identifiers import quote_identifier
 from dbxcarta.core.materialize import ExecuteFn, MaterializeStats, materialize_schemas
 from dbxcarta.core.workspace import build_workspace_client
+
 from dbxcarta_dense_schema_example.config import DenseSchemaConfig, load_config
 from dbxcarta_dense_schema_example.utils import load_dotenv_file
 
@@ -41,8 +42,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(prog="dbxcarta-dense-materialize")
     parser.add_argument("--dotenv", type=Path, default=Path(__file__).resolve().parents[2] / ".env")
     parser.add_argument("--warehouse-id", type=str, default=None)
-    parser.add_argument("--workers", type=int, default=_DEFAULT_WORKERS,
-                        help="parallel worker threads for table creation (default: 20)")
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=_DEFAULT_WORKERS,
+        help="parallel worker threads for table creation (default: 20)",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -60,9 +65,7 @@ def main() -> int:
             " Run dbxcarta-dense-generate first."
         )
 
-    warehouse_id = read_required_warehouse_id(
-        args.warehouse_id, operation="materialize tables"
-    )
+    warehouse_id = read_required_warehouse_id(args.warehouse_id, operation="materialize tables")
     payload = json.loads(config.candidate_cache.read_text())
     schemas = payload.get("schemas") or []
     if not schemas:
@@ -83,7 +86,7 @@ def main() -> int:
 
 
 def materialize(
-    ws: "WorkspaceClient",
+    ws: WorkspaceClient,
     warehouse_id: str,
     config: DenseSchemaConfig,
     schemas: list[dict[str, Any]],
@@ -102,7 +105,8 @@ def materialize(
     # EXISTS, so a pre-created (e.g. UI-created) catalog must not be re-created.
     if not catalog_exists(ws, warehouse_id, config.catalog):
         execute_ddl_blocking(
-            ws, warehouse_id,
+            ws,
+            warehouse_id,
             f"CREATE CATALOG IF NOT EXISTS {catalog_q}"
             " COMMENT 'dense-schema materialize: data catalog'",
             label=f"CREATE CATALOG {config.catalog}",

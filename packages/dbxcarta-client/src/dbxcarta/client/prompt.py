@@ -25,9 +25,7 @@ def no_context_prompt(question: str, catalog: str, schemas: list[str]) -> str:
     )
 
 
-def schema_dump_prompt(
-    question: str, catalog: str, schemas: list[str], schema_text: str
-) -> str:
+def schema_dump_prompt(question: str, catalog: str, schemas: list[str], schema_text: str) -> str:
     schema_hint = (
         f"schema '{schemas[0]}'"
         if len(schemas) == 1
@@ -42,9 +40,7 @@ def schema_dump_prompt(
     )
 
 
-def graph_rag_prompt(
-    question: str, catalog: str, schemas: list[str], context_text: str
-) -> str:
+def graph_rag_prompt(question: str, catalog: str, schemas: list[str], context_text: str) -> str:
     schema_hint = (
         f"schema '{schemas[0]}'"
         if len(schemas) == 1

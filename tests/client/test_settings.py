@@ -9,9 +9,8 @@ resolving exactly as before.
 from __future__ import annotations
 
 import pytest
-from pydantic import ValidationError
-
 from dbxcarta.client.settings import ClientSettings
+from pydantic import ValidationError
 
 # Required, no-default fields, so a ClientSettings can be built without reading
 # a real .env. ``_env_file=None`` keeps the construction hermetic.

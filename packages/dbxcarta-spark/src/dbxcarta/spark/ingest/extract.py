@@ -16,9 +16,8 @@ import dbxcarta.spark.ingest.schema_graph as sg
 from dbxcarta.spark.ingest.summary import ExtractCounts, RunSummary
 
 if TYPE_CHECKING:
-    from pyspark.sql import DataFrame, SparkSession
-
     from dbxcarta.spark.settings import SparkIngestSettings
+    from pyspark.sql import DataFrame, SparkSession
 
 logger = logging.getLogger(__name__)
 
@@ -33,16 +32,16 @@ class ExtractResult:
     can reuse the same catalog snapshot.
     """
 
-    database_df: "DataFrame"
-    schema_node_df: "DataFrame"
-    table_node_df: "DataFrame"
-    column_node_df: "DataFrame"
-    has_schema_df: "DataFrame"
-    has_table_df: "DataFrame"
-    has_column_df: "DataFrame"
-    schemata_df: "DataFrame"
-    tables_df: "DataFrame"
-    columns_df: "DataFrame"
+    database_df: DataFrame
+    schema_node_df: DataFrame
+    table_node_df: DataFrame
+    column_node_df: DataFrame
+    has_schema_df: DataFrame
+    has_table_df: DataFrame
+    has_column_df: DataFrame
+    schemata_df: DataFrame
+    tables_df: DataFrame
+    columns_df: DataFrame
 
     def unpersist_cached(self) -> None:
         """Release cached information_schema DataFrames after the ingest run.
@@ -57,8 +56,8 @@ class ExtractResult:
 
 
 def extract(
-    spark: "SparkSession",
-    settings: "SparkIngestSettings",
+    spark: SparkSession,
+    settings: SparkIngestSettings,
     schema_list: list[str],
     summary: RunSummary,
 ) -> ExtractResult:
@@ -74,40 +73,46 @@ def extract(
 
     catalogs = settings.resolved_catalogs()
 
-    def _union(frames: list["DataFrame"]) -> "DataFrame":
+    def _union(frames: list[DataFrame]) -> DataFrame:
         return reduce(lambda a, b: a.unionByName(b), frames)
 
-    schemata_df = _union([
-        spark.sql(
-            f"SELECT catalog_name, schema_name, comment"
-            f" FROM `{catalog}`.information_schema.schemata"
-        )
-        for catalog in catalogs
-    ]).filter(col("schema_name") != "information_schema")
+    schemata_df = _union(
+        [
+            spark.sql(
+                f"SELECT catalog_name, schema_name, comment"
+                f" FROM `{catalog}`.information_schema.schemata"
+            )
+            for catalog in catalogs
+        ]
+    ).filter(col("schema_name") != "information_schema")
     if schema_list:
         schemata_df = schemata_df.filter(col("schema_name").isin(schema_list))
     schemata_df = schemata_df.cache()
 
-    tables_df = _union([
-        spark.sql(
-            f"SELECT table_catalog, table_schema, table_name, table_type,"
-            f"       comment, created, last_altered"
-            f" FROM `{catalog}`.information_schema.tables"
-        )
-        for catalog in catalogs
-    ]).filter(col("table_schema") != "information_schema")
+    tables_df = _union(
+        [
+            spark.sql(
+                f"SELECT table_catalog, table_schema, table_name, table_type,"
+                f"       comment, created, last_altered"
+                f" FROM `{catalog}`.information_schema.tables"
+            )
+            for catalog in catalogs
+        ]
+    ).filter(col("table_schema") != "information_schema")
     if schema_list:
         tables_df = tables_df.filter(col("table_schema").isin(schema_list))
     tables_df = tables_df.cache()
 
-    columns_df = _union([
-        spark.sql(
-            f"SELECT table_catalog, table_schema, table_name, column_name,"
-            f"       data_type, is_nullable, ordinal_position, comment"
-            f" FROM `{catalog}`.information_schema.columns"
-        )
-        for catalog in catalogs
-    ]).filter(col("table_schema") != "information_schema")
+    columns_df = _union(
+        [
+            spark.sql(
+                f"SELECT table_catalog, table_schema, table_name, column_name,"
+                f"       data_type, is_nullable, ordinal_position, comment"
+                f" FROM `{catalog}`.information_schema.columns"
+            )
+            for catalog in catalogs
+        ]
+    ).filter(col("table_schema") != "information_schema")
     if schema_list:
         columns_df = columns_df.filter(col("table_schema").isin(schema_list))
     columns_df = columns_df.cache()

@@ -16,6 +16,7 @@
 # with no `export` and no per-shell setup.
 
 .PHONY: help \
+	test test-it test-slow \
 	e2e-finance-genie-ingest e2e-finance-genie-client e2e-finance-genie-teardown \
 	e2e-schemapile-ingest e2e-schemapile-client e2e-schemapile-teardown \
 	e2e-dense-schema-ingest e2e-dense-schema-client e2e-dense-schema-teardown
@@ -44,7 +45,31 @@ define e2e_teardown
 	DBXCARTA_ENV_FILE=$(1) uv run dbxcarta-submit teardown --yes-i-mean-it
 endef
 
+# Fast lane: the default unit/integration-free suite. Runs `tests` with
+# importlib import mode, ignoring the live integration directory and the slow
+# fk_guard file so they are never picked up by default (mirrors the previous
+# `-m 'not live and not slow'` behavior now that the markers are gone).
+test:
+	uv run pytest tests --import-mode=importlib \
+		--ignore=tests/integration \
+		--ignore=tests/spark/fk_guard/test_single_execution_guard.py
+
+# Live integration suite: needs a live Databricks profile, Neo4j, and a
+# previously-loaded catalog. Not part of the default `make test` run.
+test-it:
+	uv run pytest tests/integration --import-mode=importlib
+
+# Slow Spark fk_guard regression guard: no credentials, only time. Kept out of
+# the default run; invoke explicitly.
+test-slow:
+	uv run pytest tests/spark/fk_guard/test_single_execution_guard.py --import-mode=importlib
+
 help:
+	@echo "dbxcarta test targets:"
+	@echo "  make test       Fast lane: unit suite (excludes integration + slow fk_guard)"
+	@echo "  make test-it    Live integration suite (requires live Databricks/Neo4j + loaded catalog)"
+	@echo "  make test-slow  Slow Spark fk_guard regression guard (no creds, just time)"
+	@echo ""
 	@echo "dbxcarta e2e pipeline targets (run from repo root, ingest then client):"
 	@echo "  make e2e-finance-genie-ingest    Bootstrap, rebuild wheels, then ingest for finance-genie"
 	@echo "  make e2e-finance-genie-client    Client evaluation for finance-genie"

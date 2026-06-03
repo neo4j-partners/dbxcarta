@@ -68,7 +68,9 @@ def load_questions(source: str, spark: SparkSession | None = None) -> list[Quest
         raw_questions = json.loads(text)
 
     if not isinstance(raw_questions, list):
-        raise ValueError(
+        # ValueError is the deliberate, uniform error contract for an invalid
+        # questions file (not a programmer type error).
+        raise ValueError(  # noqa: TRY004
             f"questions file must be a JSON array, got {type(raw_questions)}"
         )
     return [Question.model_validate(item) for item in raw_questions]

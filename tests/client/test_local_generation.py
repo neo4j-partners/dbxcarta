@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import pytest
-
 from dbxcarta.client.local_generation import (
     LocalGenerationError,
     extract_generated_text,
@@ -68,7 +67,7 @@ def test_generate_sql_local_posts_chat_payload(monkeypatch) -> None:
         def json(self) -> dict:
             return {"choices": [{"message": {"content": "SELECT 1"}}]}
 
-    def fake_post(url, headers, json, timeout):  # noqa: ANN001
+    def fake_post(url, headers, json, timeout):
         calls["url"] = url
         calls["headers"] = headers
         calls["json"] = json

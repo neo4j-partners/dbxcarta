@@ -15,10 +15,10 @@ from dbxcarta.client.questions import Question, load_questions
 from dbxcarta.client.sql import parse_sql
 
 __all__ = [
+    "GraphRagContext",
+    "Question",
+    "build_graph_rag_context",
     "compare_result_sets",
     "load_questions",
     "parse_sql",
-    "Question",
-    "GraphRagContext",
-    "build_graph_rag_context",
 ]

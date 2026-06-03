@@ -12,10 +12,9 @@ from __future__ import annotations
 
 import re
 
-from pyspark.sql.types import ArrayType, DataType, MapType
-
 from dbxcarta.spark.ingest.preflight import _SUMMARY_TABLE_COLUMNS_SQL
 from dbxcarta.spark.ingest.summary_io import summary_table_schema
+from pyspark.sql.types import ArrayType, DataType, MapType
 
 _SCALAR_SQL = {
     "StringType": "STRING",
@@ -31,10 +30,7 @@ def _spark_type_to_sql(dtype: DataType) -> str:
     if isinstance(dtype, ArrayType):
         return f"ARRAY<{_spark_type_to_sql(dtype.elementType)}>"
     if isinstance(dtype, MapType):
-        return (
-            f"MAP<{_spark_type_to_sql(dtype.keyType)},"
-            f"{_spark_type_to_sql(dtype.valueType)}>"
-        )
+        return f"MAP<{_spark_type_to_sql(dtype.keyType)},{_spark_type_to_sql(dtype.valueType)}>"
     return _SCALAR_SQL[type(dtype).__name__]
 
 
@@ -69,9 +65,7 @@ def test_preflight_ddl_and_writer_schema_agree_on_shared_columns() -> None:
     assert shared, "expected overlapping columns between DDL and writer schema"
 
     mismatches = {
-        name: (ddl[name], writer[name])
-        for name in sorted(shared)
-        if ddl[name] != writer[name]
+        name: (ddl[name], writer[name]) for name in sorted(shared) if ddl[name] != writer[name]
     }
     assert not mismatches, (
         "preflight CREATE TABLE and summary_table_schema() disagree on column "

@@ -29,7 +29,6 @@ from typing import Any, Literal
 
 from dbxcarta.core.identifiers import quote_identifier
 
-
 logger = logging.getLogger(__name__)
 
 # An injected SQL runner: ``execute(statement, label)`` runs one statement and
@@ -66,28 +65,56 @@ _NAME_SANITIZE_RE = re.compile(r"[^a-zA-Z0-9_]+")
 # with identical entries, so core owns it as the default. An example overrides
 # it only if its source ever needs different entries; this keeps a single map
 # today without hardcoding that the two sources must always agree.
-DEFAULT_DELTA_TYPE_MAP: Mapping[str, str] = MappingProxyType({
-    "INT": "INT", "INTEGER": "INT", "INT4": "INT",
-    "BIGINT": "BIGINT", "INT8": "BIGINT", "LONG": "BIGINT",
-    "SMALLINT": "SMALLINT", "TINYINT": "TINYINT", "MEDIUMINT": "INT",
-    "FLOAT": "FLOAT", "REAL": "FLOAT", "DOUBLE": "DOUBLE",
-    "DOUBLE PRECISION": "DOUBLE",
-    "DECIMAL": "DECIMAL(18,4)", "NUMERIC": "DECIMAL(18,4)",
-    "NUMBER": "DECIMAL(18,4)",
-    "BOOLEAN": "BOOLEAN", "BOOL": "BOOLEAN", "BIT": "BOOLEAN",
-    "TEXT": "STRING", "LONGTEXT": "STRING", "MEDIUMTEXT": "STRING",
-    "TINYTEXT": "STRING", "CHARACTER VARYING": "STRING",
-    "VARCHAR": "STRING", "CHAR": "STRING", "NVARCHAR": "STRING",
-    "NCHAR": "STRING", "STRING": "STRING",
-    "DATE": "DATE", "DATETIME": "TIMESTAMP", "TIMESTAMP": "TIMESTAMP",
-    "TIMESTAMPTZ": "TIMESTAMP",
-    "TIMESTAMP WITHOUT TIME ZONE": "TIMESTAMP",
-    "TIMESTAMP WITH TIME ZONE": "TIMESTAMP",
-    "TIME": "STRING", "TIME WITHOUT TIME ZONE": "STRING",
-    "BLOB": "BINARY", "BINARY": "BINARY", "VARBINARY": "BINARY",
-    "BYTEA": "BINARY", "JSON": "STRING", "JSONB": "STRING",
-    "UUID": "STRING", "ENUM": "STRING", "SET": "STRING",
-})
+DEFAULT_DELTA_TYPE_MAP: Mapping[str, str] = MappingProxyType(
+    {
+        "INT": "INT",
+        "INTEGER": "INT",
+        "INT4": "INT",
+        "BIGINT": "BIGINT",
+        "INT8": "BIGINT",
+        "LONG": "BIGINT",
+        "SMALLINT": "SMALLINT",
+        "TINYINT": "TINYINT",
+        "MEDIUMINT": "INT",
+        "FLOAT": "FLOAT",
+        "REAL": "FLOAT",
+        "DOUBLE": "DOUBLE",
+        "DOUBLE PRECISION": "DOUBLE",
+        "DECIMAL": "DECIMAL(18,4)",
+        "NUMERIC": "DECIMAL(18,4)",
+        "NUMBER": "DECIMAL(18,4)",
+        "BOOLEAN": "BOOLEAN",
+        "BOOL": "BOOLEAN",
+        "BIT": "BOOLEAN",
+        "TEXT": "STRING",
+        "LONGTEXT": "STRING",
+        "MEDIUMTEXT": "STRING",
+        "TINYTEXT": "STRING",
+        "CHARACTER VARYING": "STRING",
+        "VARCHAR": "STRING",
+        "CHAR": "STRING",
+        "NVARCHAR": "STRING",
+        "NCHAR": "STRING",
+        "STRING": "STRING",
+        "DATE": "DATE",
+        "DATETIME": "TIMESTAMP",
+        "TIMESTAMP": "TIMESTAMP",
+        "TIMESTAMPTZ": "TIMESTAMP",
+        "TIMESTAMP WITHOUT TIME ZONE": "TIMESTAMP",
+        "TIMESTAMP WITH TIME ZONE": "TIMESTAMP",
+        "TIME": "STRING",
+        "TIME WITHOUT TIME ZONE": "STRING",
+        "BLOB": "BINARY",
+        "BINARY": "BINARY",
+        "VARBINARY": "BINARY",
+        "BYTEA": "BINARY",
+        "JSON": "STRING",
+        "JSONB": "STRING",
+        "UUID": "STRING",
+        "ENUM": "STRING",
+        "SET": "STRING",
+    }
+)
 
 
 @dataclass
@@ -122,9 +149,7 @@ class MaterializeStats:
         )
 
 
-def coerce_type(
-    raw: str, type_map: Mapping[str, str] = DEFAULT_DELTA_TYPE_MAP
-) -> tuple[str, bool]:
+def coerce_type(raw: str, type_map: Mapping[str, str] = DEFAULT_DELTA_TYPE_MAP) -> tuple[str, bool]:
     """Map a source column type to a Delta type.
 
     Returns ``(delta_type, fellback)`` where ``fellback`` is True when the type
@@ -193,12 +218,9 @@ def build_insert_statement(
     trip, so it replaces a freshly created table's contents in one statement.
     """
     columns_clause = ", ".join(quote_identifier(c) for c in col_names)
-    values_clauses = [
-        "(" + ", ".join(render_sql_value(v) for v in row) + ")" for row in rows
-    ]
-    return (
-        f"INSERT OVERWRITE TABLE {fq_table} ({columns_clause}) VALUES\n  "
-        + ",\n  ".join(values_clauses)
+    values_clauses = ["(" + ", ".join(render_sql_value(v) for v in row) + ")" for row in rows]
+    return f"INSERT OVERWRITE TABLE {fq_table} ({columns_clause}) VALUES\n  " + ",\n  ".join(
+        values_clauses
     )
 
 
@@ -216,9 +238,10 @@ def constraint_name(
     name = f"{prefix}_{body}" if body else prefix
     if len(name) <= max_len:
         return name
-    digest = hashlib.sha1(name.encode("utf-8")).hexdigest()[:12]
+    # Disambiguation only, not security: same digest bytes, silences S324.
+    digest = hashlib.sha1(name.encode("utf-8"), usedforsecurity=False).hexdigest()[:12]
     keep = max_len - len(prefix) - 1 - len(digest) - 1
-    return f"{prefix}_{name[len(prefix) + 1:][:keep]}_{digest}"
+    return f"{prefix}_{name[len(prefix) + 1 :][:keep]}_{digest}"
 
 
 @dataclass
@@ -289,8 +312,7 @@ def materialize_schemas(
         missing = [k for k in ("uc_schema", "source_id") if not schema_entry.get(k)]
         if missing:
             raise ValueError(
-                f"blueprint schema entry missing required key(s) {missing}:"
-                f" {schema_entry!r}"
+                f"blueprint schema entry missing required key(s) {missing}: {schema_entry!r}"
             )
         uc_schema = schema_entry["uc_schema"]
         source_id = schema_entry["source_id"]
@@ -305,26 +327,36 @@ def materialize_schemas(
 
         # Serial reuses the main executor; parallel hands each pool thread its
         # own via the factory so the injected runner is thread-confined.
-        table_execute = (
-            _per_thread_executor(make_execute) if workers > 1 else main_execute
-        )
+        table_execute = _per_thread_executor(make_execute) if workers > 1 else main_execute
         tables = schema_entry.get("tables", [])
         materialized: dict[str, _MaterializedTable] = {}
         total = len(tables)
         thunks: list[_BuildFn] = [
             functools.partial(
                 _materialize_table,
-                table_execute, catalog_q, schema_q, source_id, table,
-                property_prefix=property_prefix, type_map=type_map,
-                on_insert_error=on_insert_error, log=log, progress=f"{idx}/{total}",
+                table_execute,
+                catalog_q,
+                schema_q,
+                source_id,
+                table,
+                property_prefix=property_prefix,
+                type_map=type_map,
+                on_insert_error=on_insert_error,
+                on_table_error=on_table_error,
+                log=log,
+                progress=f"{idx}/{total}",
             )
             for idx, table in enumerate(tables, 1)
         ]
 
         # Serial and parallel share one collection loop: each entry is a
-        # zero-arg callable returning (record, stats). In parallel mode the
-        # thread pool drains first (in completion order); the bound
-        # ``future.result`` then returns instantly when collected below.
+        # zero-arg callable returning (record, stats). Each build applies its
+        # own table-create and row-insert error policy internally, so the loop
+        # only sums tallies and records the materialized tables. A build that
+        # re-raises (a ``"raise"`` policy, or any non-warehouse error such as a
+        # bug) propagates out unchanged; in parallel mode the pool drains in the
+        # list comprehension first, so the bound ``future.result`` returns or
+        # re-raises instantly when called below.
         builds: list[_BuildFn]
         if workers > 1:
             with ThreadPoolExecutor(max_workers=workers) as pool:
@@ -334,15 +366,13 @@ def materialize_schemas(
             builds = thunks
 
         for build in builds:
-            result, local = _collect(build, on_table_error, log)
+            result, local = build()
             stats = stats + local
             if result is not None:
                 materialized[result.safe_name] = result
 
         # Second pass: foreign keys, only after every table and its PK exists.
-        stats = stats + _add_foreign_keys(
-            main_execute, catalog_q, schema_q, materialized, log
-        )
+        stats = stats + _add_foreign_keys(main_execute, catalog_q, schema_q, materialized, log)
 
     return stats
 
@@ -367,26 +397,6 @@ def _per_thread_executor(make_execute: ExecuteFactory) -> ExecuteFn:
     return execute
 
 
-def _collect(
-    produce: _BuildFn,
-    on_table_error: TableErrorMode,
-    log: logging.Logger,
-) -> tuple[_MaterializedTable | None, MaterializeStats]:
-    """Run one table build, honouring ``on_table_error`` on a create failure.
-
-    Returns the per-table result and tally. On ``"skip"`` a failed build is
-    logged and reported as an empty result with an empty tally so the rest of
-    the catalog still materializes; on ``"raise"`` the error propagates.
-    """
-    try:
-        return produce()
-    except _WAREHOUSE_ERRORS as exc:
-        if on_table_error == "raise":
-            raise
-        log.error("table failed: %s", exc)
-        return None, MaterializeStats()
-
-
 def _materialize_table(
     execute: ExecuteFn,
     catalog_q: str,
@@ -397,15 +407,23 @@ def _materialize_table(
     property_prefix: str,
     type_map: Mapping[str, str],
     on_insert_error: InsertErrorMode,
+    on_table_error: TableErrorMode,
     log: logging.Logger,
     progress: str = "",
 ) -> tuple[_MaterializedTable | None, MaterializeStats]:
     """Create one table, insert its rows, and add its primary key.
 
     Returns ``(record, stats)``; ``record`` is ``None`` when the table is
-    skipped (unusable name, no columns, or no coercible columns). ``stats`` is
-    this table's own tally so a parallel caller can sum partial tallies without
-    shared mutable state.
+    skipped (unusable name, no columns, no coercible columns, or a tolerated
+    create failure). ``stats`` is this table's own tally so a parallel caller
+    can sum partial tallies without shared mutable state.
+
+    ``on_table_error`` and ``on_insert_error`` are applied at the statements
+    they govern (the ``CREATE TABLE`` and the row insert respectively), so the
+    two policies are independent: a failed insert under ``on_insert_error=
+    "raise"`` propagates regardless of ``on_table_error``, and vice versa.
+    Only warehouse errors (:data:`_WAREHOUSE_ERRORS`) are subject to a ``"skip"``
+    policy; any other exception always propagates so a real bug is never masked.
     """
     stats = MaterializeStats()
     raw_name = table.get("name", "")
@@ -458,13 +476,19 @@ def _materialize_table(
         + ",\n  ".join(col_defs)
         + f"\n) USING DELTA TBLPROPERTIES ({tbl_properties})"
     )
-    execute(create_sql, f"CREATE TABLE {fq}")
+    try:
+        execute(create_sql, f"CREATE TABLE {fq}")
+    except _WAREHOUSE_ERRORS as exc:
+        if on_table_error == "raise":
+            raise
+        log.warning("table create failed for %s: %s", fq, exc)
+        return None, MaterializeStats()
     stats.tables_created += 1
 
     raw_rows = table.get("rows") or []
     if raw_rows:
         kept_rows = [
-            tuple(v for v, keep in zip(row, keep_col_mask) if keep)
+            tuple(v for v, keep in zip(row, keep_col_mask, strict=False) if keep)
             for row in raw_rows
         ]
         kept_rows = [r for r in kept_rows if len(r) == len(safe_col_names)]
@@ -480,8 +504,13 @@ def _materialize_table(
 
     safe_col_set = frozenset(safe_col_names)
     _add_primary_key(
-        execute, fq, safe_name, table.get("primary_keys") or [],
-        safe_col_set, stats, log,
+        execute,
+        fq,
+        safe_name,
+        table.get("primary_keys") or [],
+        safe_col_set,
+        stats,
+        log,
     )
     return (
         _MaterializedTable(
@@ -556,8 +585,7 @@ def _add_foreign_keys(
         for fk in child.foreign_keys:
             src_cols = [sanitize_identifier(c, prefix="c") for c in (fk.get("columns") or [])]
             ref_cols = [
-                sanitize_identifier(c, prefix="c")
-                for c in (fk.get("referred_columns") or [])
+                sanitize_identifier(c, prefix="c") for c in (fk.get("referred_columns") or [])
             ]
             parent_name = sanitize_identifier(fk.get("foreign_table", ""), prefix="t")
 
@@ -586,6 +614,8 @@ def _add_foreign_keys(
             except _WAREHOUSE_ERRORS as exc:
                 log.warning(
                     "add foreign key failed for %s -> %s: %s",
-                    child_fq, parent_fq, exc,
+                    child_fq,
+                    parent_fq,
+                    exc,
                 )
     return stats

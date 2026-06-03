@@ -15,9 +15,8 @@ from dbxcarta.core.identifiers import quote_identifier, quote_qualified_name
 from dbxcarta.spark.ingest.transform.staging import split_volume_subpath
 
 if TYPE_CHECKING:
-    from pyspark.sql import SparkSession
-
     from dbxcarta.spark.settings import SparkIngestSettings
+    from pyspark.sql import SparkSession
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +50,7 @@ _SUMMARY_TABLE_COLUMNS_SQL = """\
             embedding_ledger_hits MAP<STRING, BIGINT>"""
 
 
-def preflight(spark: "SparkSession", settings: "SparkIngestSettings") -> None:
+def preflight(spark: SparkSession, settings: SparkIngestSettings) -> None:
     """Fail fast on any mis-provisioned dependency.
 
     Four checks:
@@ -76,9 +75,7 @@ def preflight(spark: "SparkSession", settings: "SparkIngestSettings") -> None:
 
     parts = split_volume_subpath(settings.dbxcarta_summary_volume)
     vol_catalog, vol_schema, vol_name = parts[1], parts[2], parts[3]
-    spark.sql(
-        f"CREATE VOLUME IF NOT EXISTS `{vol_catalog}`.`{vol_schema}`.`{vol_name}`"
-    )
+    spark.sql(f"CREATE VOLUME IF NOT EXISTS `{vol_catalog}`.`{vol_schema}`.`{vol_name}`")
 
     quoted_table = quote_qualified_name(
         settings.dbxcarta_summary_table,
@@ -90,13 +87,15 @@ def preflight(spark: "SparkSession", settings: "SparkIngestSettings") -> None:
         ) USING DELTA
     """)
 
-    any_embeddings = any([
-        settings.dbxcarta_include_embeddings_tables,
-        settings.dbxcarta_include_embeddings_columns,
-        settings.dbxcarta_include_embeddings_values,
-        settings.dbxcarta_include_embeddings_schemas,
-        settings.dbxcarta_include_embeddings_databases,
-    ])
+    any_embeddings = any(
+        [
+            settings.dbxcarta_include_embeddings_tables,
+            settings.dbxcarta_include_embeddings_columns,
+            settings.dbxcarta_include_embeddings_values,
+            settings.dbxcarta_include_embeddings_schemas,
+            settings.dbxcarta_include_embeddings_databases,
+        ]
+    )
     if any_embeddings:
         endpoint = settings.dbxcarta_embedding_endpoint
         # ai_query surfaces failures through the Spark execution layer, so
@@ -135,8 +134,8 @@ def preflight(spark: "SparkSession", settings: "SparkIngestSettings") -> None:
 
 
 def _assert_materialized_tables_exist(
-    spark: "SparkSession",
-    settings: "SparkIngestSettings",
+    spark: SparkSession,
+    settings: SparkIngestSettings,
     catalogs: list[str],
 ) -> None:
     """Confirm the Materialize stage left at least one table for Ingest to read.
@@ -150,9 +149,7 @@ def _assert_materialized_tables_exist(
     (how schemapile runs). Finding one table anywhere in scope is enough; a
     single ``LIMIT 1`` probe per catalog keeps this O(1), not catalog-scale.
     """
-    schema_list = [
-        s.strip() for s in settings.dbxcarta_schemas.split(",") if s.strip()
-    ]
+    schema_list = [s.strip() for s in settings.dbxcarta_schemas.split(",") if s.strip()]
     schema_filter = ""
     if schema_list:
         in_list = ", ".join(f"'{s}'" for s in schema_list)
@@ -166,9 +163,7 @@ def _assert_materialized_tables_exist(
         if rows:
             return
 
-    scope = (
-        f"schemas {schema_list}" if schema_list else "any non-system schema"
-    )
+    scope = f"schemas {schema_list}" if schema_list else "any non-system schema"
     raise RuntimeError(
         f"[dbxcarta] preflight: no tables found in {', '.join(catalogs)}"
         f" ({scope}). The Materialize stage must run before Ingest: run the"

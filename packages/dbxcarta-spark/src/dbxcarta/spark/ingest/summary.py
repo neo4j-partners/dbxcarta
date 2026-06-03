@@ -14,12 +14,11 @@ Delta table) and reading it back lives in `summary_io`.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from dbxcarta.spark.contract import NodeLabel
-
 if TYPE_CHECKING:
+    from dbxcarta.spark.contract import NodeLabel
     from dbxcarta.spark.ingest.fk.declared import DeclaredCounters
     from dbxcarta.spark.ingest.fk.inference import CoarseFKCounts
     from dbxcarta.spark.ingest.transform.sample_values import SampleStats
@@ -33,7 +32,8 @@ class FKSkipCounts:
     keys are deliberately namespaced `fk_discovery_skipped*`: the bare
     `fk_skipped` key belongs to declared-FK accounting (`fk_declared -
     fk_resolved`), which `verify.references._check_accounting` invariant-
-    checks. Reusing it would make a guardrail trip fail that invariant."""
+    checks. Reusing it would make a guardrail trip fail that invariant.
+    """
 
     column_count: int = 0
     column_limit: int = 0
@@ -71,7 +71,8 @@ class SampleValueCounts:
     Captured from SampleStats via `from_sample_stats`; flat serialization to
     `row_counts` happens in `as_row_counts`. Optional fields (percentiles)
     are emitted only when non-None — matches the legacy pipeline behaviour
-    where the percentile keys were skipped if unset."""
+    where the percentile keys were skipped if unset.
+    """
 
     candidate_columns: int = 0
     sampled_columns: int = 0
@@ -90,7 +91,7 @@ class SampleValueCounts:
     cardinality_max: int | None = None
 
     @classmethod
-    def from_sample_stats(cls, stats: "SampleStats") -> "SampleValueCounts":
+    def from_sample_stats(cls, stats: SampleStats) -> SampleValueCounts:
         """Copy Spark sample statistics into the run-summary DTO.
 
         Keeping this conversion here prevents the pipeline from depending on
@@ -131,8 +132,14 @@ class SampleValueCounts:
             "value_nodes": self.value_nodes,
             "has_value_edges": self.has_value_edges,
         }
-        for name in ("cardinality_min", "cardinality_p25", "cardinality_p50",
-                     "cardinality_p75", "cardinality_p95", "cardinality_max"):
+        for name in (
+            "cardinality_min",
+            "cardinality_p25",
+            "cardinality_p50",
+            "cardinality_p75",
+            "cardinality_p95",
+            "cardinality_max",
+        ):
             val = getattr(self, name)
             if val is not None:
                 out[name] = val
@@ -144,7 +151,8 @@ class EmbeddingCounts:
     """Per-label embedding bookkeeping.
 
     Keyed by `NodeLabel` enum in memory; serialization to the Delta/JSON
-    wire flattens to `dict[str, ...]` using `label.value` via `as_*_map`."""
+    wire flattens to `dict[str, ...]` using `label.value` via `as_*_map`.
+    """
 
     model: str | None = None
     failure_threshold: float | None = None
@@ -205,18 +213,18 @@ class RunSummary:
     contract_version: str
     catalog: str
     schemas: list[str]
-    started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     ended_at: datetime | None = None
     status: str = "running"
     error: str | None = None
     extract: ExtractCounts = field(default_factory=ExtractCounts)
-    fk_declared: "DeclaredCounters | None" = None
-    fk_metadata: "CoarseFKCounts | None" = None
+    fk_declared: DeclaredCounters | None = None
+    fk_metadata: CoarseFKCounts | None = None
     sample_values: SampleValueCounts | None = None
     embeddings: EmbeddingCounts = field(default_factory=EmbeddingCounts)
     neo4j_counts: dict[str, int] = field(default_factory=dict)
     verify: VerifyResult | None = None
-    fk_skip: "FKSkipCounts | None" = None
+    fk_skip: FKSkipCounts | None = None
     # Set to a loud message when the value path ran and found candidate
     # columns but produced zero Value nodes — a strong signal that sampling
     # silently failed (unreadable schemas, cardinality wipeout) rather than
@@ -231,7 +239,7 @@ class RunSummary:
         """
         self.status = status
         self.error = error
-        self.ended_at = datetime.now(timezone.utc)
+        self.ended_at = datetime.now(UTC)
 
     def _build_row_counts(self) -> dict[str, int]:
         """Flatten all nominal counter groups into the legacy `row_counts` shape."""
@@ -278,9 +286,7 @@ class RunSummary:
             # a nested struct. The JSON output replaces these with a richer
             # nested `verify` object that includes the violation list.
             "verify_ok": None if self.verify is None else self.verify.ok,
-            "verify_violation_count": (
-                0 if self.verify is None else len(self.verify.violations)
-            ),
+            "verify_violation_count": (0 if self.verify is None else len(self.verify.violations)),
         }
 
     def to_json_dict(self) -> dict[str, Any]:

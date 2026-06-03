@@ -20,13 +20,14 @@ import sys
 import textwrap
 from collections import deque
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from dbxcarta.core.env import read_required_warehouse_id
 from dbxcarta.core.materialize import sanitize_identifier
 from dbxcarta.core.questions import GeneratedPair, ValidationOutcome
 from dbxcarta.core.sql_safety import sql_targets_only_catalog
 from dbxcarta.core.workspace import build_workspace_client
+
 from dbxcarta_dense_schema_example.config import DenseSchemaConfig, load_config
 from dbxcarta_dense_schema_example.utils import load_dotenv_file
 
@@ -53,10 +54,7 @@ def main() -> int:
         "--cache-dir",
         type=Path,
         default=None,
-        help=(
-            "Directory for LLM batch cache"
-            " (default: .cache/questions_<DENSE_TABLE_COUNT>)."
-        ),
+        help=("Directory for LLM batch cache (default: .cache/questions_<DENSE_TABLE_COUNT>)."),
     )
     parser.add_argument("--warehouse-id", type=str, default=None)
     parser.add_argument(
@@ -117,7 +115,7 @@ def _default_cache_dir(config: DenseSchemaConfig) -> Path:
 
 
 def _generate_all(
-    ws: "WorkspaceClient",
+    ws: WorkspaceClient,
     config: DenseSchemaConfig,
     schema_entry: dict[str, Any],
     cache_dir: Path,
@@ -145,7 +143,8 @@ def _generate_all(
             continue
 
         subgraph_tables = [
-            t for t in tables
+            t
+            for t in tables
             if sanitize_identifier(t.get("name", ""), prefix="t") in set(subgraph_names)
         ]
 
@@ -163,13 +162,15 @@ def _generate_all(
             sql = str(item.get("sql", "")).strip()
             if shape not in _SHAPES or not question or not sql:
                 continue
-            pairs.append(GeneratedPair(
-                uc_schema=schema_entry.get("uc_schema", ""),
-                source_id=schema_entry.get("source_id", ""),
-                shape=shape,
-                question=question,
-                sql=sql,
-            ))
+            pairs.append(
+                GeneratedPair(
+                    uc_schema=schema_entry.get("uc_schema", ""),
+                    source_id=schema_entry.get("source_id", ""),
+                    shape=shape,
+                    question=question,
+                    sql=sql,
+                )
+            )
 
         batch_idx += 1
 
@@ -212,9 +213,7 @@ def _expand_subgraph(
     return list(visited)
 
 
-def _cache_key(
-    subgraph_names: list[str], config: DenseSchemaConfig, batch_idx: int
-) -> str:
+def _cache_key(subgraph_names: list[str], config: DenseSchemaConfig, batch_idx: int) -> str:
     sig = json.dumps(
         {
             "tables": sorted(subgraph_names),
@@ -230,7 +229,7 @@ def _cache_key(
 
 
 def _call_model(
-    ws: "WorkspaceClient",
+    ws: WorkspaceClient,
     config: DenseSchemaConfig,
     schema_entry: dict[str, Any],
     subgraph_tables: list[dict[str, Any]],
@@ -298,35 +297,22 @@ def _build_prompt(
             for c in (table.get("columns") or [])
         ]
         safe_cols = [(n, c) for n, c in safe_cols if n]
-        cols = ", ".join(
-            f"{name} {c.get('type', '')}" for name, c in safe_cols
-        )
-        pk = [
-            sanitize_identifier(str(k), prefix="c")
-            for k in (table.get("primary_keys") or [])
-        ]
+        cols = ", ".join(f"{name} {c.get('type', '')}" for name, c in safe_cols)
+        pk = [sanitize_identifier(str(k), prefix="c") for k in (table.get("primary_keys") or [])]
         pk_clause = f" PK({', '.join(pk)})" if pk else ""
         fks = table.get("foreign_keys") or []
         fk_parts = []
         for fk in fks:
-            fk_cols = [
-                sanitize_identifier(str(c), prefix="c")
-                for c in (fk.get("columns") or [])
-            ]
+            fk_cols = [sanitize_identifier(str(c), prefix="c") for c in (fk.get("columns") or [])]
             ref_table = sanitize_identifier(str(fk.get("foreign_table") or ""), prefix="t")
             ref_cols = [
-                sanitize_identifier(str(c), prefix="c")
-                for c in (fk.get("referred_columns") or [])
+                sanitize_identifier(str(c), prefix="c") for c in (fk.get("referred_columns") or [])
             ]
             if fk_cols and ref_table and ref_cols:
-                fk_parts.append(
-                    f"{', '.join(fk_cols)} -> {ref_table}({', '.join(ref_cols)})"
-                )
+                fk_parts.append(f"{', '.join(fk_cols)} -> {ref_table}({', '.join(ref_cols)})")
         fk_clause = f" FKs: {'; '.join(fk_parts)}" if fk_parts else ""
         sample_clause = _format_sample_rows(safe_cols, table.get("rows") or [])
-        ddl_lines.append(
-            f"- {table_name}({cols}){pk_clause}{fk_clause}{sample_clause}"
-        )
+        ddl_lines.append(f"- {table_name}({cols}){pk_clause}{fk_clause}{sample_clause}")
 
     schema_block = "\n".join(ddl_lines) if ddl_lines else "(no tables)"
     n = config.questions_per_batch
@@ -358,11 +344,7 @@ def _format_sample_rows(
     col_names = [name for name, _ in safe_cols]
     samples = []
     for row in rows[:2]:
-        sample = {
-            name: row[idx]
-            for idx, name in enumerate(col_names)
-            if idx < len(row)
-        }
+        sample = {name: row[idx] for idx, name in enumerate(col_names) if idx < len(row)}
         samples.append(sample)
     return f" Samples: {json.dumps(samples, default=str)}"
 
@@ -389,10 +371,7 @@ def _first_message_text(response: Any) -> str:
     if not choices:
         return ""
     first = choices[0]
-    if isinstance(first, dict):
-        message = first.get("message")
-    else:
-        message = getattr(first, "message", None)
+    message = first.get("message") if isinstance(first, dict) else getattr(first, "message", None)
     if message is None:
         return ""
     if isinstance(message, dict):
@@ -401,7 +380,7 @@ def _first_message_text(response: Any) -> str:
 
 
 def _validate_all(
-    ws: "WorkspaceClient",
+    ws: WorkspaceClient,
     warehouse_id: str,
     catalog: str,
     pairs: list[GeneratedPair],

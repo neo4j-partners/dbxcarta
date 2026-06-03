@@ -17,13 +17,12 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import dbxcarta.spark.ingest.transform.sample_values as sv
-from dbxcarta.spark.ingest.extract import ExtractResult
 from dbxcarta.spark.ingest.summary import RunSummary, SampleValueCounts
-from dbxcarta.spark.settings import SparkIngestSettings
 
 if TYPE_CHECKING:
-    from pyspark.sql import SparkSession
-    from pyspark.sql import DataFrame
+    from dbxcarta.spark.ingest.extract import ExtractResult
+    from dbxcarta.spark.settings import SparkIngestSettings
+    from pyspark.sql import DataFrame, SparkSession
 
 logger = logging.getLogger(__name__)
 
@@ -41,14 +40,14 @@ class ValueResult:
     the embedding vector), and `_load` writes HAS_VALUE from it.
     """
 
-    value_node_df: "DataFrame"
-    has_value_df: "DataFrame"
+    value_node_df: DataFrame
+    has_value_df: DataFrame
     sample_stats: sv.SampleStats
     # Cached sampled-value DataFrame backing value_node_df and has_value_df.
     # None when nothing was cached. The pipeline releases this only after the
     # chunk-loop Value writes, FK discovery, and the Neo4j load have finished,
     # mirroring ExtractResult.unpersist_cached().
-    cache_handle: "DataFrame | None" = None
+    cache_handle: DataFrame | None = None
 
     def unpersist_cached(self) -> None:
         """Release the cached sampled-value DataFrame after the ingest run.
@@ -63,8 +62,11 @@ class ValueResult:
 
 
 def transform_sample_values(
-    spark: "SparkSession", settings: SparkIngestSettings, schema_list: list[str],
-    extract_result: ExtractResult, summary: RunSummary,
+    spark: SparkSession,
+    settings: SparkIngestSettings,
+    schema_list: list[str],
+    extract_result: ExtractResult,
+    summary: RunSummary,
 ) -> ValueResult | None:
     """Sample distinct values and return the sampled-value frames.
 
@@ -83,7 +85,10 @@ def transform_sample_values(
         return None
 
     value_node_df, has_value_df, sample_stats, cache_handle = sv.sample(
-        spark, extract_result.columns_df, settings.dbxcarta_catalog, schema_list,
+        spark,
+        extract_result.columns_df,
+        settings.dbxcarta_catalog,
+        schema_list,
         settings.dbxcarta_sample_limit,
         settings.dbxcarta_sample_cardinality_threshold,
         settings.dbxcarta_stack_chunk_size,

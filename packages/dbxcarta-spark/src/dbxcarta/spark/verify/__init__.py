@@ -99,8 +99,8 @@ class Report:
 def verify_run(
     *,
     summary: dict[str, Any],
-    neo4j_driver: "Driver",
-    ws: "WorkspaceClient",
+    neo4j_driver: Driver,
+    ws: WorkspaceClient,
     warehouse_id: str,
     catalog: str,
     sample_limit: int,
@@ -129,7 +129,9 @@ def verify_run(
     violations.extend(
         values_mod.check(neo4j_driver, summary, sample_limit=sample_limit, catalogs=catalogs)
     )
-    violations.extend(catalog_mod.check(neo4j_driver, summary, ws=ws, warehouse_id=warehouse_id, catalog=catalog))
+    violations.extend(
+        catalog_mod.check(neo4j_driver, summary, ws=ws, warehouse_id=warehouse_id, catalog=catalog)
+    )
 
     return Report(run_id=run_id, violations=violations)
 
@@ -137,23 +139,29 @@ def verify_run(
 def _check_summary_shape(summary: dict[str, Any]) -> list[Violation]:
     out: list[Violation] = []
     if summary.get("status") != "success":
-        out.append(Violation(
-            code="summary.status_not_success",
-            message=f"Run status is {summary.get('status')!r}; verify only meaningful for successful runs.",
-            details={"error": summary.get("error")},
-        ))
+        out.append(
+            Violation(
+                code="summary.status_not_success",
+                message=f"Run status is {summary.get('status')!r}; verify only meaningful for successful runs.",
+                details={"error": summary.get("error")},
+            )
+        )
     if not summary.get("run_id"):
         out.append(Violation(code="summary.missing_run_id", message="Run summary has no run_id."))
     if not summary.get("row_counts"):
-        out.append(Violation(code="summary.missing_row_counts", message="Run summary has empty row_counts."))
+        out.append(
+            Violation(
+                code="summary.missing_row_counts", message="Run summary has empty row_counts."
+            )
+        )
     return out
 
 
 __all__ = [
-    "Violation",
     "Report",
-    "single_value",
+    "Violation",
     "scoped_catalog",
     "scoped_catalogs",
+    "single_value",
     "verify_run",
 ]

@@ -8,7 +8,6 @@ other failures are expected to propagate as signal.
 from __future__ import annotations
 
 import pytest
-
 from dbxcarta.spark.contract import NodeLabel
 from dbxcarta.spark.ingest.transform.ledger import read_ledger
 

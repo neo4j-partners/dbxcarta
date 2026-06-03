@@ -21,9 +21,7 @@ from dbxcarta.client.graph_retriever import (
 
 # A MATCH clause on [:REFERENCES] or [r:REFERENCES] that is NOT preceded
 # by OPTIONAL. (?<!OPTIONAL ) is a fixed-width negative lookbehind.
-_WARNING_PATTERN = re.compile(
-    r"(?<!OPTIONAL )\bMATCH\b[^\n]*\[\w*:REFERENCES\]"
-)
+_WARNING_PATTERN = re.compile(r"(?<!OPTIONAL )\bMATCH\b[^\n]*\[\w*:REFERENCES\]")
 
 # The non-OPTIONAL form of the REFERENCES query. Embedded here so that if the
 # implementation ever regresses to this shape, the regex test catches it.
