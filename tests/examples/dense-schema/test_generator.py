@@ -140,8 +140,6 @@ def test_format_version():
 def test_question_cache_dir_defaults_to_table_count():
     config = DenseSchemaConfig(
         catalog="schemapile_lakehouse",
-        meta_schema="_meta",
-        volume="schemapile_volume",
         table_count=1000,
         uc_schema="dense_1000",
         seed=42,

@@ -36,7 +36,10 @@ class _FakeWorkspaceClient:
 
 def test_materialize_creates_data_catalog_before_schemas() -> None:
     ws = _FakeWorkspaceClient()
-    cfg = load_config({"DBXCARTA_CATALOG": "dense-schema_example"})
+    cfg = load_config({
+        "DBXCARTA_CATALOG": "dense-schema_example",
+        "DATABRICKS_VOLUME_PATH": "/Volumes/dbxcarta-catalog/dense_ops/dbxcarta-ops",
+    })
 
     # No schemas: only the data-catalog provisioning runs, so it is the sole
     # statement and the assertion does not depend on schema ordering.

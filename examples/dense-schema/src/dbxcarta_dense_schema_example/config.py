@@ -21,16 +21,16 @@ _PROJECT_CATALOGS_BLOCKLIST: frozenset[str] = frozenset({
 @dataclass(frozen=True)
 class DenseSchemaConfig:
     catalog: str
-    meta_schema: str
-    volume: str
     table_count: int
     uc_schema: str
     seed: int
     candidate_cache: Path
-    # Ops volume path, sourced from DATABRICKS_VOLUME_PATH. Deliberately not
-    # derived from `catalog`: the ops plane lives in its own catalog
-    # (dbxcarta-catalog.dense_ops), separate from the data catalog this config
-    # materializes tables into, so data discovery never sweeps it in.
+    # Ops volume path, sourced verbatim from DATABRICKS_VOLUME_PATH. The ops
+    # plane lives in its own catalog (dbxcarta-catalog.dense_ops), separate from
+    # the data catalog this config materializes tables into, so data discovery
+    # never sweeps it in. There is no in-catalog derivation: a missing
+    # DATABRICKS_VOLUME_PATH fails loudly rather than routing ops into the data
+    # catalog.
     volume_path: str
     questions_path: str
     question_model: str
@@ -48,19 +48,13 @@ def load_config(env: Mapping[str, str] | None = None) -> DenseSchemaConfig:
         )
     table_count = int(e.get("DENSE_TABLE_COUNT", "500"))
     uc_schema = e.get("DENSE_SCHEMA_NAME", f"dense_{table_count}")
-    meta_schema = e.get("SCHEMAPILE_META_SCHEMA", "_meta")
-    volume = e.get("SCHEMAPILE_VOLUME", "schemapile_volume")
-    # The ops plane is separate from the data catalog. Prefer the explicit
-    # DATABRICKS_VOLUME_PATH (the overlay/.env points it at the ops catalog);
-    # fall back to the legacy in-catalog derivation only when it is unset.
-    volume_path = e.get(
-        "DATABRICKS_VOLUME_PATH",
-        f"/Volumes/{catalog}/{meta_schema}/{volume}",
-    )
+    # The ops plane is separate from the data catalog. DATABRICKS_VOLUME_PATH
+    # (the overlay/.env points it at the ops catalog) is required: there is no
+    # in-catalog fallback, so a missing value fails loudly instead of silently
+    # routing ops into the data-only catalog.
+    volume_path = _required(e, "DATABRICKS_VOLUME_PATH")
     return DenseSchemaConfig(
         catalog=catalog,
-        meta_schema=meta_schema,
-        volume=volume,
         table_count=table_count,
         uc_schema=uc_schema,
         seed=int(e.get("DENSE_SEED", "42")),
