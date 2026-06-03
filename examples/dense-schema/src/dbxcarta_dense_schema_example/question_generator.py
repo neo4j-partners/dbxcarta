@@ -19,13 +19,13 @@ import re
 import sys
 import textwrap
 from collections import deque
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
+from dbxcarta.core.materialize import sanitize_identifier
+from dbxcarta.core.questions import GeneratedPair, ValidationOutcome
 from dbxcarta.core.workspace import build_workspace_client
 from dbxcarta_dense_schema_example.config import DenseSchemaConfig, load_config
-from dbxcarta_dense_schema_example.materialize import _sanitize_name
 from dbxcarta_dense_schema_example.utils import (
     load_dotenv_file,
     read_required_warehouse_id,
@@ -44,23 +44,6 @@ _MAX_BFS_DEPTH = 2
 _MAX_ATTEMPTS_PER_BATCH = 5
 _CANDIDATE_MULTIPLIER = 4
 _PROMPT_VERSION = 2
-
-
-@dataclass(frozen=True)
-class GeneratedPair:
-    uc_schema: str
-    source_id: str
-    shape: str
-    question: str
-    sql: str
-
-
-@dataclass
-class ValidationOutcome:
-    accepted: list[GeneratedPair]
-    errored: int = 0
-    empty: int = 0
-    trivial: int = 0
 
 
 def main() -> int:
@@ -146,7 +129,7 @@ def _generate_all(
         return []
 
     fk_graph = _build_fk_graph(tables)
-    table_names = [_sanitize_name(t.get("name", "")) for t in tables]
+    table_names = [sanitize_identifier(t.get("name", ""), prefix="t") for t in tables]
     table_names = [n for n in table_names if n]
 
     pairs: list[GeneratedPair] = []
@@ -164,7 +147,7 @@ def _generate_all(
 
         subgraph_tables = [
             t for t in tables
-            if _sanitize_name(t.get("name", "")) in set(subgraph_names)
+            if sanitize_identifier(t.get("name", ""), prefix="t") in set(subgraph_names)
         ]
 
         cache_key = _cache_key(subgraph_names, config, batch_idx)
@@ -197,12 +180,12 @@ def _generate_all(
 def _build_fk_graph(tables: list[dict[str, Any]]) -> dict[str, set[str]]:
     graph: dict[str, set[str]] = {}
     for table in tables:
-        name = _sanitize_name(table.get("name", ""))
+        name = sanitize_identifier(table.get("name", ""), prefix="t")
         if not name:
             continue
         graph.setdefault(name, set())
         for fk in table.get("foreign_keys") or []:
-            foreign = _sanitize_name(str(fk.get("foreign_table", "")))
+            foreign = sanitize_identifier(str(fk.get("foreign_table", "")), prefix="t")
             if foreign and foreign != name:
                 graph[name].add(foreign)
                 graph.setdefault(foreign, set()).add(name)
@@ -308,11 +291,11 @@ def _build_prompt(
     uc_schema = schema_entry.get("uc_schema", "")
     ddl_lines: list[str] = []
     for table in tables:
-        table_name = _sanitize_name(str(table.get("name", "")))
+        table_name = sanitize_identifier(str(table.get("name", "")), prefix="t")
         if not table_name:
             continue
         safe_cols = [
-            (_sanitize_name(str(c.get("name", ""))), c)
+            (sanitize_identifier(str(c.get("name", "")), prefix="c"), c)
             for c in (table.get("columns") or [])
         ]
         safe_cols = [(n, c) for n, c in safe_cols if n]
@@ -320,16 +303,20 @@ def _build_prompt(
             f"{name} {c.get('type', '')}" for name, c in safe_cols
         )
         pk = [
-            _sanitize_name(str(k)) for k in (table.get("primary_keys") or [])
+            sanitize_identifier(str(k), prefix="c")
+            for k in (table.get("primary_keys") or [])
         ]
         pk_clause = f" PK({', '.join(pk)})" if pk else ""
         fks = table.get("foreign_keys") or []
         fk_parts = []
         for fk in fks:
-            fk_cols = [_sanitize_name(str(c)) for c in (fk.get("columns") or [])]
-            ref_table = _sanitize_name(str(fk.get("foreign_table") or ""))
+            fk_cols = [
+                sanitize_identifier(str(c), prefix="c")
+                for c in (fk.get("columns") or [])
+            ]
+            ref_table = sanitize_identifier(str(fk.get("foreign_table") or ""), prefix="t")
             ref_cols = [
-                _sanitize_name(str(c))
+                sanitize_identifier(str(c), prefix="c")
                 for c in (fk.get("referred_columns") or [])
             ]
             if fk_cols and ref_table and ref_cols:

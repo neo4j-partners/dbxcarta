@@ -26,16 +26,13 @@ import logging
 import re
 import sys
 import textwrap
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
+from dbxcarta.core.materialize import sanitize_identifier
+from dbxcarta.core.questions import GeneratedPair, ValidationOutcome
 from dbxcarta.core.workspace import build_workspace_client
 from dbxcarta_schemapile_example.config import SchemaPileConfig, load_config
-from dbxcarta_schemapile_example.materialize import (
-    _sanitize_column_name,
-    _sanitize_table_name,
-)
 from dbxcarta_schemapile_example.utils import (
     load_dotenv_file,
     read_required_warehouse_id,
@@ -49,23 +46,6 @@ logger = logging.getLogger(__name__)
 
 
 _SHAPES = ("single_table_filter", "two_table_join", "aggregation")
-
-
-@dataclass(frozen=True)
-class GeneratedPair:
-    uc_schema: str
-    source_id: str
-    shape: str
-    question: str
-    sql: str
-
-
-@dataclass
-class ValidationOutcome:
-    accepted: list[GeneratedPair]
-    errored: int = 0
-    empty: int = 0
-    trivial: int = 0
 
 
 def main() -> int:
@@ -257,11 +237,11 @@ def _build_prompt(entry: dict[str, Any], config: SchemaPileConfig) -> str:
     tables = entry.get("tables") or []
     ddl_lines: list[str] = []
     for table in tables:
-        table_name = _sanitize_table_name(str(table.get("name", "")))
+        table_name = sanitize_identifier(str(table.get("name", "")), prefix="t")
         if not table_name:
             continue
         materialized_columns = [
-            (_sanitize_column_name(str(c.get("name", ""))), c)
+            (sanitize_identifier(str(c.get("name", "")), prefix="c"), c)
             for c in (table.get("columns") or [])
         ]
         materialized_columns = [(name, c) for name, c in materialized_columns if name]
@@ -270,7 +250,9 @@ def _build_prompt(entry: dict[str, Any], config: SchemaPileConfig) -> str:
         )
         pk = table.get("primary_keys") or []
         materialized_pk = [
-            name for name in (_sanitize_column_name(str(c)) for c in pk) if name
+            name
+            for name in (sanitize_identifier(str(c), prefix="c") for c in pk)
+            if name
         ]
         pk_clause = f" PK({', '.join(materialized_pk)})" if materialized_pk else ""
         fks = table.get("foreign_keys") or []
@@ -278,7 +260,7 @@ def _build_prompt(entry: dict[str, Any], config: SchemaPileConfig) -> str:
         if fks:
             fk_clause = " FKs: " + "; ".join(
                 f"{', '.join(_sanitize_fk_columns(fk.get('columns') or []))} -> "
-                f"{_sanitize_table_name(str(fk.get('foreign_table') or '?'))}"
+                f"{sanitize_identifier(str(fk.get('foreign_table') or '?'), prefix='t')}"
                 f"({', '.join(_sanitize_fk_columns(fk.get('referred_columns') or []))})"
                 for fk in fks
             )
@@ -304,7 +286,8 @@ def _build_prompt(entry: dict[str, Any], config: SchemaPileConfig) -> str:
 
 def _sanitize_fk_columns(columns: list[Any]) -> list[str]:
     return [
-        name for name in (_sanitize_column_name(str(column)) for column in columns)
+        name
+        for name in (sanitize_identifier(str(column), prefix="c") for column in columns)
         if name
     ]
 

@@ -6,111 +6,14 @@ from typing import Any
 from dbxcarta.core.identifiers import quote_identifier
 from databricks.sdk.service.sql import StatementState
 
-from dbxcarta_schemapile_example.materialize import (
-    _build_insert,
-    _coerce_type,
-    _constraint_name,
-    _render_value,
-    _sanitize_column_name,
-    _sanitize_table_name,
-    _sql_escape,
-    materialize,
-)
+from dbxcarta_schemapile_example.materialize import materialize
 
 
-def test_coerce_type_int_families():
-    assert _coerce_type("INT") == ("INT", False)
-    assert _coerce_type("INTEGER") == ("INT", False)
-    assert _coerce_type("BIGINT") == ("BIGINT", False)
-    assert _coerce_type("SMALLINT") == ("SMALLINT", False)
-    assert _coerce_type("TINYINT") == ("TINYINT", False)
-
-
-def test_coerce_type_decimal_with_precision():
-    delta, fellback = _coerce_type("DECIMAL(12, 4)")
-    assert delta == "DECIMAL(12,4)"
-    assert fellback is False
-
-
-def test_coerce_type_decimal_clamps_to_38():
-    delta, _ = _coerce_type("DECIMAL(50, 10)")
-    assert delta == "DECIMAL(38,10)"
-
-
-def test_coerce_type_varchar_becomes_string():
-    assert _coerce_type("VARCHAR(255)") == ("STRING", False)
-    assert _coerce_type("CHAR(8)") == ("STRING", False)
-
-
-def test_coerce_type_unknown_falls_back_to_string():
-    delta, fellback = _coerce_type("GEOMETRY")
-    assert delta == "STRING"
-    assert fellback is True
-
-
-def test_coerce_type_empty_is_string_fallback():
-    assert _coerce_type("") == ("STRING", True)
-
-
-def test_coerce_type_datetime_to_timestamp():
-    assert _coerce_type("DATETIME") == ("TIMESTAMP", False)
-    assert _coerce_type("TIMESTAMP WITH TIME ZONE") == ("TIMESTAMP", False)
-
-
-def test_sanitize_table_name_cleans_punctuation():
-    assert _sanitize_table_name("My-Table 1") == "my_table_1"
-    assert _sanitize_table_name("123_orders") == "t_123_orders"
-    assert _sanitize_table_name("???") == ""
-
-
-def test_sanitize_column_name_cleans_punctuation():
-    assert _sanitize_column_name("First Name") == "first_name"
-    assert _sanitize_column_name("9th_col") == "c_9th_col"
-
-
-def test_sql_escape_quotes():
-    assert _sql_escape("O'Brien") == "O''Brien"
-    assert _sql_escape("a\\b") == "a\\\\b"
-
-
-def test_render_value_null_unquoted():
-    assert _render_value(None) == "NULL"
-
-
-def test_render_value_string_quoted():
-    assert _render_value("alice") == "'alice'"
-
-
-def test_render_value_int_quoted_as_string():
-    assert _render_value(42) == "'42'"
-
-
-def test_render_value_escapes_single_quote():
-    assert _render_value("O'Brien") == "'O''Brien'"
-
-
-def test_build_insert_multi_row():
-    sql = _build_insert(
-        "`cat`.`sch`.`t`",
-        ["id", "name"],
-        [(1, "alice"), (2, None)],
-    )
-    assert sql.startswith("INSERT INTO `cat`.`sch`.`t` (`id`, `name`) VALUES")
-    assert "('1', 'alice')" in sql
-    assert "('2', NULL)" in sql
-
-
-def test_constraint_name_short_passthrough():
-    assert _constraint_name("pk", ["orders"]) == "pk_orders"
-    assert _constraint_name("fk", ["orders", "user_id"]) == "fk_orders__user_id"
-
-
-def test_constraint_name_long_gets_hash_suffix():
-    long_part = "x" * 300
-    name = _constraint_name("fk", [long_part])
-    assert len(name) <= 255
-    # Deterministic for the same input.
-    assert name == _constraint_name("fk", [long_part])
+# The materialize plumbing (coerce_type, sanitize_identifier, escape/render,
+# build_insert_statement, constraint_name) now lives in dbxcarta.core and is
+# unit-tested in tests/core/test_materialize.py. These tests cover only what
+# schemapile still owns: provisioning the data catalog and the DDL the spine
+# emits for this example's specs.
 
 
 # --- statement-capture fakes -------------------------------------------------
@@ -211,7 +114,7 @@ def test_materialize_emits_primary_key_ddl():
         " PRIMARY KEY (`id`)" in s
         for s in statements
     )
-    assert stats.primary_keys_added == 2
+    assert stats.pk_constraints_added == 2
 
 
 def test_materialize_emits_foreign_key_ddl_in_second_pass():
@@ -227,7 +130,7 @@ def test_materialize_emits_foreign_key_ddl_in_second_pass():
         " FOREIGN KEY (`user_id`)"
         f" REFERENCES {cat}.`shop`.`users` (`id`)" in fk_stmt
     )
-    assert stats.foreign_keys_added == 1
+    assert stats.fk_constraints_added == 1
 
     # The FK must be emitted only after the parent table's PK exists.
     parent_pk_idx = next(
@@ -244,7 +147,7 @@ def test_materialize_skips_fk_when_target_not_materialized():
     schemas[0]["tables"][1]["foreign_keys"][0]["foreign_table"] = "missing"
     statements, stats = _run_materialize(schemas)
     assert not any("FOREIGN KEY" in s for s in statements)
-    assert stats.foreign_keys_added == 0
+    assert stats.fk_constraints_added == 0
 
 
 def test_materialize_handles_self_referential_fk():
@@ -280,5 +183,5 @@ def test_materialize_handles_self_referential_fk():
         f" REFERENCES {cat}.`org`.`employee` (`id`)" in s
         for s in statements
     )
-    assert stats.foreign_keys_added == 1
-    assert stats.primary_keys_added == 1
+    assert stats.fk_constraints_added == 1
+    assert stats.pk_constraints_added == 1
