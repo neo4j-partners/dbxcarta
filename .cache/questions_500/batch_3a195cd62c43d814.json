@@ -1,0 +1,17 @@
+[
+  {
+    "shape": "single_table_filter",
+    "question": "Which expense reports are still pending, and what are their reference numbers, amounts, and currencies?",
+    "sql": "SELECT\n  er.reference_number,\n  er.event_date,\n  er.amount,\n  er.currency,\n  er.notes\nFROM `dense-schema-example`.`dense_500`.`hr_expense_reports` er\nWHERE er.status = 'pending'\nORDER BY er.amount DESC"
+  },
+  {
+    "shape": "two_table_join",
+    "question": "For each approved offer approval, show the employee name, reference number, amount, and currency?",
+    "sql": "SELECT\n  e.name AS employee_name,\n  oa.reference_number,\n  oa.event_date,\n  oa.amount,\n  oa.currency\nFROM `dense-schema-example`.`dense_500`.`hr_offer_approvals` oa\nINNER JOIN `dense-schema-example`.`dense_500`.`hr_employees` e\n  ON oa.employees_id = e.id\nWHERE oa.status = 'approved'\nORDER BY oa.amount DESC"
+  },
+  {
+    "shape": "aggregation",
+    "question": "What is the total offer approval line amount and average discount percentage by employment type, for lines that are not rejected?",
+    "sql": "SELECT\n  et.name AS employment_type,\n  COUNT(oal.id) AS line_count,\n  SUM(oal.total_amount) AS total_line_amount,\n  AVG(oal.discount_pct) AS avg_discount_pct\nFROM `dense-schema-example`.`dense_500`.`hr_offer_approvals_lines` oal\nINNER JOIN `dense-schema-example`.`dense_500`.`hr_employment_types` et\n  ON oal.employment_types_id = et.id\nWHERE oal.line_status <> 'rejected'\nGROUP BY et.name\nHAVING SUM(oal.total_amount) > 0\nORDER BY total_line_amount DESC"
+  }
+]

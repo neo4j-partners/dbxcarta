@@ -1,0 +1,17 @@
+[
+  {
+    "shape": "single_table_filter",
+    "question": "Which scope reviews have a status of 'pending' and an amount greater than 20,000 USD, and what are their reference numbers and event dates?",
+    "sql": "SELECT\n  sr.reference_number,\n  sr.event_date,\n  sr.amount,\n  sr.currency,\n  sr.notes\nFROM `dense-schema-example`.`dense_500`.`proj_scope_reviews` sr\nWHERE sr.status = 'pending'\n  AND sr.currency = 'USD'\n  AND sr.amount > 20000\nORDER BY sr.amount DESC"
+  },
+  {
+    "shape": "two_table_join",
+    "question": "For each scope review line with a status of 'approved', show the reference number of the parent scope review, the project phase name, the line total amount, and the discount percentage applied.",
+    "sql": "SELECT\n  sr.reference_number,\n  sr.event_date,\n  pp.name AS project_phase_name,\n  srl.total_amount,\n  srl.discount_pct,\n  srl.tax_amount,\n  srl.line_status\nFROM `dense-schema-example`.`dense_500`.`proj_scope_reviews_lines` srl\nINNER JOIN `dense-schema-example`.`dense_500`.`proj_scope_reviews` sr\n  ON srl.scope_reviews_id = sr.id\nINNER JOIN `dense-schema-example`.`dense_500`.`proj_project_phases` pp\n  ON srl.project_phases_id = pp.id\nWHERE srl.line_status = 'approved'\nORDER BY srl.total_amount DESC"
+  },
+  {
+    "shape": "aggregation",
+    "question": "For each project, what is the total scope review amount, the number of scope reviews, and the average amount per review? Include the project name and only show projects with more than one scope review, ordered by total amount descending.",
+    "sql": "SELECT\n  p.name AS project_name,\n  p.code AS project_code,\n  COUNT(sr.id) AS review_count,\n  SUM(sr.amount) AS total_amount,\n  AVG(sr.amount) AS avg_amount\nFROM `dense-schema-example`.`dense_500`.`proj_projects` p\nINNER JOIN `dense-schema-example`.`dense_500`.`proj_scope_reviews` sr\n  ON sr.projects_id = p.id\nGROUP BY p.id, p.name, p.code\nHAVING COUNT(sr.id) > 1\nORDER BY total_amount DESC"
+  }
+]

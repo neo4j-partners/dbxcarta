@@ -1,0 +1,17 @@
+[
+  {
+    "shape": "single_table_filter",
+    "question": "Which job applications have been approved with an amount greater than 20000 JPY, and what are their reference numbers and event dates?",
+    "sql": "SELECT\n  reference_number,\n  event_date,\n  amount,\n  currency,\n  notes\nFROM `dense-schema-example`.`dense_500`.`hr_job_applications`\nWHERE status = 'approved'\n  AND currency = 'JPY'\n  AND amount > 20000\nORDER BY amount DESC"
+  },
+  {
+    "shape": "two_table_join",
+    "question": "For each approved invoice, show the invoice reference number, event date, amount, currency, and the name of the employee who approved it.",
+    "sql": "SELECT\n  i.reference_number,\n  i.event_date,\n  i.amount,\n  i.currency,\n  e.name AS approved_by_name\nFROM `dense-schema-example`.`dense_500`.`fin_invoices` i\nJOIN `dense-schema-example`.`dense_500`.`hr_employees` e\n  ON i.approved_by_id = e.id\nWHERE i.status = 'approved'\nORDER BY i.amount DESC"
+  },
+  {
+    "shape": "aggregation",
+    "question": "What is the total and average anomaly flag amount per period type, and how many anomaly records exist for each, ordered by total amount descending?",
+    "sql": "SELECT\n  af.period_type,\n  COUNT(*) AS record_count,\n  SUM(af.amount_total) AS total_amount,\n  AVG(af.amount_avg) AS avg_amount\nFROM `dense-schema-example`.`dense_500`.`hr_anomaly_flags` af\nJOIN `dense-schema-example`.`dense_500`.`hr_employees` e\n  ON af.employees_id = e.id\nGROUP BY af.period_type\nHAVING COUNT(*) > 0\nORDER BY total_amount DESC"
+  }
+]

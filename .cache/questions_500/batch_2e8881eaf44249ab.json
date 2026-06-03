@@ -1,0 +1,17 @@
+[
+  {
+    "shape": "single_table_filter",
+    "question": "Which active benefit plans were created after October 1, 2024, and in what order should they be displayed?",
+    "sql": "SELECT\n  id,\n  name,\n  code,\n  description,\n  sort_order,\n  created_at\nFROM `dense-schema-example`.`dense_500`.`hr_benefit_plans`\nWHERE is_active = true\n  AND created_at >= '2024-10-01 00:00:00'\nORDER BY sort_order ASC, created_at DESC"
+  },
+  {
+    "shape": "two_table_join",
+    "question": "For each succession review line with an 'active' line status, what is the associated benefit plan name, code, and the total amount and discount percentage on that line?",
+    "sql": "SELECT\n  srl.id AS line_id,\n  bp.name AS benefit_plan_name,\n  bp.code AS benefit_plan_code,\n  srl.quantity,\n  srl.unit_price,\n  srl.total_amount,\n  srl.discount_pct,\n  srl.tax_amount,\n  srl.line_status\nFROM `dense-schema-example`.`dense_500`.`hr_succession_reviews_lines` srl\nINNER JOIN `dense-schema-example`.`dense_500`.`hr_benefit_plans` bp\n  ON srl.benefit_plans_id = bp.id\nWHERE srl.line_status = 'active'\nORDER BY srl.total_amount DESC"
+  },
+  {
+    "shape": "aggregation",
+    "question": "How many login attempts were made per status and currency combination, and what was the total and average amount for each group? Show the highest-volume groups first.",
+    "sql": "SELECT\n  status,\n  currency,\n  COUNT(*) AS attempt_count,\n  SUM(amount) AS total_amount,\n  ROUND(AVG(amount), 2) AS avg_amount\nFROM `dense-schema-example`.`dense_500`.`sys_login_attempts`\nGROUP BY status, currency\nHAVING COUNT(*) >= 1\nORDER BY attempt_count DESC, total_amount DESC"
+  }
+]

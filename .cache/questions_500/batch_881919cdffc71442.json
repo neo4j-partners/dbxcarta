@@ -1,0 +1,17 @@
+[
+  {
+    "shape": "single_table_filter",
+    "question": "Which approved succession reviews have an amount greater than 30,000 USD, and what are their reference numbers, event dates, and amounts?",
+    "sql": "SELECT reference_number, event_date, amount, currency, notes FROM `dense-schema-example`.`dense_500`.`hr_succession_reviews` WHERE status = 'approved' AND currency = 'USD' AND amount > 30000 ORDER BY amount DESC"
+  },
+  {
+    "shape": "two_table_join",
+    "question": "For each approved proof of delivery, show the reference number, event date, amount, and the name of the employee who approved it.",
+    "sql": "SELECT pod.reference_number, pod.event_date, pod.amount, pod.currency, e.name AS approved_by_name FROM `dense-schema-example`.`dense_500`.`log_proof_of_deliveries` pod JOIN `dense-schema-example`.`dense_500`.`hr_employees` e ON pod.approved_by_id = e.id WHERE pod.status = 'approved' ORDER BY pod.event_date DESC"
+  },
+  {
+    "shape": "aggregation",
+    "question": "What is the total amount and number of succession review lines per line status, ordered by total amount descending?",
+    "sql": "SELECT srl.line_status, COUNT(*) AS line_count, SUM(srl.total_amount) AS total_amount, AVG(srl.discount_pct) AS avg_discount_pct FROM `dense-schema-example`.`dense_500`.`hr_succession_reviews_lines` srl GROUP BY srl.line_status ORDER BY total_amount DESC"
+  }
+]

@@ -15,12 +15,17 @@ pipelines query the graph at runtime to retrieve the slice they need before
 generating SQL.
 
 ```
-┌───────────────┐   ┌──────────────────────┐   ┌──────────────────────┐   ┌──────────────────────┐   ┌───────────────┐
-│ Unity Catalog │──►│ dbxcarta-spark       │──►│ Neo4j semantic layer │──►│ dbxcarta-client      │──►│ SQL / answer  │
-│ flat metadata │   │ build: extract,      │   │ typed nodes, vectors,│   │ query: embed,        │   │ generated     │
-│               │   │ embed, infer FKs     │   │ confidence-scored FKs│   │ vector + graph fetch │   │ result        │
-└───────────────┘   └──────────────────────┘   └──────────────────────┘   └──────────────────────┘   └───────────────┘
+┌──────────────────────┐   ┌───────────────┐   ┌──────────────────────┐   ┌──────────────────────┐   ┌──────────────────────┐   ┌───────────────┐
+│ dbxcarta-materialize │──►│ Unity Catalog │──►│ dbxcarta-spark       │──►│ Neo4j semantic layer │──►│ dbxcarta-client      │──►│ SQL / answer  │
+│ blueprint to tables  │   │ flat metadata │   │ build: extract,      │   │ typed nodes, vectors,│   │ query: embed,        │   │ generated     │
+│ (seeds example data) │   │               │   │ embed, infer FKs     │   │ confidence-scored FKs│   │ vector + graph fetch │   │ result        │
+└──────────────────────┘   └───────────────┘   └──────────────────────┘   └──────────────────────┘   └──────────────────────┘   └───────────────┘
 ```
+
+The leftmost stage applies only to the bundled examples: `dbxcarta-materialize`
+seeds their demo tables into Unity Catalog from a committed blueprint. Against
+your own catalog the tables already exist, so the flow starts at Unity Catalog
+and `dbxcarta-materialize` is not used.
 
 The semantic-layer thesis, the three storage planes (data, semantic layer, ops),
 and the validation model are documented in
@@ -275,9 +280,10 @@ module and reading the object. A preset bundles three things together:
 
 Without a preset, every developer running dbxcarta against the same upstream project (such as Finance Genie) must manually collect and maintain the correct environment variables. A preset packages that knowledge once and makes it repeatable. Install the example package, then reference the preset by import path instead of managing env vars by hand.
 
-Optional readiness and question-upload hooks live in `dbxcarta.spark.presets`
-for CLI and demo integrations; they do not require the Spark package to depend
-on the client runtime.
+The preset protocols and the shared `StandardPreset` live in
+`dbxcarta.core.presets`; the `dbxcarta.spark.loader` resolves a preset from its
+import-path spec. Neither requires core or Spark to depend on the client
+runtime.
 
 **The preset interface:**
 
@@ -294,8 +300,8 @@ preset, so the preset carries only behavior. Both capabilities are optional.
 Companion examples show how to package reusable configuration and demo data for
 known upstream projects. Each example is its own Python package that depends on
 the relevant dbxcarta distributions as normal pip dependencies and exposes a
-module-level `preset` object. The Spark package provides the preset protocol,
-the shared `StandardPreset`, and the loader; each example constructs
+module-level `preset` object. Core provides the preset protocols and the shared
+`StandardPreset`; the Spark package provides the loader. Each example constructs
 `StandardPreset` with its bundled question set.
 
 #### Finance Genie
@@ -407,6 +413,8 @@ MATCH (n) DETACH DELETE n;
 ### 2. Create the demo source schemas
 
 `scripts/run_demo.py` uses `DBXCARTA_CATALOG`, `DATABRICKS_WAREHOUSE_ID`, and `DATABRICKS_VOLUME_PATH` from `.env`. It creates and populates the demo source schemas in Unity Catalog.
+
+This quickstart uses the built-in demo catalog, created locally through the SQL warehouse by `run_demo.py`. The bundled examples (finance-genie, schemapile, dense-schema) instead seed their tables with the serverless `dbxcarta-submit materialize` job; see each example's README.
 
 ```bash
 uv run python scripts/run_demo.py
@@ -542,7 +550,7 @@ The fixture covers all the structural edge cases:
 
 ## Upload and submit
 
-These operator commands are provided by the `dbxcarta-submit` package, a thin CLI wrapper around `databricks-job-runner` that handles upload, submit, and cleanup. It depends on `dbxcarta-spark`, runs on the operator's machine, and is never installed on the cluster. The `dbxcarta-spark` and `dbxcarta-client` packages do not depend on the job runner.
+These operator commands are provided by the `dbxcarta-submit` package, a thin CLI wrapper around `databricks-job-runner` that handles upload, submit, and cleanup. It depends on `dbxcarta-core`, runs on the operator's machine, and is never installed on the cluster. No other package depends on the job runner.
 
 ### Supply-chain checks
 
@@ -610,12 +618,15 @@ It first reads the workspace and prints every table and volume path it will dele
 
 External projects depend on the distribution that matches the capability they use. The public surfaces are:
 
+- **Core:** identifier and path helpers, the `catalog:layer` rule (`resolve_catalogs`), workspace/secret access, the SQL warehouse runner, the preset protocols and `StandardPreset`, the `.env` overlay loader, and the materialize SQL builders
 - **Spark:** `SparkIngestSettings`, `run_dbxcarta`, graph contract enums and constants, Databricks identifier/path validators, preset loading, `verify_run`, and the `dbxcarta` / `dbxcarta-ingest` wheel entrypoints
 - **Client:** retrieval primitives, SQL parsing and read-only guards, result comparison, `ClientSettings`, and the `dbxcarta.client.eval` harness
+- **Materialize:** the `dbxcarta-materialize` wheel entrypoint, the serverless Spark shell that runs core's materialize SQL builders
 
 The `dbxcarta` and `dbxcarta-ingest` commands are registered by
-`dbxcarta-spark`, `dbxcarta-client` by `dbxcarta-client`, and
-`dbxcarta-submit` by `dbxcarta-submit`.
+`dbxcarta-spark`, `dbxcarta-client` and `dbxcarta-embed-probe` by
+`dbxcarta-client`, `dbxcarta-materialize` by `dbxcarta-materialize`, and
+`dbxcarta-submit` by `dbxcarta-submit`. `dbxcarta-core` registers no command.
 
 Removing or renaming a public name above is a breaking change. Adding a new name is additive. Implementation modules below a layer remain internal unless documented here.
 
@@ -636,7 +647,7 @@ This repository uses a clean boundary cutover. Old top-level imports are deleted
 | `dbxcarta.client.client` | `dbxcarta.client.eval.run` |
 | `dbxcarta.entrypoints.ingest` | `dbxcarta.spark.entrypoint` |
 | `dbxcarta.entrypoints.client` | `dbxcarta.client.eval.entrypoint` |
-| `dbxcarta.presets` module file | `dbxcarta.spark.presets` and `dbxcarta.spark.loader` |
+| `dbxcarta.presets` module file | `dbxcarta.core.presets` (protocols + `StandardPreset`) and `dbxcarta.spark.loader` (loader) |
 
 ## Lessons learned
 

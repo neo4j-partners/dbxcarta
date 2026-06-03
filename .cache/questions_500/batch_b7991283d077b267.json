@@ -1,0 +1,17 @@
+[
+  {
+    "shape": "single_table_filter",
+    "question": "Which active production lines were created after April 1, 2024, ordered by their sort order?",
+    "sql": "SELECT id, name, code, sort_order, created_at FROM `dense-schema-example`.`dense_500`.`mfg_production_lines` WHERE is_active = true AND created_at > '2024-04-01 00:00:00' ORDER BY sort_order ASC"
+  },
+  {
+    "shape": "two_table_join",
+    "question": "List all quality check reference numbers, their event dates, statuses, and the name of the production line they belong to, for quality checks with amounts greater than 15000 USD.",
+    "sql": "SELECT qc.reference_number, qc.event_date, qc.status, qc.amount, qc.currency, pl.name AS production_line_name FROM `dense-schema-example`.`dense_500`.`mfg_quality_checks` qc JOIN `dense-schema-example`.`dense_500`.`mfg_production_lines` pl ON qc.production_lines_id = pl.id WHERE qc.amount > 15000 AND qc.currency = 'USD' ORDER BY qc.amount DESC"
+  },
+  {
+    "shape": "aggregation",
+    "question": "For each tooling asset, what is the total quantity inspected, total line amount, and average discount percentage across all quality check lines, grouped by tooling asset name, ordered by total line amount descending?",
+    "sql": "SELECT ta.name AS tooling_asset_name, ta.code AS tooling_asset_code, SUM(qcl.quantity) AS total_quantity, SUM(qcl.total_amount) AS total_line_amount, AVG(qcl.discount_pct) AS avg_discount_pct, COUNT(qcl.id) AS line_count FROM `dense-schema-example`.`dense_500`.`mfg_quality_checks_lines` qcl JOIN `dense-schema-example`.`dense_500`.`mfg_tooling_assets` ta ON qcl.tooling_assets_id = ta.id GROUP BY ta.name, ta.code HAVING COUNT(qcl.id) > 0 ORDER BY total_line_amount DESC"
+  }
+]

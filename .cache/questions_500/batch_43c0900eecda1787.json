@@ -1,0 +1,17 @@
+[
+  {
+    "shape": "single_table_filter",
+    "question": "Which project tasks have a status of 'pending' and an amount greater than 10,000 USD, showing their reference number, event date, and amount?",
+    "sql": "SELECT t.reference_number, t.event_date, t.amount, t.currency, t.notes FROM `dense-schema-example`.`dense_500`.`proj_tasks` t WHERE t.status = 'pending' AND t.amount > 10000 AND t.currency = 'USD' ORDER BY t.amount DESC"
+  },
+  {
+    "shape": "two_table_join",
+    "question": "For each active project, what is the total amount of approved resource bookings, along with the project name and code?",
+    "sql": "SELECT p.name AS project_name, p.code AS project_code, SUM(rb.amount) AS total_approved_booking_amount, rb.currency FROM `dense-schema-example`.`dense_500`.`proj_projects` p INNER JOIN `dense-schema-example`.`dense_500`.`proj_resource_bookings` rb ON rb.projects_id = p.id WHERE p.is_active = true AND rb.status = 'approved' GROUP BY p.name, p.code, rb.currency ORDER BY total_approved_booking_amount DESC"
+  },
+  {
+    "shape": "aggregation",
+    "question": "What is the total and average forecasted amount per project, broken down by period type, for projects that have more than one forecast metric record?",
+    "sql": "SELECT p.name AS project_name, p.code AS project_code, fm.period_type, COUNT(fm.id) AS forecast_record_count, SUM(fm.amount_total) AS total_forecasted_amount, AVG(fm.amount_avg) AS avg_forecasted_amount FROM `dense-schema-example`.`dense_500`.`proj_forecast_metrics` fm INNER JOIN `dense-schema-example`.`dense_500`.`proj_projects` p ON p.id = fm.projects_id GROUP BY p.name, p.code, fm.period_type HAVING COUNT(fm.id) > 1 ORDER BY total_forecasted_amount DESC"
+  }
+]

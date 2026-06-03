@@ -1,0 +1,17 @@
+[
+  {
+    "shape": "single_table_filter",
+    "question": "Which approved purchase orders were placed in 2024 with an amount greater than 10,000 USD, and what are their reference numbers and amounts?",
+    "sql": "SELECT reference_number, event_date, amount, currency, notes\nFROM `dense-schema-example`.`dense_500`.`inv_purchase_orders`\nWHERE status = 'approved'\n  AND currency = 'USD'\n  AND amount > 10000\n  AND event_date BETWEEN '2024-01-01' AND '2024-12-31'\nORDER BY amount DESC"
+  },
+  {
+    "shape": "two_table_join",
+    "question": "For each carrier booking, show the booking reference number, event date, status, amount, and the name of the employee who approved it.",
+    "sql": "SELECT cb.reference_number,\n       cb.event_date,\n       cb.status,\n       cb.amount,\n       cb.currency,\n       e.name AS approved_by_name\nFROM `dense-schema-example`.`dense_500`.`log_carrier_bookings` cb\nJOIN `dense-schema-example`.`dense_500`.`hr_employees` e\n  ON cb.approved_by_id = e.id\nORDER BY cb.event_date DESC"
+  },
+  {
+    "shape": "aggregation",
+    "question": "What is the total purchase order amount and number of orders per supplier, for suppliers that have more than one purchase order, ordered by total amount descending?",
+    "sql": "SELECT s.name AS supplier_name,\n       s.code AS supplier_code,\n       COUNT(po.id) AS order_count,\n       SUM(po.amount) AS total_amount,\n       MAX(po.currency) AS currency\nFROM `dense-schema-example`.`dense_500`.`inv_purchase_orders` po\nJOIN `dense-schema-example`.`dense_500`.`inv_suppliers` s\n  ON po.supplier_id = s.id\nGROUP BY s.name, s.code\nHAVING COUNT(po.id) > 1\nORDER BY total_amount DESC"
+  }
+]

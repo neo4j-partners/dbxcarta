@@ -28,7 +28,9 @@ uv pip install -e examples/schemapile/
 cd examples/schemapile
 cp .env.sample .env                             # edit SCHEMAPILE_REPO, profile, warehouse, catalog
 uv run dbxcarta-submit bootstrap --env-file dbxcarta-overlay.env     # ops catalog + volume + data catalog
+# Run the upstream slice.py with the .env parameters; writes the cached slice JSON (idempotent on its params sidecar).
 uv run dbxcarta-schemapile-slice
+# Filter, rank, and cap the slice into the committed candidate-table JSON read by materialize and question generation.
 uv run dbxcarta-schemapile-select
 uv run dbxcarta-submit materialize --env-file dbxcarta-overlay.env   # stage blueprint, run serverless job
 uv run dbxcarta-schemapile-generate-questions
@@ -187,9 +189,10 @@ uv run dbxcarta-schemapile-select
 ```
 
 Reads the slice JSON, applies the candidate filters, and writes a fixed
-candidate-table JSON to `SCHEMAPILE_CANDIDATE_CACHE`. This file is the
-single source of truth for the next two steps and should be committed to
-the example's cache if you want a fully reproducible run.
+candidate-table JSON to `SCHEMAPILE_CANDIDATE_CACHE`, which resolves to the
+committed `blueprint/candidates_random_1000.json`. This file is the committed
+source of truth for the next two steps; re-running select regenerates it in
+place, so commit the result for a fully reproducible run.
 
 ### 7. Materialize the slice as Delta tables
 
