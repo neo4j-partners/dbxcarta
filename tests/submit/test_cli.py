@@ -107,6 +107,22 @@ def test_publish_wheels_rejects_unknown_args() -> None:
         cli._handle_publish_wheels(["--wheel"])
 
 
+def test_smoke_imports_name_only_shared_environment_packages() -> None:
+    # The runner bootstrap runs the post-install smoke check before it prepends
+    # the per-run wheel target to sys.path, so a wheel module (dbxcarta.*) is
+    # not importable at that point and would fail every cluster run. Wheel
+    # content is guaranteed at build time instead (_assert_wheel_bundles_core),
+    # so the smoke lists must name only shared-environment (closure) packages.
+    for entrypoint, modules in cli._ENTRYPOINT_SMOKE_IMPORTS.items():
+        wheel_modules = [
+            m for m in modules if m == "dbxcarta" or m.startswith("dbxcarta.")
+        ]
+        assert not wheel_modules, (
+            f"{entrypoint} smoke imports name wheel modules {wheel_modules}; "
+            "the smoke check runs before the wheel target joins sys.path"
+        )
+
+
 def _no_workspace(monkeypatch: pytest.MonkeyPatch) -> None:
     """Stub env loading and fail loudly if a handler touches the workspace.
 

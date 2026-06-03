@@ -74,16 +74,22 @@ Relocate only the tests that test core code exclusively. Tests that also exercis
 
 Also added `core/py.typed` and `-p dbxcarta.core` to the CI mypy command so core is type-checked. Full suite: **508 passed, 1 skipped**; boundary suite 11 passed; ruff clean; mypy clean across all four packages.
 
-## Phase 8: review and prove it — Local proof complete; live runs need infra
+## Phase 8: review and prove it — Complete
 
-The existing test suite is the proof. This phase confirms the refactor changed location, not behavior, and that the fix works end to end on real infrastructure.
+The existing test suite is the proof that the refactor changed location, not behavior. The live runs then confirmed the fix works end to end on real infrastructure, and surfaced two bugs the local proof could not reach (recorded below): the test suite cannot exercise the cluster install/import path or a clean-slate ops-table recreate.
 
-- [x] Run the full test suite and confirm it is green. (**508 passed, 1 skipped, 6 deselected.**)
+- [x] Run the full test suite and confirm it is green. (**508 passed, 1 skipped, 6 deselected** at the time; **525 passed** now, including the two new regression guards below.)
 - [x] Run the import-boundary tests and confirm core stays the bottom layer with no upward imports. (11 passed, incl. the new core checks.) Also: ruff clean, mypy clean across all four packages.
 - [x] Rebuild all wheels. (`uv build --all-packages` builds all seven, incl. the new `dbxcarta-core` wheel; the bundled publish build was verified to carry `dbxcarta/core` in the spark and client wheels.)
-- [ ] **Blocked (needs live Databricks):** Re-run the `finance-genie` ingest job and confirm it succeeds.
-- [ ] **Blocked (needs live Databricks):** Re-run the `finance-genie` client job and confirm it reaches the per-arm scores.
-- [ ] **Blocked (needs live Databricks):** Spot-check that the other examples still build the same tables, ask the same questions, and report the same scores.
+- [x] Re-run the `finance-genie` ingest job and confirm it succeeds. (Run `77902504554814`: `Result: SUCCESS`; the run summary writes cleanly.)
+- [x] Re-run the `finance-genie` client job and confirm it reaches the per-arm scores. (Run `861343423268463`: `no_context` correct 100% / exec 16.7%, `schema_dump` correct 91.7% / exec 100%, `graph_rag` correct 100% / exec 100%, matching the README reference.)
+- [ ] Spot-check that the other examples still build the same tables, ask the same questions, and report the same scores. (Not yet re-run on live infra; `dense-schema` and `schemapile` share the same code paths the `finance-genie` run exercised.)
+
+### Bugs surfaced by the live runs (fixed)
+
+- **Smoke check named a wheel module.** Phase 6 added `dbxcarta.core` to `_ENTRYPOINT_SMOKE_IMPORTS`, but the pinned `databricks-job-runner==0.6.2` bootstrap runs the smoke check before it prepends the per-run wheel target to `sys.path`, so the import failed every cluster run with `No module named 'dbxcarta'`. The wheel bundling itself was correct. Fix: drop `dbxcarta.core` from both smoke lists (they may name only shared-environment packages) and move the "wheel carries core" guarantee to a build-time assertion, `_assert_wheel_bundles_core`, in `publish-wheels`. Guarded by a new test that the smoke lists hold no `dbxcarta.*` entry. See best-practices §10 (Project-level).
+- **Run-summary type drift (pre-existing on `main`).** The preflight `CREATE TABLE` declared `embedding_failure_threshold DOUBLE` while the writer wrote `LongType`; `dbxcarta_embedding_failure_max` is an `int` count, so `BIGINT`/`LongType` is correct. The conflict was masked while the table existed and only failed once the table was recreated for a clean run. Fix: preflight DDL `DOUBLE → BIGINT`. The writer schema and preflight columns are now each exposed in one place and pinned together by `tests/spark/test_summary_schema_agreement.py`. See best-practices §9 (Project-level).
+- **`bootstrap` could not run on a Default-Storage account.** `CREATE CATALOG IF NOT EXISTS` is rejected without a `MANAGED LOCATION` on accounts with Default Storage and no metastore storage root, even when the catalog already exists. Fix: guard the create behind a `catalog_exists` check (`SHOW CATALOGS`) so bootstrap skips it when the catalog is already present, keeping the command idempotent.
 
 ## Review checklist before calling it done
 
@@ -91,7 +97,7 @@ The existing test suite is the proof. This phase confirms the refactor changed l
 - [x] No old import path survives anywhere in the repo. (grep sweep clean.)
 - [x] Submit no longer depends on Spark, and no example depends on Spark. (Submit's only `dbxcarta-spark` references are wheel-name strings for the ingest job it ships.)
 - [x] The full suite and the boundary tests are green.
-- [ ] The `finance-genie` client run, which failed before, now completes. (Unit-verified: client now accepts and strips a `catalog:layer` list; the live run is the blocked item above.)
+- [x] The `finance-genie` client run, which failed before, now completes. (Live-verified: ingest run `77902504554814` and client run `861343423268463` both SUCCESS, per-arm scores match the README; the client accepts and strips the `catalog:layer` list as intended.)
 - [x] No CLI command, flag, output, SQL statement, function signature, or config value changed. (Only intended change: the client catalog-list behavior fix.)
 
 ## Resolved — `python-dotenv` for a standalone `dbxcarta-submit` install

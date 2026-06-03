@@ -21,6 +21,35 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Column definitions for the run-summary history table, kept as a module
+# constant (not inlined in the CREATE below) so a test can assert these types
+# agree with the writer schema in ``summary_io.summary_table_schema()``. A type
+# that drifts between the two surfaces only when the table is recreated from
+# scratch, because the writer's append uses ``mergeSchema``. The writer schema
+# additionally carries ``value_sampling_warning`` / ``verify_ok`` /
+# ``verify_violation_count``; the append adds those via ``mergeSchema``, so
+# preflight need not pre-declare them.
+_SUMMARY_TABLE_COLUMNS_SQL = """\
+            run_id STRING NOT NULL,
+            job_name STRING,
+            contract_version STRING,
+            catalog STRING,
+            schemas ARRAY<STRING>,
+            started_at TIMESTAMP,
+            ended_at TIMESTAMP,
+            status STRING,
+            row_counts MAP<STRING, BIGINT>,
+            neo4j_counts MAP<STRING, BIGINT>,
+            error STRING,
+            embedding_model STRING,
+            embedding_flags MAP<STRING, BOOLEAN>,
+            embedding_attempts MAP<STRING, BIGINT>,
+            embedding_successes MAP<STRING, BIGINT>,
+            embedding_failure_rate_per_label MAP<STRING, DOUBLE>,
+            embedding_failure_rate DOUBLE,
+            embedding_failure_threshold BIGINT,
+            embedding_ledger_hits MAP<STRING, BIGINT>"""
+
 
 def preflight(spark: "SparkSession", settings: "SparkIngestSettings") -> None:
     """Fail fast on any mis-provisioned dependency.
@@ -52,25 +81,7 @@ def preflight(spark: "SparkSession", settings: "SparkIngestSettings") -> None:
     )
     spark.sql(f"""
         CREATE TABLE IF NOT EXISTS {quoted_table} (
-            run_id STRING NOT NULL,
-            job_name STRING,
-            contract_version STRING,
-            catalog STRING,
-            schemas ARRAY<STRING>,
-            started_at TIMESTAMP,
-            ended_at TIMESTAMP,
-            status STRING,
-            row_counts MAP<STRING, BIGINT>,
-            neo4j_counts MAP<STRING, BIGINT>,
-            error STRING,
-            embedding_model STRING,
-            embedding_flags MAP<STRING, BOOLEAN>,
-            embedding_attempts MAP<STRING, BIGINT>,
-            embedding_successes MAP<STRING, BIGINT>,
-            embedding_failure_rate_per_label MAP<STRING, DOUBLE>,
-            embedding_failure_rate DOUBLE,
-            embedding_failure_threshold BIGINT,
-            embedding_ledger_hits MAP<STRING, BIGINT>
+{_SUMMARY_TABLE_COLUMNS_SQL}
         ) USING DELTA
     """)
 

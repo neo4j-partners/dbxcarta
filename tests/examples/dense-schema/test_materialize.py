@@ -89,3 +89,99 @@ def test_materialize_skips_create_when_catalog_exists() -> None:
 
     stmts = ws.statement_execution.statements
     assert not any(s.startswith("CREATE CATALOG") for s in stmts)
+
+
+def _two_table_schema() -> list[dict[str, object]]:
+    """Parent (hr_employees) + child with a self-FK and a cross-FK."""
+    return [
+        {
+            "source_id": "src-1",
+            "uc_schema": "dense-1000",
+            "tables": [
+                {
+                    "name": "hr_employees",
+                    "columns": [
+                        {"name": "id", "type": "BIGINT"},
+                        {"name": "parent_id", "type": "BIGINT"},
+                        {"name": "name", "type": "VARCHAR(100)"},
+                    ],
+                    "primary_keys": ["id"],
+                    "foreign_keys": [
+                        {
+                            "columns": ["parent_id"],
+                            "foreign_table": "hr_employees",
+                            "referred_columns": ["id"],
+                        }
+                    ],
+                    "rows": [[1, None, "Ada"], [2, 1, "Bob"]],
+                },
+                {
+                    "name": "hr_tasks",
+                    "columns": [
+                        {"name": "id", "type": "BIGINT"},
+                        {"name": "created_by_id", "type": "BIGINT"},
+                    ],
+                    "primary_keys": ["id"],
+                    "foreign_keys": [
+                        {
+                            "columns": ["created_by_id"],
+                            "foreign_table": "hr_employees",
+                            "referred_columns": ["id"],
+                        }
+                    ],
+                    "rows": [[10, 1], [11, 2]],
+                },
+            ],
+        }
+    ]
+
+
+def test_materialize_emits_primary_key_ddl() -> None:
+    ws = _FakeWorkspaceClient(catalogs=["dense-schema-example"])
+
+    stats = materialize(
+        ws, "wh1", _dense_config(), _two_table_schema(), workers=1
+    )
+
+    stmts = ws.statement_execution.statements
+    assert any(
+        "ALTER TABLE" in s and "ALTER COLUMN `id` SET NOT NULL" in s
+        for s in stmts
+    )
+    assert any(
+        "ADD CONSTRAINT `pk_hr_employees` PRIMARY KEY (`id`)" in s
+        for s in stmts
+    )
+    assert stats.pk_constraints_added == 2
+
+
+def test_materialize_emits_foreign_key_ddl_in_second_pass() -> None:
+    ws = _FakeWorkspaceClient(catalogs=["dense-schema-example"])
+
+    stats = materialize(
+        ws, "wh1", _dense_config(), _two_table_schema(), workers=1
+    )
+
+    stmts = ws.statement_execution.statements
+    cross_fk = next(
+        s for s in stmts
+        if "ADD CONSTRAINT `fk_hr_tasks__created_by_id`" in s
+    )
+    assert "FOREIGN KEY (`created_by_id`)" in cross_fk
+    assert (
+        "REFERENCES `dense-schema-example`.`dense-1000`.`hr_employees`"
+        " (`id`)" in cross_fk
+    )
+
+    # Self-referential FK on hr_employees is handled in the same pass.
+    assert any(
+        "ADD CONSTRAINT `fk_hr_employees__parent_id`" in s
+        and "FOREIGN KEY (`parent_id`)" in s
+        for s in stmts
+    )
+    assert stats.fk_constraints_added == 2
+
+    # FK ALTERs come after every PK ALTER (second pass).
+    last_pk = max(i for i, s in enumerate(stmts) if "PRIMARY KEY" in s)
+    first_fk = min(i for i, s in enumerate(stmts) if "FOREIGN KEY" in s)
+    assert first_fk > last_pk

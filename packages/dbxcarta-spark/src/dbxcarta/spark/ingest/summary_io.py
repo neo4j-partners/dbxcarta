@@ -18,6 +18,7 @@ from dbxcarta.spark.ingest.summary import RunSummary
 if TYPE_CHECKING:
     from databricks.sdk import WorkspaceClient
     from pyspark.sql import SparkSession
+    from pyspark.sql.types import StructType
 
 
 class LoadSummaryError(Exception):
@@ -129,13 +130,19 @@ def emit_json(summary: RunSummary, volume_path: str) -> None:
     path.write_text(json.dumps(summary.to_json_dict(), indent=2))
 
 
-def emit_delta(summary: RunSummary, spark: "SparkSession", table_name: str) -> None:
-    """Append one summary row to the configured Delta history table.
+def summary_table_schema() -> "StructType":
+    """Return the explicit Delta schema for the run-summary history table.
 
-    The explicit schema keeps Spark from inferring unstable map and
+    Exposed as a function rather than inlined in ``emit_delta`` so a test can
+    assert it agrees with the preflight ``CREATE TABLE`` DDL
+    (``preflight._SUMMARY_TABLE_COLUMNS_SQL``). A column type that drifts
+    between this writer schema and the preflight create surfaces only when the
+    table is recreated from scratch; on an existing table the append's
+    ``mergeSchema`` masks the conflict until then.
+
+    The explicit schema also keeps Spark from inferring unstable map and
     timestamp types from a single Python Row.
     """
-    from pyspark.sql import Row
     from pyspark.sql.types import (
         ArrayType,
         BooleanType,
@@ -148,7 +155,7 @@ def emit_delta(summary: RunSummary, spark: "SparkSession", table_name: str) -> N
         TimestampType,
     )
 
-    schema = StructType([
+    return StructType([
         StructField("run_id", StringType(), nullable=False),
         StructField("job_name", StringType()),
         StructField("contract_version", StringType()),
@@ -173,6 +180,16 @@ def emit_delta(summary: RunSummary, spark: "SparkSession", table_name: str) -> N
         StructField("verify_violation_count", LongType()),
     ])
 
+
+def emit_delta(summary: RunSummary, spark: "SparkSession", table_name: str) -> None:
+    """Append one summary row to the configured Delta history table.
+
+    The explicit schema keeps Spark from inferring unstable map and
+    timestamp types from a single Python Row.
+    """
+    from pyspark.sql import Row
+
+    schema = summary_table_schema()
     quoted_table = quote_qualified_name(table_name, expected_parts=3)
     row = Row(**summary.to_dict())
     (

@@ -17,6 +17,7 @@ ambiguous.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
 import re
@@ -101,6 +102,14 @@ class MaterializeStats:
     rows_inserted: int = 0
     tables_skipped: int = 0
     type_fallbacks: int = 0
+    primary_keys_added: int = 0
+    foreign_keys_added: int = 0
+
+
+# UC constraint names must stay within the identifier length limit (~255 chars).
+# Derived names are truncated and disambiguated with a stable hash suffix when
+# they would exceed this bound.
+_CONSTRAINT_NAME_LIMIT = 255
 
 
 def main() -> int:
@@ -150,7 +159,9 @@ def main() -> int:
     print(
         f"[schemapile] materialized schemas={stats.schemas_created}"
         f" tables={stats.tables_created} rows={stats.rows_inserted}"
-        f" skipped={stats.tables_skipped} type_fallbacks={stats.type_fallbacks}",
+        f" skipped={stats.tables_skipped} type_fallbacks={stats.type_fallbacks}"
+        f" primary_keys={stats.primary_keys_added}"
+        f" foreign_keys={stats.foreign_keys_added}",
         file=sys.stderr,
     )
     return 0
@@ -192,12 +203,39 @@ def materialize(
         )
         stats.schemas_created += 1
 
+        # First pass: create every table, insert rows, and add its PRIMARY KEY.
+        # `materialized` maps the sanitized table name to the set of sanitized
+        # column names that were actually created, so the FK pass can skip any
+        # foreign key whose target table or referred columns never landed in UC.
+        materialized: dict[str, _MaterializedTable] = {}
         for table in schema_entry.get("tables", []):
-            _materialize_table(
+            result = _materialize_table(
                 ws, warehouse_id, config, catalog_q, schema_q,
                 source_id, table, stats,
             )
+            if result is not None:
+                materialized[result.safe_name] = result
+
+        # Second pass: add FOREIGN KEYs only after all tables and their PKs
+        # exist. A FK cannot reference a table whose PK is not yet declared,
+        # and self-referential FKs are valid here because the PK is in place.
+        for result in materialized.values():
+            _add_foreign_keys(
+                ws, warehouse_id, catalog_q, schema_q, result, materialized, stats,
+            )
     return stats
+
+
+@dataclass
+class _MaterializedTable:
+    """A table that was actually created in UC, with the identifiers needed to
+    declare its constraints. `safe_columns` is the set of sanitized column names
+    present in the created table; `foreign_keys` is the source spec's raw FK
+    list, deferred to the second pass."""
+
+    safe_name: str
+    safe_columns: set[str]
+    foreign_keys: list[dict[str, Any]]
 
 
 def _materialize_table(
@@ -209,13 +247,13 @@ def _materialize_table(
     source_id: str,
     table: dict[str, Any],
     stats: MaterializeStats,
-) -> None:
+) -> _MaterializedTable | None:
     raw_name = table.get("name", "")
     safe_name = _sanitize_table_name(raw_name)
     if not safe_name:
         stats.tables_skipped += 1
         logger.warning("[schemapile] skipping table with unusable name: %r", raw_name)
-        return
+        return None
     table_q = quote_identifier(safe_name)
     fq = f"{catalog_q}.{schema_q}.{table_q}"
 
@@ -223,7 +261,7 @@ def _materialize_table(
     if not columns:
         stats.tables_skipped += 1
         logger.warning("[schemapile] skipping table without columns: %s", raw_name)
-        return
+        return None
 
     col_defs: list[str] = []
     safe_col_names: list[str] = []
@@ -245,7 +283,7 @@ def _materialize_table(
     if not col_defs:
         stats.tables_skipped += 1
         logger.warning("[schemapile] skipping table without coercible columns: %s", raw_name)
-        return
+        return None
 
     fks_json = json.dumps(table.get("foreign_keys") or [])
     pks_json = json.dumps(table.get("primary_keys") or [])
@@ -282,6 +320,171 @@ def _materialize_table(
                     "[schemapile] insert failed for %s.%s.%s: %s",
                     catalog_q, schema_q, table_q, exc,
                 )
+
+    safe_col_set = set(safe_col_names)
+    _add_primary_key(
+        ws, warehouse_id, fq, safe_name, table, safe_col_set, stats,
+    )
+
+    return _MaterializedTable(
+        safe_name=safe_name,
+        safe_columns=safe_col_set,
+        foreign_keys=list(table.get("foreign_keys") or []),
+    )
+
+
+def _add_primary_key(
+    ws: "WorkspaceClient",
+    warehouse_id: str,
+    fq: str,
+    safe_name: str,
+    table: dict[str, Any],
+    safe_columns: set[str],
+    stats: MaterializeStats,
+) -> None:
+    """Declare an informational PRIMARY KEY for the table.
+
+    UC requires PK columns to be NOT NULL, so each PK column is set NOT NULL
+    before the constraint is added. PK columns that were dropped during
+    sanitization (or that never landed as real columns) are skipped; if any
+    PK column is missing the PK is not declared. Each ALTER is tolerant: a
+    failure is logged and the run continues, mirroring the INSERT handling.
+    """
+    raw_pks = table.get("primary_keys") or []
+    if not raw_pks:
+        return
+    safe_pks: list[str] = []
+    for raw_col in raw_pks:
+        safe_col = _sanitize_column_name(str(raw_col))
+        if not safe_col or safe_col not in safe_columns:
+            logger.warning(
+                "[schemapile] skipping PK on %s: column %r not materialized",
+                safe_name, raw_col,
+            )
+            return
+        safe_pks.append(safe_col)
+    if not safe_pks:
+        return
+
+    for safe_col in safe_pks:
+        try:
+            _execute(
+                ws, warehouse_id,
+                f"ALTER TABLE {fq} ALTER COLUMN {quote_identifier(safe_col)}"
+                " SET NOT NULL",
+            )
+        except Exception as exc:
+            logger.warning(
+                "[schemapile] SET NOT NULL failed for %s.%s: %s",
+                safe_name, safe_col, exc,
+            )
+            return
+
+    pk_name = _constraint_name("pk", [safe_name])
+    cols_clause = ", ".join(quote_identifier(c) for c in safe_pks)
+    try:
+        _execute(
+            ws, warehouse_id,
+            f"ALTER TABLE {fq} ADD CONSTRAINT {quote_identifier(pk_name)}"
+            f" PRIMARY KEY ({cols_clause})",
+        )
+        stats.primary_keys_added += 1
+    except Exception as exc:
+        logger.warning(
+            "[schemapile] ADD PRIMARY KEY failed for %s: %s", safe_name, exc,
+        )
+
+
+def _add_foreign_keys(
+    ws: "WorkspaceClient",
+    warehouse_id: str,
+    catalog_q: str,
+    schema_q: str,
+    child: "_MaterializedTable",
+    materialized: dict[str, "_MaterializedTable"],
+    stats: MaterializeStats,
+) -> None:
+    """Declare informational FOREIGN KEYs for one child table.
+
+    Runs in the second pass so the parent table's PRIMARY KEY already exists.
+    Each FK references a table within the same schema (`foreign_table`). FKs
+    whose child or referred columns were dropped during sanitization, or whose
+    target table was not materialized, are skipped. Each ALTER is tolerant of
+    failure to keep one bad table from aborting the run.
+    """
+    child_fq = f"{catalog_q}.{schema_q}.{quote_identifier(child.safe_name)}"
+    for fk in child.foreign_keys:
+        safe_cols = _safe_columns(fk.get("columns") or [])
+        if safe_cols is None or not all(c in child.safe_columns for c in safe_cols):
+            logger.warning(
+                "[schemapile] skipping FK on %s: child columns not materialized",
+                child.safe_name,
+            )
+            continue
+
+        parent_name = _sanitize_table_name(str(fk.get("foreign_table") or ""))
+        parent = materialized.get(parent_name)
+        if parent is None:
+            logger.warning(
+                "[schemapile] skipping FK on %s: target table %r not materialized",
+                child.safe_name, fk.get("foreign_table"),
+            )
+            continue
+
+        safe_referred = _safe_columns(fk.get("referred_columns") or [])
+        if (
+            safe_referred is None
+            or len(safe_referred) != len(safe_cols)
+            or not all(c in parent.safe_columns for c in safe_referred)
+        ):
+            logger.warning(
+                "[schemapile] skipping FK on %s -> %s: referred columns not"
+                " materialized or arity mismatch",
+                child.safe_name, parent_name,
+            )
+            continue
+
+        fk_name = _constraint_name("fk", [child.safe_name, *safe_cols])
+        parent_fq = f"{catalog_q}.{schema_q}.{quote_identifier(parent_name)}"
+        child_cols = ", ".join(quote_identifier(c) for c in safe_cols)
+        referred_cols = ", ".join(quote_identifier(c) for c in safe_referred)
+        try:
+            _execute(
+                ws, warehouse_id,
+                f"ALTER TABLE {child_fq} ADD CONSTRAINT {quote_identifier(fk_name)}"
+                f" FOREIGN KEY ({child_cols})"
+                f" REFERENCES {parent_fq} ({referred_cols})",
+            )
+            stats.foreign_keys_added += 1
+        except Exception as exc:
+            logger.warning(
+                "[schemapile] ADD FOREIGN KEY failed for %s -> %s: %s",
+                child.safe_name, parent_name, exc,
+            )
+
+
+def _safe_columns(raw_cols: list[Any]) -> list[str] | None:
+    """Sanitize a list of column names. Returns None if any name is unusable,
+    so a constraint that loses a column is skipped rather than silently
+    referencing the wrong columns."""
+    safe: list[str] = []
+    for raw_col in raw_cols:
+        cleaned = _sanitize_column_name(str(raw_col))
+        if not cleaned:
+            return None
+        safe.append(cleaned)
+    return safe or None
+
+
+def _constraint_name(prefix: str, parts: list[str]) -> str:
+    """Build a deterministic constraint name from sanitized identifier parts,
+    guarding the UC identifier length limit with a stable hash suffix."""
+    base = f"{prefix}_{'__'.join(parts)}"
+    if len(base) <= _CONSTRAINT_NAME_LIMIT:
+        return base
+    digest = hashlib.sha1(base.encode("utf-8")).hexdigest()[:12]
+    keep = _CONSTRAINT_NAME_LIMIT - len(digest) - 1
+    return f"{base[:keep]}_{digest}"
 
 
 def _coerce_type(raw: str) -> tuple[str, bool]:

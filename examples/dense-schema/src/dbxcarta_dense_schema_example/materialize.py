@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
 import os
@@ -69,6 +70,8 @@ class MaterializeStats:
     rows_inserted: int = 0
     tables_skipped: int = 0
     type_fallbacks: int = 0
+    pk_constraints_added: int = 0
+    fk_constraints_added: int = 0
     _lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False, compare=False)
 
     def _inc(self, **kwargs: int) -> None:
@@ -118,7 +121,8 @@ def main() -> int:
     print(
         f"[dense] materialized tables={stats.tables_created}"
         f" rows={stats.rows_inserted} skipped={stats.tables_skipped}"
-        f" type_fallbacks={stats.type_fallbacks}",
+        f" type_fallbacks={stats.type_fallbacks}"
+        f" pks={stats.pk_constraints_added} fks={stats.fk_constraints_added}",
         file=sys.stderr,
     )
     return 0
@@ -171,6 +175,7 @@ def materialize(
             table_idx += 1
             labeled.append((f"{table_idx}/{total_tables}", table))
 
+        materialized: dict[str, _MaterializedTable] = {}
         with ThreadPoolExecutor(max_workers=workers) as pool:
             futures = {
                 pool.submit(
@@ -182,11 +187,35 @@ def materialize(
             }
             for future in as_completed(futures):
                 try:
-                    future.result()
+                    result = future.result()
                 except Exception as exc:
                     name = futures[future].get("name", "?")
                     logger.error("[dense] table %s failed: %s", name, exc)
+                    continue
+                if result is not None:
+                    materialized[result.safe_name] = result
+
+        # Second pass: add foreign keys only after every table and its PK
+        # exists. Tables are created concurrently above, so a FK target's PK
+        # may not exist until the pool has fully drained.
+        _add_foreign_keys(
+            ws, warehouse_id, catalog_q, schema_q, materialized, stats,
+        )
     return stats
+
+
+@dataclass
+class _MaterializedTable:
+    """What was actually created for one table, for the FK second pass.
+
+    Carries sanitized identifiers so the FK pass references the
+    actually-created columns/tables, not the original names.
+    """
+
+    safe_name: str
+    columns: frozenset[str]
+    pk_columns: tuple[str, ...]
+    foreign_keys: list[dict[str, Any]]
 
 
 def _materialize_table(
@@ -199,12 +228,12 @@ def _materialize_table(
     stats: MaterializeStats,
     *,
     progress: str = "",
-) -> None:
+) -> _MaterializedTable | None:
     raw_name = table.get("name", "")
     safe_name = _sanitize_name(raw_name)
     if not safe_name:
         stats._inc(tables_skipped=1)
-        return
+        return None
     table_q = quote_identifier(safe_name)
     fq = f"{catalog_q}.{schema_q}.{table_q}"
     logger.info("[dense] table %s %s", progress, fq)
@@ -212,7 +241,7 @@ def _materialize_table(
     columns = table.get("columns") or []
     if not columns:
         stats.tables_skipped += 1
-        return
+        return None
 
     col_defs: list[str] = []
     safe_col_names: list[str] = []
@@ -233,7 +262,7 @@ def _materialize_table(
 
     if not col_defs:
         stats._inc(tables_skipped=1)
-        return
+        return None
 
     fks_json = json.dumps(table.get("foreign_keys") or [])
     pks_json = json.dumps(table.get("primary_keys") or [])
@@ -265,6 +294,144 @@ def _materialize_table(
                 stats._inc(rows_inserted=len(kept_rows))
             except Exception as exc:
                 logger.warning("[dense] insert failed for %s: %s", fq, exc)
+
+    safe_col_set = frozenset(safe_col_names)
+    pk_columns = _add_primary_key(
+        ws, warehouse_id, fq, safe_name, table.get("primary_keys") or [],
+        safe_col_set, stats,
+    )
+    return _MaterializedTable(
+        safe_name=safe_name,
+        columns=safe_col_set,
+        pk_columns=pk_columns,
+        foreign_keys=table.get("foreign_keys") or [],
+    )
+
+
+_MAX_CONSTRAINT_NAME = 255
+
+
+def _constraint_name(prefix: str, *parts: str) -> str:
+    """Deterministic, length-guarded constraint name.
+
+    Builds ``<prefix>_<parts...>`` from already-sanitized identifiers. If the
+    result exceeds the UC limit, truncate the variable portion and append a
+    stable hash suffix so distinct inputs stay distinct.
+    """
+    body = "__".join(p for p in parts if p)
+    name = f"{prefix}_{body}" if body else prefix
+    if len(name) <= _MAX_CONSTRAINT_NAME:
+        return name
+    digest = hashlib.sha1(name.encode("utf-8")).hexdigest()[:8]
+    keep = _MAX_CONSTRAINT_NAME - len(prefix) - 1 - len(digest) - 1
+    return f"{prefix}_{name[len(prefix) + 1:][:keep]}_{digest}"
+
+
+def _add_primary_key(
+    ws: WorkspaceClient,
+    warehouse_id: str,
+    fq: str,
+    safe_table: str,
+    primary_keys: list[str],
+    column_set: frozenset[str],
+    stats: MaterializeStats,
+) -> tuple[str, ...]:
+    """Add a PRIMARY KEY constraint; return the sanitized PK columns.
+
+    Returns an empty tuple when no valid PK can be declared. Each ALTER is
+    tolerant: a failure logs a warning and continues so one bad table does
+    not abort the run.
+    """
+    safe_pk_cols = [_sanitize_name(c) for c in primary_keys]
+    safe_pk_cols = [c for c in safe_pk_cols if c and c in column_set]
+    if len(safe_pk_cols) != len(primary_keys):
+        # A PK column was dropped during sanitization or is missing: a partial
+        # PK would be wrong, so skip the whole constraint.
+        return ()
+    if not safe_pk_cols:
+        return ()
+
+    for col in safe_pk_cols:
+        col_q = quote_identifier(col)
+        try:
+            _execute(
+                ws, warehouse_id,
+                f"ALTER TABLE {fq} ALTER COLUMN {col_q} SET NOT NULL",
+                label=f"SET NOT NULL {fq}.{col}",
+            )
+        except Exception as exc:
+            logger.warning("[dense] set not null failed for %s.%s: %s", fq, col, exc)
+            return ()
+
+    pk_name = _constraint_name("pk", safe_table)
+    cols_clause = ", ".join(quote_identifier(c) for c in safe_pk_cols)
+    try:
+        _execute(
+            ws, warehouse_id,
+            f"ALTER TABLE {fq} ADD CONSTRAINT {quote_identifier(pk_name)}"
+            f" PRIMARY KEY ({cols_clause})",
+            label=f"ADD PRIMARY KEY {fq}",
+        )
+        stats._inc(pk_constraints_added=1)
+    except Exception as exc:
+        logger.warning("[dense] add primary key failed for %s: %s", fq, exc)
+        return ()
+    return tuple(safe_pk_cols)
+
+
+def _add_foreign_keys(
+    ws: WorkspaceClient,
+    warehouse_id: str,
+    catalog_q: str,
+    schema_q: str,
+    materialized: dict[str, "_MaterializedTable"],
+    stats: MaterializeStats,
+) -> None:
+    """Second pass: add FK constraints after all tables and PKs exist.
+
+    Skips any FK whose child/parent columns were dropped during sanitization
+    or whose target table/columns do not exist among the materialized tables.
+    Each ALTER is tolerant: a failure logs a warning and continues.
+    """
+    for child in materialized.values():
+        child_fq = f"{catalog_q}.{schema_q}.{quote_identifier(child.safe_name)}"
+        for fk in child.foreign_keys:
+            src_cols = [_sanitize_name(c) for c in (fk.get("columns") or [])]
+            ref_cols = [_sanitize_name(c) for c in (fk.get("referred_columns") or [])]
+            parent_name = _sanitize_name(fk.get("foreign_table", ""))
+            raw_src = fk.get("columns") or []
+            raw_ref = fk.get("referred_columns") or []
+
+            if not parent_name or parent_name not in materialized:
+                continue
+            if len(src_cols) != len(raw_src) or len(ref_cols) != len(raw_ref):
+                continue
+            if not src_cols or len(src_cols) != len(ref_cols):
+                continue
+            if any(c not in child.columns for c in src_cols):
+                continue
+            parent = materialized[parent_name]
+            if any(c not in parent.columns for c in ref_cols):
+                continue
+
+            parent_fq = f"{catalog_q}.{schema_q}.{quote_identifier(parent_name)}"
+            fk_name = _constraint_name("fk", child.safe_name, *src_cols)
+            src_clause = ", ".join(quote_identifier(c) for c in src_cols)
+            ref_clause = ", ".join(quote_identifier(c) for c in ref_cols)
+            try:
+                _execute(
+                    ws, warehouse_id,
+                    f"ALTER TABLE {child_fq} ADD CONSTRAINT"
+                    f" {quote_identifier(fk_name)} FOREIGN KEY ({src_clause})"
+                    f" REFERENCES {parent_fq} ({ref_clause})",
+                    label=f"ADD FOREIGN KEY {child_fq} -> {parent_fq}",
+                )
+                stats._inc(fk_constraints_added=1)
+            except Exception as exc:
+                logger.warning(
+                    "[dense] add foreign key failed for %s -> %s: %s",
+                    child_fq, parent_fq, exc,
+                )
 
 
 def _coerce_type(raw: str) -> tuple[str, bool]:

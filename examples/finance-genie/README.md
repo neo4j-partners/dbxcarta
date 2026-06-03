@@ -293,6 +293,13 @@ does not create the upstream medallion data catalogs:
 uv run dbxcarta-submit bootstrap
 ```
 
+`bootstrap` checks whether the catalog already exists before issuing
+`CREATE CATALOG` and skips the create when it does. On accounts with Default
+Storage and no metastore storage root, `CREATE CATALOG` is rejected without a
+`MANAGED LOCATION` even with `IF NOT EXISTS`, so a pre-created catalog (for
+example one created in the workspace UI) must not be re-created. The schema and
+volume creates remain `IF NOT EXISTS`.
+
 To remove only the ops schema later, without touching the shared ops catalog,
 run `teardown` (it drops the overlay's `DBXCARTA_TEARDOWN_TARGET`,
 `schema:dbxcarta-catalog.finance_genie_ops`):
