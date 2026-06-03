@@ -18,6 +18,7 @@ from typing import Any
 
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.config import Config
+from dbxcarta.core.executor import catalog_exists
 from dbxcarta.core.identifiers import quote_identifier
 from dbxcarta_dense_schema_example.config import DenseSchemaConfig, load_config
 from dbxcarta_dense_schema_example.utils import (
@@ -139,12 +140,16 @@ def materialize(
     # DATABRICKS_VOLUME_PATH; the data catalog is this example's own, so
     # materialize owns creating it. load_config already refuses a
     # protected/project catalog name, so this never targets a shared catalog.
-    _execute(
-        ws, warehouse_id,
-        f"CREATE CATALOG IF NOT EXISTS {catalog_q}"
-        " COMMENT 'dense-schema materialize: data catalog'",
-        label=f"CREATE CATALOG {config.catalog}",
-    )
+    # Skip the create when the catalog already exists: on Default-Storage
+    # accounts CREATE CATALOG fails without a MANAGED LOCATION even with IF NOT
+    # EXISTS, so a pre-created (e.g. UI-created) catalog must not be re-created.
+    if not catalog_exists(ws, warehouse_id, config.catalog):
+        _execute(
+            ws, warehouse_id,
+            f"CREATE CATALOG IF NOT EXISTS {catalog_q}"
+            " COMMENT 'dense-schema materialize: data catalog'",
+            label=f"CREATE CATALOG {config.catalog}",
+        )
 
     total_tables = sum(len(s.get("tables", [])) for s in schemas)
     table_idx = 0

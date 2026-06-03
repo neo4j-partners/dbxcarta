@@ -23,9 +23,9 @@ _DEFAULT_EXCLUDE: set[str] = {"single_table_filter"}
 _SCHEMA_RE = re.compile(r"`([^`]+)`\.\`([^`]+)`\.\`[^`]+`")
 
 # Fallback (catalog, schema) when no fully-qualified table reference is found.
-# dense materializes into its own data catalog, so this is dense-schema_example,
+# dense materializes into its own data catalog, so this is dense-schema-example,
 # not the old shared-with-schemapile catalog.
-_DEFAULT_CATALOG_SCHEMA: tuple[str, str] = ("dense-schema_example", "dense_1000")
+_DEFAULT_CATALOG_SCHEMA: tuple[str, str] = ("dense-schema-example", "dense-1000")
 
 
 def _detect_schema(sql: str) -> tuple[str, str]:

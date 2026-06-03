@@ -26,7 +26,7 @@ class DenseSchemaConfig:
     seed: int
     candidate_cache: Path
     # Ops volume path, sourced verbatim from DATABRICKS_VOLUME_PATH. The ops
-    # plane lives in its own catalog (dbxcarta-catalog.dense_ops), separate from
+    # plane lives in its own catalog (dbxcarta-catalog.dense-ops), separate from
     # the data catalog this config materializes tables into, so data discovery
     # never sweeps it in. There is no in-catalog derivation: a missing
     # DATABRICKS_VOLUME_PATH fails loudly rather than routing ops into the data

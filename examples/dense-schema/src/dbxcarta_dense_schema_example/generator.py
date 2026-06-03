@@ -7,7 +7,7 @@ connections through shared anchor tables.
 
 Usage:
     uv run dbxcarta-dense-generate --tables 500 --schema dense_500
-    uv run dbxcarta-dense-generate --tables 1000 --schema dense_1000
+    uv run dbxcarta-dense-generate --tables 1000 --schema dense-1000
 """
 
 from __future__ import annotations
@@ -887,7 +887,7 @@ def main() -> int:
         default=None,
         help=(
             "UC schema name for the generated schema"
-            " (default: dense_500 or dense_1000)."
+            " (default: dense_500 or dense-1000)."
         ),
     )
     parser.add_argument(

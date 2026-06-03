@@ -25,7 +25,7 @@ def test_generate_500_table_count():
 
 
 def test_generate_1000_table_count():
-    result = generate_candidates_json(1000, "dense_1000")
+    result = generate_candidates_json(1000, "dense-1000")
     schema = result["schemas"][0]
     tables = schema["tables"]
     assert len(tables) == 1000
@@ -127,7 +127,7 @@ def test_unsupported_table_count_raises():
 
 
 def test_unique_table_names():
-    result = generate_candidates_json(1000, "dense_1000")
+    result = generate_candidates_json(1000, "dense-1000")
     names = [t["name"] for t in result["schemas"][0]["tables"]]
     assert len(names) == len(set(names)), "Duplicate table names found"
 
@@ -141,10 +141,10 @@ def test_question_cache_dir_defaults_to_table_count():
     config = DenseSchemaConfig(
         catalog="schemapile_lakehouse",
         table_count=1000,
-        uc_schema="dense_1000",
+        uc_schema="dense-1000",
         seed=42,
         candidate_cache=Path(".cache/candidates_1000.json"),
-        volume_path="/Volumes/dbxcarta-catalog/dense_ops/dbxcarta-ops",
+        volume_path="/Volumes/dbxcarta-catalog/dense-ops/dbxcarta-ops",
         questions_path="/Volumes/example/questions.json",
         question_model="databricks-meta-llama-3-3-70b-instruct",
         questions_target=60,

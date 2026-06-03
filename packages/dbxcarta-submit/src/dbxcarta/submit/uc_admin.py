@@ -15,6 +15,7 @@ from enum import Enum
 
 from databricks.sdk import WorkspaceClient
 
+from dbxcarta.core.executor import catalog_exists
 from dbxcarta.core.identifiers import (
     check_not_protected,
     quote_identifier,
@@ -96,12 +97,16 @@ def ensure_uc_volume(
     catalog_q = quote_identifier(catalog)
     schema_q = quote_identifier(schema)
     volume_q = quote_identifier(volume)
-    execute_statement(
-        ws,
-        warehouse_id,
-        f"CREATE CATALOG IF NOT EXISTS {catalog_q}"
-        " COMMENT 'dbxcarta bootstrap: example catalog'",
-    )
+    # Skip CREATE CATALOG when the catalog already exists: on Default-Storage
+    # accounts the statement fails without a MANAGED LOCATION even with IF NOT
+    # EXISTS, so a pre-created (e.g. UI-created) catalog must not be re-created.
+    if not catalog_exists(ws, warehouse_id, catalog):
+        execute_statement(
+            ws,
+            warehouse_id,
+            f"CREATE CATALOG IF NOT EXISTS {catalog_q}"
+            " COMMENT 'dbxcarta bootstrap: example catalog'",
+        )
     execute_statement(
         ws,
         warehouse_id,

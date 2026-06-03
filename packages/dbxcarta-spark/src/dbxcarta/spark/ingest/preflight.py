@@ -69,7 +69,7 @@ def preflight(spark: "SparkSession", settings: "SparkIngestSettings") -> None:
             embedding_successes MAP<STRING, BIGINT>,
             embedding_failure_rate_per_label MAP<STRING, DOUBLE>,
             embedding_failure_rate DOUBLE,
-            embedding_failure_threshold DOUBLE,
+            embedding_failure_threshold BIGINT,
             embedding_ledger_hits MAP<STRING, BIGINT>
         ) USING DELTA
     """)

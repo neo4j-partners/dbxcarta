@@ -20,7 +20,7 @@ The [Setup flow](#setup-flow) section explains each step in more detail.
 uv sync
 uv pip install -e examples/dense-schema/
 
-# Generate the synthetic schema. 1000 tables yields schema dense_1000, which
+# Generate the synthetic schema. 1000 tables yields schema dense-1000, which
 # matches DBXCARTA_SCHEMAS in dbxcarta-overlay.env.
 uv run dbxcarta-dense-generate --tables 1000
 
@@ -95,10 +95,10 @@ Generate the synthetic schema locally:
 uv run dbxcarta-dense-generate --tables 500
 ```
 
-Provision the ops plane, the `dbxcarta-catalog.dense_ops` schema and its
+Provision the ops plane, the `dbxcarta-catalog.dense-ops` schema and its
 `dbxcarta-ops` volume named by the overlay's `DATABRICKS_VOLUME_PATH`, after
 configuring `.env`. `bootstrap` is idempotent, so re-running it changes nothing;
-the `-ingest` make target also runs it first. The `dense-schema_example` data
+the `-ingest` make target also runs it first. The `dense-schema-example` data
 catalog is created by the materialize step below:
 
 ```bash
@@ -106,7 +106,7 @@ uv run dbxcarta-submit bootstrap --env-file examples/dense-schema/dbxcarta-overl
 ```
 
 Materialize the fixture into Unity Catalog. This creates the
-`dense-schema_example` data catalog and the `dense_1000` schema and tables:
+`dense-schema-example` data catalog and the `dense-1000` schema and tables:
 
 ```bash
 uv run dbxcarta-dense-materialize
@@ -114,7 +114,7 @@ uv run dbxcarta-dense-materialize
 
 To remove dense's full footprint later, run `teardown`. It drops the overlay's
 `DBXCARTA_TEARDOWN_TARGET`,
-`catalog:dense-schema_example,schema:dbxcarta-catalog.dense_ops`: the data
+`catalog:dense-schema-example,schema:dbxcarta-catalog.dense-ops`: the data
 catalog and dense's ops schema. The shared `dbxcarta-catalog` is left intact for
 the other examples:
 

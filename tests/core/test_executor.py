@@ -4,7 +4,9 @@ from types import SimpleNamespace
 
 from databricks.sdk.service.sql import StatementState
 
-from dbxcarta.core.executor import fetch_rows
+import pytest
+
+from dbxcarta.core.executor import catalog_exists, fetch_rows
 
 
 def _response(
@@ -94,3 +96,37 @@ def test_fetch_rows_uses_fallback_name_for_unnamed_columns() -> None:
     assert error is None
     assert columns == ["id", "col_2"]
     assert rows == [[1, "a"]]
+
+
+def _catalogs_workspace(*names: str) -> _Workspace:
+    rows = [[name] for name in names]
+    return _Workspace(
+        _StatementExecution(
+            _response(first_rows=rows, column_names=["catalog"]), {}
+        )
+    )
+
+
+def test_catalog_exists_true_when_present() -> None:
+    ws = _catalogs_workspace("dbxcarta-catalog", "dense-schema-example")
+    assert catalog_exists(ws, "warehouse", "dense-schema-example") is True
+
+
+def test_catalog_exists_false_when_absent() -> None:
+    ws = _catalogs_workspace("dbxcarta-catalog")
+    assert catalog_exists(ws, "warehouse", "dense-schema-example") is False
+
+
+def test_catalog_exists_raises_when_listing_fails() -> None:
+    response = SimpleNamespace(
+        statement_id="stmt-1",
+        status=SimpleNamespace(
+            state=StatementState.FAILED,
+            error=SimpleNamespace(message="permission denied"),
+        ),
+        manifest=None,
+        result=None,
+    )
+    ws = _Workspace(_StatementExecution(response, {}))
+    with pytest.raises(RuntimeError, match="permission denied"):
+        catalog_exists(ws, "warehouse", "dense-schema-example")

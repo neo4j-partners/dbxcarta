@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
-from dbxcarta.core.executor import execute_ddl
+from dbxcarta.core.executor import catalog_exists, execute_ddl
 from dbxcarta.core.identifiers import quote_identifier
 from dbxcarta.core.workspace import build_workspace_client
 from dbxcarta_schemapile_example.config import SchemaPileConfig, load_config
@@ -170,11 +170,15 @@ def materialize(
     # DATABRICKS_VOLUME_PATH; the data catalog is this example's own, so
     # materialize owns creating it. config.load_config already refuses a
     # protected/project catalog name, so this never targets a shared catalog.
-    _execute(
-        ws, warehouse_id,
-        f"CREATE CATALOG IF NOT EXISTS {catalog_q}"
-        " COMMENT 'schemapile materialize: data catalog'",
-    )
+    # Skip the create when the catalog already exists: on Default-Storage
+    # accounts CREATE CATALOG fails without a MANAGED LOCATION even with IF NOT
+    # EXISTS, so a pre-created (e.g. UI-created) catalog must not be re-created.
+    if not catalog_exists(ws, warehouse_id, config.catalog):
+        _execute(
+            ws, warehouse_id,
+            f"CREATE CATALOG IF NOT EXISTS {catalog_q}"
+            " COMMENT 'schemapile materialize: data catalog'",
+        )
 
     for schema_entry in schemas:
         uc_schema = schema_entry["uc_schema"]

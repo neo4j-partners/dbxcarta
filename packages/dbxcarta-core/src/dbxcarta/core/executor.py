@@ -107,6 +107,23 @@ def fetch_rows(
     return None, None, f"statement did not complete within {timeout_sec}s (state={state})"
 
 
+def catalog_exists(ws: WorkspaceClient, warehouse_id: str, catalog: str) -> bool:
+    """Return True if *catalog* already exists in the metastore.
+
+    Guards ``CREATE CATALOG``: on accounts with Default Storage enabled but no
+    metastore storage root URL, ``CREATE CATALOG`` fails unless given a
+    ``MANAGED LOCATION``, even with ``IF NOT EXISTS`` on a catalog that already
+    exists. Callers check this first and skip the create when the catalog is
+    already present (for example, pre-created in the workspace UI).
+    """
+    _, rows, error = fetch_rows(ws, warehouse_id, "SHOW CATALOGS")
+    if error is not None or rows is None:
+        raise RuntimeError(
+            f"could not list catalogs to check for {catalog!r}: {error}"
+        )
+    return any(row and row[0] == catalog for row in rows)
+
+
 def execute_ddl(
     ws: WorkspaceClient,
     warehouse_id: str,

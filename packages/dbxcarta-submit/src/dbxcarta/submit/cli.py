@@ -79,11 +79,15 @@ _ENTRYPOINT_PINNED_CLOSURE: dict[str, tuple[str, ...]] = {
 
 # Top-level import names checked by the bootstrap post-install smoke
 # check. Import names cannot be derived from version pins, so they are
-# supplied explicitly.
+# supplied explicitly. These name only shared-environment packages (the
+# --no-deps closure), never wheel modules: the runner bootstrap runs the
+# smoke check before it prepends the per-run wheel target to sys.path, so a
+# wheel module like ``dbxcarta.core`` is not importable at that point. The
+# guarantee that the wheels physically carry ``dbxcarta/core`` is enforced
+# at build time instead (see ``_assert_wheel_bundles_core``).
 _ENTRYPOINT_SMOKE_IMPORTS: dict[str, tuple[str, ...]] = {
     "ingest": (
         "databricks_job_runner",
-        "dbxcarta.core",
         "neo4j",
         "pydantic",
         "pydantic_core",
@@ -91,7 +95,6 @@ _ENTRYPOINT_SMOKE_IMPORTS: dict[str, tuple[str, ...]] = {
         "dotenv",
     ),
     "client": (
-        "dbxcarta.core",
         "neo4j",
         "pydantic",
         "pydantic_core",
@@ -274,11 +277,37 @@ def _core_bundled_into(project_dir: Path) -> Iterator[None]:
             shutil.rmtree(target, ignore_errors=True)
 
 
+def _assert_wheel_bundles_core(wheel_path: Path) -> None:
+    """Fail loudly if a built entrypoint wheel is missing ``dbxcarta/core``.
+
+    The runner bootstrap installs the application wheel with ``--no-deps`` and
+    cannot pull a separate core wheel, so each entrypoint wheel must physically
+    carry the core modules (bundled by ``_core_bundled_into``). The post-install
+    smoke check cannot verify this — it runs before the wheel target is on
+    ``sys.path`` — so the guarantee is enforced here, at build time, where a
+    missing core package surfaces immediately instead of as an ``ImportError``
+    on the cluster at first ``import dbxcarta.core``.
+    """
+    import zipfile
+
+    from databricks_job_runner.errors import RunnerError
+
+    with zipfile.ZipFile(wheel_path) as zf:
+        names = zf.namelist()
+    if not any(n.startswith("dbxcarta/core/") for n in names):
+        raise RunnerError(
+            f"built wheel {wheel_path.name} does not bundle dbxcarta/core; "
+            "the entrypoint wheel must physically carry the core modules "
+            "(the runner installs it with --no-deps and cannot pull a "
+            "separate core wheel)"
+        )
+
+
 def _handle_publish_wheels(argv: list[str]) -> int:
     import argparse
 
     from databricks_job_runner.errors import RunnerError
-    from databricks_job_runner.upload import publish_wheel_stable
+    from databricks_job_runner.upload import find_latest_wheel, publish_wheel_stable
 
     parser = argparse.ArgumentParser(
         prog="dbxcarta-submit publish-wheels",
@@ -306,6 +335,14 @@ def _handle_publish_wheels(argv: list[str]) -> int:
                     runner.wheel_volume_dir,
                     wheel_package,
                 )
+                built = find_latest_wheel(
+                    runner.project_dir / "dist", wheel_package
+                )
+                if built is None:
+                    raise RunnerError(
+                        f"no built wheel found for {wheel_package} in dist/"
+                    )
+                _assert_wheel_bundles_core(built)
         runner.upload_all()
     except RunnerError as exc:
         print(f"error: {exc}", file=sys.stderr)
