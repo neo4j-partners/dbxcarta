@@ -318,6 +318,19 @@ Phase 4 deletes) were removed rather than rewritten. Suite passes apart from a
 pre-existing bootstrap test failure from Phase 1's uncommitted submit changes
 and three live-Databricks integration tests.
 
+Review refinement: folding `NOT NULL` inline surfaced a real behavior shift the
+plan had not anticipated. The committed schemapile blueprint has 11 tables whose
+sample rows carry a NULL in a declared PK column. With inline `NOT NULL`, the one
+atomic `INSERT OVERWRITE` for such a table fails on the null, so under
+`on_insert_error="skip"` the table would land with its PK but lose *every* sample
+row (the old add-PK-after-insert path tolerated this by leaving the key off and
+keeping the rows). To preserve the rows, `_resolve_primary_key_columns` now also
+takes the prepared sample rows and drops the inline PK when any sample row has a
+NULL in a PK column, restoring the old data-preserving outcome (rows kept, PK
+absent) for exactly those tables. dense (synthetic, non-null `id`) is unaffected:
+all 500 keep their PK; schemapile keeps 130 and drops 11. Covered by two new core
+tests.
+
 ### Phase 3: Commit the blueprint and add config (prep, additive)
 
 What: Move the blueprint JSON out of `.cache` into `examples/<name>/blueprint/`,

@@ -435,6 +435,69 @@ def test_spine_rejects_schema_entry_missing_keys(missing: str) -> None:
         materialize_schemas([entry], catalog="cat", make_execute=_Recorder, property_prefix="ex")
 
 
+def test_spine_drops_pk_when_sample_row_has_null_in_pk_column() -> None:
+    """A NULL in a PK column drops the inline PK so the rows still load.
+
+    Inline ``NOT NULL`` would reject the null-PK row and fail the whole
+    ``INSERT OVERWRITE`` (one atomic statement), losing every row for the table.
+    Dropping the key keeps the data; the table just lands without its
+    informational primary key.
+    """
+    rec = _Recorder()
+    schemas = [
+        {
+            "uc_schema": "s",
+            "source_id": "src",
+            "tables": [
+                {
+                    "name": "t",
+                    "columns": [{"name": "id", "type": "int"}, {"name": "v", "type": "text"}],
+                    "primary_keys": ["id"],
+                    "foreign_keys": [],
+                    "rows": [[1, "a"], [None, "b"]],  # second row has a null PK
+                }
+            ],
+        }
+    ]
+    stats = materialize_schemas(
+        schemas, catalog="cat", make_execute=lambda: rec, property_prefix="ex"
+    )
+    joined = "\n".join(rec.statements)
+    assert "PRIMARY KEY" not in joined
+    assert "NOT NULL" not in joined
+    assert stats.pk_constraints_added == 0
+    assert stats.tables_created == 1
+    assert stats.rows_inserted == 2  # both rows kept, including the null-PK row
+
+
+def test_spine_keeps_pk_when_pk_column_has_no_nulls() -> None:
+    """The null gate is row-data-specific: clean PK data still folds the key."""
+    rec = _Recorder()
+    schemas = [
+        {
+            "uc_schema": "s",
+            "source_id": "src",
+            "tables": [
+                {
+                    "name": "t",
+                    "columns": [{"name": "id", "type": "int"}, {"name": "v", "type": "text"}],
+                    "primary_keys": ["id"],
+                    "foreign_keys": [],
+                    "rows": [[1, "a"], [2, None]],  # null in a non-PK column is fine
+                }
+            ],
+        }
+    ]
+    stats = materialize_schemas(
+        schemas, catalog="cat", make_execute=lambda: rec, property_prefix="ex"
+    )
+    joined = "\n".join(rec.statements)
+    assert "`id` INT NOT NULL" in joined
+    assert "CONSTRAINT `pk_t` PRIMARY KEY (`id`)" in joined
+    assert stats.pk_constraints_added == 1
+    assert stats.rows_inserted == 2
+
+
 def test_spine_skips_pk_when_column_dropped() -> None:
     schemas = [
         {

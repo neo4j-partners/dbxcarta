@@ -417,9 +417,11 @@ def _materialize_table(
     The primary key is declared inline: its columns carry ``NOT NULL`` and the
     statement ends with an inline ``CONSTRAINT ... PRIMARY KEY (...)`` clause, so
     one ``CREATE`` replaces the former create / set-not-null / add-constraint
-    sequence. A key whose columns did not all survive sanitization is dropped
-    (no clause emitted) rather than partially declared. Foreign keys remain a
-    second pass, since they reference tables that may not exist yet.
+    sequence. A key is dropped (no clause emitted) when its columns did not all
+    survive sanitization, or when a sample row carries a NULL in a PK column
+    (which the inline ``NOT NULL`` would reject, failing the whole insert);
+    dropping it keeps the rows. Foreign keys remain a second pass, since they
+    reference tables that may not exist yet.
 
     Returns ``(record, stats)``; ``record`` is ``None`` when the table is
     skipped (unusable name, no columns, no coercible columns, or a tolerated
@@ -472,11 +474,26 @@ def _materialize_table(
         return None, stats
 
     safe_col_set = frozenset(safe_col_names)
+
+    # Prepare the sample rows down to the surviving columns up front, so the
+    # null-aware PK gate below and the INSERT later both work from the same
+    # rows: each kept row aligns positionally with safe_col_names.
+    kept_rows = [
+        tuple(v for v, keep in zip(row, keep_col_mask, strict=False) if keep)
+        for row in (table.get("rows") or [])
+    ]
+    kept_rows = [r for r in kept_rows if len(r) == len(safe_col_names)]
+
     # Primary key, folded into the CREATE: a valid key declares its columns NOT
     # NULL and an inline CONSTRAINT clause in the one statement, so UC's
     # NOT-NULL-before-PK requirement is satisfied without a follow-up ALTER. An
-    # invalid key resolves to no columns, so no clause is emitted.
-    pk_cols = _resolve_primary_key_columns(table.get("primary_keys") or [], safe_col_set)
+    # invalid key, or one whose sample rows carry a NULL in a PK column (which
+    # the inline NOT NULL would reject, failing the whole INSERT and dropping
+    # every row), resolves to no columns, so no clause is emitted and the rows
+    # are kept.
+    pk_cols = _resolve_primary_key_columns(
+        table.get("primary_keys") or [], safe_col_names, kept_rows
+    )
     pk_col_set = frozenset(pk_cols)
     col_defs = [
         f"{quote_identifier(name)} {delta_type}" + (" NOT NULL" if name in pk_col_set else "")
@@ -513,22 +530,15 @@ def _materialize_table(
     if pk_cols:
         stats.pk_constraints_added += 1
 
-    raw_rows = table.get("rows") or []
-    if raw_rows:
-        kept_rows = [
-            tuple(v for v, keep in zip(row, keep_col_mask, strict=False) if keep)
-            for row in raw_rows
-        ]
-        kept_rows = [r for r in kept_rows if len(r) == len(safe_col_names)]
-        if kept_rows:
-            insert_sql = build_insert_statement(fq, safe_col_names, kept_rows)
-            try:
-                execute(insert_sql, f"INSERT OVERWRITE {fq}")
-                stats.rows_inserted += len(kept_rows)
-            except _WAREHOUSE_ERRORS as exc:
-                if on_insert_error == "raise":
-                    raise
-                log.warning("insert failed for %s: %s", fq, exc)
+    if kept_rows:
+        insert_sql = build_insert_statement(fq, safe_col_names, kept_rows)
+        try:
+            execute(insert_sql, f"INSERT OVERWRITE {fq}")
+            stats.rows_inserted += len(kept_rows)
+        except _WAREHOUSE_ERRORS as exc:
+            if on_insert_error == "raise":
+                raise
+            log.warning("insert failed for %s: %s", fq, exc)
 
     return (
         _MaterializedTable(
@@ -540,18 +550,35 @@ def _materialize_table(
     )
 
 
-def _resolve_primary_key_columns(primary_keys: list[str], column_set: frozenset[str]) -> list[str]:
+def _resolve_primary_key_columns(
+    primary_keys: list[str],
+    column_names: Sequence[str],
+    rows: Sequence[Sequence[Any]],
+) -> list[str]:
     """Return the sanitized PK columns to fold into the CREATE, or ``[]``.
 
     UC requires PK columns to be NOT NULL, which the inline CREATE declares
-    alongside the constraint. If any PK column was dropped during sanitization
-    or never landed as a real column, the whole key is dropped (an empty list,
-    so no inline clause is emitted), since a partial PK would be wrong. Pure: it
-    decides which columns the caller declares, and runs no SQL.
+    alongside the constraint. The whole key is dropped (an empty list, so no
+    inline clause is emitted) in two cases, since both would otherwise be wrong:
+
+    - any PK column was dropped during sanitization or never landed as a real
+      column, which would make the key partial; or
+    - a prepared sample ``row`` carries a NULL in a PK column. The inline NOT
+      NULL would reject that row and fail the whole ``INSERT OVERWRITE``, losing
+      every row; dropping the key keeps the data (the table lands without its
+      informational PK, matching the old add-PK-after-insert behavior).
+
+    Pure: it decides which columns the caller declares, and runs no SQL.
+    ``column_names`` is the surviving-column order that each ``rows`` tuple
+    aligns to.
     """
+    column_set = set(column_names)
     safe_pk_cols = [sanitize_identifier(c, prefix="c") for c in primary_keys]
     safe_pk_cols = [c for c in safe_pk_cols if c and c in column_set]
     if not safe_pk_cols or len(safe_pk_cols) != len(primary_keys):
+        return []
+    pk_indexes = [column_names.index(c) for c in safe_pk_cols]
+    if any(row[i] is None for row in rows for i in pk_indexes):
         return []
     return safe_pk_cols
 
