@@ -24,7 +24,8 @@ dependency is satisfied.
 - [x] **Overlay** — ops moved to `dbxcarta-catalog.dense_ops`, comma-list teardown,
   stale comments rewritten.
 - [x] **Materialize** — `CREATE CATALOG IF NOT EXISTS` for the data catalog.
-- [x] **Standalone `config.py`** — `volume_path`/`questions_path` read env, ops fallback.
+- [x] **Standalone `config.py`** — `volume_path` reads `DATABRICKS_VOLUME_PATH` (required, no
+  fallback); `questions_path` reads `DBXCARTA_CLIENT_QUESTIONS`, defaulting under the ops volume.
 - [x] **Standalone `.env` / `.env.sample`** — ops location; `.env.sample` catalog fixed.
 - [x] **Preset** — readiness queries the data catalog, not `schemapile_lakehouse`.
 - [x] **Docs** — README rewritten for the standalone-catalog, split-plane design.
@@ -39,8 +40,12 @@ dependency is satisfied.
   which deliberately keeps the default off the environment so module-level
   construction of the `preset` singleton at import time does not depend on env
   load order. Net effect is the same: readiness queries the data catalog.
-- **`SCHEMAPILE_META_SCHEMA` / `SCHEMAPILE_VOLUME` kept** as the in-catalog
-  fallback inputs for `volume_path`, matching schemapile, rather than dropped.
+- **`SCHEMAPILE_META_SCHEMA` / `SCHEMAPILE_VOLUME` dropped.** A follow-up cleanup
+  removed these keys and the in-catalog fallback from both dense and schemapile:
+  `volume_path` now reads `DATABRICKS_VOLUME_PATH` as a required value, so a
+  missing ops path fails loudly instead of silently deriving a path inside the
+  data catalog. The dense `config.py` no longer reads the `SCHEMAPILE_*` names at
+  all (they were a copy-paste leak into a non-schemapile example).
 - **Config blocklist** now also refuses `dbxcarta-catalog` as a data catalog, so
   `DBXCARTA_CATALOG` can never be set to the shared ops catalog.
 - **Pre-existing mypy gaps.** `materialize.py`'s `_execute` has two pre-existing
@@ -158,11 +163,13 @@ The `volume_path` property derives `/Volumes/{catalog}/{meta_schema}/{volume}`
 from the data catalog, which conflates data and ops. Untangle it the way
 clean-schemapile untangles schemapile's config:
 
-- Make `volume_path` read `DATABRICKS_VOLUME_PATH` from env, falling back to the
-  derived ops path `/Volumes/dbxcarta-catalog/dense_ops/dbxcarta-ops` rather than a
-  data-catalog path.
-- Make `questions_path` read `DBXCARTA_CLIENT_QUESTIONS` from env, falling back to
-  the ops location, not `/Volumes/{catalog}/_meta/schemapile_volume/...`.
+- Make `volume_path` read `DATABRICKS_VOLUME_PATH` from env as a **required**
+  value. There is no in-catalog fallback: a missing ops path fails loudly rather
+  than silently deriving a path inside the data catalog. (The earlier draft kept
+  a fallback to the derived ops path; the follow-up cleanup removed it so the
+  separation is enforced, not merely configured.)
+- Make `questions_path` read `DBXCARTA_CLIENT_QUESTIONS` from env, defaulting
+  under the ops volume, not `/Volumes/{catalog}/_meta/schemapile_volume/...`.
 - The `catalog` field stays the data catalog `dense-schema_example` that
   materialize writes tables into.
 
@@ -172,10 +179,10 @@ clean-schemapile untangles schemapile's config:
   `DBXCARTA_SUMMARY_TABLE`, and `DBXCARTA_CLIENT_QUESTIONS` at the ops location.
 - Fix `.env.sample`, which still sets `DBXCARTA_CATALOG=schemapile_lakehouse`, to
   `DBXCARTA_CATALOG=dense-schema_example`.
-- The leftover `SCHEMAPILE_META_SCHEMA` and `SCHEMAPILE_VOLUME` keys are no longer
-  the source of the ops path once `volume_path` reads env directly. Drop them from
-  the dense `.env`/`.env.sample`, or repurpose them as the ops fallback inputs, but
-  do not let them keep deriving an ops path inside the data catalog.
+- Drop the leftover `SCHEMAPILE_META_SCHEMA` and `SCHEMAPILE_VOLUME` keys from the
+  dense `.env`/`.env.sample`. Once `volume_path` reads `DATABRICKS_VOLUME_PATH`
+  directly they are no longer the source of the ops path, and they only ever
+  derived an ops path inside the data catalog. The follow-up cleanup removed them.
 
 ### Preset: `preset.py`
 
@@ -197,7 +204,9 @@ clean-schemapile untangles schemapile's config:
 ### Tests
 
 - Add a config test asserting `volume_path` and `questions_path` read the ops env
-  vars and fall back to the ops path, not a data-catalog path.
+  vars, and that a missing `DATABRICKS_VOLUME_PATH` raises rather than deriving a
+  data-catalog path. Add a test that the shared `dbxcarta-catalog` is rejected as
+  a data catalog.
 - Add a materialize test asserting `CREATE CATALOG IF NOT EXISTS` is issued before
   the first `CREATE SCHEMA`.
 - Add a preset test asserting readiness queries the data catalog
@@ -208,7 +217,9 @@ clean-schemapile untangles schemapile's config:
 - The `_meta`-inside-data-catalog conflation for dense, by layout rather than by
   filter.
 - The stale `schemapile_lakehouse` references in the overlay comments, the
-  `.env.sample`, and the preset default.
+  `.env.sample`, the preset default, and `filter_questions.py`'s catalog default.
+- The in-catalog `volume_path` fallback and the `SCHEMAPILE_META_SCHEMA` /
+  `SCHEMAPILE_VOLUME` keys, so no code path can route ops into the data catalog.
 - The teardown that orphaned dense's catalog and ops schema.
 
 ## What this keeps

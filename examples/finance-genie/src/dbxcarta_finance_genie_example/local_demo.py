@@ -279,7 +279,7 @@ def run_graph_rag_question(
 
 
 def _load_settings() -> ClientSettings:
-    return ClientSettings()  # type: ignore[call-arg]
+    return ClientSettings()
 
 
 def _resolve_question(

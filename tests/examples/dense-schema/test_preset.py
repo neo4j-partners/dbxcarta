@@ -1,36 +1,29 @@
 from __future__ import annotations
 
-import sys
-
-import pytest
-
-from dbxcarta_dense_schema_example.preset import DenseSchemaPreset, preset
-
-
-def test_preset_targets_dense_data_catalog() -> None:
-    assert preset.catalog == "dense-schema_example"
-
-
-def test_preset_rejects_invalid_identifier() -> None:
-    with pytest.raises(ValueError):
-        DenseSchemaPreset(catalog="invalid catalog name with spaces")
+from dbxcarta.spark.loader import load_preset
+from dbxcarta.spark.presets import (
+    Preset,
+    QuestionsUploadable,
+    ReadinessCheckable,
+    StandardPreset,
+)
+from dbxcarta_dense_schema_example import preset
 
 
-def test_readiness_queries_the_data_catalog(monkeypatch: pytest.MonkeyPatch) -> None:
-    captured: dict[str, str] = {}
+def test_preset_is_the_shared_standard_preset() -> None:
+    assert isinstance(preset, StandardPreset)
 
-    def fake_fetch(ws: object, warehouse_id: str, catalog: str) -> list[str]:
-        captured["catalog"] = catalog
-        return ["dense_1000"]
 
-    # The package re-exports the `preset` instance, which shadows the module
-    # for monkeypatch's dotted-string form, so patch the module object directly.
-    preset_module = sys.modules[DenseSchemaPreset.__module__]
-    monkeypatch.setattr(preset_module, "_fetch_schema_names", fake_fetch)
-    monkeypatch.setenv("DBXCARTA_SCHEMAS", "dense_1000")
+def test_preset_satisfies_protocols() -> None:
+    assert isinstance(preset, Preset)
+    assert isinstance(preset, ReadinessCheckable)
+    assert isinstance(preset, QuestionsUploadable)
 
-    report = preset.readiness(ws=None, warehouse_id="wh")  # type: ignore[arg-type]
 
-    assert captured["catalog"] == "dense-schema_example"
-    assert report.present == ("dense_1000",)
-    assert report.missing_required == ()
+def test_preset_resolvable_via_import_path() -> None:
+    assert load_preset("dbxcarta_dense_schema_example:preset") is preset
+
+
+def test_preset_bundles_questions_at_example_root() -> None:
+    assert preset.questions_file.name == "questions.json"
+    assert preset.questions_file.parent.name == "dense-schema"

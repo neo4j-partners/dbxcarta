@@ -1,14 +1,5 @@
-"""dbxcarta dense-schema Phase G example.
+"""dbxcarta preset package for this example. See preset.py."""
 
-Pass `dbxcarta_dense_schema_example:preset` to the dbxcarta CLI:
+from .preset import preset
 
-    uv run dbxcarta preset dbxcarta_dense_schema_example:preset --check-ready
-    uv run dbxcarta preset dbxcarta_dense_schema_example:preset --upload-questions
-"""
-
-from dbxcarta_dense_schema_example.preset import (
-    DenseSchemaPreset,
-    preset,
-)
-
-__all__ = ["DenseSchemaPreset", "preset"]
+__all__ = ["preset"]

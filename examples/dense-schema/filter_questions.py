@@ -22,13 +22,18 @@ from pathlib import Path
 _DEFAULT_EXCLUDE: set[str] = {"single_table_filter"}
 _SCHEMA_RE = re.compile(r"`([^`]+)`\.\`([^`]+)`\.\`[^`]+`")
 
+# Fallback (catalog, schema) when no fully-qualified table reference is found.
+# dense materializes into its own data catalog, so this is dense-schema_example,
+# not the old shared-with-schemapile catalog.
+_DEFAULT_CATALOG_SCHEMA: tuple[str, str] = ("dense-schema_example", "dense_1000")
+
 
 def _detect_schema(sql: str) -> tuple[str, str]:
     """Return (catalog, schema) from the first fully-qualified table reference."""
     m = _SCHEMA_RE.search(sql)
     if m:
         return m.group(1), m.group(2)
-    return "schemapile_lakehouse", "dense_1000"
+    return _DEFAULT_CATALOG_SCHEMA
 
 
 def _load_batches(batch_dir: Path) -> list[dict]:
@@ -139,7 +144,7 @@ def main() -> int:
             deduped.append(q)
 
     # Detect catalog/schema from first SQL
-    catalog, schema = _detect_schema(deduped[0]["sql"]) if deduped else ("schemapile_lakehouse", "dense_1000")
+    catalog, schema = _detect_schema(deduped[0]["sql"]) if deduped else _DEFAULT_CATALOG_SCHEMA
     source_id = f"synthetic_{schema.split('_')[-1]}" if "_" in schema else schema
 
     output = _format_output(deduped, catalog, schema, source_id, args.id_prefix)

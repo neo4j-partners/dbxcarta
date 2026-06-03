@@ -36,8 +36,8 @@ _REL_SRC = re.compile(r"\(src:(\w+)\)-\[r:(\w+)\]")
 _CATALOG = "graph-enriched-lakehouse"
 _SCHEMA = "graph-enriched-schema"
 
-# A medallion-style multi-catalog set (the production Finance Genie shape).
-_BRONZE = "graph-enriched-finance-bronze"
+# A medallion-style multi-catalog set (the production Finance Genie shape:
+# silver and gold, folded into one graph).
 _SILVER = "graph-enriched-finance-silver"
 _GOLD = "graph-enriched-finance-gold"
 
@@ -117,11 +117,8 @@ def test_scoped_catalogs_falls_back_to_single_when_list_empty():
 
 
 def test_scoped_catalogs_normalizes_every_resolved_catalog():
-    ids, prefixes = verify.scoped_catalogs(
-        {"catalog": _SILVER}, [_BRONZE, _SILVER, _GOLD]
-    )
+    ids, prefixes = verify.scoped_catalogs({"catalog": _SILVER}, [_SILVER, _GOLD])
     assert ids == [
-        "graph_enriched_finance_bronze",
         "graph_enriched_finance_silver",
         "graph_enriched_finance_gold",
     ]
@@ -164,24 +161,20 @@ def test_node_counts_still_flag_a_real_mismatch():
 
 
 def test_node_counts_pass_for_multi_catalog_aggregate():
-    """A medallion run: 3 catalogs written, summary counts the aggregate.
+    """A medallion run: 2 catalogs written, summary counts the aggregate.
 
     Scoping to only the primary (silver) catalog would see 1 Database / 1
-    Schema / 2 Tables / 3 Columns and mismatch the 3/3/6/9 aggregate. With the
+    Schema / 2 Tables / 3 Columns and mismatch the 2/2/4/6 aggregate. With the
     full resolved-catalog scope the sums match.
     """
-    nodes = (
-        _graph_nodes(_BRONZE, _SCHEMA)
-        + _graph_nodes(_SILVER, _SCHEMA)
-        + _graph_nodes(_GOLD, _SCHEMA)
-    )
+    nodes = _graph_nodes(_SILVER, _SCHEMA) + _graph_nodes(_GOLD, _SCHEMA)
     summary = {
         "catalog": _SILVER,
-        "row_counts": {"databases": 3, "schemas": 3, "tables": 6, "columns": 9},
+        "row_counts": {"databases": 2, "schemas": 2, "tables": 4, "columns": 6},
     }
     assert (
         graph_mod._check_node_counts(
-            _Driver(nodes), summary, catalogs=[_BRONZE, _SILVER, _GOLD]
+            _Driver(nodes), summary, catalogs=[_SILVER, _GOLD]
         )
         == []
     )
@@ -189,15 +182,15 @@ def test_node_counts_pass_for_multi_catalog_aggregate():
 
 def test_node_counts_multi_catalog_flags_missing_catalog():
     """If one catalog's nodes are missing, the aggregate still mismatches."""
-    nodes = _graph_nodes(_BRONZE, _SCHEMA) + _graph_nodes(_SILVER, _SCHEMA)
+    nodes = _graph_nodes(_SILVER, _SCHEMA)
     summary = {
         "catalog": _SILVER,
-        "row_counts": {"databases": 3, "schemas": 3, "tables": 6, "columns": 9},
+        "row_counts": {"databases": 2, "schemas": 2, "tables": 4, "columns": 6},
     }
     codes = {
         v.code
         for v in graph_mod._check_node_counts(
-            _Driver(nodes), summary, catalogs=[_BRONZE, _SILVER, _GOLD]
+            _Driver(nodes), summary, catalogs=[_SILVER, _GOLD]
         )
     }
     assert "graph.node_count_mismatch.Database" in codes
@@ -218,21 +211,20 @@ def test_references_edge_count_multi_catalog_aggregate():
     """Inferred edges land per-catalog (cross-catalog pairing is blocked); the
     aggregate REFERENCES total must sum across every resolved catalog."""
     rels = [
-        ("REFERENCES", generate_id(_BRONZE, _SCHEMA, "orders", "customer_id")),
         ("REFERENCES", generate_id(_SILVER, _SCHEMA, "orders", "customer_id")),
         ("REFERENCES", generate_id(_GOLD, _SCHEMA, "orders", "customer_id")),
     ]
     summary = {
         "catalog": _SILVER,
-        "row_counts": {"fk_edges": 0, "fk_inferred_metadata_accepted": 3},
+        "row_counts": {"fk_edges": 0, "fk_inferred_metadata_accepted": 2},
     }
     assert (
         references_mod._check_edge_count(
-            _Driver(nodes=(), rels=rels), summary, catalogs=[_BRONZE, _SILVER, _GOLD]
+            _Driver(nodes=(), rels=rels), summary, catalogs=[_SILVER, _GOLD]
         )
         == []
     )
-    # Scoping to silver alone would see 1, not the aggregate 3 -> mismatch.
+    # Scoping to silver alone would see 1, not the aggregate 2 -> mismatch.
     assert references_mod._check_edge_count(_Driver(nodes=(), rels=rels), summary)
 
 
@@ -247,17 +239,17 @@ def test_value_count_scoped_with_hyphenated_catalog():
 
 
 def test_value_count_multi_catalog_aggregate():
-    bronze_col = generate_id(_BRONZE, _SCHEMA, "orders", "status")
     silver_col = generate_id(_SILVER, _SCHEMA, "orders", "status")
+    gold_col = generate_id(_GOLD, _SCHEMA, "orders", "status")
     value_nodes = [
-        ("Value", generate_value_id(bronze_col, "open")),
-        ("Value", generate_value_id(bronze_col, "closed")),
         ("Value", generate_value_id(silver_col, "open")),
+        ("Value", generate_value_id(silver_col, "closed")),
+        ("Value", generate_value_id(gold_col, "open")),
     ]
     summary = {"catalog": _SILVER, "row_counts": {"value_nodes": 3}}
     assert (
         values_mod._check_value_count(
-            _Driver(value_nodes), summary, catalogs=[_BRONZE, _SILVER, _GOLD]
+            _Driver(value_nodes), summary, catalogs=[_SILVER, _GOLD]
         )
         == []
     )

@@ -14,6 +14,7 @@ import argparse
 import hashlib
 import json
 import logging
+import random
 import re
 import sys
 import textwrap
@@ -149,8 +150,6 @@ def _generate_all(
     table_names = [n for n in table_names if n]
 
     pairs: list[GeneratedPair] = []
-    import random
-
     rng = random.Random(config.seed)
     batch_idx = 0
     candidate_target = config.questions_target * _CANDIDATE_MULTIPLIER
@@ -213,7 +212,7 @@ def _build_fk_graph(tables: list[dict[str, Any]]) -> dict[str, set[str]]:
 def _expand_subgraph(
     seed: str,
     graph: dict[str, set[str]],
-    rng,
+    rng: random.Random,
 ) -> list[str]:
     visited: set[str] = set()
     queue: deque[tuple[str, int]] = deque([(seed, 0)])

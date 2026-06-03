@@ -111,10 +111,14 @@ The standalone tooling derives its volume path from the data catalog
 (`/Volumes/{catalog}/{meta_schema}/{volume}`), which conflates data and ops.
 Untangle it:
 
-- Make `config.volume_path` and `questions_path` read `DATABRICKS_VOLUME_PATH`
-  and `DBXCARTA_CLIENT_QUESTIONS` directly from env, falling back to a derived
-  ops path rather than a data-catalog path. The `catalog` field stays the data
-  catalog that materialize writes tables into.
+- Make `config.volume_path` read `DATABRICKS_VOLUME_PATH` directly from env as a
+  **required** value, and `questions_path` read `DBXCARTA_CLIENT_QUESTIONS`,
+  defaulting under the ops volume. There is no in-catalog fallback: a missing
+  volume path fails loudly rather than deriving a data-catalog path. (The earlier
+  draft kept a derived-ops-path fallback; the post-review cleanup above removed it,
+  along with the vestigial `meta_schema`/`volume` fields and their `SCHEMAPILE_*`
+  env reads.) The `catalog` field stays the data catalog that materialize writes
+  tables into.
 - Point `DATABRICKS_VOLUME_PATH`, `DBXCARTA_SUMMARY_*`, and
   `DBXCARTA_CLIENT_QUESTIONS` in `.env` and `.env.sample` at the ops location.
 - `DBXCARTA_SCHEMAS` in `.env` is already blank; update the stale comment that
@@ -145,12 +149,15 @@ Untangle it:
 
 ### Tests
 
-- `test_config.py`: update the `volume_path` assertion for the new env-driven
-  derivation.
+- `test_config.py`: assert `volume_path`/`questions_path` read the ops env vars,
+  and that a missing `DATABRICKS_VOLUME_PATH` raises rather than deriving a
+  data-catalog path. Add a test that the shared `dbxcarta-catalog` is rejected as
+  a data catalog.
 - Check `test_materialize.py` for any assertion that the step writes a schema
   list or `.env.generated`, and drop it.
-- The `meta_schema="_meta"` fixtures in the example tests can stay; `_meta` is
-  still the default for the standalone config's derive fallback.
+- Drop the `meta_schema="_meta"` / `volume="schemapile_volume"` kwargs from the
+  example-test config fixtures: those fields were removed in the cleanup above, so
+  the fixtures construct `SchemaPileConfig` without them.
 
 ## What this removes
 

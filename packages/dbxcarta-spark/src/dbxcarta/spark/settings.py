@@ -21,6 +21,32 @@ from dbxcarta.spark.databricks import (
 )
 
 
+def resolve_catalogs(catalog: str, catalogs: str) -> list[str]:
+    """Catalogs to ingest, order-preserving and de-duplicated.
+
+    The single source of truth for "which catalogs does this run touch".
+    Both the readiness check and the pipeline resolve their catalog set
+    through this one function, so they can never disagree.
+
+    Each entry in ``catalogs`` is ``catalog`` or ``catalog:layer``; the
+    ``:layer`` suffix is stripped here. A blank list falls back to the single
+    ``catalog``, preserving the historical single-catalog behavior. Duplicates
+    are collapsed: a repeated catalog would otherwise double-count extract
+    totals and re-write every node. Every resolved name is validated with the
+    same rule the pipeline uses, so a malformed catalog fails loud wherever the
+    list is resolved.
+    """
+    listed: list[str] = []
+    for part in catalogs.split(","):
+        name = part.split(":", 1)[0].strip()
+        if name:
+            listed.append(name)
+    resolved = list(dict.fromkeys(listed)) or [catalog]
+    for name in resolved:
+        validate_identifier(name, label="catalog")
+    return resolved
+
+
 class SparkIngestSettings(BaseSettings):
     """Environment-backed configuration for the ingest job.
 
@@ -50,16 +76,12 @@ class SparkIngestSettings(BaseSettings):
     # verification coverage shrinks as catalogs are added. Widening verify to
     # every resolved catalog is deferred to a follow-up (each extra catalog
     # multiplies the warehouse information_schema queries).
+    # Each entry is `catalog` or `catalog:layer` (e.g.
+    # "cat-silver:silver,cat-gold:gold"). The optional `:layer` suffix drives
+    # the Table node `layer` property; an entry with no suffix yields
+    # layer=null. The layer rides on the catalog entry rather than a separate
+    # map, so the layer cannot name a catalog the run never ingests.
     dbxcarta_catalogs: str = ""
-    # Comma-separated catalog:layer pairs (e.g.
-    # "cat-bronze:bronze,cat-silver:silver,cat-gold:gold"). Drives the Table
-    # node `layer` property. Catalogs absent from the map yield layer=null.
-    # Config, not a name-prefix regex, so it does not become a new hardcode.
-    # Every catalog named here must also be an ingested catalog (see the
-    # cross-field validator) — a layer mapped to a catalog that is never
-    # ingested is dead config and almost always a typo, so it is rejected at
-    # startup rather than silently producing all-null layers.
-    dbxcarta_layer_map: str = ""
     # Comma-separated list of bare schema names under each ingested catalog.
     # Blank string means "every schema in the catalog". Whitespace around each
     # name is stripped. Metadata FK inference is restricted to column pairs
@@ -145,57 +167,54 @@ class SparkIngestSettings(BaseSettings):
     @field_validator("dbxcarta_catalogs")
     @classmethod
     def _validate_catalogs(cls, v: str) -> str:
-        """Validate each catalog in the multi-catalog ingest list, if set."""
-        for part in v.split(","):
-            name = part.strip()
-            if name:
-                validate_identifier(name, label="catalog")
-        return v
+        """Validate each entry in the multi-catalog ingest list, if set.
 
-    @field_validator("dbxcarta_layer_map")
-    @classmethod
-    def _validate_layer_map(cls, v: str) -> str:
-        """Validate catalog:layer pairs. Catalog must be a safe identifier;
-        layer must be a non-empty bare token (letters, digits, underscore)."""
+        Each entry is ``catalog`` or ``catalog:layer``. The catalog must be a
+        safe identifier; when a ``:layer`` suffix is present it must be a single
+        non-empty alphanumeric/underscore token. A malformed entry like ``cat:``
+        or ``cat:a:b`` fails at startup rather than surfacing as a confusing
+        graph attribute.
+        """
         for part in v.split(","):
             entry = part.strip()
             if not entry:
                 continue
-            if entry.count(":") != 1:
+            if entry.count(":") > 1:
                 raise ValueError(
-                    f"Invalid DBXCARTA_LAYER_MAP entry {entry!r};"
-                    " expected exactly one 'catalog:layer' pair"
+                    f"Invalid DBXCARTA_CATALOGS entry {entry!r};"
+                    " expected 'catalog' or a single 'catalog:layer' pair"
                 )
-            catalog, layer = (s.strip() for s in entry.split(":"))
-            validate_identifier(catalog, label="layer-map catalog")
-            if not layer or not layer.replace("_", "").isalnum():
-                raise ValueError(
-                    f"Invalid DBXCARTA_LAYER_MAP layer {layer!r};"
-                    " expected a non-empty alphanumeric/underscore token"
-                )
+            name, sep, layer = entry.partition(":")
+            validate_identifier(name.strip(), label="catalog")
+            if sep:
+                layer = layer.strip()
+                if not layer or not layer.replace("_", "").isalnum():
+                    raise ValueError(
+                        f"Invalid DBXCARTA_CATALOGS layer {layer!r};"
+                        " expected a non-empty alphanumeric/underscore token"
+                    )
         return v
 
     def resolved_catalogs(self) -> list[str]:
-        """Catalogs to ingest, order-preserving and de-duplicated.
+        """Catalogs to ingest, resolved through the shared parser.
 
-        Falls back to the single dbxcarta_catalog when dbxcarta_catalogs is
-        blank, preserving historical behavior. Duplicates in the list are
-        collapsed: Neo4j MERGE-on-id would dedupe the nodes anyway, but a
-        repeated catalog would otherwise double-count extract totals and
-        re-write every node, so the dedupe happens here at the single source
-        of truth for "which catalogs does this run touch".
+        Delegates to the module-level :func:`resolve_catalogs` so readiness and
+        the pipeline resolve the identical catalog set from the same input.
         """
-        listed = [c.strip() for c in self.dbxcarta_catalogs.split(",") if c.strip()]
-        return list(dict.fromkeys(listed)) or [self.dbxcarta_catalog]
+        return resolve_catalogs(self.dbxcarta_catalog, self.dbxcarta_catalogs)
 
     def layer_map(self) -> dict[str, str]:
-        """Parsed catalog -> layer mapping. Empty when unset."""
+        """Parsed catalog -> layer mapping, read from dbxcarta_catalogs.
+
+        Each entry is ``catalog`` or ``catalog:layer``; an entry with no layer
+        suffix contributes no mapping, so its Table nodes carry a null layer.
+        """
         out: dict[str, str] = {}
-        for part in self.dbxcarta_layer_map.split(","):
+        for part in self.dbxcarta_catalogs.split(","):
             entry = part.strip()
-            if not entry:
+            if not entry or ":" not in entry:
                 continue
-            catalog, layer = (s.strip() for s in entry.split(":"))
+            catalog, layer = (s.strip() for s in entry.split(":", 1))
             out[catalog] = layer
         return out
 
@@ -254,14 +273,9 @@ class SparkIngestSettings(BaseSettings):
     def _validate_feature_coherence(self) -> "SparkIngestSettings":
         """Cross-field sanity checks.
 
-        Fail at Settings construction (i.e., job startup) rather than halfway
-        through a run. Two known incoherence cases today:
-
-        1. Value embeddings require sample-values to be enabled — there are
-           no Value nodes to embed otherwise.
-        2. Every dbxcarta_layer_map catalog must be an ingested catalog —
-           a layer mapped to a never-ingested catalog is silently dead
-           config (all-null layers) and is almost always a typo.
+        Fail at Settings construction (job startup) rather than halfway through
+        a run. Value embeddings require sample-values to be enabled: there are
+        no Value nodes to embed otherwise.
         """
         if (
             self.dbxcarta_include_embeddings_values
@@ -270,14 +284,5 @@ class SparkIngestSettings(BaseSettings):
             raise ValueError(
                 "DBXCARTA_INCLUDE_EMBEDDINGS_VALUES=true requires"
                 " DBXCARTA_INCLUDE_VALUES=true (nothing to embed otherwise)"
-            )
-        ingested = set(self.resolved_catalogs())
-        unknown = sorted(set(self.layer_map()) - ingested)
-        if unknown:
-            raise ValueError(
-                f"DBXCARTA_LAYER_MAP references catalog(s) {unknown} that are"
-                " not ingested. Every layer-mapped catalog must appear in"
-                " DBXCARTA_CATALOGS (or be DBXCARTA_CATALOG when the list is"
-                " blank); a layer on a never-ingested catalog is dead config."
             )
         return self

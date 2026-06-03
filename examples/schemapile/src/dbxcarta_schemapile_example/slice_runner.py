@@ -88,7 +88,7 @@ def _cache_is_current(config: SchemaPileConfig) -> bool:
         recorded = json.loads(sidecar.read_text())
     except (OSError, json.JSONDecodeError):
         return False
-    return recorded == _params_fingerprint(config)
+    return bool(recorded == _params_fingerprint(config))
 
 
 def _params_fingerprint(config: SchemaPileConfig) -> dict[str, object]:

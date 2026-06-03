@@ -58,7 +58,7 @@ Neo4j semantic layer.
 **What the build pipeline does:**
 
 - Extracts Unity Catalog metadata across one or more catalogs: table names, column descriptions, comments, and sampled values
-- Tags every table with its medallion layer from a `catalog:layer` map, so bronze, silver, and gold fold into one graph
+- Tags every table with its medallion layer from the `catalog:layer` entries in `DBXCARTA_CATALOGS`; dbxcarta reads only the silver and gold layers, folding them into one graph
 - Embeds each piece using a Databricks foundation model
 - Discovers foreign keys from declared constraints plus metadata and semantic inference, each edge scored by confidence
 - Writes the result to Neo4j as typed nodes with vector properties
@@ -82,7 +82,7 @@ Each node carries:
 - A stable dotted `id` such as `catalog.schema.table.column`, catalog-qualified so a graph spanning multiple catalogs reconstructs full names per node
 - A `description`
 - An `embedding` vector for semantic similarity search (where applicable)
-- For `Table` nodes under graph contract v1.1, a `layer` property recording the medallion tier (`bronze`, `silver`, `gold`) derived from the configured `catalog:layer` map
+- For `Table` nodes under graph contract v1.1, a `layer` property recording the medallion tier (`silver`, `gold`) derived from the `:layer` suffix on each `DBXCARTA_CATALOGS` entry
 
 ![dbxcarta Graph Schema](docs/assets/graph-schema.png)
 
@@ -114,7 +114,7 @@ Unity Catalog metadata flows through a single Spark job that extracts, embeds, a
 - **Unity Catalog:** reads source metadata from `information_schema` across every catalog in `DBXCARTA_CATALOGS` (falling back to the single `DBXCARTA_CATALOG` anchor), including tables, columns, schemas, and sampled values
 - **Preflight:** checks grants, endpoint access, and required configuration before the Spark job does any expensive work
 - **Extract:** unions Unity Catalog metadata from each resolved catalog into Spark DataFrames for every enabled node and relationship type
-- **Transform:** shapes raw metadata into stable graph rows with typed labels, catalog-qualified dotted IDs, descriptions, relationship keys, and the `Table.layer` tier derived from `DBXCARTA_LAYER_MAP`
+- **Transform:** shapes raw metadata into stable graph rows with typed labels, catalog-qualified dotted IDs, descriptions, relationship keys, and the `Table.layer` tier read from the `:layer` suffix on each `DBXCARTA_CATALOGS` entry
 - **Embed:** calls `ai_query` inside Spark for each enabled label; row-level failures are captured instead of aborting the whole run
 - **Delta Staging:** materializes enriched rows once so validation, summaries, and Neo4j writes reuse the same embedding results
 - **Neo4j:** writes nodes and relationships with `MERGE`, then creates or updates the vector indexes used at query time
@@ -128,8 +128,7 @@ from dbxcarta.spark import SparkIngestSettings, run_dbxcarta
 
 settings = SparkIngestSettings(
     dbxcarta_catalog="analytics_silver",
-    dbxcarta_catalogs="analytics_bronze,analytics_silver,analytics_gold",
-    dbxcarta_layer_map="analytics_bronze:bronze,analytics_silver:silver,analytics_gold:gold",
+    dbxcarta_catalogs="analytics_silver:silver,analytics_gold:gold",
     dbxcarta_schemas="finance,customer_success",
     dbxcarta_summary_volume="/Volumes/analytics/ops/dbxcarta/summaries",
     dbxcarta_summary_table="analytics_ops.dbxcarta.dbxcarta_runs",
@@ -140,7 +139,7 @@ settings = SparkIngestSettings(
 run_dbxcarta(settings=settings)
 ```
 
-`dbxcarta_catalog` is the single anchor catalog used for preflight, verify, and ops provisioning. `dbxcarta_catalogs` lists every catalog folded into one graph and is the default model: a build normally spans several catalogs. A single-catalog build remains fully supported; leave `dbxcarta_catalogs` blank and it falls back to the anchor catalog. `dbxcarta_layer_map` carries `catalog:layer` pairs that set the `Table.layer` property; a catalog absent from the map yields a null layer. The summary table's catalog and schema determine the ops catalog, which is kept separate from the data catalogs being mapped.
+`dbxcarta_catalog` is the single anchor catalog used for preflight, verify, and ops provisioning. `dbxcarta_catalogs` lists every catalog folded into one graph and is the default model: a build normally spans several catalogs. A single-catalog build remains fully supported; leave `dbxcarta_catalogs` blank and it falls back to the anchor catalog. Each `dbxcarta_catalogs` entry is `catalog` or `catalog:layer`; the optional `:layer` suffix sets the `Table.layer` property, and an entry with no suffix yields a null layer. The summary table's catalog and schema determine the ops catalog, which is kept separate from the data catalogs being mapped.
 
 The no-argument form, `run_dbxcarta()`, is the Databricks wheel entrypoint. It loads `SparkIngestSettings` from environment variables and runs the same pipeline.
 
@@ -266,8 +265,8 @@ loader; examples own their concrete preset implementations.
 
 [**Follow the Finance Genie Quick Start →**](examples/finance-genie/README.md#quick-start)
 
-- **Layout:** three-catalog medallion. Finance Genie writes raw business tables to bronze and silver, graph-enriched features to gold, named `graph-enriched-finance-bronze`, `-silver`, and `-gold`.
-- **Graph:** dbxcarta folds all three catalogs into one Neo4j semantic layer via `DBXCARTA_CATALOGS`, tagging each table's tier via `DBXCARTA_LAYER_MAP`.
+- **Layout:** two-catalog medallion. Finance Genie writes curated business tables to silver and graph-enriched features to gold, named `graph-enriched-finance-silver` and `-gold`.
+- **Graph:** dbxcarta folds both catalogs into one Neo4j semantic layer via `DBXCARTA_CATALOGS`, tagging each table's tier from the `:layer` suffix on each entry.
 - **Ops catalog:** run summaries and the generation cache land in a separate `dbxcarta-catalog`.
 
 #### SchemaPile

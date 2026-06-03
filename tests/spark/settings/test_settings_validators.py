@@ -181,16 +181,27 @@ def test_resolved_catalogs_strips_whitespace_and_empties() -> None:
     assert s.resolved_catalogs() == ["bronze", "gold"]
 
 
-# --- Layer map ---------------------------------------------------------------
+# --- Layer map (folded into dbxcarta_catalogs) -------------------------------
 
-def test_layer_map_parses_pairs() -> None:
+def test_layer_map_parses_suffixes_from_catalogs() -> None:
     s = SparkIngestSettings(
         dbxcarta_catalog="main",
-        dbxcarta_catalogs="bronze,silver,gold",
-        dbxcarta_layer_map="bronze:bronze, silver:silver ,gold:gold",
+        dbxcarta_catalogs="bronze:bronze, silver:silver ,gold:gold",
         **_BASE_SETTINGS,
     )
     assert s.layer_map() == {"bronze": "bronze", "silver": "silver", "gold": "gold"}
+    # The same list resolves to bare catalog names with the suffix stripped,
+    # so readiness and the pipeline can never disagree on the catalog set.
+    assert s.resolved_catalogs() == ["bronze", "silver", "gold"]
+
+
+def test_layer_map_empty_when_no_suffixes() -> None:
+    s = SparkIngestSettings(
+        dbxcarta_catalog="main",
+        dbxcarta_catalogs="bronze,silver,gold",
+        **_BASE_SETTINGS,
+    )
+    assert s.layer_map() == {}
 
 
 def test_layer_map_empty_by_default() -> None:
@@ -198,60 +209,27 @@ def test_layer_map_empty_by_default() -> None:
     assert s.layer_map() == {}
 
 
-@pytest.mark.parametrize("bad_map", [
-    "bronze",              # no colon
+def test_layer_map_subset_of_catalogs() -> None:
+    """Only some entries carry a suffix; the rest yield a null layer."""
+    s = SparkIngestSettings(
+        dbxcarta_catalog="main",
+        dbxcarta_catalogs="bronze:bronze,silver,gold:gold",
+        **_BASE_SETTINGS,
+    )
+    assert s.layer_map() == {"bronze": "bronze", "gold": "gold"}
+    assert s.resolved_catalogs() == ["bronze", "silver", "gold"]
+
+
+@pytest.mark.parametrize("bad_entry", [
     "bronze:b:extra",      # two colons
     "bronze:",             # empty layer
     "1bad:bronze",         # bad catalog identifier
     "bronze:has space",    # non-alnum layer token
 ])
-def test_settings_rejects_malformed_layer_map(bad_map: str) -> None:
+def test_settings_rejects_malformed_catalog_layer_entry(bad_entry: str) -> None:
     with pytest.raises(ValidationError):
         SparkIngestSettings(
             dbxcarta_catalog="main",
-            dbxcarta_catalogs="bronze",
-            dbxcarta_layer_map=bad_map,
+            dbxcarta_catalogs=bad_entry,
             **_BASE_SETTINGS,
         )
-
-
-def test_settings_rejects_layer_map_for_non_ingested_catalog() -> None:
-    """A layer mapped to a catalog that is never ingested is a typo, not config.
-
-    Cross-field validator turns the otherwise-silent all-null-layer outcome
-    into a startup failure.
-    """
-    with pytest.raises(ValidationError, match="not ingested"):
-        SparkIngestSettings(
-            dbxcarta_catalog="main",
-            dbxcarta_catalogs="bronze,silver",
-            dbxcarta_layer_map="bronze:bronze,glod:gold",  # typo: glod
-            **_BASE_SETTINGS,
-        )
-
-
-def test_settings_accepts_layer_map_subset_of_ingested() -> None:
-    """Mapping only some ingested catalogs is valid; the rest yield null layer."""
-    s = SparkIngestSettings(
-        dbxcarta_catalog="main",
-        dbxcarta_catalogs="bronze,silver,gold",
-        dbxcarta_layer_map="bronze:bronze,gold:gold",
-        **_BASE_SETTINGS,
-    )
-    assert s.layer_map() == {"bronze": "bronze", "gold": "gold"}
-
-
-def test_settings_layer_map_validated_against_single_catalog_fallback() -> None:
-    """When the list is blank, the lone dbxcarta_catalog is the ingested set."""
-    with pytest.raises(ValidationError, match="not ingested"):
-        SparkIngestSettings(
-            dbxcarta_catalog="main",
-            dbxcarta_layer_map="other:gold",
-            **_BASE_SETTINGS,
-        )
-    ok = SparkIngestSettings(
-        dbxcarta_catalog="main",
-        dbxcarta_layer_map="main:gold",
-        **_BASE_SETTINGS,
-    )
-    assert ok.layer_map() == {"main": "gold"}

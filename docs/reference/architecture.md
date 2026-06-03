@@ -26,13 +26,12 @@ the tool's own exhaust.
 ```
                           UNITY CATALOG (the subject)
    ┌───────────────────────────────────────────────────────────────────┐
-   │  graph-enriched-finance-bronze   :bronze                           │
    │  graph-enriched-finance-silver   :silver   (DBXCARTA_CATALOG anchor)│
    │  graph-enriched-finance-gold     :gold                             │
    │     information_schema  +  sampled values        read-only         │
    └───────────────────────────────────────────────────────────────────┘
             │ extract metadata across DBXCARTA_CATALOGS
-            │ layer = DBXCARTA_LAYER_MAP[catalog]
+            │ layer = the :layer suffix on each DBXCARTA_CATALOGS entry
             ▼
    ┌──────────────────────────┐        ┌──────────────────────────────┐
    │   dbxcarta-spark         │        │  NEO4J  (the semantic layer)  │
@@ -63,11 +62,11 @@ DBxCarta. The semantic layer is never polluted by the tool's own records.
 
 The catalogs under evaluation are the source of truth and DBxCarta only reads
 them. For a medallion layout each layer is its own catalog. The finance-genie
-example uses `graph-enriched-finance-bronze`, `-silver`, and `-gold`.
+example uses `graph-enriched-finance-silver` and `-gold`.
 `DBXCARTA_CATALOG` names a single anchor catalog used for preflight, verify, and
 ops provisioning; `DBXCARTA_CATALOGS` lists every catalog folded into one
-semantic layer; `DBXCARTA_LAYER_MAP` carries `catalog:layer` pairs so the layer
-records which medallion tier each table came from. The build reads
+semantic layer, where each entry is `catalog` or `catalog:layer` and the
+optional `:layer` suffix records which medallion tier each table came from. The build reads
 `information_schema` and a bounded sample of values and writes nothing here, so
 the meaning the layer encodes stays anchored to what the data team published.
 
@@ -83,7 +82,7 @@ and are discovered from declared constraints and metadata heuristics, so a join
 path the catalog never declared is still navigable and ranked by how much to
 trust it. The `layer` property under graph contract v1.1
 records each table's medallion tier, so a retriever can prefer the curated gold
-table over a raw bronze one when both could answer a question.
+table over a rawer silver one when both could answer a question.
 
 This plane is the one the client reads at query time, and it is regenerable by
 design. Because Unity Catalog is the source of truth, the semantic layer can be
@@ -133,7 +132,7 @@ three are controls. `reference` executes the ground-truth SQL to establish what
 a correct answer returns. `no_context` gives the model only the catalog name and
 sets the floor. `schema_dump` pastes a bounded schema, capped near two thousand
 tokens and pulled from the graph across every resolved catalog, so the control
-sees bronze, silver, and gold rather than only the anchor. `graph_rag` justifies
+sees silver and gold rather than only the anchor. `graph_rag` justifies
 the build pipeline only if it beats `schema_dump` at this matched token budget
 and both clear `no_context`; the cap is what turns `schema_dump` from a "paste
 everything" strawman into a real competitor for the same budget.

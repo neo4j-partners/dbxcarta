@@ -15,7 +15,7 @@ import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from dbxcarta_schemapile_example.config import SchemaPileConfig, load_config
 from dbxcarta_schemapile_example.utils import load_dotenv_file
@@ -269,9 +269,9 @@ def _sanitize_schema_name(source_id: str, *, used: set[str]) -> str:
 def _load_slice(path: Path) -> dict[str, Any]:
     try:
         import orjson
-        return orjson.loads(path.read_bytes())
+        return cast("dict[str, Any]", orjson.loads(path.read_bytes()))
     except ImportError:
-        return json.loads(path.read_text())
+        return cast("dict[str, Any]", json.loads(path.read_text()))
 
 
 if __name__ == "__main__":

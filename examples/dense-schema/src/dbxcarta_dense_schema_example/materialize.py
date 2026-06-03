@@ -10,6 +10,7 @@ import re
 import sys
 import threading
 import time
+from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -299,7 +300,9 @@ def _render_value(value: Any) -> str:
     return f"'{_sql_escape(str(value))}'"
 
 
-def _build_insert(fq_table: str, col_names: list[str], rows) -> str:
+def _build_insert(
+    fq_table: str, col_names: list[str], rows: Sequence[Sequence[Any]]
+) -> str:
     columns_clause = ", ".join(quote_identifier(c) for c in col_names)
     values_clauses = [
         "(" + ", ".join(_render_value(v) for v in row) + ")" for row in rows
@@ -331,6 +334,10 @@ def _execute(
     )
     state = response.status.state if response.status else StatementState.SUCCEEDED
     statement_id = response.statement_id
+    if statement_id is None:
+        raise RuntimeError(
+            f"No statement id returned for: {label or statement[:80]}"
+        )
 
     deadline = t0 + _STATEMENT_TIMEOUT_S
     while state in (StatementState.PENDING, StatementState.RUNNING):
