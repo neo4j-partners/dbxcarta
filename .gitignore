@@ -154,3 +154,4 @@ docker-tests/.env
 # publish run cannot leave a duplicate core source to be committed by mistake.
 packages/dbxcarta-spark/src/dbxcarta/core/
 packages/dbxcarta-client/src/dbxcarta/core/
+packages/dbxcarta-materialize/src/dbxcarta/core/

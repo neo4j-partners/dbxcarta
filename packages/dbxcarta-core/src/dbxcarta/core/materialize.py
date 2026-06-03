@@ -1,59 +1,34 @@
-"""Shared, example-agnostic plumbing for turning a table spec into real tables.
+"""Pure statement builders for turning a table spec into real tables.
 
-Both the dense-schema and schemapile examples carried near-identical copies of
-the create-schema, create-table, insert-rows, add-constraints sequence and its
-supporting helpers. This module is the single home for that plumbing. Example
-choices (the source type map, the table-property prefix, table-build
-concurrency, and row-insert/table-create error handling) are passed in as
-arguments rather than hardcoded, so one copy serves every example.
+Both the dense-schema and schemapile examples once carried near-identical copies
+of the create-schema, create-table, insert-rows, add-constraints sequence and
+its supporting helpers. This module is the single home for that plumbing, and it
+is deliberately *pure*: it only builds SQL strings (and the small records the
+foreign-key pass needs). It opens nothing, spawns no threads, and runs no SQL.
 
-The module is deliberately free of any ``WorkspaceClient`` dependency: the
-spine runs SQL through an injected ``execute`` callable that raises on failure.
-That keeps core light and the spine unit-testable, and lets each example bind
-its own warehouse executor.
+The imperative shell that owns a ``SparkSession`` (the ``dbxcarta-materialize``
+Spark job) asks these builders for the statements, runs them with ``spark.sql``,
+pools the independent table creates, and tallies the run. Keeping execution and
+threading out of core makes the builders trivially testable as text and leaves
+the only thread pool over a known thread-safe ``SparkSession``.
+
+Example choices (the source type map and the table-property prefix) are passed
+in as arguments rather than hardcoded, so one copy serves every example.
 """
 
 from __future__ import annotations
 
-import functools
 import hashlib
 import json
-import logging
 import re
-import threading
-from collections.abc import Callable, Mapping, Sequence
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any
 
 from dbxcarta.core.identifiers import quote_identifier
 
-logger = logging.getLogger(__name__)
-
-# An injected SQL runner: ``execute(statement, label)`` runs one statement and
-# raises on any non-success. The label is for logging only.
-ExecuteFn = Callable[[str, str], None]
-
-# A factory that produces an :data:`ExecuteFn`. The spine calls it once for the
-# main thread and once per pool worker, so a single executor instance is never
-# shared across threads. A caller whose underlying resource is already
-# thread-safe (the Databricks ``WorkspaceClient``) returns the same closure each
-# call; a caller backed by a non-thread-safe resource (a DB-API connection or
-# cursor) returns a fresh per-thread one. The concurrency contract is thus
-# enforced by construction rather than assumed of the caller.
-ExecuteFactory = Callable[[], ExecuteFn]
-
-InsertErrorMode = Literal["raise", "skip"]
-TableErrorMode = Literal["raise", "skip"]
-
-# The failure types an injected ``execute`` raises for a warehouse-side error:
-# ``RuntimeError`` for a FAILED/CANCELED statement, ``TimeoutError`` for one
-# that never reached a terminal state. The skip-on-error paths catch exactly
-# these so a genuine warehouse failure is tolerated while a programming error
-# (a malformed spec, a bug) still propagates instead of masquerading as a
-# skipped table.
-_WAREHOUSE_ERRORS = (RuntimeError, TimeoutError)
+if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
 
 _CONSTRAINT_NAME_LIMIT = 255
 
@@ -121,10 +96,13 @@ DEFAULT_DELTA_TYPE_MAP: Mapping[str, str] = MappingProxyType(
 class MaterializeStats:
     """Tally of one materialize run.
 
-    Holds counts only. Parallelism is the caller's concern: a parallel
-    materialize has each worker return its own ``MaterializeStats`` and the
-    spine sums them with :meth:`__add__`, so the shape carries no shared
-    mutable state.
+    Holds counts only. Parallelism is the shell's concern: a parallel
+    materialize has each table build return its own ``MaterializeStats`` and the
+    shell sums them with :meth:`__add__`, so the shape carries no shared mutable
+    state. Core fills the build-time counts (``type_fallbacks`` and the
+    ``tables_skipped`` of a build-time skip); the shell adds the runtime counts
+    (``tables_created``, ``rows_inserted``, ``pk_constraints_added``,
+    ``fk_constraints_added``) as each statement it runs succeeds.
     """
 
     schemas_created: int = 0
@@ -245,12 +223,14 @@ def constraint_name(
 
 
 @dataclass
-class _MaterializedTable:
+class MaterializedTable:
     """A table that was actually created, with the identifiers the FK pass needs.
 
     ``columns`` is the set of sanitized column names that landed in the table;
     ``foreign_keys`` is the source spec's raw FK list, deferred to the second
-    pass.
+    pass. The shell builds this record from a :class:`TablePlan` only once its
+    ``CREATE`` has actually run, so :func:`build_foreign_key_statements` is
+    handed exactly the tables that exist.
     """
 
     safe_name: str
@@ -258,161 +238,86 @@ class _MaterializedTable:
     foreign_keys: list[dict[str, Any]]
 
 
-# A zero-arg callable that builds one table and returns its record and tally.
-# Both a ``functools.partial`` (serial) and a future's ``result`` (parallel)
-# satisfy it, so one collection loop handles both modes.
-_BuildFn = Callable[[], tuple["_MaterializedTable | None", MaterializeStats]]
+@dataclass
+class TablePlan:
+    """The statements to run for one table, plus what the shell needs to tally.
+
+    ``create_sql`` always runs; ``insert_sql`` runs only when present (a table
+    with sample rows). ``has_primary_key`` records whether the ``CREATE`` carries
+    an inline ``PRIMARY KEY`` clause, so the shell can count
+    ``pk_constraints_added`` once the create succeeds. ``record`` is the
+    :class:`MaterializedTable` the foreign-key pass keys on, registered by the
+    shell only after the create runs. ``*_label`` are human-readable tags for
+    logging only.
+    """
+
+    create_sql: str
+    create_label: str
+    insert_sql: str | None
+    insert_label: str | None
+    has_primary_key: bool
+    row_count: int
+    record: MaterializedTable
 
 
-def materialize_schemas(
-    schemas: list[dict[str, Any]],
+@dataclass
+class TableBuild:
+    """The pure outcome of building one table's statements (no execution).
+
+    ``plan`` is ``None`` when the table is skipped at build time (unusable name,
+    no columns, or no coercible columns); ``stats`` then carries that skip in
+    ``tables_skipped``. When ``plan`` is present, ``stats`` carries only the
+    build-time counts known without running SQL (``type_fallbacks``); the shell
+    adds the runtime counts as it executes the plan.
+    """
+
+    plan: TablePlan | None
+    stats: MaterializeStats
+
+
+def read_schema_entry(entry: dict[str, Any]) -> tuple[str, str]:
+    """Return ``(uc_schema, source_id)`` for a blueprint schema entry.
+
+    Raises ``ValueError`` naming the missing key(s) when ``uc_schema`` or
+    ``source_id`` is absent or blank, so a malformed blueprint fails loudly at
+    the boundary rather than emitting a half-formed schema.
+    """
+    missing = [k for k in ("uc_schema", "source_id") if not entry.get(k)]
+    if missing:
+        raise ValueError(f"blueprint schema entry missing required key(s) {missing}: {entry!r}")
+    return entry["uc_schema"], entry["source_id"]
+
+
+def build_create_schema_statement(
+    catalog_q: str,
+    uc_schema: str,
+    source_id: str,
     *,
-    catalog: str,
-    make_execute: ExecuteFactory,
     property_prefix: str,
-    type_map: Mapping[str, str] = DEFAULT_DELTA_TYPE_MAP,
-    workers: int = 1,
-    on_insert_error: InsertErrorMode = "raise",
-    on_table_error: TableErrorMode = "raise",
-    log: logging.Logger | None = None,
-) -> MaterializeStats:
-    """Materialize candidate schemas as Delta tables and return the tally.
+) -> tuple[str, str]:
+    """Build the ``CREATE SCHEMA`` statement and its log label.
 
-    For each entry in ``schemas`` (each a dict with ``uc_schema``,
-    ``source_id``, and ``tables``), creates the schema, creates every table
-    (with its primary key folded inline into the CREATE and its sample rows
-    inserted, in a first pass), then adds foreign-key constraints in a second
-    pass after all tables exist. The caller is responsible for creating the
-    catalog itself before calling this.
-
-    Choices passed in by the example:
-
-    - ``make_execute`` is an :data:`ExecuteFactory`. The schema-create and
-      foreign-key passes run on the calling thread through one executor; in
-      parallel mode each pool worker gets its own executor from the same
-      factory, so an injected SQL runner is never shared across threads.
-    - ``property_prefix`` names the ``TBLPROPERTIES`` keys (``<prefix>.source_id``)
-      and the schema comment.
-    - ``type_map`` is the source-to-Delta type map.
-    - ``workers`` selects table-build concurrency: ``1`` walks tables serially,
-      ``>1`` builds them with a thread pool. Foreign keys are always a second
-      pass, which the parallel path requires.
-    - ``on_insert_error`` and ``on_table_error`` choose ``"raise"`` (abort the
-      run) or ``"skip"`` (log and continue) for a failed row insert or a failed
-      table create, respectively.
+    ``property_prefix`` names the schema comment, mirroring the ``TBLPROPERTIES``
+    prefix the tables carry.
     """
-    log = log or logger
-    stats = MaterializeStats()
-    catalog_q = quote_identifier(catalog)
-    # One executor for the calling thread: it runs the schema-create and the
-    # foreign-key second pass, neither of which is parallelized. Workers below
-    # get their own.
-    main_execute = make_execute()
-
-    for schema_entry in schemas:
-        missing = [k for k in ("uc_schema", "source_id") if not schema_entry.get(k)]
-        if missing:
-            raise ValueError(
-                f"blueprint schema entry missing required key(s) {missing}: {schema_entry!r}"
-            )
-        uc_schema = schema_entry["uc_schema"]
-        source_id = schema_entry["source_id"]
-        schema_q = quote_identifier(uc_schema)
-        log.info("creating schema %s.%s", catalog, uc_schema)
-        main_execute(
-            f"CREATE SCHEMA IF NOT EXISTS {catalog_q}.{schema_q}"
-            f" COMMENT '{property_prefix} source: {escape_sql_string(source_id)}'",
-            f"CREATE SCHEMA {uc_schema}",
-        )
-        stats = stats + MaterializeStats(schemas_created=1)
-
-        # Serial reuses the main executor; parallel hands each pool thread its
-        # own via the factory so the injected runner is thread-confined.
-        table_execute = _per_thread_executor(make_execute) if workers > 1 else main_execute
-        tables = schema_entry.get("tables", [])
-        materialized: dict[str, _MaterializedTable] = {}
-        total = len(tables)
-        thunks: list[_BuildFn] = [
-            functools.partial(
-                _materialize_table,
-                table_execute,
-                catalog_q,
-                schema_q,
-                source_id,
-                table,
-                property_prefix=property_prefix,
-                type_map=type_map,
-                on_insert_error=on_insert_error,
-                on_table_error=on_table_error,
-                log=log,
-                progress=f"{idx}/{total}",
-            )
-            for idx, table in enumerate(tables, 1)
-        ]
-
-        # Serial and parallel share one collection loop: each entry is a
-        # zero-arg callable returning (record, stats). Each build applies its
-        # own table-create and row-insert error policy internally, so the loop
-        # only sums tallies and records the materialized tables. A build that
-        # re-raises (a ``"raise"`` policy, or any non-warehouse error such as a
-        # bug) propagates out unchanged; in parallel mode the pool drains in the
-        # list comprehension first, so the bound ``future.result`` returns or
-        # re-raises instantly when called below.
-        builds: list[_BuildFn]
-        if workers > 1:
-            with ThreadPoolExecutor(max_workers=workers) as pool:
-                futures = [pool.submit(thunk) for thunk in thunks]
-                builds = [future.result for future in as_completed(futures)]
-        else:
-            builds = thunks
-
-        for build in builds:
-            result, local = build()
-            stats = stats + local
-            if result is not None:
-                materialized[result.safe_name] = result
-
-        # Second pass: foreign keys, only after every table and its PK exists.
-        stats = stats + _add_foreign_keys(main_execute, catalog_q, schema_q, materialized, log)
-
-    return stats
+    schema_q = quote_identifier(uc_schema)
+    sql = (
+        f"CREATE SCHEMA IF NOT EXISTS {catalog_q}.{schema_q}"
+        f" COMMENT '{property_prefix} source: {escape_sql_string(source_id)}'"
+    )
+    return sql, f"CREATE SCHEMA {uc_schema}"
 
 
-def _per_thread_executor(make_execute: ExecuteFactory) -> ExecuteFn:
-    """Wrap a factory so each calling thread lazily gets its own executor.
-
-    The thread pool reuses its threads, so the factory is called at most once
-    per worker thread (not once per table), and the returned executor is only
-    ever touched by the thread that created it. This is the per-thread-resource
-    pattern: it makes the "one executor per worker" contract true by
-    construction instead of trusting the injected runner to be thread-safe.
-    """
-    local = threading.local()
-
-    def execute(statement: str, label: str) -> None:
-        runner: ExecuteFn | None = getattr(local, "runner", None)
-        if runner is None:
-            runner = local.runner = make_execute()
-        runner(statement, label)
-
-    return execute
-
-
-def _materialize_table(
-    execute: ExecuteFn,
+def build_table(
+    table: dict[str, Any],
+    *,
     catalog_q: str,
     schema_q: str,
     source_id: str,
-    table: dict[str, Any],
-    *,
     property_prefix: str,
-    type_map: Mapping[str, str],
-    on_insert_error: InsertErrorMode,
-    on_table_error: TableErrorMode,
-    log: logging.Logger,
-    progress: str = "",
-) -> tuple[_MaterializedTable | None, MaterializeStats]:
-    """Create one table (with its primary key folded into the CREATE) and insert its rows.
+    type_map: Mapping[str, str] = DEFAULT_DELTA_TYPE_MAP,
+) -> TableBuild:
+    """Build one table's statements (with its primary key folded into the CREATE).
 
     The primary key is declared inline: its columns carry ``NOT NULL`` and the
     statement ends with an inline ``CONSTRAINT ... PRIMARY KEY (...)`` clause, so
@@ -420,38 +325,28 @@ def _materialize_table(
     sequence. A key is dropped (no clause emitted) when its columns did not all
     survive sanitization, or when a sample row carries a NULL in a PK column
     (which the inline ``NOT NULL`` would reject, failing the whole insert);
-    dropping it keeps the rows. Foreign keys remain a second pass, since they
-    reference tables that may not exist yet.
+    dropping it keeps the rows. Foreign keys are deferred to
+    :func:`build_foreign_key_statements`, since they reference tables that may
+    not exist yet.
 
-    Returns ``(record, stats)``; ``record`` is ``None`` when the table is
-    skipped (unusable name, no columns, no coercible columns, or a tolerated
-    create failure). ``stats`` is this table's own tally so a parallel caller
-    can sum partial tallies without shared mutable state.
-
-    ``on_table_error`` and ``on_insert_error`` are applied at the statements
-    they govern (the ``CREATE TABLE`` and the row insert respectively), so the
-    two policies are independent: a failed insert under ``on_insert_error=
-    "raise"`` propagates regardless of ``on_table_error``, and vice versa.
-    Only warehouse errors (:data:`_WAREHOUSE_ERRORS`) are subject to a ``"skip"``
-    policy; any other exception always propagates so a real bug is never masked.
+    Returns a :class:`TableBuild`. ``plan`` is ``None`` when the table is skipped
+    at build time (unusable name, no columns, or no coercible columns), with the
+    skip recorded in ``stats.tables_skipped``. ``property_prefix`` names the
+    ``TBLPROPERTIES`` keys (``<prefix>.source_id`` and so on); ``type_map`` is the
+    source-to-Delta type map.
     """
-    stats = MaterializeStats()
     raw_name = table.get("name", "")
     safe_name = sanitize_identifier(raw_name, prefix="t")
     if not safe_name:
-        stats.tables_skipped += 1
-        log.warning("skipping table with unusable name: %r", raw_name)
-        return None, stats
+        return TableBuild(None, MaterializeStats(tables_skipped=1))
     table_q = quote_identifier(safe_name)
     fq = f"{catalog_q}.{schema_q}.{table_q}"
-    log.info("table %s %s", progress, fq)
 
     columns = table.get("columns") or []
     if not columns:
-        stats.tables_skipped += 1
-        log.warning("skipping table without columns: %s", raw_name)
-        return None, stats
+        return TableBuild(None, MaterializeStats(tables_skipped=1))
 
+    type_fallbacks = 0
     typed_cols: list[tuple[str, str]] = []  # (safe column name, Delta type)
     safe_col_names: list[str] = []
     keep_col_mask: list[bool] = []
@@ -463,21 +358,19 @@ def _materialize_table(
         raw_type = str(col.get("type", "")).strip()
         delta_type, fellback = coerce_type(raw_type, type_map)
         if fellback:
-            stats.type_fallbacks += 1
+            type_fallbacks += 1
         typed_cols.append((safe_col, delta_type))
         safe_col_names.append(safe_col)
         keep_col_mask.append(True)
 
     if not typed_cols:
-        stats.tables_skipped += 1
-        log.warning("skipping table without coercible columns: %s", raw_name)
-        return None, stats
+        return TableBuild(None, MaterializeStats(tables_skipped=1))
 
     safe_col_set = frozenset(safe_col_names)
 
     # Prepare the sample rows down to the surviving columns up front, so the
-    # null-aware PK gate below and the INSERT later both work from the same
-    # rows: each kept row aligns positionally with safe_col_names.
+    # null-aware PK gate below and the INSERT both work from the same rows: each
+    # kept row aligns positionally with safe_col_names.
     kept_rows = [
         tuple(v for v, keep in zip(row, keep_col_mask, strict=False) if keep)
         for row in (table.get("rows") or [])
@@ -517,37 +410,22 @@ def _materialize_table(
         + ",\n  ".join(col_defs)
         + f"\n) USING DELTA TBLPROPERTIES ({tbl_properties})"
     )
-    try:
-        execute(create_sql, f"CREATE TABLE {fq}")
-    except _WAREHOUSE_ERRORS as exc:
-        if on_table_error == "raise":
-            raise
-        log.warning("table create failed for %s: %s", fq, exc)
-        return None, MaterializeStats()
-    stats.tables_created += 1
-    # The PK landed with the table, since it is part of the CREATE that just
-    # succeeded, so it is counted here rather than after a separate ALTER.
-    if pk_cols:
-        stats.pk_constraints_added += 1
 
-    if kept_rows:
-        insert_sql = build_insert_statement(fq, safe_col_names, kept_rows)
-        try:
-            execute(insert_sql, f"INSERT OVERWRITE {fq}")
-            stats.rows_inserted += len(kept_rows)
-        except _WAREHOUSE_ERRORS as exc:
-            if on_insert_error == "raise":
-                raise
-            log.warning("insert failed for %s: %s", fq, exc)
-
-    return (
-        _MaterializedTable(
+    insert_sql = build_insert_statement(fq, safe_col_names, kept_rows) if kept_rows else None
+    plan = TablePlan(
+        create_sql=create_sql,
+        create_label=f"CREATE TABLE {fq}",
+        insert_sql=insert_sql,
+        insert_label=f"INSERT OVERWRITE {fq}" if insert_sql is not None else None,
+        has_primary_key=bool(pk_cols),
+        row_count=len(kept_rows),
+        record=MaterializedTable(
             safe_name=safe_name,
             columns=safe_col_set,
             foreign_keys=list(table.get("foreign_keys") or []),
         ),
-        stats,
     )
+    return TableBuild(plan, MaterializeStats(type_fallbacks=type_fallbacks))
 
 
 def _resolve_primary_key_columns(
@@ -583,20 +461,22 @@ def _resolve_primary_key_columns(
     return safe_pk_cols
 
 
-def _add_foreign_keys(
-    execute: ExecuteFn,
+def build_foreign_key_statements(
+    materialized: dict[str, MaterializedTable],
+    *,
     catalog_q: str,
     schema_q: str,
-    materialized: dict[str, _MaterializedTable],
-    log: logging.Logger,
-) -> MaterializeStats:
-    """Second pass: add FK constraints after all tables and PKs exist.
+) -> list[tuple[str, str]]:
+    """Build the second-pass ``ALTER ... ADD CONSTRAINT ... FOREIGN KEY`` statements.
 
-    Skips any FK whose child or parent columns were dropped during sanitization,
-    whose arity does not match, or whose target table/columns do not exist among
-    the materialized tables. Each ALTER is tolerant of failure.
+    Given the tables that were actually created (so a foreign key only points at
+    a table that exists), returns ``(statement, label)`` pairs in materialized
+    order. Skips any FK whose child or parent columns were dropped during
+    sanitization, whose arity does not match, or whose target table/columns are
+    not among ``materialized``. Running each statement (and tolerating a failure)
+    is the shell's job.
     """
-    stats = MaterializeStats()
+    statements: list[tuple[str, str]] = []
     for child in materialized.values():
         child_fq = f"{catalog_q}.{schema_q}.{quote_identifier(child.safe_name)}"
         for fk in child.foreign_keys:
@@ -620,19 +500,12 @@ def _add_foreign_keys(
             parent_fq = f"{catalog_q}.{schema_q}.{quote_identifier(parent_name)}"
             src_clause = ", ".join(quote_identifier(c) for c in src_cols)
             ref_clause = ", ".join(quote_identifier(c) for c in ref_cols)
-            try:
-                execute(
+            statements.append(
+                (
                     f"ALTER TABLE {child_fq} ADD CONSTRAINT {quote_identifier(fk_name)}"
                     f" FOREIGN KEY ({src_clause})"
                     f" REFERENCES {parent_fq} ({ref_clause})",
                     f"ADD FOREIGN KEY {child_fq} -> {parent_fq}",
                 )
-                stats.fk_constraints_added += 1
-            except _WAREHOUSE_ERRORS as exc:
-                log.warning(
-                    "add foreign key failed for %s -> %s: %s",
-                    child_fq,
-                    parent_fq,
-                    exc,
-                )
-    return stats
+            )
+    return statements

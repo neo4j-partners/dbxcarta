@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from dbxcarta.core.identifiers import quote_qualified_name
+from dbxcarta.core.volume_io import ensure_volume_subdirs
 
 if TYPE_CHECKING:
     from databricks.sdk import WorkspaceClient
@@ -82,24 +83,6 @@ def load_summary_from_volume(
     return None
 
 
-def _mkdirs(dirpath: Path) -> None:
-    """Create local or UC Volume subdirectories needed for JSON summaries.
-
-    UC Volumes expose a FUSE path whose root must be provisioned by Databricks,
-    so this helper only creates subdirectories below the volume root.
-    """
-    parts = dirpath.parts
-    if len(parts) > 1 and parts[1] == "Volumes":
-        # UC Volume FUSE mount: creating the volume root (/Volumes/cat/schema/vol)
-        # is handled by CREATE VOLUME in preflight and returns errno 95 if
-        # attempted via os.mkdir. Only create subdirectories beyond the volume
-        # root (depth > 5).
-        for depth in range(6, len(parts) + 1):
-            Path(*parts[:depth]).mkdir(exist_ok=True)
-    else:
-        dirpath.mkdir(parents=True, exist_ok=True)
-
-
 def emit_stdout(summary: RunSummary) -> None:
     """Print a compact human-readable summary to driver stdout."""
     print(
@@ -123,7 +106,7 @@ def emit_json(summary: RunSummary, volume_path: str) -> None:
     """Write the JSON summary file under the configured UC Volume path."""
     ts = (summary.ended_at or summary.started_at).strftime("%Y%m%dT%H%M%SZ")
     path = Path(volume_path) / f"{summary.job_name}_{summary.run_id}_{ts}.json"
-    _mkdirs(path.parent)
+    ensure_volume_subdirs(path.parent)
     path.write_text(json.dumps(summary.to_json_dict(), indent=2))
 
 

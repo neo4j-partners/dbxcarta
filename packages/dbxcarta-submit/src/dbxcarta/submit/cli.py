@@ -22,11 +22,13 @@ if TYPE_CHECKING:
 _ENTRYPOINT_WHEEL_PACKAGE: dict[str, str] = {
     "ingest": "dbxcarta-spark",
     "client": "dbxcarta-client",
+    "materialize": "dbxcarta-materialize",
 }
 
 _ENTRYPOINT_CONSOLE_SCRIPT: dict[str, str] = {
     "ingest": "dbxcarta-ingest",
     "client": "dbxcarta-client",
+    "materialize": "dbxcarta-materialize",
 }
 
 # Packages the Databricks Runtime provides on the cluster and that the
@@ -71,9 +73,24 @@ _CLIENT_PINNED_CLOSURE: tuple[str, ...] = (
     "typing-inspection==0.4.2",
 )
 
+# Materialize needs neither Neo4j nor the job runner: it only builds DDL strings
+# (core) and runs them with spark.sql. Its closure is the client one with neo4j
+# (and neo4j's pytz dependency) dropped — just pydantic v2 and its transitives,
+# the config-boundary surface MaterializeSettings reads through.
+_MATERIALIZE_PINNED_CLOSURE: tuple[str, ...] = (
+    "pydantic==2.13.3",
+    "pydantic-core==2.46.3",
+    "pydantic-settings==2.14.0",
+    "python-dotenv==1.2.2",
+    "annotated-types==0.7.0",
+    "typing-extensions==4.15.0",
+    "typing-inspection==0.4.2",
+)
+
 _ENTRYPOINT_PINNED_CLOSURE: dict[str, tuple[str, ...]] = {
     "ingest": _INGEST_PINNED_CLOSURE,
     "client": _CLIENT_PINNED_CLOSURE,
+    "materialize": _MATERIALIZE_PINNED_CLOSURE,
 }
 
 # Top-level import names checked by the bootstrap post-install smoke
@@ -99,6 +116,11 @@ _ENTRYPOINT_SMOKE_IMPORTS: dict[str, tuple[str, ...]] = {
         "pydantic_core",
         "pydantic_settings",
     ),
+    "materialize": (
+        "pydantic",
+        "pydantic_core",
+        "pydantic_settings",
+    ),
 }
 
 # The Neo4j Spark Connector stays a pinned JVM cluster library (pip
@@ -109,6 +131,7 @@ _INGEST_JVM_PROBE_CLASS = "org.neo4j.spark.DataSource"
 _ENTRYPOINT_JVM_PROBE_CLASS: dict[str, str | None] = {
     "ingest": _INGEST_JVM_PROBE_CLASS,
     "client": None,
+    "materialize": None,
 }
 
 
@@ -166,12 +189,14 @@ def _ingest_runner() -> Runner:
 def main() -> None:
     """Entry point for the operator submission CLI.
 
-    dbxcarta owns four first-class commands; every other command is passed
+    dbxcarta owns five first-class commands; every other command is passed
     through to ``databricks-job-runner`` (submit, validate, logs, clean,
     upload, download, catalog, schema, volume).
 
     - `dbxcarta-submit submit-entrypoint {ingest|client}` submits the wheel
       entrypoint.
+    - `dbxcarta-submit materialize` stages the committed blueprint to the ops
+      Volume and submits the materialize wheel entrypoint as a serverless job.
     - `dbxcarta-submit publish-wheels` publishes the stable per-package
       wheels and ships the bootstrap script.
     - `dbxcarta-submit bootstrap` creates the data catalog the selected overlay
@@ -189,6 +214,8 @@ def main() -> None:
     argv = sys.argv[1:]
     if argv[:1] == ["submit-entrypoint"]:
         sys.exit(_handle_submit_entrypoint(argv[1:]))
+    if argv[:1] == ["materialize"]:
+        sys.exit(_handle_materialize(argv[1:], overlay))
     if argv[:1] == ["publish-wheels"]:
         sys.exit(_handle_publish_wheels(argv[1:]))
     if argv[:1] == ["bootstrap"]:
@@ -216,8 +243,11 @@ def _print_help() -> None:
         "\n"
         "dbxcarta operator commands:\n"
         "  submit-entrypoint {ingest|client}   Submit a wheel entrypoint as a Databricks job.\n"
-        "  publish-wheels                      Publish the ingest and client wheels to the\n"
-        "                                      stable Volume path and ship the bootstrap script.\n"
+        "  materialize                         Stage the committed blueprint to the ops Volume\n"
+        "                                      and submit the materialize entrypoint (serverless).\n"
+        "  publish-wheels                      Publish the ingest, client, and materialize wheels\n"
+        "                                      to the stable Volume path and ship the bootstrap\n"
+        "                                      script.\n"
         "  bootstrap                           Create the data catalog (DBXCARTA_CATALOG) and the\n"
         "                                      ops catalog/schema/volume (DATABRICKS_VOLUME_PATH),\n"
         "                                      idempotent.\n"
@@ -233,7 +263,11 @@ def _print_help() -> None:
 # The entrypoint wheels the runner installs with --no-deps. Each must
 # physically carry ``dbxcarta/core`` because the bootstrap installs a single
 # application wheel by name and has no slot for a separate core wheel.
-_CORE_BUNDLE_PACKAGES: tuple[str, ...] = ("dbxcarta-spark", "dbxcarta-client")
+_CORE_BUNDLE_PACKAGES: tuple[str, ...] = (
+    "dbxcarta-spark",
+    "dbxcarta-client",
+    "dbxcarta-materialize",
+)
 
 
 @contextlib.contextmanager
@@ -552,6 +586,148 @@ def _handle_submit_entrypoint(argv: list[str]) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     return 0
+
+
+def _handle_materialize(argv: list[str], overlay: Path | None) -> int:
+    """Stage the committed blueprint to the ops Volume, then submit the job.
+
+    Uploads the blueprint to the canonical ``{volume}/dbxcarta/blueprint/
+    blueprint.json`` (the path the cluster job derives from
+    ``DATABRICKS_VOLUME_PATH``), then submits the ``dbxcarta-materialize`` wheel
+    entrypoint as a standalone serverless Spark job. The local blueprint is
+    ``--blueprint`` when given, else the single ``*.json`` under the selected
+    overlay's sibling ``blueprint/`` directory. The data catalog must already
+    exist (run ``dbxcarta-submit bootstrap`` first).
+    """
+    import argparse
+
+    from databricks_job_runner.errors import RunnerError
+    from dbxcarta.core.config import derive_ops_config
+    from dbxcarta.core.env import (
+        EnvFileError,
+        load_env_files,
+        resolve_env_files,
+    )
+    from dbxcarta.core.volume_io import upload_file_to_volume
+    from dbxcarta.core.workspace import build_workspace_client
+
+    try:
+        files, cleaned_argv = resolve_env_files(argv)
+    except EnvFileError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    load_env_files(files)
+
+    parser = argparse.ArgumentParser(
+        prog="dbxcarta-submit materialize",
+        description=(
+            "Stage the committed blueprint to the ops Volume and submit the "
+            "materialize entrypoint as a serverless Spark job."
+        ),
+    )
+    parser.add_argument(
+        "--blueprint",
+        type=Path,
+        default=None,
+        help=(
+            "Local blueprint JSON to stage. Defaults to the single *.json under "
+            "the selected overlay's sibling blueprint/ directory."
+        ),
+    )
+    parser.add_argument("--compute", choices=("cluster", "serverless"), default=None)
+    parser.add_argument("--no-wait", action="store_true")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the blueprint that would be staged and where, then exit.",
+    )
+    args = parser.parse_args(cleaned_argv)
+
+    volume_path = os.environ.get("DATABRICKS_VOLUME_PATH", "").strip()
+    if not volume_path:
+        print(
+            "error: DATABRICKS_VOLUME_PATH is not set; select an example overlay "
+            "with --env-file or DBXCARTA_ENV_FILE.",
+            file=sys.stderr,
+        )
+        return 2
+
+    try:
+        local_blueprint = _resolve_local_blueprint(args.blueprint, overlay)
+        _validate_blueprint_file(local_blueprint)
+        dest = derive_ops_config(volume_path).blueprint_volume
+    except (ValueError, FileNotFoundError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    if args.dry_run:
+        print(
+            f"[materialize] would stage {local_blueprint} -> {dest}, "
+            "then submit the materialize entrypoint (serverless)",
+            file=sys.stderr,
+        )
+        return 0
+
+    try:
+        ws = build_workspace_client()
+        upload_file_to_volume(ws, local_blueprint, dest)
+        print(f"[materialize] staged {local_blueprint.name} -> {dest}", file=sys.stderr)
+        _submit_bootstrap_entrypoint(
+            "materialize",
+            compute_mode=args.compute,
+            no_wait=args.no_wait,
+        )
+    except RunnerError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    return 0
+
+
+def _resolve_local_blueprint(explicit: Path | None, overlay: Path | None) -> Path:
+    """Return the local blueprint JSON to stage.
+
+    ``explicit`` (``--blueprint``) wins when given. Otherwise the blueprint is
+    the single ``*.json`` under the selected overlay's sibling ``blueprint/``
+    directory; zero or several candidates is a hard error, since there is no
+    unambiguous default to pick.
+    """
+    if explicit is not None:
+        if not explicit.is_file():
+            raise FileNotFoundError(f"blueprint not found at {explicit}")
+        return explicit
+    if overlay is None:
+        raise ValueError(
+            "no --blueprint given and no overlay selected; pass --blueprint or "
+            "select an overlay with --env-file or DBXCARTA_ENV_FILE."
+        )
+    blueprint_dir = overlay.resolve().parent / "blueprint"
+    candidates = sorted(blueprint_dir.glob("*.json"))
+    if not candidates:
+        raise FileNotFoundError(
+            f"no blueprint *.json found under {blueprint_dir}; pass --blueprint explicitly."
+        )
+    if len(candidates) > 1:
+        names = ", ".join(p.name for p in candidates)
+        raise ValueError(
+            f"multiple blueprint *.json under {blueprint_dir} ({names}); "
+            "pass --blueprint to choose one."
+        )
+    return candidates[0]
+
+
+def _validate_blueprint_file(path: Path) -> None:
+    """Light structural check before staging: a JSON object with a non-empty
+    ``schemas`` array. The cluster job re-reads and fully validates it; this just
+    catches an empty or malformed file before a job is submitted.
+    """
+    from dbxcarta.core.volume_io import load_json_file
+
+    payload = load_json_file(path, label="blueprint")
+    if not isinstance(payload, dict):
+        raise ValueError(f"blueprint must be a JSON object: {path}")  # noqa: TRY004
+    schemas = payload.get("schemas")
+    if not isinstance(schemas, list) or not schemas:
+        raise ValueError(f"blueprint must carry a non-empty 'schemas' array: {path}")
 
 
 def _submit_bootstrap_entrypoint(

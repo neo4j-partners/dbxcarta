@@ -1,17 +1,19 @@
 from __future__ import annotations
 
-import threading
 from typing import Any
 
 import pytest
 from dbxcarta.core.materialize import (
-    ExecuteFn,
+    MaterializedTable,
     MaterializeStats,
+    build_create_schema_statement,
+    build_foreign_key_statements,
     build_insert_statement,
+    build_table,
     coerce_type,
     constraint_name,
     escape_sql_string,
-    materialize_schemas,
+    read_schema_entry,
     render_sql_value,
     sanitize_identifier,
 )
@@ -129,313 +131,115 @@ def test_materialize_stats_add_rejects_other_types() -> None:
         MaterializeStats() + 1  # type: ignore[operator]
 
 
-# --- the spine -----------------------------------------------------------
+# --- read_schema_entry ---------------------------------------------------
 
 
-class _Recorder:
-    """Fake ``execute`` that records statements and can fail matching ones."""
-
-    def __init__(self, fail_on: str | None = None) -> None:
-        self.statements: list[str] = []
-        self._fail_on = fail_on
-
-    def __call__(self, statement: str, label: str) -> None:
-        self.statements.append(statement)
-        if self._fail_on is not None and self._fail_on in statement:
-            raise RuntimeError(f"forced failure: {label}")
-
-
-def _two_table_schema() -> list[dict[str, Any]]:
-    return [
-        {
-            "uc_schema": "shop",
-            "source_id": "shop_db",
-            "tables": [
-                {
-                    "name": "customers",
-                    "columns": [{"name": "id", "type": "int"}, {"name": "name", "type": "text"}],
-                    "primary_keys": ["id"],
-                    "foreign_keys": [],
-                    "rows": [[1, "Ada"], [2, "Grace"]],
-                },
-                {
-                    "name": "orders",
-                    "columns": [
-                        {"name": "id", "type": "int"},
-                        {"name": "customer_id", "type": "int"},
-                    ],
-                    "primary_keys": ["id"],
-                    "foreign_keys": [
-                        {
-                            "columns": ["customer_id"],
-                            "foreign_table": "customers",
-                            "referred_columns": ["id"],
-                        }
-                    ],
-                    "rows": [[10, 1]],
-                },
-            ],
-        }
-    ]
-
-
-@pytest.mark.parametrize("workers", [1, 4])
-def test_spine_materializes_schema_with_constraints(workers: int) -> None:
-    rec = _Recorder()
-    stats = materialize_schemas(
-        _two_table_schema(),
-        catalog="cat",
-        make_execute=lambda: rec,
-        property_prefix="ex",
-        workers=workers,
-    )
-    assert stats.schemas_created == 1
-    assert stats.tables_created == 2
-    assert stats.rows_inserted == 3
-    assert stats.pk_constraints_added == 2
-    assert stats.fk_constraints_added == 1
-
-    joined = "\n".join(rec.statements)
-    assert "CREATE SCHEMA IF NOT EXISTS `cat`.`shop`" in joined
-    assert "COMMENT 'ex source: shop_db'" in joined
-    assert "INSERT OVERWRITE TABLE `cat`.`shop`.`orders`" in joined
-    # The primary key is folded into the CREATE: its column carries inline
-    # NOT NULL and the table ends with an inline CONSTRAINT ... PRIMARY KEY
-    # clause, so the former SET-NOT-NULL and ADD-PRIMARY-KEY ALTERs are gone.
-    assert "`id` INT NOT NULL" in joined
-    assert "CONSTRAINT `pk_orders` PRIMARY KEY (`id`)" in joined
-    assert "SET NOT NULL" not in joined
-    assert "ADD CONSTRAINT `pk_" not in joined
-    assert "FOREIGN KEY (`customer_id`) REFERENCES `cat`.`shop`.`customers`" in joined
-    assert "'ex.source_id' = 'shop_db'" in joined
-
-
-def test_spine_parallel_executor_is_thread_confined() -> None:
-    """Each pool worker gets its own executor from the factory.
-
-    Proves the per-worker seam: no executor instance is ever touched by more
-    than one thread, and the factory is called more than once (the calling
-    thread plus at least one worker), so a non-thread-safe injected runner would
-    stay confined to its creating thread under ``workers > 1``.
-    """
-    lock = threading.Lock()
-    factory_calls = 0
-    usage: dict[int, set[int]] = {}  # executor instance id -> thread idents
-
-    def make_execute() -> ExecuteFn:
-        nonlocal factory_calls
-        with lock:
-            factory_calls += 1
-        token = object()  # unique per executor, kept alive by the closure below
-
-        def execute(statement: str, label: str) -> None:
-            with lock:
-                usage.setdefault(id(token), set()).add(threading.get_ident())
-
-        return execute
-
-    schemas = [
-        {
-            "uc_schema": "s",
-            "source_id": "src",
-            "tables": [
-                {
-                    "name": f"t{i}",
-                    "columns": [{"name": "c", "type": "int"}],
-                    "primary_keys": [],
-                    "foreign_keys": [],
-                    "rows": [],
-                }
-                for i in range(40)
-            ],
-        }
-    ]
-    materialize_schemas(
-        schemas,
-        catalog="cat",
-        make_execute=make_execute,
-        property_prefix="ex",
-        workers=4,
-    )
-
-    assert usage  # statements ran
-    assert all(len(threads) == 1 for threads in usage.values())
-    assert factory_calls >= 2  # calling thread + at least one worker
-
-
-def test_spine_skips_table_with_no_columns() -> None:
-    schemas = [
-        {
-            "uc_schema": "s",
-            "source_id": "src",
-            "tables": [
-                {"name": "empty", "columns": [], "primary_keys": [], "foreign_keys": [], "rows": []}
-            ],
-        }
-    ]
-    stats = materialize_schemas(
-        schemas, catalog="cat", make_execute=_Recorder, property_prefix="ex"
-    )
-    assert stats.tables_created == 0
-    assert stats.tables_skipped == 1
-
-
-def test_spine_counts_type_fallbacks() -> None:
-    schemas = [
-        {
-            "uc_schema": "s",
-            "source_id": "src",
-            "tables": [
-                {
-                    "name": "t",
-                    "columns": [{"name": "c", "type": "mystery"}],
-                    "primary_keys": [],
-                    "foreign_keys": [],
-                    "rows": [],
-                }
-            ],
-        }
-    ]
-    stats = materialize_schemas(
-        schemas, catalog="cat", make_execute=_Recorder, property_prefix="ex"
-    )
-    assert stats.type_fallbacks == 1
-
-
-# Each build applies its own create/insert error policy inside _materialize_table;
-# in parallel mode the exception surfaces through ``future.result`` rather than a
-# direct call, so each policy is exercised in both modes.
-@pytest.mark.parametrize("workers", [1, 4])
-def test_spine_skip_mode_tolerates_failed_insert(workers: int) -> None:
-    rec = _Recorder(fail_on="INSERT OVERWRITE")
-    stats = materialize_schemas(
-        _two_table_schema(),
-        catalog="cat",
-        make_execute=lambda: rec,
-        property_prefix="ex",
-        on_insert_error="skip",
-        workers=workers,
-    )
-    assert stats.rows_inserted == 0
-    assert stats.tables_created == 2  # tables still created despite insert failures
-
-
-@pytest.mark.parametrize("workers", [1, 4])
-def test_spine_raise_mode_propagates_failed_insert(workers: int) -> None:
-    rec = _Recorder(fail_on="INSERT OVERWRITE")
-    with pytest.raises(RuntimeError):
-        materialize_schemas(
-            _two_table_schema(),
-            catalog="cat",
-            make_execute=lambda: rec,
-            property_prefix="ex",
-            on_insert_error="raise",
-            workers=workers,
-        )
-
-
-@pytest.mark.parametrize("workers", [1, 4])
-def test_spine_insert_raise_is_independent_of_table_skip(workers: int) -> None:
-    """on_insert_error and on_table_error are independent policies.
-
-    A failed insert under ``on_insert_error="raise"`` must propagate even when
-    ``on_table_error="skip"``. The table-create policy must not swallow an
-    insert error: regression test for the previously conflated handling where a
-    single wrapper above both statements applied the table policy to both.
-    """
-    rec = _Recorder(fail_on="INSERT OVERWRITE")
-    with pytest.raises(RuntimeError):
-        materialize_schemas(
-            _two_table_schema(),
-            catalog="cat",
-            make_execute=lambda: rec,
-            property_prefix="ex",
-            on_insert_error="raise",
-            on_table_error="skip",
-            workers=workers,
-        )
-
-
-@pytest.mark.parametrize("workers", [1, 4])
-def test_spine_table_skip_does_not_swallow_insert_raise_converse(workers: int) -> None:
-    """Converse: a tolerated CREATE failure must not abort the run even when
-    ``on_insert_error="raise"``. The create policy governs the create only."""
-    rec = _Recorder(fail_on="CREATE TABLE")
-    stats = materialize_schemas(
-        _two_table_schema(),
-        catalog="cat",
-        make_execute=lambda: rec,
-        property_prefix="ex",
-        on_table_error="skip",
-        on_insert_error="raise",
-        workers=workers,
-    )
-    assert stats.tables_created == 0
-
-
-@pytest.mark.parametrize("workers", [1, 4])
-def test_spine_skip_mode_tolerates_failed_table_create(workers: int) -> None:
-    rec = _Recorder(fail_on="CREATE TABLE")
-    stats = materialize_schemas(
-        _two_table_schema(),
-        catalog="cat",
-        make_execute=lambda: rec,
-        property_prefix="ex",
-        on_table_error="skip",
-        workers=workers,
-    )
-    assert stats.tables_created == 0
-
-
-@pytest.mark.parametrize("workers", [1, 4])
-def test_spine_raise_mode_propagates_failed_table_create(workers: int) -> None:
-    rec = _Recorder(fail_on="CREATE TABLE")
-    with pytest.raises(RuntimeError):
-        materialize_schemas(
-            _two_table_schema(),
-            catalog="cat",
-            make_execute=lambda: rec,
-            property_prefix="ex",
-            on_table_error="raise",
-            workers=workers,
-        )
-
-
-@pytest.mark.parametrize("workers", [1, 4])
-def test_spine_skip_mode_does_not_swallow_non_warehouse_errors(workers: int) -> None:
-    """skip mode tolerates warehouse failures, not programming errors.
-
-    A non-warehouse exception (here a ValueError standing in for a bug or a
-    malformed spec) must propagate even with on_table_error="skip", rather than
-    being logged as a skipped table and hiding the defect. In parallel mode the
-    error surfaces through ``future.result()`` rather than a direct call, so
-    both modes are checked.
-    """
-
-    def execute(statement: str, _label: str) -> None:
-        if "CREATE TABLE" in statement:
-            raise ValueError("not a warehouse error")
-
-    with pytest.raises(ValueError, match="not a warehouse error"):
-        materialize_schemas(
-            _two_table_schema(),
-            catalog="cat",
-            make_execute=lambda: execute,
-            property_prefix="ex",
-            on_table_error="skip",
-            workers=workers,
-        )
+def test_read_schema_entry_returns_schema_and_source() -> None:
+    assert read_schema_entry({"uc_schema": "shop", "source_id": "shop_db"}) == ("shop", "shop_db")
 
 
 @pytest.mark.parametrize("missing", ["uc_schema", "source_id"])
-def test_spine_rejects_schema_entry_missing_keys(missing: str) -> None:
-    entry = {"uc_schema": "s", "source_id": "src", "tables": []}
+def test_read_schema_entry_rejects_missing_keys(missing: str) -> None:
+    entry = {"uc_schema": "s", "source_id": "src"}
     del entry[missing]
     with pytest.raises(ValueError, match=f"missing required key.*{missing}"):
-        materialize_schemas([entry], catalog="cat", make_execute=_Recorder, property_prefix="ex")
+        read_schema_entry(entry)
 
 
-def test_spine_drops_pk_when_sample_row_has_null_in_pk_column() -> None:
+# --- build_create_schema_statement ---------------------------------------
+
+
+def test_build_create_schema_statement() -> None:
+    sql, label = build_create_schema_statement("`cat`", "shop", "shop_db", property_prefix="ex")
+    assert sql == (
+        "CREATE SCHEMA IF NOT EXISTS `cat`.`shop` COMMENT 'ex source: shop_db'"
+    )
+    assert label == "CREATE SCHEMA shop"
+
+
+# --- build_table ---------------------------------------------------------
+
+
+def _customers_table() -> dict[str, Any]:
+    return {
+        "name": "customers",
+        "columns": [{"name": "id", "type": "int"}, {"name": "name", "type": "text"}],
+        "primary_keys": ["id"],
+        "foreign_keys": [],
+        "rows": [[1, "Ada"], [2, "Grace"]],
+    }
+
+
+def _build(table: dict[str, Any], *, prefix: str = "ex"):
+    return build_table(
+        table,
+        catalog_q="`cat`",
+        schema_q="`shop`",
+        source_id="shop_db",
+        property_prefix=prefix,
+    )
+
+
+def test_build_table_folds_primary_key_and_inserts_rows() -> None:
+    build = _build(_customers_table())
+    plan = build.plan
+    assert plan is not None
+    # The primary key is folded into the CREATE: its column carries inline NOT
+    # NULL and the table ends with an inline CONSTRAINT ... PRIMARY KEY clause,
+    # so the former SET-NOT-NULL and ADD-PRIMARY-KEY ALTERs are gone.
+    assert "`id` INT NOT NULL" in plan.create_sql
+    assert "CONSTRAINT `pk_customers` PRIMARY KEY (`id`)" in plan.create_sql
+    assert "SET NOT NULL" not in plan.create_sql
+    assert "ADD CONSTRAINT" not in plan.create_sql
+    assert "CREATE TABLE IF NOT EXISTS `cat`.`shop`.`customers`" in plan.create_sql
+    assert "'ex.source_id' = 'shop_db'" in plan.create_sql
+    assert plan.create_label == "CREATE TABLE `cat`.`shop`.`customers`"
+    assert plan.has_primary_key is True
+
+    assert plan.insert_sql is not None
+    assert plan.insert_sql.startswith("INSERT OVERWRITE TABLE `cat`.`shop`.`customers`")
+    assert plan.insert_label == "INSERT OVERWRITE `cat`.`shop`.`customers`"
+    assert plan.row_count == 2
+
+    assert plan.record.safe_name == "customers"
+    assert plan.record.columns == frozenset({"id", "name"})
+    assert build.stats.type_fallbacks == 0
+    assert build.stats.tables_skipped == 0
+
+
+def test_build_table_skips_unusable_name() -> None:
+    build = _build({"name": "!!!", "columns": [{"name": "c", "type": "int"}]})
+    assert build.plan is None
+    assert build.stats.tables_skipped == 1
+
+
+def test_build_table_skips_when_no_columns() -> None:
+    build = _build({"name": "empty", "columns": []})
+    assert build.plan is None
+    assert build.stats.tables_skipped == 1
+
+
+def test_build_table_skips_when_no_coercible_columns() -> None:
+    build = _build({"name": "t", "columns": [{"name": "!!!", "type": "int"}]})
+    assert build.plan is None
+    assert build.stats.tables_skipped == 1
+
+
+def test_build_table_counts_type_fallbacks() -> None:
+    build = _build({"name": "t", "columns": [{"name": "c", "type": "mystery"}], "rows": []})
+    assert build.plan is not None
+    assert build.stats.type_fallbacks == 1
+
+
+def test_build_table_without_rows_emits_no_insert() -> None:
+    build = _build({"name": "t", "columns": [{"name": "c", "type": "int"}], "rows": []})
+    assert build.plan is not None
+    assert build.plan.insert_sql is None
+    assert build.plan.insert_label is None
+    assert build.plan.row_count == 0
+
+
+def test_build_table_drops_pk_when_sample_row_has_null_in_pk_column() -> None:
     """A NULL in a PK column drops the inline PK so the rows still load.
 
     Inline ``NOT NULL`` would reject the null-PK row and fail the whole
@@ -443,78 +247,117 @@ def test_spine_drops_pk_when_sample_row_has_null_in_pk_column() -> None:
     Dropping the key keeps the data; the table just lands without its
     informational primary key.
     """
-    rec = _Recorder()
-    schemas = [
-        {
-            "uc_schema": "s",
-            "source_id": "src",
-            "tables": [
-                {
-                    "name": "t",
-                    "columns": [{"name": "id", "type": "int"}, {"name": "v", "type": "text"}],
-                    "primary_keys": ["id"],
-                    "foreign_keys": [],
-                    "rows": [[1, "a"], [None, "b"]],  # second row has a null PK
-                }
-            ],
-        }
-    ]
-    stats = materialize_schemas(
-        schemas, catalog="cat", make_execute=lambda: rec, property_prefix="ex"
-    )
-    joined = "\n".join(rec.statements)
-    assert "PRIMARY KEY" not in joined
-    assert "NOT NULL" not in joined
-    assert stats.pk_constraints_added == 0
-    assert stats.tables_created == 1
-    assert stats.rows_inserted == 2  # both rows kept, including the null-PK row
+    table = {
+        "name": "t",
+        "columns": [{"name": "id", "type": "int"}, {"name": "v", "type": "text"}],
+        "primary_keys": ["id"],
+        "rows": [[1, "a"], [None, "b"]],  # second row has a null PK
+    }
+    build = _build(table)
+    plan = build.plan
+    assert plan is not None
+    assert "PRIMARY KEY" not in plan.create_sql
+    assert "NOT NULL" not in plan.create_sql
+    assert plan.has_primary_key is False
+    assert plan.row_count == 2  # both rows kept, including the null-PK row
 
 
-def test_spine_keeps_pk_when_pk_column_has_no_nulls() -> None:
+def test_build_table_keeps_pk_when_pk_column_has_no_nulls() -> None:
     """The null gate is row-data-specific: clean PK data still folds the key."""
-    rec = _Recorder()
-    schemas = [
-        {
-            "uc_schema": "s",
-            "source_id": "src",
-            "tables": [
-                {
-                    "name": "t",
-                    "columns": [{"name": "id", "type": "int"}, {"name": "v", "type": "text"}],
-                    "primary_keys": ["id"],
-                    "foreign_keys": [],
-                    "rows": [[1, "a"], [2, None]],  # null in a non-PK column is fine
-                }
-            ],
-        }
-    ]
-    stats = materialize_schemas(
-        schemas, catalog="cat", make_execute=lambda: rec, property_prefix="ex"
-    )
-    joined = "\n".join(rec.statements)
-    assert "`id` INT NOT NULL" in joined
-    assert "CONSTRAINT `pk_t` PRIMARY KEY (`id`)" in joined
-    assert stats.pk_constraints_added == 1
-    assert stats.rows_inserted == 2
+    table = {
+        "name": "t",
+        "columns": [{"name": "id", "type": "int"}, {"name": "v", "type": "text"}],
+        "primary_keys": ["id"],
+        "rows": [[1, "a"], [2, None]],  # null in a non-PK column is fine
+    }
+    build = _build(table)
+    plan = build.plan
+    assert plan is not None
+    assert "`id` INT NOT NULL" in plan.create_sql
+    assert "CONSTRAINT `pk_t` PRIMARY KEY (`id`)" in plan.create_sql
+    assert plan.has_primary_key is True
+    assert plan.row_count == 2
 
 
-def test_spine_skips_pk_when_column_dropped() -> None:
-    schemas = [
-        {
-            "uc_schema": "s",
-            "source_id": "src",
-            "tables": [
+def test_build_table_drops_pk_when_column_sanitized_away() -> None:
+    table = {
+        "name": "t",
+        "columns": [{"name": "keep", "type": "int"}],
+        "primary_keys": ["keep", "!!!"],  # one PK column sanitizes away
+        "rows": [],
+    }
+    build = _build(table)
+    plan = build.plan
+    assert plan is not None
+    assert plan.has_primary_key is False
+    assert "PRIMARY KEY" not in plan.create_sql
+
+
+# --- build_foreign_key_statements ----------------------------------------
+
+
+def _materialized_shop() -> dict[str, MaterializedTable]:
+    return {
+        "customers": MaterializedTable(
+            safe_name="customers",
+            columns=frozenset({"id", "name"}),
+            foreign_keys=[],
+        ),
+        "orders": MaterializedTable(
+            safe_name="orders",
+            columns=frozenset({"id", "customer_id"}),
+            foreign_keys=[
                 {
-                    "name": "t",
-                    "columns": [{"name": "keep", "type": "int"}],
-                    "primary_keys": ["keep", "!!!"],  # one PK column sanitizes away
-                    "foreign_keys": [],
-                    "rows": [],
+                    "columns": ["customer_id"],
+                    "foreign_table": "customers",
+                    "referred_columns": ["id"],
                 }
             ],
-        }
-    ]
-    stats = materialize_schemas(
-        schemas, catalog="cat", make_execute=_Recorder, property_prefix="ex"
+        ),
+    }
+
+
+def test_build_foreign_key_statements_emits_alter_for_valid_edge() -> None:
+    stmts = build_foreign_key_statements(
+        _materialized_shop(), catalog_q="`cat`", schema_q="`shop`"
     )
-    assert stats.pk_constraints_added == 0
+    assert len(stmts) == 1
+    sql, label = stmts[0]
+    assert sql.startswith("ALTER TABLE `cat`.`shop`.`orders` ADD CONSTRAINT")
+    assert "FOREIGN KEY (`customer_id`) REFERENCES `cat`.`shop`.`customers` (`id`)" in sql
+    assert label == "ADD FOREIGN KEY `cat`.`shop`.`orders` -> `cat`.`shop`.`customers`"
+
+
+def test_build_foreign_key_statements_skips_when_parent_absent() -> None:
+    materialized = {
+        "orders": MaterializedTable(
+            safe_name="orders",
+            columns=frozenset({"id", "customer_id"}),
+            foreign_keys=[
+                {
+                    "columns": ["customer_id"],
+                    "foreign_table": "customers",  # not materialized
+                    "referred_columns": ["id"],
+                }
+            ],
+        ),
+    }
+    assert build_foreign_key_statements(materialized, catalog_q="`cat`", schema_q="`shop`") == []
+
+
+def test_build_foreign_key_statements_skips_on_arity_mismatch() -> None:
+    materialized = {
+        "customers": MaterializedTable("customers", frozenset({"id"}), []),
+        "orders": MaterializedTable(
+            "orders",
+            frozenset({"customer_id"}),
+            [
+                {
+                    "columns": ["customer_id"],
+                    "foreign_table": "customers",
+                    "referred_columns": ["id", "extra"],  # arity 2 vs 1
+                }
+            ],
+        ),
+    }
+    assert build_foreign_key_statements(materialized, catalog_q="`cat`", schema_q="`shop`") == []

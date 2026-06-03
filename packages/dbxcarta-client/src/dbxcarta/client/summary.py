@@ -9,22 +9,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from dbxcarta.core.identifiers import quote_qualified_name
+from dbxcarta.core.volume_io import ensure_volume_subdirs
 
 if TYPE_CHECKING:
     from pyspark.sql import SparkSession
-
-
-def _mkdirs(dirpath: Path) -> None:
-    parts = dirpath.parts
-    if len(parts) > 1 and parts[1] == "Volumes":
-        # UC Volumes (/Volumes/<catalog>/<schema>/<volume>/...) reject
-        # parents=True mkdir on the managed prefix; the catalog/schema/volume
-        # already exist, so create only the subpath levels (depth >= 6) one
-        # at a time.
-        for depth in range(6, len(parts) + 1):
-            Path(*parts[:depth]).mkdir(exist_ok=True)
-    else:
-        dirpath.mkdir(parents=True, exist_ok=True)
 
 
 @dataclass
@@ -252,7 +240,7 @@ class ClientRunSummary:
     def emit_json(self, volume_path: str) -> None:
         ts = (self.ended_at or self.started_at).strftime("%Y%m%dT%H%M%SZ")
         path = Path(volume_path) / f"{self.job_name}_{self.run_id}_{ts}.json"
-        _mkdirs(path.parent)
+        ensure_volume_subdirs(path.parent)
         path.write_text(json.dumps(self._to_json_dict(), indent=2))
 
     def emit_delta(self, spark: SparkSession, table_name: str) -> None:

@@ -427,6 +427,48 @@ the blueprint and runs a serverless job to completion that creates the tables,
 rows, and primary keys and adds the foreign keys; a summary record is written;
 the old shells are gone; and the suite passes against the new shape.
 
+Status: Done. Core `materialize.py` is now pure: `materialize_schemas` /
+`make_execute` / `ExecuteFactory` / `_per_thread_executor` / the thread pool are
+gone, replaced by string builders — `read_schema_entry`,
+`build_create_schema_statement`, `build_table` (returns a `TableBuild` of a
+`TablePlan` plus build-time stats, or `None` + a skip tally), and
+`build_foreign_key_statements` — over public `MaterializedTable`/`TablePlan`/
+`TableBuild`/`MaterializeStats`. The null-aware PK gate and the full skip matrix
+are preserved; only the execution/threading moved out. The new
+`dbxcarta-materialize` package (namespace-packaged, core bundled at publish,
+neo4j-free deps) owns the `SparkSession`, asks core for statements, overlaps the
+independent creates in a bounded `ThreadPoolExecutor` (default 5 from
+`DBXCARTA_MATERIALIZE_WORKERS`) over `spark.sql`, runs the FK pass serially after,
+and writes a `MaterializeRunSummary` (its own dataclass, mirroring the client's,
+to the shared `dbxcarta_run_summary` table with `job_name="dbxcarta_materialize"`).
+`dbxcarta-submit materialize` stages the committed blueprint to the canonical
+`{volume}/dbxcarta/blueprint/blueprint.json` and submits a serverless job via the
+shared runner; the entrypoint is wired into all five registries plus
+`publish-wheels`/`_assert_wheel_bundles_core`/`_CORE_BUNDLE_PACKAGES`, the
+workspace `pyproject.toml`, `.gitignore`, and the CI mypy command. The two
+example `materialize.py` shells and their console scripts are deleted;
+`execute_ddl_blocking` stays for bootstrap/teardown. Core tests are now pure
+SQL-text assertions, `tests/materialize/` covers the shell (bounded pool,
+skip-on-error tally, FK second pass, summary record), and the example-shell tests
+are deleted.
+
+Five decisions confirmed with the operator before implementation: (1) the pure
+core/shell seam shape above; (2) a single constant property prefix `"dbxcarta"`
+in the shared job, replacing the per-example `"dense"`/`"schemapile"` values
+(the `<prefix>.*` TBLPROPERTIES are write-only — nothing reads them back); (3)
+`dbxcarta-submit materialize --blueprint <path>` (defaulting to the single
+`*.json` under the overlay's sibling `blueprint/` dir), staged to the canonical
+`blueprint.json` so the cluster derives the same path with no new env var; (4) a
+self-contained `MaterializeRunSummary` mirroring the client rather than importing
+the ingest `RunSummary` (there is no single shared sink — each stage owns its
+summary type writing to the one table by `job_name`); (5) the job no longer
+creates the data catalog (bootstrap owns it). Verified: ruff + mypy clean on the
+new and changed code; full non-live suite is 604 passed / 1 skipped, with the
+only red being the two pre-existing items already noted in Phases 2–3 (the
+`bootstrap` dry-run test that predates Phase 1's `DBXCARTA_CATALOG` requirement,
+and the three live-Databricks integration tests). End-to-end serverless run
+against a live workspace is left to the operator.
+
 ### Phase 5: Attribution and docs
 
 What: Add the SchemaPile attribution note next to the committed schemapile
@@ -440,3 +482,34 @@ new shape.
 
 Done when: The attribution note ships with the blueprint and the docs read
 correctly.
+
+Status: Done. The SchemaPile attribution ships as
+`examples/schemapile/blueprint/ATTRIBUTION.md`: it credits SchemaPile, marks the
+file a curated derivative slice of SchemaPile-Perm, records the permissive-license
+terms (no share-alike, no non-commercial), and preserves provenance. One factual
+correction to the plan: the committed blueprint carries no per-schema source URLs,
+only a `source_id` per schema (SchemaPile's identifier for the originating SQL
+file), so the note preserves that as the provenance handle rather than URLs.
+
+The four-stage wording was updated in the locked-vocabulary reference
+(`docs/proposals/separate-v2.md`): "The two pairs" now reads Example-specific
+preparation = Blueprint (the only truly example-specific stage) and Product
+behavior = Materialize, Ingest, and Client, and the Materialize stage contract's
+Does/Primary-input/Owner lines now describe it as one shared serverless Spark job
+staged via `dbxcarta-submit materialize`, owned by the product. The historical
+"Locked names for shared core targets" section and `separate-v2-plan.md` were left
+as records of the prior effort, superseded by Phase 4.
+
+Both example READMEs were refreshed to the new shape (deleted per-example
+`dbxcarta-dense-materialize`/`dbxcarta-schemapile-materialize` console scripts
+replaced by `dbxcarta-submit materialize`, catalog creation re-pointed to
+bootstrap, `materialize.py` dropped from the file trees and `blueprint/` added,
+materialize reframed as the shared product step, INSERT behavior updated to
+`INSERT OVERWRITE`). Refreshing dense surfaced a config/data mismatch: the
+committed blueprint, `.env.sample`, and config default all said `dense_500` but
+the overlay's `DBXCARTA_SCHEMAS` said `dense-1000`. Confirmed with the operator,
+the overlay was reconciled to `dense_500` so the materialized schema matches what
+ingest reads. Separately flagged (not fixed here): the committed dense
+`questions.json` `reference_sql` is stale, pointing at `schemapile_lakehouse.
+dense-1000`, a pre-existing issue independent of this phase that needs the question
+set regenerated against the real `dense-schema-example.dense_500` catalog.

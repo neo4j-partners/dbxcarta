@@ -27,10 +27,10 @@ uv pip install -e examples/schemapile/
 # examples/schemapile/.env, so run them from that directory.
 cd examples/schemapile
 cp .env.sample .env                             # edit SCHEMAPILE_REPO, profile, warehouse, catalog
-uv run dbxcarta-submit bootstrap --env-file dbxcarta-overlay.env  # provision ops catalog + volume
+uv run dbxcarta-submit bootstrap --env-file dbxcarta-overlay.env     # ops catalog + volume + data catalog
 uv run dbxcarta-schemapile-slice
 uv run dbxcarta-schemapile-select
-uv run dbxcarta-schemapile-materialize
+uv run dbxcarta-submit materialize --env-file dbxcarta-overlay.env   # stage blueprint, run serverless job
 uv run dbxcarta-schemapile-generate-questions
 cd ../..
 
@@ -65,9 +65,9 @@ examples/schemapile/
 │   ├── preset.py                # module-level `preset` (shared StandardPreset)
 │   ├── config.py                # one-shot .env parser
 │   ├── slice_runner.py          # shells out to upstream slice.py
-│   ├── candidate_selector.py    # slice JSON -> candidate-table JSON
-│   ├── materialize.py           # candidate JSON -> Delta tables
+│   ├── candidate_selector.py    # slice JSON -> candidate-table JSON (blueprint)
 │   └── question_generator.py    # LLM + SQL validation -> questions.json
+├── blueprint/                   # committed candidate JSON + attribution
 ├── scripts/                     # one-off utilities, see scripts/README.md
 │   └── dump_question_context.py # Neo4j -> docs/schemapile/questions-schema.md
 └── ../../../tests/examples/schemapile/
@@ -104,7 +104,8 @@ local edits to the dbxcarta packages on every run. The targets set
 `DBXCARTA_ENV_FILE` to this directory's
 `dbxcarta-overlay.env` inline on each command, so they pick up the right
 dbxcarta config from any shell. They do not use this directory's
-standalone `./.env` (that configures the slice/materialize tooling only).
+standalone `./.env`, which configures the host-only slice, select, and
+question-generation tooling only.
 `make help` lists the targets for every example.
 
 ## Setup flow
@@ -155,9 +156,10 @@ uv run dbxcarta-submit bootstrap --env-file dbxcarta-overlay.env
 This provisions the **ops plane** named by the overlay's
 `DATABRICKS_VOLUME_PATH`: the `dbxcarta-catalog` catalog, the
 `schemapile_ops` schema, and the `dbxcarta-ops` volume that hold wheels,
-run summaries, and the question set. It is idempotent. The **data**
-catalog (`schemapile_lakehouse`) is created by the materialize step
-(section 7), not here, so the data plane and ops plane stay separate.
+run summaries, and the question set. It also creates the **data** catalog
+the overlay names in `DBXCARTA_CATALOG` (`schemapile_lakehouse`). The
+materialize step (section 7) assumes that catalog already exists. It is
+idempotent.
 
 To tear down later, `teardown` drops both targets the overlay names in
 `DBXCARTA_TEARDOWN_TARGET`: the data catalog `schemapile_lakehouse` and
@@ -192,18 +194,24 @@ the example's cache if you want a fully reproducible run.
 ### 7. Materialize the slice as Delta tables
 
 ```bash
-uv run dbxcarta-schemapile-materialize
+uv run dbxcarta-submit materialize --env-file dbxcarta-overlay.env
 ```
 
-Creates one UC schema per candidate (`sp_<sanitized_id>`) and one Delta
-table per table spec. Types are coerced to Delta with a documented map;
-anything unrecognized falls back to `STRING`. When the candidate JSON
-carries row-aligned sample VALUES for a table, the materializer
-`DELETE`s and re-`INSERT`s those rows so re-runs are idempotent; tables
-without sample VALUES land typed-but-empty. The original source
-filename, primary key list, and foreign key list are recorded as Delta
-table properties on every table so the trace from a UC table to its
-schemapile origin is always one query away.
+Materialize is a shared product step, the same serverless Spark
+entrypoint every example uses, configured through the overlay rather than
+a per-example script. The command stages the committed blueprint (the
+single `*.json` under `blueprint/`, which `dbxcarta-schemapile-select`
+regenerates in place) to the ops Volume, then submits the
+`dbxcarta-materialize` job. The job creates one UC schema per candidate
+(`sp_<sanitized_id>`) and one Delta table per table spec in the
+`schemapile_lakehouse` data catalog that bootstrap already created. Types
+are coerced to Delta with a documented map; anything unrecognized falls
+back to `STRING`. When the blueprint carries row-aligned sample VALUES for
+a table, the job loads them with a single `INSERT OVERWRITE` so re-runs are
+idempotent; tables without sample VALUES land typed-but-empty. The
+original source filename, primary key list, and foreign key list are
+recorded as Delta table properties on every table so the trace from a UC
+table to its schemapile origin is always one query away.
 
 No schema list is emitted. `schemapile_lakehouse` is a dedicated,
 data-only catalog, so the dbxcarta run auto-discovers every materialized
@@ -267,7 +275,8 @@ repo root is the shortcut (see the Quick iterate loop section above).
 
 This overlay is the dbxcarta CLI overlay only. It is distinct from
 `./.env` / `./.env.sample`, which configure the standalone SchemaPile
-tooling (slice/candidate/materialize) and never layer.
+tooling (slice/candidate/question generation) and never layer. The shared
+materialize job reads the overlay, not this `./.env`.
 
 ## Supporting scripts
 
@@ -290,7 +299,9 @@ This example is built in phases that build on top of each other:
 3. **Phase 2 (slice runner)**. Host-only; depends only on the upstream
    schemapile checkout.
 4. **Phase 3 (bootstrap)**. Provisions the catalog and volume.
-5. **Phase 4 (materialize)**. Reads the candidate JSON; writes Delta tables.
+5. **Phase 4 (materialize)**. The shared serverless `dbxcarta-materialize`
+   job, configured per example through the overlay: stages the committed
+   blueprint and writes Delta tables.
 6. **Phase 5 (package wiring)**. This package; exposes the preset.
 7. **Phase 6 (end-to-end run)**. Runs the assembled example against a live
    workspace and compares evaluation arms.

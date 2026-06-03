@@ -14,14 +14,13 @@ identical across examples, so they live here once.
 
 from __future__ import annotations
 
-import contextlib
-import json
 import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from dbxcarta.core.catalogs import resolve_catalogs
 from dbxcarta.core.identifiers import quote_identifier
+from dbxcarta.core.volume_io import load_json_file, upload_file_to_volume
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -161,9 +160,7 @@ class StandardPreset:
                 f"DBXCARTA_CLIENT_QUESTIONS must be a /Volumes/... .json path, got {dest!r}"
             )
         _validate_questions_file(self.questions_file)
-        _ensure_parent_dir(ws, dest)
-        with self.questions_file.open("rb") as fh:
-            ws.files.upload(file_path=dest, contents=fh, overwrite=True)
+        upload_file_to_volume(ws, self.questions_file, dest)
 
 
 def _has_data_schema(
@@ -197,14 +194,6 @@ def _fetch_schema_names(
     return [row[0] for row in rows if row]
 
 
-def _ensure_parent_dir(ws: WorkspaceClient, dest: str) -> None:
-    from databricks.sdk.errors import ResourceAlreadyExists
-
-    parent = dest.rsplit("/", 1)[0]
-    with contextlib.suppress(ResourceAlreadyExists):
-        ws.files.create_directory(parent)
-
-
 def _validate_questions_file(path: Path) -> None:
     """Validate a questions file before upload.
 
@@ -216,10 +205,7 @@ def _validate_questions_file(path: Path) -> None:
     """
     if not path.is_file():
         raise FileNotFoundError(f"questions file not found at {path}; generate it first")
-    try:
-        questions = json.loads(path.read_text())
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"questions file is not valid JSON: {path}") from exc
+    questions = load_json_file(path, label="questions file")
     if not isinstance(questions, list) or not questions:
         raise ValueError(f"questions file must be a non-empty JSON array: {path}")
     for item in questions:

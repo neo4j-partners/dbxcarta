@@ -18,7 +18,6 @@ test = ["pytest"]
 [project.scripts]
 dbxcarta-schemapile-slice = "dbxcarta_schemapile_example.slice_runner:main"
 dbxcarta-schemapile-select = "dbxcarta_schemapile_example.candidate_selector:main"
-dbxcarta-schemapile-materialize = "dbxcarta_schemapile_example.materialize:main"
 dbxcarta-schemapile-generate-questions = "dbxcarta_schemapile_example.question_generator:main"
 
 [build-system]

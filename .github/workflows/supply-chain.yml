@@ -114,7 +114,7 @@ jobs:
         run: uv run pytest
 
       - name: Type check
-        run: uv run mypy -p dbxcarta.core -p dbxcarta.spark -p dbxcarta.client -p dbxcarta.submit
+        run: uv run mypy -p dbxcarta.core -p dbxcarta.spark -p dbxcarta.client -p dbxcarta.submit -p dbxcarta.materialize
 
       - name: Lint
         run: uv run ruff check .
