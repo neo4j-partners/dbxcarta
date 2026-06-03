@@ -49,3 +49,12 @@ def test_plain_multi_catalog_list_dedupes_order_preserving() -> None:
 def test_malformed_catalog_identifier_is_rejected() -> None:
     with pytest.raises(ValidationError):
         _make(dbxcarta_catalogs="1bad")
+
+
+def test_max_questions_defaults_to_no_cap() -> None:
+    assert _make().dbxcarta_client_max_questions == 0
+
+
+def test_max_questions_parses_from_env_value() -> None:
+    # Forwarded as a job-param string; pydantic coerces it to int.
+    assert _make(dbxcarta_client_max_questions="5").dbxcarta_client_max_questions == 5

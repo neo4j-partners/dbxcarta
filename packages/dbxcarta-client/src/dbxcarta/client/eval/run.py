@@ -79,6 +79,16 @@ def run_client() -> None:
     _preflight(ws, settings)
 
     questions = _load_questions(settings.dbxcarta_client_questions, spark)
+    if settings.dbxcarta_client_max_questions > 0:
+        capped = settings.dbxcarta_client_max_questions
+        if capped < len(questions):
+            logger.info(
+                "[dbxcarta_client] capping question set to first %d of %d "
+                "(DBXCARTA_CLIENT_MAX_QUESTIONS)",
+                capped,
+                len(questions),
+            )
+            questions = questions[:capped]
     active_arms = settings.arms
     staging_table = _resolve_staging_table(settings) if any(
         a in _STAGING_ARMS for a in active_arms

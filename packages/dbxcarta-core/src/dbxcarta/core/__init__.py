@@ -5,7 +5,9 @@
 Databricks SDK, never Spark: identifier and path helpers (:mod:`identifiers`),
 the catalog-list rule (:mod:`catalogs`), workspace/secret access
 (:mod:`workspace`), the SQL warehouse runner (:mod:`executor`), the example
-preset (:mod:`presets`), and the env-file overlay loader (:mod:`env`).
+preset (:mod:`presets`), the env-file overlay loader (:mod:`env`), the shared
+table-materialize plumbing (:mod:`materialize`), and the question-generation
+shapes (:mod:`questions`).
 
 Submodules are imported directly (``from dbxcarta.core.identifiers import
 quote_identifier``); this package root deliberately re-exports nothing so that

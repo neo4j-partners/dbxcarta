@@ -40,6 +40,9 @@ class ClientSettings(BaseSettings):
 
     # Client-specific — runtime
     dbxcarta_client_questions: str = ""  # defaults to {volume_path}/questions.json
+    # 0 = run the full question set; set to a small N (e.g. 5) to evaluate only
+    # the first N questions as a quick post-ingest smoke check.
+    dbxcarta_client_max_questions: int = 0
     dbxcarta_client_arms: str = "no_context,schema_dump,graph_rag"
     dbxcarta_client_top_k: int = 5
     # Force re-inference even when a matching cached staging table exists.

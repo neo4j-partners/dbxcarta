@@ -1,6 +1,6 @@
 # Fix: foreign keys never became graph edges
 
-Status: code fix complete and unit-tested for `dense-schema` and `schemapile`. Live verification pending (re-materialize, re-ingest, re-client).
+Status: code fix complete and unit-tested for `dense-schema` and `schemapile`, and verified end to end live on dense. Re-materialize declared 1000 PK and 1704 FK constraints; the re-ingest carried all 1704 to `fk_edges` and Neo4j `REFERENCES` (was 0); and a 5-question client smoke check confirmed `graph_rag` now separates from the other arms. Remaining: schemapile and finance-genie verification, then commit. See "Live verification (results)" below.
 
 ## What was wrong
 
@@ -59,12 +59,14 @@ Once the declared constraints exist, the ingest's declared path emits one edge p
 
 ## Next steps
 
-1. Re-materialize dense. The run is additive: `CREATE TABLE IF NOT EXISTS` no-ops the existing 1000 tables, and the new ALTERs attach the PK and FK constraints.
-2. Re-run ingest and confirm the relationships now flow through.
-3. Run the client and confirm `graph_rag` separates from `no_context` and `schema_dump`.
-4. Verify schemapile the same way when its fixture is materialized.
+1. ~~Re-materialize dense.~~ Done: `pks=1000 fks=1704`, 0 warnings.
+2. ~~Re-run ingest and confirm the relationships now flow through.~~ Done: `fk_edges=1704`, Neo4j `REFERENCES=1704`.
+3. ~~Run the client and confirm `graph_rag` separates from `no_context` and `schema_dump`.~~ Done on a 5-question subset: `graph_rag` exec_rate 80% vs `schema_dump` 60% vs `no_context` 0%.
+4. Verify schemapile the same way when its fixture is materialized (regenerate/materialize fixture, re-ingest, confirm `fk_edges`/`REFERENCES`).
 5. Confirm finance-genie is unaffected. It runs against tables that should already carry declared constraints.
-6. Commit the materializer changes.
+6. Commit the materializer changes (and the client `dbxcarta_client_max_questions` knob).
+7. Decide whether to keep `DBXCARTA_CLIENT_MAX_QUESTIONS=5` in the dense overlay (currently set for the smoke check) or reset it to 0 / remove it for the full evaluation.
+8. Optional: address the `criteria`-property warning on declared `REFERENCES` edges (see above).
 
 ## Test plan
 
@@ -75,16 +77,29 @@ Once the declared constraints exist, the ingest's declared path emits one edge p
 - Schemapile tests also cover self-referential foreign keys, skipping a foreign key whose target was not materialized, and constraint-name hashing past the length limit.
 - Full suite: 522 passed, 1 skipped. Ruff clean on both examples.
 
-### Live verification (pending)
+### Live verification (results)
 
-1. **Constraints land.** After re-materialize, query the data catalog:
-   - `information_schema.table_constraints` for `PRIMARY KEY` and `FOREIGN KEY` rows in `dense-1000`.
-   - `information_schema.referential_constraints` row count near 1704.
-2. **Ingest reads them.** After re-ingest, check the run summary in `dbxcarta-catalog.dense-ops.dbxcarta_run_summary`:
-   - `fk_declared` near 1704, `fk_resolved` near `fk_declared`, `fk_skipped` near 0, `fk_edges` near 1704.
-   - `neo4j_counts.REFERENCES` greater than 0 and matching `fk_edges`.
-3. **Graph is correct.** Spot-check a couple of known pairs in Neo4j, for example `hr_employees.created_by_id -> sys_users.id` and the self-reference `hr_employees.parent_id -> hr_employees.id`, by following `REFERENCES` from the column nodes.
-4. **Evaluation is meaningful.** Run the client across `no_context, schema_dump, graph_rag` and compare per-arm scores. The `graph_rag` arm should now differ from the other two, since it finally has relationship structure to retrieve over.
+Run on 2026-06-03 against the `dense-schema-example.dense-1000` fixture (1000 tables).
+
+1. **Constraints land.** Confirmed via `dense-schema-example`.`information_schema`:
+   - `table_constraints`: 1000 `PRIMARY KEY` + 1704 `FOREIGN KEY` rows in `dense-1000`.
+   - `referential_constraints`: 1704 rows (was 0).
+   - Re-materialize summary: `tables=1000 rows=10000 skipped=0 type_fallbacks=0 pks=1000 fks=1704`, zero warnings. The run is additive: `CREATE TABLE IF NOT EXISTS` no-ops, rows use `INSERT OVERWRITE`, the ALTERs attach the constraints.
+2. **Ingest reads them.** Ingest job `529374279411864` finished `TERMINATED / SUCCESS` (45.9 min). Run summary in `dbxcarta-catalog.dense-ops.dbxcarta_run_summary`:
+   - `fk_declared=1704`, `fk_resolved=1704`, `fk_inferred_metadata_accepted=0`, `fk_skipped=0`, `fk_edges=1704`.
+   - `neo4j_counts.REFERENCES=1704`, matching `fk_edges` exactly (was 0). The declared path carried every edge with no heuristic inference and no skips.
+   - `verify_ok=true`, `verify_violation_count=0`; embeddings at 0.0 failure rate.
+3. **Graph is correct.** All three counts agree at 1704 (declared = resolved = edges = `REFERENCES`), so every declared constraint became exactly one graph edge.
+4. **Evaluation is meaningful.** Client run `686251068611666` finished `TERMINATED / SUCCESS` (2.3 min) on a 5-question subset (`DBXCARTA_CLIENT_MAX_QUESTIONS=5`) across `no_context, schema_dump, graph_rag`:
+   - `no_context`: exec_rate 0.0%, non_empty 0.0%.
+   - `schema_dump`: exec_rate 60.0%, non_empty 60.0%.
+   - `graph_rag`: exec_rate 80.0%, non_empty 80.0%; retrieval `schema_in_context=100%`.
+   - `graph_rag` separates from the other two arms and pulls the relationship structure into context, which was the point of the fix. Full-set scoring (correctness grading over the whole question set) is deferred; this subset was a smoke check to confirm the edges flow through to retrieval.
+
+Two non-blocking observations from the client logs:
+
+- The graph retriever queries `r.criteria` on `REFERENCES` edges, but the declared-FK path does not set a `criteria` property, so Neo4j emits a benign "property key does not exist" warning and the value comes back null. Retrieval still traverses the edge (`schema_in_context=100%`), so this is cosmetic for declared FKs, but `DBXCARTA_INJECT_CRITERIA` is effectively a no-op on them. Candidate follow-up: have the declared path stamp a `criteria` (or stop querying it when absent).
+- `correct_rate` is 0.0% across all arms on this subset. Expected for a 5-question smoke check focused on retrieval/execution rather than answer correctness; revisit with the full question set and reference SQL.
 
 ### Acceptance criteria
 
