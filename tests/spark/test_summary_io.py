@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from typing import Any
 
 import pytest
-
 from dbxcarta.spark.ingest.summary_io import LoadSummaryError, load_summary_from_volume
 
 _VOLUME = "/Volumes/main/ops/dbxcarta/summaries"

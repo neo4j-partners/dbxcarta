@@ -91,7 +91,8 @@ def _assert_graph_populated(settings: ClientSettings) -> None:
     uri, username, password = neo4j_credentials(settings)
     with GraphDatabase.driver(uri, auth=(username, password)) as driver:
         with driver.session() as session:
-            count = session.run("MATCH (t:Table) RETURN count(t) AS c").single()["c"]
+            record = session.run("MATCH (t:Table) RETURN count(t) AS c").single()
+    count = record["c"] if record is not None else 0
     if count == 0:
         raise RuntimeError(
             "Neo4j graph has no Table nodes; run the Ingest job before the "
