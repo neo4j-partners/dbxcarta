@@ -10,28 +10,34 @@ from dbxcarta.client.eval.run import manage_questions
 
 def test_manage_questions_writes_schema_column(tmp_path) -> None:
     path = tmp_path / "questions.json"
-    path.write_text(json.dumps([
-        {
-            "question_id": "q1",
-            "question": "Who?",
-            "notes": "note",
-            "reference_sql": "SELECT 1",
-            "schema": "target_schema",
-        }
-    ]))
+    path.write_text(
+        json.dumps(
+            [
+                {
+                    "question_id": "q1",
+                    "question": "Who?",
+                    "notes": "note",
+                    "reference_sql": "SELECT 1",
+                    "schema": "target_schema",
+                }
+            ]
+        )
+    )
 
     spark = _SparkStub()
     settings = SimpleNamespace(dbxcarta_summary_table="cat.meta.run_summary")
 
     manage_questions(spark, settings, str(path))
 
-    assert spark.rows == [(
-        "q1",
-        "Who?",
-        "note",
-        "SELECT 1",
-        "target_schema",
-    )]
+    assert spark.rows == [
+        (
+            "q1",
+            "Who?",
+            "note",
+            "SELECT 1",
+            "target_schema",
+        )
+    ]
     assert [field.name for field in spark.schema.fields] == [
         "question_id",
         "question",

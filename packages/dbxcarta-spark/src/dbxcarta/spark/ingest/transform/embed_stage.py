@@ -17,12 +17,9 @@ from __future__ import annotations
 
 import contextlib
 import logging
-from collections.abc import Iterator
 from typing import TYPE_CHECKING
 
 import dbxcarta.spark.ingest.transform.embeddings as emb
-from dbxcarta.spark.contract import NodeLabel
-from dbxcarta.spark.ingest.summary import RunSummary
 from dbxcarta.spark.ingest.transform.ledger import (
     read_ledger,
     split_by_ledger,
@@ -33,9 +30,13 @@ from dbxcarta.spark.ingest.transform.staging import (
     materialize_transient,
     transient_path,
 )
-from dbxcarta.spark.settings import SparkIngestSettings
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+    from dbxcarta.spark.contract import NodeLabel
+    from dbxcarta.spark.ingest.summary import RunSummary
+    from dbxcarta.spark.settings import SparkIngestSettings
     from pyspark.sql import DataFrame
 
 logger = logging.getLogger(__name__)
@@ -43,14 +44,14 @@ logger = logging.getLogger(__name__)
 
 @contextlib.contextmanager
 def embedded_batch(
-    df: "DataFrame",
+    df: DataFrame,
     label: NodeLabel,
     settings: SparkIngestSettings,
     ledger_path: str,
     transient_root: str,
     batch_tag: str,
     summary: RunSummary,
-) -> "Iterator[DataFrame]":
+) -> Iterator[DataFrame]:
     """Embed one batch's `df` for `label`, freeze it, and yield the result.
 
     `df` carries a builder-attached `embedding_text` column; the hash and the
@@ -102,19 +103,17 @@ def finalize_embedding_summary(summary: RunSummary) -> None:
         total_attempts += attempts
         total_successes += successes
     counts.aggregate_failure_rate = (
-        (total_attempts - total_successes) / total_attempts
-        if total_attempts > 0
-        else 0.0
+        (total_attempts - total_successes) / total_attempts if total_attempts > 0 else 0.0
     )
 
 
 def _embed_with_ledger(
-    df: "DataFrame",
+    df: DataFrame,
     label: NodeLabel,
     settings: SparkIngestSettings,
     ledger_path: str,
     summary: RunSummary,
-) -> "DataFrame":
+) -> DataFrame:
     """Return df enriched with embedding columns, using the ledger when on."""
     from pyspark.sql.functions import col, lit, sha2
     from pyspark.sql.types import ArrayType, DoubleType
@@ -146,13 +145,16 @@ def _embed_with_ledger(
         col("_led_embedded_at").alias("embedded_at"),
     )
     embedded_misses = emb.add_embedding_column(
-        misses_df, endpoint, dimension, label=label.value,
+        misses_df,
+        endpoint,
+        dimension,
+        label=label.value,
     )
     return hit_final.unionByName(embedded_misses)
 
 
 def _accumulate_and_gate(
-    staged: "DataFrame",
+    staged: DataFrame,
     label: NodeLabel,
     settings: SparkIngestSettings,
     summary: RunSummary,
@@ -166,7 +168,10 @@ def _accumulate_and_gate(
 
     logger.info(
         "[dbxcarta] %s batch embeddings: attempts=%d successes=%d failures=%d",
-        label.value, attempts, successes, failures,
+        label.value,
+        attempts,
+        successes,
+        failures,
     )
 
     cap = settings.dbxcarta_embedding_failure_max

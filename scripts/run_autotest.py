@@ -22,7 +22,7 @@ import re
 import subprocess
 import sys
 import tempfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -39,16 +39,18 @@ FIXTURE_SCHEMAS = [
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _make_ws():
-    from dbxcarta.client.databricks import build_workspace_client
+    from dbxcarta.core.workspace import build_workspace_client
 
     return build_workspace_client()
 
 
-def _run(cmd: list[str], *, env_overrides: dict[str, str] | None = None) -> subprocess.CompletedProcess:
+def _run(
+    cmd: list[str], *, env_overrides: dict[str, str] | None = None
+) -> subprocess.CompletedProcess:
     env = {**os.environ, **(env_overrides or {})}
     result = subprocess.run(cmd, capture_output=True, text=True, env=env, cwd=PROJECT_ROOT)
     if result.stdout:
@@ -61,6 +63,7 @@ def _run(cmd: list[str], *, env_overrides: dict[str, str] | None = None) -> subp
 # ---------------------------------------------------------------------------
 # Preflight
 # ---------------------------------------------------------------------------
+
 
 def run_preflight() -> dict:
     print("\n=== Preflight ===")
@@ -88,7 +91,7 @@ def run_preflight() -> dict:
         return {"status": "fail", "errors": errors}
 
     try:
-        from dbxcarta.client.executor import preflight_warehouse
+        from dbxcarta.core.executor import preflight_warehouse
 
         ws = _make_ws()
         preflight_warehouse(ws, warehouse_id)
@@ -103,12 +106,20 @@ def run_preflight() -> dict:
 # Unit Test Gate
 # ---------------------------------------------------------------------------
 
+
 def run_unit_tests() -> dict:
     print("\n=== Unit Test Gate ===")
-    result = _run([
-        "uv", "run", "pytest", "tests/", "-x", "-q",
-        "--ignore=tests/integration",
-    ])
+    result = _run(
+        [
+            "uv",
+            "run",
+            "pytest",
+            "tests/",
+            "-x",
+            "-q",
+            "--ignore=tests/integration",
+        ]
+    )
 
     passed = 0
     failed = 0
@@ -127,6 +138,7 @@ def run_unit_tests() -> dict:
 # ---------------------------------------------------------------------------
 # Schema Teardown and Setup
 # ---------------------------------------------------------------------------
+
 
 def run_schema_setup() -> dict:
     print("\n=== Schema Teardown and Setup ===")
@@ -158,6 +170,7 @@ def run_schema_setup() -> dict:
 # ---------------------------------------------------------------------------
 # Ingest Run
 # ---------------------------------------------------------------------------
+
 
 def run_ingest() -> dict:
     print("\n=== Ingest Run ===")
@@ -232,6 +245,7 @@ def run_ingest() -> dict:
 # Assertions
 # ---------------------------------------------------------------------------
 
+
 def run_assertions(run_summary: dict) -> dict:
     print("\n=== Assertions ===")
     failed: list[str] = []
@@ -296,7 +310,8 @@ _FK_RE = re.compile(
 def _parse_fixture_fks(catalog: str) -> set[tuple[str, str]]:
     """Parse `tests/fixtures/setup_test_catalog.sql` and return the canonical
     set of *declared* `(src_id, dst_id)` REFERENCES edges, normalized via
-    `generate_id`."""
+    `generate_id`.
+    """
     from dbxcarta.spark.contract import generate_id
 
     fixture_sql = (PROJECT_ROOT / "tests" / "fixtures" / "setup_test_catalog.sql").read_text()
@@ -311,7 +326,8 @@ def _parse_fixture_fks(catalog: str) -> set[tuple[str, str]]:
 def _neo4j_references_by_source(ws) -> dict[str, set[tuple[str, str]]]:
     """Open a Neo4j session via Databricks Secrets; return REFERENCES edges
     bucketed by their `source` property (`'declared'`, `'inferred_metadata'`,
-    `'inferred_semantic'`, ...)."""
+    `'inferred_semantic'`, ...).
+    """
     import base64
 
     from neo4j import GraphDatabase
@@ -401,9 +417,10 @@ def run_references_diff() -> dict:
 # Output JSON
 # ---------------------------------------------------------------------------
 
+
 def run_write_output(phases: dict, catalog: str) -> dict:
     print("\n=== Write Output JSON ===")
-    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
 
     overall_phases = {k: v for k, v in phases.items() if k != "output"}
     overall = "pass" if all(p["status"] == "pass" for p in overall_phases.values()) else "fail"
@@ -441,6 +458,7 @@ def run_write_output(phases: dict, catalog: str) -> dict:
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def _abort(phases: dict) -> None:
     failed = [k for k, v in phases.items() if v["status"] != "pass"]

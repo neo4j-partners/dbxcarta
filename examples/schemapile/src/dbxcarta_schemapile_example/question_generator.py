@@ -26,20 +26,17 @@ import logging
 import re
 import sys
 import textwrap
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from dbxcarta.client.databricks import build_workspace_client
+from dbxcarta.core.env import read_required_warehouse_id
+from dbxcarta.core.materialize import sanitize_identifier
+from dbxcarta.core.questions import GeneratedPair, ValidationOutcome
+from dbxcarta.core.sql_safety import sql_targets_only_catalog
+from dbxcarta.core.workspace import build_workspace_client
+
 from dbxcarta_schemapile_example.config import SchemaPileConfig, load_config
-from dbxcarta_schemapile_example.materialize import (
-    _sanitize_column_name,
-    _sanitize_table_name,
-)
-from dbxcarta_schemapile_example.utils import (
-    load_dotenv_file,
-    read_required_warehouse_id,
-)
+from dbxcarta_schemapile_example.utils import load_dotenv_file
 
 if TYPE_CHECKING:
     from databricks.sdk import WorkspaceClient
@@ -51,23 +48,6 @@ logger = logging.getLogger(__name__)
 _SHAPES = ("single_table_filter", "two_table_join", "aggregation")
 
 
-@dataclass(frozen=True)
-class GeneratedPair:
-    uc_schema: str
-    source_id: str
-    shape: str
-    question: str
-    sql: str
-
-
-@dataclass
-class ValidationOutcome:
-    accepted: list[GeneratedPair]
-    errored: int = 0
-    empty: int = 0
-    trivial: int = 0
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(
         prog="dbxcarta-schemapile-generate-questions",
@@ -77,7 +57,9 @@ def main() -> int:
         ),
     )
     parser.add_argument(
-        "--dotenv", type=Path, default=Path(__file__).resolve().parents[2] / ".env",
+        "--dotenv",
+        type=Path,
+        default=Path(__file__).resolve().parents[2] / ".env",
         help="Path to the .env file to load (default: example directory .env)",
     )
     parser.add_argument(
@@ -108,10 +90,7 @@ def main() -> int:
         nargs="+",
         metavar="SHAPE",
         default=[],
-        help=(
-            "Shapes to drop after generation. "
-            "E.g. --exclude-shapes single_table_filter"
-        ),
+        help=("Shapes to drop after generation. E.g. --exclude-shapes single_table_filter"),
     )
     args = parser.parse_args()
 
@@ -174,7 +153,7 @@ def main() -> int:
 
 
 def _generate_all(
-    ws: "WorkspaceClient",
+    ws: WorkspaceClient,
     config: SchemaPileConfig,
     schemas: list[dict[str, Any]],
     cache_dir: Path,
@@ -195,31 +174,36 @@ def _generate_all(
             sql = str(item.get("sql", "")).strip()
             if shape not in _SHAPES or not question or not sql:
                 continue
-            pairs.append(GeneratedPair(
-                uc_schema=entry["uc_schema"],
-                source_id=entry["source_id"],
-                shape=shape,
-                question=question,
-                sql=sql,
-            ))
+            pairs.append(
+                GeneratedPair(
+                    uc_schema=entry["uc_schema"],
+                    source_id=entry["source_id"],
+                    shape=shape,
+                    question=question,
+                    sql=sql,
+                )
+            )
     return pairs
 
 
 def _cache_path(cache_dir: Path, uc_schema: str, config: SchemaPileConfig) -> Path:
     sig = hashlib.sha256(
-        json.dumps({
-            "uc_schema": uc_schema,
-            "model": config.question_model,
-            "questions_per_schema": config.questions_per_schema,
-            "temperature": config.question_temperature,
-            "seed": config.seed,
-        }, sort_keys=True).encode()
+        json.dumps(
+            {
+                "uc_schema": uc_schema,
+                "model": config.question_model,
+                "questions_per_schema": config.questions_per_schema,
+                "temperature": config.question_temperature,
+                "seed": config.seed,
+            },
+            sort_keys=True,
+        ).encode()
     ).hexdigest()[:16]
     return cache_dir / f"{uc_schema}-{sig}.json"
 
 
 def _call_model(
-    ws: "WorkspaceClient",
+    ws: WorkspaceClient,
     config: SchemaPileConfig,
     entry: dict[str, Any],
 ) -> list[dict[str, Any]]:
@@ -257,20 +241,18 @@ def _build_prompt(entry: dict[str, Any], config: SchemaPileConfig) -> str:
     tables = entry.get("tables") or []
     ddl_lines: list[str] = []
     for table in tables:
-        table_name = _sanitize_table_name(str(table.get("name", "")))
+        table_name = sanitize_identifier(str(table.get("name", "")), prefix="t")
         if not table_name:
             continue
         materialized_columns = [
-            (_sanitize_column_name(str(c.get("name", ""))), c)
+            (sanitize_identifier(str(c.get("name", "")), prefix="c"), c)
             for c in (table.get("columns") or [])
         ]
         materialized_columns = [(name, c) for name, c in materialized_columns if name]
-        cols = ", ".join(
-            f"{name} {c.get('type', '')}" for name, c in materialized_columns
-        )
+        cols = ", ".join(f"{name} {c.get('type', '')}" for name, c in materialized_columns)
         pk = table.get("primary_keys") or []
         materialized_pk = [
-            name for name in (_sanitize_column_name(str(c)) for c in pk) if name
+            name for name in (sanitize_identifier(str(c), prefix="c") for c in pk) if name
         ]
         pk_clause = f" PK({', '.join(materialized_pk)})" if materialized_pk else ""
         fks = table.get("foreign_keys") or []
@@ -278,7 +260,7 @@ def _build_prompt(entry: dict[str, Any], config: SchemaPileConfig) -> str:
         if fks:
             fk_clause = " FKs: " + "; ".join(
                 f"{', '.join(_sanitize_fk_columns(fk.get('columns') or []))} -> "
-                f"{_sanitize_table_name(str(fk.get('foreign_table') or '?'))}"
+                f"{sanitize_identifier(str(fk.get('foreign_table') or '?'), prefix='t')}"
                 f"({', '.join(_sanitize_fk_columns(fk.get('referred_columns') or []))})"
                 for fk in fks
             )
@@ -289,7 +271,7 @@ def _build_prompt(entry: dict[str, Any], config: SchemaPileConfig) -> str:
     n_per_shape = max(1, n // 3)
     return textwrap.dedent(f"""\
         Catalog: `{schema_catalog}`
-        Schema: `{uc_schema}` (originally `{entry['source_id']}`)
+        Schema: `{uc_schema}` (originally `{entry["source_id"]}`)
 
         Tables and columns:
         {schema_block}
@@ -304,7 +286,8 @@ def _build_prompt(entry: dict[str, Any], config: SchemaPileConfig) -> str:
 
 def _sanitize_fk_columns(columns: list[Any]) -> list[str]:
     return [
-        name for name in (_sanitize_column_name(str(column)) for column in columns)
+        name
+        for name in (sanitize_identifier(str(column), prefix="c") for column in columns)
         if name
     ]
 
@@ -337,10 +320,7 @@ def _first_message_text(response: Any) -> str:
     if not choices:
         return ""
     first = choices[0]
-    if isinstance(first, dict):
-        message = first.get("message")
-    else:
-        message = getattr(first, "message", None)
+    message = first.get("message") if isinstance(first, dict) else getattr(first, "message", None)
     if message is None:
         return ""
     if isinstance(message, dict):
@@ -349,7 +329,7 @@ def _first_message_text(response: Any) -> str:
 
 
 def _validate_all(
-    ws: "WorkspaceClient",
+    ws: WorkspaceClient,
     warehouse_id: str,
     catalog: str,
     pairs: list[GeneratedPair],
@@ -364,7 +344,7 @@ def _validate_all(
     empty = 0
     trivial = 0
     for pair in pairs:
-        if not _sql_targets_only_catalog(pair.sql, catalog):
+        if not sql_targets_only_catalog(pair.sql, catalog):
             errored += 1
             continue
         try:
@@ -393,47 +373,11 @@ def _validate_all(
             continue
         accepted.append(pair)
     return ValidationOutcome(
-        accepted=accepted, errored=errored, empty=empty, trivial=trivial,
+        accepted=accepted,
+        errored=errored,
+        empty=empty,
+        trivial=trivial,
     )
-
-
-_FORBIDDEN_SQL_RE = re.compile(
-    r"\b("
-    r"alter|call|copy|create|delete|drop|execute|grant|insert|merge|msck|"
-    r"optimize|refresh|repair|replace|revoke|truncate|update|use|vacuum"
-    r")\b",
-    re.IGNORECASE,
-)
-_TABLE_REF_RE = re.compile(r"\b(?:from|join)\s+([`A-Za-z0-9_.-]+)", re.IGNORECASE)
-
-
-def _sql_targets_only_catalog(sql: str, catalog: str) -> bool:
-    """Guard against generated SQL that is not a read-only query for catalog."""
-    normalized = sql.strip()
-    lowered = normalized.lower()
-    if not lowered.startswith("select"):
-        return False
-    if ";" in normalized.rstrip(";"):
-        return False
-    if _FORBIDDEN_SQL_RE.search(normalized):
-        return False
-    if "information_schema" in lowered or re.search(r"\bsystem\s*\.", lowered):
-        return False
-    target = f"`{catalog.lower()}`"
-    if target not in lowered:
-        return False
-
-    for match in _TABLE_REF_RE.finditer(sql):
-        ref = match.group(1).strip()
-        if ref.startswith("`"):
-            if not ref.lower().startswith(target):
-                return False
-        elif "." in ref:
-            if not ref.lower().startswith(f"{catalog.lower()}."):
-                return False
-        else:
-            return False
-    return True
 
 
 def _format_questions(pairs: list[GeneratedPair]) -> list[dict[str, Any]]:

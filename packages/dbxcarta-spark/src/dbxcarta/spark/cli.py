@@ -3,13 +3,12 @@ from __future__ import annotations
 import sys
 from typing import TYPE_CHECKING
 
-from dbxcarta.spark.env import select_overlay_path
+from dbxcarta.core.env import select_overlay_path
 
 if TYPE_CHECKING:
     from databricks.sdk import WorkspaceClient
-    from neo4j import Driver
-
     from dbxcarta.spark.settings import SparkIngestSettings
+    from neo4j import Driver
 
 
 def main() -> None:
@@ -49,7 +48,7 @@ def _load_env(argv: list[str]) -> tuple[list[str] | None, int]:
     Returns ``(cleaned_argv, 0)`` on success, or ``(None, 2)`` after
     printing an :class:`EnvFileError` so the caller returns the code.
     """
-    from dbxcarta.spark.env import EnvFileError, load_env_files, resolve_env_files
+    from dbxcarta.core.env import EnvFileError, load_env_files, resolve_env_files
 
     try:
         env_files, cleaned = resolve_env_files(argv)
@@ -75,8 +74,8 @@ def _handle_verify(argv: list[str]) -> int:
     )
     args = parser.parse_args(argv)
 
-    from dbxcarta.spark.settings import SparkIngestSettings
     from dbxcarta.spark.ingest.summary_io import LoadSummaryError, load_summary_from_volume
+    from dbxcarta.spark.settings import SparkIngestSettings
     from dbxcarta.spark.verify import verify_run
 
     settings = SparkIngestSettings()
@@ -89,7 +88,10 @@ def _handle_verify(argv: list[str]) -> int:
         return 2
     if summary is None:
         scope_msg = f"run_id={args.run_id!r}" if args.run_id else "most recent status='success' run"
-        print(f"error: no run summary found in {settings.dbxcarta_summary_volume} for {scope_msg}.", file=sys.stderr)
+        print(
+            f"error: no run summary found in {settings.dbxcarta_summary_volume} for {scope_msg}.",
+            file=sys.stderr,
+        )
         return 2
 
     driver = _build_neo4j_driver(ws, settings)
@@ -128,11 +130,11 @@ def _handle_preset(argv: list[str]) -> int:
     parser.add_argument("--strict-optional", action="store_true")
     args = parser.parse_args(argv)
 
-    from dbxcarta.spark.loader import load_preset
-    from dbxcarta.spark.presets import (
+    from dbxcarta.core.presets import (
         QuestionsUploadable,
         ReadinessCheckable,
     )
+    from dbxcarta.spark.loader import load_preset
 
     try:
         preset = load_preset(args.spec)
@@ -155,7 +157,10 @@ def _handle_preset(argv: list[str]) -> int:
 
     if args.upload_questions:
         if not isinstance(preset, QuestionsUploadable):
-            print(f"error: preset {args.spec!r} does not implement upload_questions()", file=sys.stderr)
+            print(
+                f"error: preset {args.spec!r} does not implement upload_questions()",
+                file=sys.stderr,
+            )
             return 2
         ws = _build_workspace_client()
         preset.upload_questions(ws)
@@ -168,17 +173,14 @@ def _handle_preset(argv: list[str]) -> int:
 
 
 def _build_workspace_client() -> WorkspaceClient:
-    from dbxcarta.spark.databricks import build_workspace_client
+    from dbxcarta.core.workspace import build_workspace_client
 
     return build_workspace_client()
 
 
-def _build_neo4j_driver(
-    ws: WorkspaceClient, settings: SparkIngestSettings
-) -> Driver:
+def _build_neo4j_driver(ws: WorkspaceClient, settings: SparkIngestSettings) -> Driver:
+    from dbxcarta.core.workspace import read_workspace_secret
     from neo4j import GraphDatabase
-
-    from dbxcarta.spark.databricks import read_workspace_secret
 
     scope = settings.databricks_secret_scope
     return GraphDatabase.driver(

@@ -15,12 +15,17 @@ pipelines query the graph at runtime to retrieve the slice they need before
 generating SQL.
 
 ```
-┌───────────────┐   ┌──────────────────────┐   ┌──────────────────────┐   ┌──────────────────────┐   ┌───────────────┐
-│ Unity Catalog │──►│ dbxcarta-spark       │──►│ Neo4j semantic layer │──►│ dbxcarta-client      │──►│ SQL / answer  │
-│ flat metadata │   │ build: extract,      │   │ typed nodes, vectors,│   │ query: embed,        │   │ generated     │
-│               │   │ embed, infer FKs     │   │ confidence-scored FKs│   │ vector + graph fetch │   │ result        │
-└───────────────┘   └──────────────────────┘   └──────────────────────┘   └──────────────────────┘   └───────────────┘
+┌──────────────────────┐   ┌───────────────┐   ┌──────────────────────┐   ┌──────────────────────┐   ┌──────────────────────┐   ┌───────────────┐
+│ dbxcarta-materialize │──►│ Unity Catalog │──►│ dbxcarta-spark       │──►│ Neo4j semantic layer │──►│ dbxcarta-client      │──►│ SQL / answer  │
+│ blueprint to tables  │   │ flat metadata │   │ build: extract,      │   │ typed nodes, vectors,│   │ query: embed,        │   │ generated     │
+│ (seeds example data) │   │               │   │ embed, infer FKs     │   │ confidence-scored FKs│   │ vector + graph fetch │   │ result        │
+└──────────────────────┘   └───────────────┘   └──────────────────────┘   └──────────────────────┘   └──────────────────────┘   └───────────────┘
 ```
+
+The leftmost stage applies only to the bundled examples: `dbxcarta-materialize`
+seeds their demo tables into Unity Catalog from a committed blueprint. Against
+your own catalog the tables already exist, so the flow starts at Unity Catalog
+and `dbxcarta-materialize` is not used.
 
 The semantic-layer thesis, the three storage planes (data, semantic layer, ops),
 and the validation model are documented in
@@ -29,20 +34,54 @@ canonical architecture reference.
 
 ## Packages
 
-dbxcarta is split into three packages: the Spark and client libraries plus
-the operator-local `dbxcarta-submit` CLI. There is no top-level `dbxcarta`
-import surface; library consumers import the layer they need.
+dbxcarta is split into five packages layered over a shared, Spark-free core.
+`dbxcarta-core` is the foundation. `dbxcarta-spark`, `dbxcarta-client`, and
+`dbxcarta-materialize` are sibling layers that each depend on core but never on
+one another. `dbxcarta-submit` is the operator-local CLI that builds and submits
+the jobs. There is no top-level `dbxcarta` import surface; library consumers
+import the layer they need.
+
+```
+┌───────────────────────────────────────────────────────────────────────────┐
+│ examples/   finance-genie · schemapile · dense-schema                       │
+│ overlay env + preset object                    depend on → client, core     │
+└───────────────────────────────────────────────────────────────────────────┘
+                                     │
+        ┌────────────────────────────┼────────────────────────────┐
+        ▼                            ▼                            ▼
+┌──────────────────────┐  ┌──────────────────────┐  ┌──────────────────────┐
+│ dbxcarta-spark       │  │ dbxcarta-client      │  │ dbxcarta-materialize │
+│ UC ingest to Neo4j   │  │ retrieval + eval     │  │ build demo tables    │
+│ +pyspark +neo4j      │  │ +requests            │  │ +pyspark (shell)     │
+└──────────────────────┘  └──────────────────────┘  └──────────────────────┘
+        │                            │                            │
+        └────────────────────────────┼────────────────────────────┘
+                                     ▼
+┌───────────────────────────────────────────────────────────────────────────┐
+│ dbxcarta-core      Spark-free shared foundation · databricks-sdk only       │
+│ identifiers · catalogs · workspace · executor · presets · env ·             │
+│ materialize (pure SQL builders) · questions · config · volume_io            │
+└───────────────────────────────────────────────────────────────────────────┘
+
+   dbxcarta-submit   operator CLI · depends on core + databricks-job-runner
+                     builds wheels, uploads, and submits the spark / client /
+                     materialize jobs. Runs locally; never on the cluster.
+```
 
 | Capability | Distribution | Import path | Console script |
 |------------|--------------|-------------|----------------|
+| Shared Spark-free foundation: identifiers, the `catalog:layer` rule, workspace/secret access, SQL warehouse runner, preset protocols, env-overlay loader, pure materialize SQL builders | `dbxcarta-core` | `dbxcarta.core` | — |
 | Databricks Spark ingest, graph contract, IDs, validators, verification, preset runner | `dbxcarta-spark` | `dbxcarta.spark` | `dbxcarta`, `dbxcarta-ingest` |
 | Retrieval runtime and Text2SQL eval harness | `dbxcarta-client` | `dbxcarta.client` | `dbxcarta-client`, `dbxcarta-embed-probe` |
+| Serverless Spark job that builds the demo tables from a committed blueprint | `dbxcarta-materialize` | `dbxcarta.materialize` | `dbxcarta-materialize` |
 | Operator CLI to build, upload, and submit Databricks jobs | `dbxcarta-submit` | `dbxcarta.submit` | `dbxcarta-submit` |
 
 **Layer responsibilities:**
 
+- **Core** is the shared bottom layer every other package builds on: identifier and path quoting, the single `catalog:layer` parsing rule, workspace/secret access, the SQL warehouse runner, the preset capability protocols, the `.env` overlay loader, and the pure table-materialize SQL builders. It pulls in only the Databricks SDK, never Spark, Neo4j, or the job runner. The boundaries are enforced by `tests/boundary/test_import_boundaries.py`.
 - **Spark** owns the concrete Unity Catalog ingest implementation, the graph contract, verification, Databricks validators, preset capability protocols, and the `dbxcarta` domain CLI for verify and preset.
 - **Client** owns retrieval primitives and the Text2SQL eval harness.
+- **Materialize** is the serverless Spark job that creates the demo tables: core builds the `CREATE` / `INSERT` / foreign-key SQL as pure strings, and this layer owns the `SparkSession` and the bounded thread pool that runs them.
 - **Submit** owns the operator CLI that builds, uploads, and submits Databricks jobs. It is the only layer that depends on `databricks-job-runner`, runs on the operator's machine, and is never installed on the cluster.
 
 This repository uses a clean boundary cutover. Old top-level imports are deleted
@@ -241,9 +280,10 @@ module and reading the object. A preset bundles three things together:
 
 Without a preset, every developer running dbxcarta against the same upstream project (such as Finance Genie) must manually collect and maintain the correct environment variables. A preset packages that knowledge once and makes it repeatable. Install the example package, then reference the preset by import path instead of managing env vars by hand.
 
-Optional readiness and question-upload hooks live in `dbxcarta.spark.presets`
-for CLI and demo integrations; they do not require the Spark package to depend
-on the client runtime.
+The preset protocols and the shared `StandardPreset` live in
+`dbxcarta.core.presets`; the `dbxcarta.spark.loader` resolves a preset from its
+import-path spec. Neither requires core or Spark to depend on the client
+runtime.
 
 **The preset interface:**
 
@@ -260,8 +300,8 @@ preset, so the preset carries only behavior. Both capabilities are optional.
 Companion examples show how to package reusable configuration and demo data for
 known upstream projects. Each example is its own Python package that depends on
 the relevant dbxcarta distributions as normal pip dependencies and exposes a
-module-level `preset` object. The Spark package provides the preset protocol,
-the shared `StandardPreset`, and the loader; each example constructs
+module-level `preset` object. Core provides the preset protocols and the shared
+`StandardPreset`; the Spark package provides the loader. Each example constructs
 `StandardPreset` with its bundled question set.
 
 #### Finance Genie
@@ -373,6 +413,8 @@ MATCH (n) DETACH DELETE n;
 ### 2. Create the demo source schemas
 
 `scripts/run_demo.py` uses `DBXCARTA_CATALOG`, `DATABRICKS_WAREHOUSE_ID`, and `DATABRICKS_VOLUME_PATH` from `.env`. It creates and populates the demo source schemas in Unity Catalog.
+
+This quickstart uses the built-in demo catalog, created locally through the SQL warehouse by `run_demo.py`. The bundled examples (finance-genie, schemapile, dense-schema) instead seed their tables with the serverless `dbxcarta-submit materialize` job; see each example's README.
 
 ```bash
 uv run python scripts/run_demo.py
@@ -508,7 +550,7 @@ The fixture covers all the structural edge cases:
 
 ## Upload and submit
 
-These operator commands are provided by the `dbxcarta-submit` package, a thin CLI wrapper around `databricks-job-runner` that handles upload, submit, and cleanup. It depends on `dbxcarta-spark`, runs on the operator's machine, and is never installed on the cluster. The `dbxcarta-spark` and `dbxcarta-client` packages do not depend on the job runner.
+These operator commands are provided by the `dbxcarta-submit` package, a thin CLI wrapper around `databricks-job-runner` that handles upload, submit, and cleanup. It depends on `dbxcarta-core`, runs on the operator's machine, and is never installed on the cluster. No other package depends on the job runner.
 
 ### Supply-chain checks
 
@@ -576,12 +618,15 @@ It first reads the workspace and prints every table and volume path it will dele
 
 External projects depend on the distribution that matches the capability they use. The public surfaces are:
 
+- **Core:** identifier and path helpers, the `catalog:layer` rule (`resolve_catalogs`), workspace/secret access, the SQL warehouse runner, the preset protocols and `StandardPreset`, the `.env` overlay loader, and the materialize SQL builders
 - **Spark:** `SparkIngestSettings`, `run_dbxcarta`, graph contract enums and constants, Databricks identifier/path validators, preset loading, `verify_run`, and the `dbxcarta` / `dbxcarta-ingest` wheel entrypoints
 - **Client:** retrieval primitives, SQL parsing and read-only guards, result comparison, `ClientSettings`, and the `dbxcarta.client.eval` harness
+- **Materialize:** the `dbxcarta-materialize` wheel entrypoint, the serverless Spark shell that runs core's materialize SQL builders
 
 The `dbxcarta` and `dbxcarta-ingest` commands are registered by
-`dbxcarta-spark`, `dbxcarta-client` by `dbxcarta-client`, and
-`dbxcarta-submit` by `dbxcarta-submit`.
+`dbxcarta-spark`, `dbxcarta-client` and `dbxcarta-embed-probe` by
+`dbxcarta-client`, `dbxcarta-materialize` by `dbxcarta-materialize`, and
+`dbxcarta-submit` by `dbxcarta-submit`. `dbxcarta-core` registers no command.
 
 Removing or renaming a public name above is a breaking change. Adding a new name is additive. Implementation modules below a layer remain internal unless documented here.
 
@@ -602,4 +647,21 @@ This repository uses a clean boundary cutover. Old top-level imports are deleted
 | `dbxcarta.client.client` | `dbxcarta.client.eval.run` |
 | `dbxcarta.entrypoints.ingest` | `dbxcarta.spark.entrypoint` |
 | `dbxcarta.entrypoints.client` | `dbxcarta.client.eval.entrypoint` |
-| `dbxcarta.presets` module file | `dbxcarta.spark.presets` and `dbxcarta.spark.loader` |
+| `dbxcarta.presets` module file | `dbxcarta.core.presets` (protocols + `StandardPreset`) and `dbxcarta.spark.loader` (loader) |
+
+## Lessons learned
+
+### Dropping a data catalog on a Default-Storage account is not round-trippable through the tooling
+
+On 2026-06-03, clearing the example catalogs for a pipeline re-run surfaced a gap. `dbxcarta-submit teardown` dropped the dense and schemapile data catalogs with `DROP CATALOG ... CASCADE`, but the follow-up `dbxcarta-submit bootstrap` could not recreate them. This workspace runs on a Databricks account with Default Storage enabled and no metastore storage root URL. On such an account, a SQL `CREATE CATALOG` without an explicit `MANAGED LOCATION` fails, and the Unity Catalog catalogs API fails the same way. `bootstrap`'s `ensure_uc_catalog` only runs `CREATE CATALOG` when the catalog is missing, so it works for an existing catalog by skipping the create, but it cannot rebuild one that was dropped.
+
+What this means in practice:
+
+- `teardown` of a data catalog is effectively irreversible from the CLI on this account. Recreating the catalog requires the Databricks UI "Default Storage" flow, or a `CREATE CATALOG ... MANAGED LOCATION` pointed at a real storage location.
+- Ops schemas are safe to drop and recreate. `bootstrap` rebuilds the ops schema and volume inside the shared `dbxcarta-catalog`, which is never dropped.
+- finance-genie was unaffected. Its teardown target is ops only, so its data catalog stayed in place and bootstrap took the skip path.
+
+Guidance:
+
+- Do not run `teardown` against a data catalog on a Default-Storage account unless you are prepared to recreate that catalog in the UI. Prefer clearing schema and table contents over dropping the catalog itself.
+- Follow-up worth making: give `bootstrap` a managed-location or default-storage create path so that teardown plus bootstrap is genuinely round-trippable, matching the Phase 1 intent recorded in `planner.md`.

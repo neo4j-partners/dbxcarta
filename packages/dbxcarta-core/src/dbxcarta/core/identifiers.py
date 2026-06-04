@@ -2,11 +2,7 @@
 
 from __future__ import annotations
 
-import base64
-import os
 import re
-
-from databricks.sdk import WorkspaceClient
 
 _IDENTIFIER_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_-]*$")
 _VOLUME_SUBPATH_PART_RE = re.compile(r"^[A-Za-z0-9._=-]+$")
@@ -19,26 +15,6 @@ _VOLUME_SUBPATH_PART_RE = re.compile(r"^[A-Za-z0-9._=-]+$")
 UC_PROTECTED_NAMES: frozenset[str] = frozenset(
     {"main", "system", "hive_metastore", "samples", "graph-enriched-lakehouse"}
 )
-
-
-def build_workspace_client() -> WorkspaceClient:
-    """Build a WorkspaceClient from DATABRICKS_PROFILE or default SDK auth."""
-    profile = os.environ.get("DATABRICKS_PROFILE")
-    return WorkspaceClient(profile=profile) if profile else WorkspaceClient()
-
-
-def read_workspace_secret(ws: WorkspaceClient, scope: str, key: str) -> str:
-    """Fetch and base64-decode a workspace secret value.
-
-    ``WorkspaceClient.secrets.get_secret`` returns the value base64-encoded,
-    and ``.value`` is ``None`` when the secret is absent. Surface a missing
-    secret as an explicit error rather than letting ``b64decode(None)`` raise
-    an opaque ``TypeError`` deep in the call stack.
-    """
-    value = ws.secrets.get_secret(scope=scope, key=key).value
-    if value is None:
-        raise RuntimeError(f"secret {key!r} not found in scope {scope!r}")
-    return base64.b64decode(value).decode()
 
 
 def validate_identifier(value: str, *, label: str = "identifier") -> str:
@@ -62,8 +38,7 @@ def split_qualified_name(
     parts = value.split(".")
     if expected_parts is not None and len(parts) != expected_parts:
         raise ValueError(
-            f"Invalid Databricks {label}: {value!r}; expected "
-            f"{expected_parts} dot-separated parts"
+            f"Invalid Databricks {label}: {value!r}; expected {expected_parts} dot-separated parts"
         )
     for part in parts:
         validate_identifier(part, label=f"{label} part")
@@ -103,10 +78,7 @@ def parse_volume_path(value: str) -> tuple[str, str, str]:
     """
     parts = value.strip().strip("/").split("/")
     if len(parts) != 4 or parts[0] != "Volumes":
-        raise ValueError(
-            f"volume path must be /Volumes/<catalog>/<schema>/<volume>, "
-            f"got {value!r}"
-        )
+        raise ValueError(f"volume path must be /Volumes/<catalog>/<schema>/<volume>, got {value!r}")
     catalog, schema, volume = parts[1], parts[2], parts[3]
     validate_identifier(catalog, label="volume catalog")
     validate_identifier(schema, label="volume schema")
@@ -124,10 +96,9 @@ def validate_uc_volume_subpath(value: str, *, label: str = "UC Volume path") -> 
     parts = value.rstrip("/").lstrip("/").split("/")
     if len(parts) < 5 or parts[0] != "Volumes":
         raise ValueError(
-            f"{label} must be /Volumes/<catalog>/<schema>/<volume>/<subdir>, "
-            f"got {value!r}"
+            f"{label} must be /Volumes/<catalog>/<schema>/<volume>/<subdir>, got {value!r}"
         )
-    for name, part in zip(("catalog", "schema", "volume"), parts[1:4]):
+    for name, part in zip(("catalog", "schema", "volume"), parts[1:4], strict=False):
         validate_identifier(part, label=f"volume {name}")
     for part in parts[4:]:
         if not part or part in (".", "..") or not _VOLUME_SUBPATH_PART_RE.match(part):

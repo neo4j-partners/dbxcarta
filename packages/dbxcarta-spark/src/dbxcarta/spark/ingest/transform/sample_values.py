@@ -9,14 +9,15 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING
 
 from dbxcarta.spark.contract import CONTRACT_VERSION, generate_id
 from dbxcarta.spark.ingest.contract_expr import id_expr_from_columns, value_id_expr
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from pyspark.sql import DataFrame, SparkSession
 
 logger = logging.getLogger(__name__)
@@ -56,14 +57,14 @@ class TableCandidate:
 
 
 def sample(
-    spark: "SparkSession",
-    columns_df: "DataFrame",
+    spark: SparkSession,
+    columns_df: DataFrame,
     catalog: str,
     schema_list: list[str],
     sample_limit: int,
     cardinality_threshold: int,
     stack_chunk_size: int,
-) -> tuple["DataFrame", "DataFrame", SampleStats, "DataFrame | None"]:
+) -> tuple[DataFrame, DataFrame, SampleStats, DataFrame | None]:
     """Discover and sample distinct values for STRING/BOOLEAN columns.
 
     Returns (value_node_df, has_value_rel_df, stats, cache_handle). DataFrames
@@ -86,20 +87,24 @@ def sample(
     # the `value` column so the embed stage is uniform across labels. The
     # fail-closed write boundary strips it; `value` stays a declared
     # property in its own right.
-    value_schema = StructType([
-        StructField("id", StringType(), nullable=False),
-        StructField("value", StringType()),
-        StructField("count", LongType()),
-        StructField("catalog", StringType()),
-        StructField("schema", StringType()),
-        StructField("table", StringType()),
-        StructField("contract_version", StringType()),
-        StructField("embedding_text", StringType()),
-    ])
-    rel_schema = StructType([
-        StructField("source_id", StringType(), nullable=False),
-        StructField("target_id", StringType(), nullable=False),
-    ])
+    value_schema = StructType(
+        [
+            StructField("id", StringType(), nullable=False),
+            StructField("value", StringType()),
+            StructField("count", LongType()),
+            StructField("catalog", StringType()),
+            StructField("schema", StringType()),
+            StructField("table", StringType()),
+            StructField("contract_version", StringType()),
+            StructField("embedding_text", StringType()),
+        ]
+    )
+    rel_schema = StructType(
+        [
+            StructField("source_id", StringType(), nullable=False),
+            StructField("target_id", StringType(), nullable=False),
+        ]
+    )
 
     candidates = _candidates_from_columns_df(columns_df, schema_list)
     total_candidate_cols = sum(len(c.column_names) for c in candidates)
@@ -108,7 +113,10 @@ def sample(
 
     t0 = time.perf_counter_ns()
     sampled_candidates, cardinality_values, cardinality_failed = _cardinality_filter(
-        spark, candidates, cardinality_threshold, stack_chunk_size,
+        spark,
+        candidates,
+        cardinality_threshold,
+        stack_chunk_size,
     )
     cardinality_wall_ms = (time.perf_counter_ns() - t0) // 1_000_000
     sampled_cols = sum(len(c.column_names) for c in sampled_candidates)
@@ -145,20 +153,16 @@ def sample(
     raw_df = raw_df.cache()
     vid_expr = value_id_expr()
 
-    value_node_df = (
-        raw_df
-        .select(
-            vid_expr.alias("id"),
-            col("val").alias("value"),
-            col("cnt").alias("count"),
-            col("tbl_catalog").alias("catalog"),
-            col("tbl_schema").alias("schema"),
-            col("tbl_name").alias("table"),
-            lit(CONTRACT_VERSION).alias("contract_version"),
-            col("val").alias("embedding_text"),
-        )
-        .dropDuplicates(["id"])
-    )
+    value_node_df = raw_df.select(
+        vid_expr.alias("id"),
+        col("val").alias("value"),
+        col("cnt").alias("count"),
+        col("tbl_catalog").alias("catalog"),
+        col("tbl_schema").alias("schema"),
+        col("tbl_name").alias("table"),
+        lit(CONTRACT_VERSION).alias("contract_version"),
+        col("val").alias("embedding_text"),
+    ).dropDuplicates(["id"])
     has_value_df = raw_df.select(
         col("col_id").alias("source_id"),
         vid_expr.alias("target_id"),
@@ -180,7 +184,7 @@ def sample(
 
 
 def _candidates_from_columns_df(
-    columns_df: "DataFrame",
+    columns_df: DataFrame,
     schema_list: list[str],
 ) -> list[TableCandidate]:
     """Build TableCandidate list from the extract-stage columns DataFrame.
@@ -196,8 +200,7 @@ def _candidates_from_columns_df(
         df = df.filter(col("table_schema").isin(schema_list))
 
     rows = (
-        df
-        .groupBy("table_catalog", "table_schema", "table_name")
+        df.groupBy("table_catalog", "table_schema", "table_name")
         .agg(collect_list("column_name").alias("column_names"))
         .orderBy("table_catalog", "table_schema", "table_name")
         .collect()
@@ -211,28 +214,26 @@ def _candidates_from_columns_df(
         names: list[str] = list(row["column_names"])
         # IDs are computed from generate_id(), byte-identical to id_expr() in Spark.
         ids = [generate_id(cat, sch, tbl, name) for name in names]
-        out.append(TableCandidate(
-            catalog=cat,
-            schema_name=sch,
-            table_name=tbl,
-            column_names=names,
-            column_ids=ids,
-        ))
+        out.append(
+            TableCandidate(
+                catalog=cat,
+                schema_name=sch,
+                table_name=tbl,
+                column_names=names,
+                column_ids=ids,
+            )
+        )
     return out
 
 
-_T = TypeVar("_T")
-
-
-def _chunk(lst: list[_T], n: int) -> Iterator[list[_T]]:
+def _chunk[T](lst: list[T], n: int) -> Iterator[list[T]]:
     for i in range(0, len(lst), n):
-        yield lst[i:i + n]
+        yield lst[i : i + n]
 
 
 def _cardinality_query(fq_table: str, column_names: list[str]) -> str:
     aggs = ", ".join(
-        f"approx_count_distinct(`{c}`) AS `card_{i}`"
-        for i, c in enumerate(column_names)
+        f"approx_count_distinct(`{c}`) AS `card_{i}`" for i, c in enumerate(column_names)
     )
     return f"SELECT {aggs} FROM {fq_table}"
 
@@ -241,8 +242,7 @@ def _sample_query(fq_table: str, column_names: list[str]) -> str:
     n = len(column_names)
     quote = chr(39)
     stack_expr = ", ".join(
-        f"'{c.replace(quote, quote * 2)}', CAST(`{c}` AS STRING)"
-        for c in column_names
+        f"'{c.replace(quote, quote * 2)}', CAST(`{c}` AS STRING)" for c in column_names
     )
     return (
         f"SELECT col_name, val, COUNT(*) AS cnt"
@@ -269,7 +269,7 @@ def _cardinality_filter(
     for cand in candidates:
         kept_names: list[str] = []
         kept_ids: list[str] = []
-        id_by_name = dict(zip(cand.column_names, cand.column_ids))
+        id_by_name = dict(zip(cand.column_names, cand.column_ids, strict=False))
         table_failed = False
         for chunk_index, chunk_cols in enumerate(_chunk(cand.column_names, chunk_size)):
             try:
@@ -285,19 +285,24 @@ def _cardinality_filter(
                 table_failed = True
                 logger.warning(
                     "[dbxcarta] cardinality probe failed for %s chunk=%d cols=%s: %s",
-                    cand.fq(), chunk_index, chunk_cols, exc,
+                    cand.fq(),
+                    chunk_index,
+                    chunk_cols,
+                    exc,
                 )
                 continue
         if table_failed:
             failed_tables += 1
         if kept_names:
-            kept.append(TableCandidate(
-                catalog=cand.catalog,
-                schema_name=cand.schema_name,
-                table_name=cand.table_name,
-                column_names=kept_names,
-                column_ids=kept_ids,
-            ))
+            kept.append(
+                TableCandidate(
+                    catalog=cand.catalog,
+                    schema_name=cand.schema_name,
+                    table_name=cand.table_name,
+                    column_names=kept_names,
+                    column_ids=kept_ids,
+                )
+            )
     return kept, all_cards, failed_tables
 
 
@@ -342,7 +347,10 @@ def _sample_values(
             except (AnalysisException, Py4JJavaError) as exc:
                 logger.warning(
                     "[dbxcarta] sampling failed for %s chunk=%d cols=%s: %s",
-                    cand.fq(), chunk_index, chunk_cols, exc,
+                    cand.fq(),
+                    chunk_index,
+                    chunk_cols,
+                    exc,
                 )
 
     if not dfs:
@@ -354,10 +362,7 @@ def _sample_values(
 
     w = Window.partitionBy("col_id").orderBy(col("cnt").desc())
     top_n: DataFrame = (
-        raw_df
-        .withColumn("_rn", row_number().over(w))
-        .filter(col("_rn") <= limit)
-        .drop("_rn")
+        raw_df.withColumn("_rn", row_number().over(w)).filter(col("_rn") <= limit).drop("_rn")
     )
     return top_n
 
@@ -392,7 +397,10 @@ def _filter_readable_schemas(
             skipped += 1
             logger.warning(
                 "[dbxcarta] skipping schema %s.%s (%d probes failed, last: %s)",
-                cat, sch, len(probes), last_exc,
+                cat,
+                sch,
+                len(probes),
+                last_exc,
             )
             continue
         readable.extend(cands)
@@ -405,7 +413,7 @@ def _add_cardinality_stats(stats: SampleStats, values: list[int]) -> None:
     s = sorted(values)
 
     def _pct(p: float) -> int:
-        idx = min(len(s) - 1, max(0, int(round(p * (len(s) - 1)))))
+        idx = min(len(s) - 1, max(0, round(p * (len(s) - 1))))
         return int(s[idx])
 
     stats.cardinality_min = int(s[0])

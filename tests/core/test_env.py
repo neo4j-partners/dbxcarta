@@ -1,4 +1,4 @@
-"""Unit tests for `dbxcarta.spark.env.inject_params`."""
+"""Unit tests for `dbxcarta.core.env.inject_params`."""
 
 from __future__ import annotations
 
@@ -7,8 +7,7 @@ import sys
 from pathlib import Path
 
 import pytest
-
-from dbxcarta.spark import env as _bootstrap
+from dbxcarta.core import env as _bootstrap
 
 
 def test_inject_params_overlays_key_value_args(
@@ -55,26 +54,20 @@ def test_resolve_no_overlay_is_base_only(monkeypatch: pytest.MonkeyPatch) -> Non
     assert argv == ["--run-id", "r1"]
 
 
-def test_resolve_cli_option_wins_over_env_var(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_resolve_cli_option_wins_over_env_var(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     cli_overlay = tmp_path / "cli.env"
     _write_env(cli_overlay, "X", "1")
     env_overlay = tmp_path / "env.env"
     _write_env(env_overlay, "X", "2")
     monkeypatch.setenv(_bootstrap._ENV_FILE_KEY, str(env_overlay))
 
-    files, argv = _bootstrap.resolve_env_files(
-        ["--env-file", str(cli_overlay), "spec"]
-    )
+    files, argv = _bootstrap.resolve_env_files(["--env-file", str(cli_overlay), "spec"])
 
     assert files == [cli_overlay, _bootstrap._BASE_ENV_FILE]
     assert argv == ["spec"]
 
 
-def test_resolve_env_var_used_when_no_cli_option(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_resolve_env_var_used_when_no_cli_option(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     env_overlay = tmp_path / "env.env"
     _write_env(env_overlay, "X", "2")
     monkeypatch.setenv(_bootstrap._ENV_FILE_KEY, str(env_overlay))
@@ -156,9 +149,7 @@ def test_select_overlay_env_var_fallback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv(_bootstrap._ENV_FILE_KEY, "/from/env.env")
-    assert _bootstrap.select_overlay_path(["submit-entrypoint", "ingest"]) == Path(
-        "/from/env.env"
-    )
+    assert _bootstrap.select_overlay_path(["submit-entrypoint", "ingest"]) == Path("/from/env.env")
 
 
 def test_select_overlay_malformed_flag_is_no_selection(
@@ -180,3 +171,64 @@ def test_load_missing_file_is_silent_noop(tmp_path) -> None:
     _bootstrap.load_env_files([missing])
 
     assert _LAYER_KEY not in os.environ
+
+
+def test_read_required_warehouse_id_prefers_and_strips_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DATABRICKS_WAREHOUSE_ID", "ignored")
+    assert _bootstrap.read_required_warehouse_id(" wh-1 ", operation="bootstrap") == "wh-1"
+
+
+def test_read_required_warehouse_id_falls_back_to_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DATABRICKS_WAREHOUSE_ID", "wh-env")
+    assert _bootstrap.read_required_warehouse_id(None, operation="bootstrap") == "wh-env"
+
+
+def test_read_required_warehouse_id_missing_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DATABRICKS_WAREHOUSE_ID", "   ")
+    with pytest.raises(ValueError, match="DATABRICKS_WAREHOUSE_ID"):
+        _bootstrap.read_required_warehouse_id(None, operation="bootstrap")
+
+
+def test_read_required_warehouse_id_appends_extra_hint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("DATABRICKS_WAREHOUSE_ID", raising=False)
+    with pytest.raises(ValueError, match="or use --skip-validate"):
+        _bootstrap.read_required_warehouse_id(
+            None, operation="SQL validation", extra_hint="or use --skip-validate"
+        )
+
+
+def test_read_materialize_workers_defaults_to_five() -> None:
+    assert _bootstrap.read_materialize_workers({}) == 5
+
+
+def test_read_materialize_workers_blank_uses_default() -> None:
+    assert _bootstrap.read_materialize_workers({"DBXCARTA_MATERIALIZE_WORKERS": "  "}) == 5
+
+
+def test_read_materialize_workers_reads_override() -> None:
+    assert _bootstrap.read_materialize_workers({"DBXCARTA_MATERIALIZE_WORKERS": "8"}) == 8
+
+
+def test_read_materialize_workers_reads_process_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DBXCARTA_MATERIALIZE_WORKERS", "3")
+    assert _bootstrap.read_materialize_workers() == 3
+
+
+def test_read_materialize_workers_rejects_below_one() -> None:
+    with pytest.raises(ValueError, match=">= 1"):
+        _bootstrap.read_materialize_workers({"DBXCARTA_MATERIALIZE_WORKERS": "0"})
+
+
+def test_read_materialize_workers_rejects_non_integer() -> None:
+    with pytest.raises(ValueError, match="must be an integer"):
+        _bootstrap.read_materialize_workers({"DBXCARTA_MATERIALIZE_WORKERS": "many"})

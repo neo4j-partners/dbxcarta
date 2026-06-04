@@ -8,7 +8,7 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "databricks-job-runner==0.6.2",
-    "dbxcarta-spark",
+    "dbxcarta-core",
 ]
 
 [project.optional-dependencies]

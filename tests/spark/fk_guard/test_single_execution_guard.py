@@ -1,7 +1,7 @@
 """Regression guard: single execution and id/id pruning cannot return silently.
 
-Marked ``slow`` and kept out of the fast unit suite. Three deterministic
-checks, no reliance on real OOM:
+Kept out of the fast unit suite (run via its own Make target). Three
+deterministic checks, no reliance on real OOM:
 
   - **Single-execution job-count guard** - the hard lock for the hot path.
     Wraps the metadata strategy in a Spark job group and asserts the strategy
@@ -28,7 +28,6 @@ job-count guard above is the real lock for the hot path.
 from __future__ import annotations
 
 import pytest
-
 from dbxcarta.spark.ingest.fk.inference import (
     build_columns_frame,
     build_pk_gate,
@@ -57,8 +56,12 @@ _SCHEMA = "guard"
 _N_TABLES = 80
 
 _COL_FIELDS = (
-    "table_catalog", "table_schema", "table_name", "column_name",
-    "data_type", "comment",
+    "table_catalog",
+    "table_schema",
+    "table_name",
+    "column_name",
+    "data_type",
+    "comment",
 )
 
 
@@ -76,15 +79,17 @@ def _constraints_schema():
         StructType,
     )
 
-    return StructType([
-        StructField("table_catalog", StringType(), True),
-        StructField("table_schema", StringType(), True),
-        StructField("table_name", StringType(), True),
-        StructField("column_name", StringType(), True),
-        StructField("constraint_type", StringType(), True),
-        StructField("ordinal_position", IntegerType(), True),
-        StructField("constraint_name", StringType(), True),
-    ])
+    return StructType(
+        [
+            StructField("table_catalog", StringType(), True),
+            StructField("table_schema", StringType(), True),
+            StructField("table_name", StringType(), True),
+            StructField("column_name", StringType(), True),
+            StructField("constraint_type", StringType(), True),
+            StructField("ordinal_position", IntegerType(), True),
+            StructField("constraint_name", StringType(), True),
+        ]
+    )
 
 
 def _synthetic_catalog() -> tuple[list[tuple], list[tuple]]:
@@ -119,9 +124,8 @@ def guard_spark():
     """
     from pyspark.sql import SparkSession
 
-    spark = (
-        SparkSession.builder
-        .master("local[1]")
+    return (
+        SparkSession.builder.master("local[1]")
         .appName("dbxcarta-fk-guard")
         .config("spark.ui.enabled", "false")
         .config("spark.sql.shuffle.partitions", "1")
@@ -130,22 +134,22 @@ def guard_spark():
         .config("spark.driver.host", "127.0.0.1")
         .getOrCreate()
     )
-    yield spark
 
 
 def _build_frames(spark):
     columns_df = spark.createDataFrame(
-        _synthetic_catalog()[0], schema=_columns_schema(),
+        _synthetic_catalog()[0],
+        schema=_columns_schema(),
     )
     constraints_df = spark.createDataFrame(
-        _synthetic_catalog()[1], schema=_constraints_schema(),
+        _synthetic_catalog()[1],
+        schema=_constraints_schema(),
     )
     cf = build_columns_frame(columns_df)
     pk_gate, composite_pk_count = build_pk_gate(cf, constraints_df)
     return cf, pk_gate, composite_pk_count
 
 
-@pytest.mark.slow
 def test_metadata_runs_pinned_strategy_job_count(guard_spark) -> None:
     """The hot-path lock: metadata triggers the pinned job count.
 
@@ -158,7 +162,11 @@ def test_metadata_runs_pinned_strategy_job_count(guard_spark) -> None:
     sc.setJobGroup(group, "metadata strategy")
     before = set(sc.statusTracker().getJobIdsForGroup(group))
     edges, counts, _ = infer_metadata_edges(
-        guard_spark, cf, pk_gate, None, composite_pk_count=composite,
+        guard_spark,
+        cf,
+        pk_gate,
+        None,
+        composite_pk_count=composite,
     )
     jobs = set(sc.statusTracker().getJobIdsForGroup(group)) - before
     assert len(jobs) == _EXPECTED_METADATA_JOBS, (
@@ -173,12 +181,15 @@ def test_metadata_runs_pinned_strategy_job_count(guard_spark) -> None:
     edges.unpersist()
 
 
-@pytest.mark.slow
 def test_metadata_plan_keeps_explode_and_window(guard_spark) -> None:
     """Structural plan guard: AQE-stable operators must survive."""
     cf, pk_gate, composite = _build_frames(guard_spark)
     edges, _counts, _ = infer_metadata_edges(
-        guard_spark, cf, pk_gate, None, composite_pk_count=composite,
+        guard_spark,
+        cf,
+        pk_gate,
+        None,
+        composite_pk_count=composite,
     )
     plan = edges._jdf.queryExecution().toString()
     for op in ("Generate", "Window"):
@@ -186,7 +197,6 @@ def test_metadata_plan_keeps_explode_and_window(guard_spark) -> None:
     edges.unpersist()
 
 
-@pytest.mark.slow
 def test_prefilter_is_small_fraction_of_cartesian(guard_spark) -> None:
     """Replaces the removed `candidates` telemetry.
 
@@ -225,10 +235,7 @@ def test_prefilter_is_small_fraction_of_cartesian(guard_spark) -> None:
             & (F.col("a_sch") == F.col("b_sch"))
             & (F.col("a_name") == F.col("b_name"))
             & (F.col("a_id") != F.col("b_id"))
-            & ~(
-                (F.col("a_name") == F.lit("id"))
-                & (F.col("b_name") == F.lit("id"))
-            ),
+            & ~((F.col("a_name") == F.lit("id")) & (F.col("b_name") == F.lit("id"))),
             "inner",
         )
         .join(pk_ids, "b_id", "inner")

@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from collections import Counter
 from itertools import combinations
-from typing import Any, Sequence
+from typing import TYPE_CHECKING, Any
 
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 # Result-set comparison algorithm boundaries. Not runtime tunables.
 COMPARE_ROW_THRESHOLD = 500
@@ -77,10 +79,7 @@ def is_row_superset(
     """True when every reference row appears in generated at least as often."""
     ref_counter = Counter(ref_norm)
     gen_counter = Counter(gen_norm)
-    for row, count in ref_counter.items():
-        if gen_counter[row] < count:
-            return False
-    return True
+    return all(gen_counter[row] >= count for row, count in ref_counter.items())
 
 
 def compare_result_sets(
@@ -115,14 +114,11 @@ def compare_result_sets(
         ref_sample = ref_sorted[::stride][:sample_size]
         if not gen_sample:
             return True, None
-        match_rate = sum(g == r for g, r in zip(gen_sample, ref_sample)) / len(
+        match_rate = sum(g == r for g, r in zip(gen_sample, ref_sample, strict=False)) / len(
             gen_sample
         )
         if match_rate < LARGE_SAMPLE_MATCH_RATE:
-            return False, (
-                f"sampled match rate {match_rate:.1%} < "
-                f"{LARGE_SAMPLE_MATCH_RATE:.0%}"
-            )
+            return False, (f"sampled match rate {match_rate:.1%} < {LARGE_SAMPLE_MATCH_RATE:.0%}")
         return True, None
 
     gen_sorted = normalize_result_set(gen_cols, gen_rows)

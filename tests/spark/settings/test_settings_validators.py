@@ -11,10 +11,8 @@ Spark. Validates the boundary itself, not downstream behaviour.
 from __future__ import annotations
 
 import pytest
-from pydantic import ValidationError
-
 from dbxcarta.spark.settings import SparkIngestSettings
-
+from pydantic import ValidationError
 
 _BASE_SETTINGS = {
     "databricks_secret_scope": "dbxcarta-neo4j-test",
@@ -25,24 +23,31 @@ _BASE_SETTINGS = {
 
 # --- _IDENTIFIER_RE validation -----------------------------------------------
 
-@pytest.mark.parametrize("bad_catalog", [
-    "evil`catalog",     # backtick — injection vector
-    "cat.subcat",       # dot (catalog must be single identifier)
-    "cat name",         # space
-    "1cat",             # leading digit
-    "",                 # empty
-])
+
+@pytest.mark.parametrize(
+    "bad_catalog",
+    [
+        "evil`catalog",  # backtick — injection vector
+        "cat.subcat",  # dot (catalog must be single identifier)
+        "cat name",  # space
+        "1cat",  # leading digit
+        "",  # empty
+    ],
+)
 def test_settings_rejects_non_strict_catalog(bad_catalog: str) -> None:
     with pytest.raises(ValidationError, match="Invalid Databricks identifier"):
         SparkIngestSettings(dbxcarta_catalog=bad_catalog, **_BASE_SETTINGS)
 
 
-@pytest.mark.parametrize("good_catalog", [
-    "main",
-    "my_catalog",
-    "_internal",
-    "dbxcarta-catalog",   # hyphens are valid; require backtick-quoting in SQL
-])
+@pytest.mark.parametrize(
+    "good_catalog",
+    [
+        "main",
+        "my_catalog",
+        "_internal",
+        "dbxcarta-catalog",  # hyphens are valid; require backtick-quoting in SQL
+    ],
+)
 def test_settings_accepts_strict_catalog(good_catalog: str) -> None:
     s = SparkIngestSettings(dbxcarta_catalog=good_catalog, **_BASE_SETTINGS)
     assert s.dbxcarta_catalog == good_catalog
@@ -58,13 +63,16 @@ def test_settings_accepts_three_part_summary_table() -> None:
     assert s.dbxcarta_summary_table == "cat.schema.table"
 
 
-@pytest.mark.parametrize("bad_table", [
-    "table_name",           # unqualified
-    "schema.table",         # missing catalog
-    "schema.`table`",       # backtick in a part — injection vector
-    "schema..table",        # empty middle part
-    "schema.1table",        # leading digit in a part
-])
+@pytest.mark.parametrize(
+    "bad_table",
+    [
+        "table_name",  # unqualified
+        "schema.table",  # missing catalog
+        "schema.`table`",  # backtick in a part — injection vector
+        "schema..table",  # empty middle part
+        "schema.1table",  # leading digit in a part
+    ],
+)
 def test_settings_rejects_malformed_summary_table(bad_table: str) -> None:
     with pytest.raises(ValidationError, match="Invalid Databricks"):
         SparkIngestSettings(
@@ -74,11 +82,14 @@ def test_settings_rejects_malformed_summary_table(bad_table: str) -> None:
         )
 
 
-@pytest.mark.parametrize("bad_path", [
-    "/Volumes/cat/schema/vol",       # volume root, no subdir
-    "/dbfs/Volumes/cat/schema/vol/runs",
-    "/Volumes/cat/schema",
-])
+@pytest.mark.parametrize(
+    "bad_path",
+    [
+        "/Volumes/cat/schema/vol",  # volume root, no subdir
+        "/dbfs/Volumes/cat/schema/vol/runs",
+        "/Volumes/cat/schema",
+    ],
+)
 def test_settings_rejects_non_volume_summary_paths(bad_path: str) -> None:
     with pytest.raises(ValidationError, match="DBXCARTA_SUMMARY_VOLUME"):
         SparkIngestSettings(
@@ -117,6 +128,7 @@ def test_settings_rejects_unsafe_embedding_endpoint() -> None:
 
 # --- Cross-field validation --------------------------------------------------
 
+
 def test_settings_rejects_value_embeddings_without_sampling() -> None:
     """DBXCARTA_INCLUDE_EMBEDDINGS_VALUES=true requires DBXCARTA_INCLUDE_VALUES=true.
 
@@ -135,15 +147,21 @@ def test_settings_rejects_value_embeddings_without_sampling() -> None:
 
 # --- Multi-catalog list ------------------------------------------------------
 
-@pytest.mark.parametrize("bad_list", [
-    "good,evil`cat",     # backtick in one entry — injection vector
-    "good,cat.sub",      # dotted entry
-    "good,1cat",         # leading digit
-])
+
+@pytest.mark.parametrize(
+    "bad_list",
+    [
+        "good,evil`cat",  # backtick in one entry — injection vector
+        "good,cat.sub",  # dotted entry
+        "good,1cat",  # leading digit
+    ],
+)
 def test_settings_rejects_bad_catalog_in_multi_list(bad_list: str) -> None:
     with pytest.raises(ValidationError, match="Invalid Databricks catalog"):
         SparkIngestSettings(
-            dbxcarta_catalog="main", dbxcarta_catalogs=bad_list, **_BASE_SETTINGS,
+            dbxcarta_catalog="main",
+            dbxcarta_catalogs=bad_list,
+            **_BASE_SETTINGS,
         )
 
 
@@ -183,6 +201,7 @@ def test_resolved_catalogs_strips_whitespace_and_empties() -> None:
 
 # --- Layer map (folded into dbxcarta_catalogs) -------------------------------
 
+
 def test_layer_map_parses_suffixes_from_catalogs() -> None:
     s = SparkIngestSettings(
         dbxcarta_catalog="main",
@@ -220,12 +239,15 @@ def test_layer_map_subset_of_catalogs() -> None:
     assert s.resolved_catalogs() == ["bronze", "silver", "gold"]
 
 
-@pytest.mark.parametrize("bad_entry", [
-    "bronze:b:extra",      # two colons
-    "bronze:",             # empty layer
-    "1bad:bronze",         # bad catalog identifier
-    "bronze:has space",    # non-alnum layer token
-])
+@pytest.mark.parametrize(
+    "bad_entry",
+    [
+        "bronze:b:extra",  # two colons
+        "bronze:",  # empty layer
+        "1bad:bronze",  # bad catalog identifier
+        "bronze:has space",  # non-alnum layer token
+    ],
+)
 def test_settings_rejects_malformed_catalog_layer_entry(bad_entry: str) -> None:
     with pytest.raises(ValidationError):
         SparkIngestSettings(

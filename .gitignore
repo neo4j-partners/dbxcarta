@@ -140,10 +140,21 @@ fabric.properties
 
 worklog/
 .codex/
+# Ephemeral Claude Code scheduled-task locks (sessionId/pid/timestamps).
+.claude/*.lock
 .mcp.json
 outputs/
 examples/**/.cache/
+.cache/
 docs/proposals/
 
 # docker-tests: throwaway local Neo4j creds (template is .env.example)
 docker-tests/.env
+
+# Transient core source copied into the entrypoint packages by
+# `dbxcarta-submit publish-wheels` so each cluster wheel carries dbxcarta/core.
+# The context manager removes these after the build; ignored so an interrupted
+# publish run cannot leave a duplicate core source to be committed by mistake.
+packages/dbxcarta-spark/src/dbxcarta/core/
+packages/dbxcarta-client/src/dbxcarta/core/
+packages/dbxcarta-materialize/src/dbxcarta/core/

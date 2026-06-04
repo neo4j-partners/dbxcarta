@@ -12,10 +12,9 @@ makes the leak class impossible to reintroduce silently.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
-
 from dbxcarta.spark.contract import NODE_PROPERTIES, NodeLabel
 from dbxcarta.spark.run import _project
 
@@ -64,7 +63,7 @@ def _value_for(column: str) -> object:
     if column == "embedding":
         return [0.1, 0.2]
     if column == "last_run":
-        return datetime(2026, 5, 17, tzinfo=timezone.utc)
+        return datetime(2026, 5, 17, tzinfo=UTC)
     if column == "is_nullable":
         return True
     if column in {"count", "ordinal_position"}:
@@ -98,7 +97,8 @@ def test_project_embedded_node_is_exactly_declared(local_spark, label) -> None:
 
 @pytest.mark.parametrize("label", list(NodeLabel))
 def test_project_not_embedded_node_omits_optional_embedding(
-    local_spark, label,
+    local_spark,
+    label,
 ) -> None:
     """Disabled-label path: no `embedding` column, builder's
     `embedding_text` still present. Output is declared minus `embedding`,
@@ -112,11 +112,23 @@ def test_project_not_embedded_node_omits_optional_embedding(
 
 def test_project_value_embedded_is_exactly_declared(local_spark) -> None:
     df = local_spark.createDataFrame(
-        [(
-            "c1.abc", "ACTIVE", 42, "main", "sales",
-            datetime(2026, 5, 17, tzinfo=timezone.utc), "1.1", [0.3],
-            "h", "ep", "2026", None, "ACTIVE",
-        )],
+        [
+            (
+                "c1.abc",
+                "ACTIVE",
+                42,
+                "main",
+                "sales",
+                datetime(2026, 5, 17, tzinfo=UTC),
+                "1.1",
+                [0.3],
+                "h",
+                "ep",
+                "2026",
+                None,
+                "ACTIVE",
+            )
+        ],
         "id string, value string, count long, catalog string, schema string,"
         " last_run timestamp, contract_version string,"
         " embedding array<double>, embedding_text_hash string,"

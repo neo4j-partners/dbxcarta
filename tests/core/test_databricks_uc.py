@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import pytest
-
-from dbxcarta.spark.databricks import (
+from dbxcarta.core.identifiers import (
     UC_PROTECTED_NAMES,
     check_not_protected,
     parse_volume_path,
@@ -22,10 +21,10 @@ def test_parse_volume_path_tolerates_trailing_slash() -> None:
 @pytest.mark.parametrize(
     "value",
     [
-        "/Volumes/cat/sch",          # too few parts
+        "/Volumes/cat/sch",  # too few parts
         "/Volumes/cat/sch/vol/sub",  # has a subdir; use validate_uc_volume_subpath
-        "/Wrong/cat/sch/vol",        # not a Volumes path
-        "/Volumes/cat/sch/1bad",     # invalid leading-digit identifier
+        "/Wrong/cat/sch/vol",  # not a Volumes path
+        "/Volumes/cat/sch/1bad",  # invalid leading-digit identifier
     ],
 )
 def test_parse_volume_path_rejects_bad_paths(value: str) -> None:

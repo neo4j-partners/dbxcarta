@@ -39,7 +39,9 @@ def test_build_database_nodes_one_per_catalog(local_spark) -> None:
     rows = build_database_nodes(local_spark, ["bronze", "silver", "gold"]).collect()
     assert {r["name"] for r in rows} == {"bronze", "silver", "gold"}
     assert {r["id"] for r in rows} == {
-        generate_id("bronze"), generate_id("silver"), generate_id("gold"),
+        generate_id("bronze"),
+        generate_id("silver"),
+        generate_id("gold"),
     }
     # embedding_text equals name (the Database embedding-text expression).
     assert all(r["embedding_text"] == r["name"] for r in rows)
@@ -103,7 +105,8 @@ _GOLD_ORDERS = generate_id("gold", "sales", "orders")
 
 def test_build_table_nodes_layer_from_catalog(local_spark) -> None:
     rows = build_table_nodes(
-        _tables_df(local_spark), {"bronze": "bronze", "gold": "gold"},
+        _tables_df(local_spark),
+        {"bronze": "bronze", "gold": "gold"},
     ).collect()
     by_id = {r["id"]: r for r in rows}
     assert by_id[_BRONZE_ORDERS]["layer"] == "bronze"
@@ -173,10 +176,7 @@ def test_table_embedding_text_distinguishes_catalogs(local_spark) -> None:
 
 def test_column_embedding_text_distinguishes_catalogs(local_spark) -> None:
     df = build_column_nodes(_columns_df(local_spark))
-    texts = {
-        r["id"]: r["embedding_text"]
-        for r in df.collect()
-    }
+    texts = {r["id"]: r["embedding_text"] for r in df.collect()}
     bronze_id = generate_id("bronze", "sales", "orders", "id")
     gold_id = generate_id("gold", "sales", "orders", "id")
     assert texts[bronze_id] == "bronze.sales.orders.id | bigint | pk"

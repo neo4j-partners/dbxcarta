@@ -10,10 +10,19 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 _ENV_FILE_KEY = "DBXCARTA_ENV_FILE"
 _ENV_FILE_OPT = "--env-file"
 _BASE_ENV_FILE = Path(".env")
+
+# Default bounded driver-pool size for the materialize Spark job. The job
+# overlaps the independent CREATE TABLE statements in a ThreadPoolExecutor of
+# this size; the foreign-key pass stays serial after it.
+_DEFAULT_MATERIALIZE_WORKERS = 5
 
 
 class EnvFileError(Exception):
@@ -149,3 +158,48 @@ def inject_params() -> None:
         else:
             remaining.append(arg)
     sys.argv[1:] = remaining
+
+
+def read_required_warehouse_id(
+    override: str | None,
+    *,
+    operation: str,
+    extra_hint: str = "",
+) -> str:
+    """Return the SQL warehouse id from a CLI override or the environment.
+
+    ``override`` (a ``--warehouse-id`` flag value) wins when set; otherwise the
+    value comes from ``DATABRICKS_WAREHOUSE_ID``. Raises ``ValueError`` naming
+    ``operation`` when neither yields a non-blank id, with ``extra_hint``
+    appended when a caller has an additional escape (for example
+    ``--skip-validate``).
+    """
+    warehouse_id = (override or os.environ.get("DATABRICKS_WAREHOUSE_ID", "")).strip()
+    if not warehouse_id:
+        hint = f" {extra_hint}" if extra_hint else ""
+        raise ValueError(
+            f"DATABRICKS_WAREHOUSE_ID is required for {operation};"
+            f" set it in .env or pass --warehouse-id{hint}"
+        )
+    return warehouse_id
+
+
+def read_materialize_workers(env: Mapping[str, str] | None = None) -> int:
+    """Return the bounded materialize table-build worker count.
+
+    Sourced from ``DBXCARTA_MATERIALIZE_WORKERS`` (default 5). A blank value
+    uses the default; a non-integer or a value ``< 1`` fails loudly, since a
+    driver pool needs at least one worker. The materialize Spark job reads this
+    to size the ThreadPoolExecutor that overlaps the per-table ``CREATE``s.
+    """
+    source = os.environ if env is None else env
+    raw = source.get("DBXCARTA_MATERIALIZE_WORKERS", "").strip()
+    if not raw:
+        return _DEFAULT_MATERIALIZE_WORKERS
+    try:
+        workers = int(raw)
+    except ValueError:
+        raise ValueError(f"DBXCARTA_MATERIALIZE_WORKERS must be an integer (got {raw!r})") from None
+    if workers < 1:
+        raise ValueError(f"DBXCARTA_MATERIALIZE_WORKERS must be >= 1 (got {workers})")
+    return workers

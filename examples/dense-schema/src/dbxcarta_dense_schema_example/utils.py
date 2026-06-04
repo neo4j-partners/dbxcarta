@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import logging
-import os
-from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def load_dotenv_file(path: Path) -> None:
@@ -20,20 +22,3 @@ def load_dotenv_file(path: Path) -> None:
         return
     if path.is_file():
         load_dotenv(path, override=False)
-
-
-def read_required_warehouse_id(
-    override: str | None,
-    *,
-    operation: str,
-    extra_hint: str = "",
-) -> str:
-    """Return the SQL warehouse id from CLI override or environment."""
-    warehouse_id = (override or os.environ.get("DATABRICKS_WAREHOUSE_ID", "")).strip()
-    if not warehouse_id:
-        hint = f" {extra_hint}" if extra_hint else ""
-        raise ValueError(
-            f"DATABRICKS_WAREHOUSE_ID is required for {operation};"
-            f" set it in .env or pass --warehouse-id{hint}"
-        )
-    return warehouse_id

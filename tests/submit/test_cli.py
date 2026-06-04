@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import pytest
-
 from databricks_job_runner import BootstrapConfig, ClassicCluster, Serverless
 from databricks_job_runner.errors import RunnerError
-
 from dbxcarta.submit import cli
 
 
@@ -33,17 +31,13 @@ def test_submit_ingest_rejects_serverless_compute(
     monkeypatch.setattr(cli, "_ingest_runner", lambda: stub)
 
     with pytest.raises(RunnerError, match="Neo4j Spark Connector"):
-        cli._submit_bootstrap_entrypoint(
-            "ingest", compute_mode="serverless", no_wait=True
-        )
+        cli._submit_bootstrap_entrypoint("ingest", compute_mode="serverless", no_wait=True)
     assert stub.submitted == []
 
 
 def test_submit_unknown_entrypoint_raises() -> None:
     with pytest.raises(RunnerError, match="unknown wheel entrypoint"):
-        cli._submit_bootstrap_entrypoint(
-            "bogus", compute_mode=None, no_wait=True
-        )
+        cli._submit_bootstrap_entrypoint("bogus", compute_mode=None, no_wait=True)
 
 
 def test_submit_ingest_builds_bootstrap_with_probe_and_closure(
@@ -107,6 +101,20 @@ def test_publish_wheels_rejects_unknown_args() -> None:
         cli._handle_publish_wheels(["--wheel"])
 
 
+def test_smoke_imports_name_only_shared_environment_packages() -> None:
+    # The runner bootstrap runs the post-install smoke check before it prepends
+    # the per-run wheel target to sys.path, so a wheel module (dbxcarta.*) is
+    # not importable at that point and would fail every cluster run. Wheel
+    # content is guaranteed at build time instead (_assert_wheel_bundles_core),
+    # so the smoke lists must name only shared-environment (closure) packages.
+    for entrypoint, modules in cli._ENTRYPOINT_SMOKE_IMPORTS.items():
+        wheel_modules = [m for m in modules if m == "dbxcarta" or m.startswith("dbxcarta.")]
+        assert not wheel_modules, (
+            f"{entrypoint} smoke imports name wheel modules {wheel_modules}; "
+            "the smoke check runs before the wheel target joins sys.path"
+        )
+
+
 def _no_workspace(monkeypatch: pytest.MonkeyPatch) -> None:
     """Stub env loading and fail loudly if a handler touches the workspace.
 
@@ -121,8 +129,8 @@ def _no_workspace(monkeypatch: pytest.MonkeyPatch) -> None:
     # Keep a developer's exported overlay selection from steering the handler:
     # the tests drive env entirely through monkeypatch.setenv below.
     monkeypatch.delenv("DBXCARTA_ENV_FILE", raising=False)
-    monkeypatch.setattr("dbxcarta.spark.env.load_env_files", lambda files: None)
-    monkeypatch.setattr("dbxcarta.spark.databricks.build_workspace_client", _boom)
+    monkeypatch.setattr("dbxcarta.core.env.load_env_files", lambda files: None)
+    monkeypatch.setattr("dbxcarta.core.workspace.build_workspace_client", _boom)
     monkeypatch.setattr("dbxcarta.submit.uc_admin.ensure_uc_volume", _boom)
     monkeypatch.setattr("dbxcarta.submit.uc_admin.drop_teardown_target", _boom)
 
@@ -140,8 +148,10 @@ def test_bootstrap_dry_run_reports_names_without_workspace(
 ) -> None:
     _no_workspace(monkeypatch)
     monkeypatch.setenv("DATABRICKS_VOLUME_PATH", "/Volumes/cat/sch/vol")
+    monkeypatch.setenv("DBXCARTA_CATALOG", "dense_data")
     assert cli._handle_bootstrap(["--dry-run"]) == 0
     err = capsys.readouterr().err
+    assert "data catalog=dense_data" in err
     assert "catalog=cat" in err
     assert "schema=sch" in err
     assert "volume=vol" in err
@@ -152,6 +162,7 @@ def test_bootstrap_dry_run_refuses_protected_catalog(
 ) -> None:
     _no_workspace(monkeypatch)
     monkeypatch.setenv("DATABRICKS_VOLUME_PATH", "/Volumes/main/sch/vol")
+    monkeypatch.setenv("DBXCARTA_CATALOG", "dense_data")
     assert cli._handle_bootstrap(["--dry-run"]) == 2
 
 

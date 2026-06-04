@@ -22,7 +22,6 @@ from __future__ import annotations
 import re
 
 import pytest
-
 from dbxcarta.spark import verify
 from dbxcarta.spark.contract import generate_id, generate_value_id
 from dbxcarta.spark.verify import graph as graph_mod
@@ -69,11 +68,7 @@ class _Session:
         if "count(r)" in cypher:
             rel = _REL_SRC.search(cypher).group(2)
             prefixes = params.get("prefixes")
-            cnt = sum(
-                1
-                for rt, sid in self._rels
-                if rt == rel and _any_prefix(sid, prefixes)
-            )
+            cnt = sum(1 for rt, sid in self._rels if rt == rel and _any_prefix(sid, prefixes))
             return _Result(cnt)
         label = _NODE_LABEL.search(cypher).group(1)
         if "catalog_ids" in params:
@@ -81,9 +76,7 @@ class _Session:
             cnt = sum(1 for lb, nid in self._nodes if lb == label and nid in ids)
         elif "prefixes" in params:
             cnt = sum(
-                1
-                for lb, nid in self._nodes
-                if lb == label and _any_prefix(nid, params["prefixes"])
+                1 for lb, nid in self._nodes if lb == label and _any_prefix(nid, params["prefixes"])
             )
         else:
             cnt = sum(1 for lb, _ in self._nodes if lb == label)
@@ -152,8 +145,9 @@ def test_node_counts_still_flag_a_real_mismatch():
         "catalog": _CATALOG,
         "row_counts": {"databases": 1, "schemas": 1, "tables": 2, "columns": 3},
     }
-    nodes = [n for n in _graph_nodes() if n[0] != "Table"][:1] + [
-        ("Table", generate_id(_CATALOG, _SCHEMA, "orders"))
+    nodes = [
+        *[n for n in _graph_nodes() if n[0] != "Table"][:1],
+        ("Table", generate_id(_CATALOG, _SCHEMA, "orders")),
     ]
     violations = graph_mod._check_node_counts(_Driver(nodes), summary)
     codes = {v.code for v in violations}
@@ -172,12 +166,7 @@ def test_node_counts_pass_for_multi_catalog_aggregate():
         "catalog": _SILVER,
         "row_counts": {"databases": 2, "schemas": 2, "tables": 4, "columns": 6},
     }
-    assert (
-        graph_mod._check_node_counts(
-            _Driver(nodes), summary, catalogs=[_SILVER, _GOLD]
-        )
-        == []
-    )
+    assert graph_mod._check_node_counts(_Driver(nodes), summary, catalogs=[_SILVER, _GOLD]) == []
 
 
 def test_node_counts_multi_catalog_flags_missing_catalog():
@@ -189,9 +178,7 @@ def test_node_counts_multi_catalog_flags_missing_catalog():
     }
     codes = {
         v.code
-        for v in graph_mod._check_node_counts(
-            _Driver(nodes), summary, catalogs=[_SILVER, _GOLD]
-        )
+        for v in graph_mod._check_node_counts(_Driver(nodes), summary, catalogs=[_SILVER, _GOLD])
     }
     assert "graph.node_count_mismatch.Database" in codes
     assert "graph.node_count_mismatch.Table" in codes
@@ -248,9 +235,7 @@ def test_value_count_multi_catalog_aggregate():
     ]
     summary = {"catalog": _SILVER, "row_counts": {"value_nodes": 3}}
     assert (
-        values_mod._check_value_count(
-            _Driver(value_nodes), summary, catalogs=[_SILVER, _GOLD]
-        )
+        values_mod._check_value_count(_Driver(value_nodes), summary, catalogs=[_SILVER, _GOLD])
         == []
     )
 

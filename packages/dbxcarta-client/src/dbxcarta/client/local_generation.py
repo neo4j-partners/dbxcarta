@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import requests
-from databricks.sdk import WorkspaceClient
+
+if TYPE_CHECKING:
+    from databricks.sdk import WorkspaceClient
 
 
 class LocalGenerationError(RuntimeError):
@@ -37,22 +39,16 @@ def generate_sql_local(
         )
         response.raise_for_status()
     except requests.RequestException as exc:
-        raise LocalGenerationError(
-            f"serving endpoint call failed for {endpoint!r}: {exc}"
-        ) from exc
+        raise LocalGenerationError(f"serving endpoint call failed for {endpoint!r}: {exc}") from exc
 
     try:
         data = response.json()
     except ValueError as exc:
-        raise LocalGenerationError(
-            f"serving endpoint {endpoint!r} did not return JSON"
-        ) from exc
+        raise LocalGenerationError(f"serving endpoint {endpoint!r} did not return JSON") from exc
 
     text = extract_generated_text(data)
     if not text:
-        raise LocalGenerationError(
-            f"serving endpoint {endpoint!r} returned no generated text"
-        )
+        raise LocalGenerationError(f"serving endpoint {endpoint!r} returned no generated text")
     return text
 
 

@@ -11,7 +11,6 @@ the dependency pins change.
 from __future__ import annotations
 
 import pytest
-
 from dbxcarta.submit import cli
 
 

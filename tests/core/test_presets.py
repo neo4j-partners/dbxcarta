@@ -10,8 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
-from dbxcarta.spark.presets import (
+from dbxcarta.core.presets import (
     Preset,
     QuestionsUploadable,
     ReadinessCheckable,
@@ -64,6 +63,7 @@ def test_standard_preset_satisfies_protocols() -> None:
 
 
 # --- Readiness rule: a catalog needs a schema beyond information_schema/default
+
 
 def test_readiness_not_ready_with_only_auto_schemas(
     monkeypatch: pytest.MonkeyPatch,
@@ -120,6 +120,7 @@ def test_readiness_fails_loud_without_catalog(
 
 # --- ReadinessReport.format relabel ------------------------------------------
 
+
 def test_format_omits_empty_schema_and_relabels_catalogs() -> None:
     report = ReadinessReport(
         catalog="silver,gold",
@@ -150,6 +151,7 @@ def test_format_reports_missing_catalogs() -> None:
 
 # --- Questions file validation -----------------------------------------------
 
+
 def test_validate_questions_file_accepts_non_empty_array(tmp_path: Path) -> None:
     path = tmp_path / "questions.json"
     path.write_text('[{"question_id": "q1", "question": "how many rows?"}]')
@@ -176,6 +178,7 @@ def test_validate_questions_file_rejects_missing_file(tmp_path: Path) -> None:
 
 
 # --- Upload destination validation -------------------------------------------
+
 
 def test_upload_requires_destination(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("DBXCARTA_CLIENT_QUESTIONS", raising=False)

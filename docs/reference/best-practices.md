@@ -178,3 +178,19 @@ A name match is a candidate, not a foreign key. Every inferred edge (metadata an
 **How we apply it:** in `fk/inference.py`, `infer_metadata_edges` applies the `canonicalize_expr` type-equality predicate and an inner join against `build_pk_gate`'s PK-evidence frame as hard filters — no edge survives either one failing. Authority order is threaded in `fk/discovery.py`: metadata left-anti-joins declared-only edges, so declared suppresses inferred metadata.
 
 Source: derived from FK correctness requirements (a name match alone is not a foreign key) and the declared-edge authority ordering.
+
+### 9. An ops table's preflight DDL and its writer schema must agree on every column type
+
+The pipeline pre-creates the run-summary history table in preflight, then appends to it at the end of the run with `mode("append").option("mergeSchema", "true")`. mergeSchema reconciles new columns, but a column that exists on both sides with a conflicting type is a hard merge failure. Because the table is created once and reused, a type disagreement between the `CREATE TABLE` and the writer schema stays invisible for as long as the table survives, then fails the very next run after the table is dropped or recreated. A column's declared type must also match the runtime value, not just the field's annotation: `dbxcarta_embedding_failure_max` is annotated `float | None` but holds an `int` count, so its column is `BIGINT` and the writer's `StructField` is `LongType`, never `DOUBLE`.
+
+**How we apply it:** the writer schema lives in one place, `summary_io.summary_table_schema()`, and the preflight column types live in `preflight._SUMMARY_TABLE_COLUMNS_SQL`. `tests/spark/test_summary_schema_agreement.py` maps each writer `StructField` to its SQL type and asserts it matches the preflight DDL for every shared column, so a future drift fails at commit time rather than on the first clean-slate run.
+
+Source: derived from Delta `mergeSchema` merge semantics and a production failure where the preflight DDL declared `embedding_failure_threshold DOUBLE` while the writer wrote `LongType`, surfacing only when the summary table was recreated.
+
+### 10. The cluster bootstrap smoke check validates only shared-environment packages; wheel content is a build-time guarantee
+
+The pinned `databricks-job-runner` bootstrap runs its post-install smoke imports before it prepends the per-run wheel target to `sys.path`. At that point only the shared driver environment is importable: the `--no-deps` pinned closure and the DBR-provided packages. A wheel module such as `dbxcarta.core` is not yet on the path, so naming it in the smoke list fails every cluster run with `No module named 'dbxcarta'`, regardless of whether the wheel actually carries it. The smoke check answers "is the shared environment intact," never "did this wheel get built correctly."
+
+**How we apply it:** `_ENTRYPOINT_SMOKE_IMPORTS` names only closure packages, and `tests/submit/test_cli.py` asserts no entry is a `dbxcarta.*` module. The guarantee that each entrypoint wheel physically carries `dbxcarta/core` is enforced where it can be, at build time: `publish-wheels` calls `_assert_wheel_bundles_core` on each freshly built wheel before it is relied upon.
+
+Source: derived from the `databricks-job-runner==0.6.2` bootstrap ordering (smoke check precedes the `sys.path` insert of the wheel target) and a production failure where `dbxcarta.core` in the smoke list blocked every ingest run.

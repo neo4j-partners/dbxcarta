@@ -6,7 +6,7 @@ authors = [{ name = "Ryan Knight" }]
 requires-python = ">=3.12"
 dependencies = [
     "dbxcarta-client[graph]",
-    "dbxcarta-spark",
+    "dbxcarta-core",
     "databricks-sdk>=0.40",
     "Faker==40.15.0",
     "python-dotenv",
@@ -18,7 +18,6 @@ test = ["pytest"]
 
 [project.scripts]
 dbxcarta-dense-generate = "dbxcarta_dense_schema_example.generator:main"
-dbxcarta-dense-materialize = "dbxcarta_dense_schema_example.materialize:main"
 dbxcarta-dense-generate-questions = "dbxcarta_dense_schema_example.question_generator:main"
 
 [build-system]
@@ -27,7 +26,7 @@ build-backend = "uv_build"
 
 [tool.uv.sources]
 dbxcarta-client = { workspace = true }
-dbxcarta-spark = { workspace = true }
+dbxcarta-core = { workspace = true }
 
 [tool.pytest.ini_options]
 addopts = "-m 'not live'"

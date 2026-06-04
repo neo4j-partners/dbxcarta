@@ -10,18 +10,17 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from dbxcarta.spark.contract import NodeLabel, REFERENCES_PROPERTIES, RelType
+from dbxcarta.spark.contract import REFERENCES_PROPERTIES, NodeLabel, RelType
 from dbxcarta.spark.ingest.load.writer import (
     write_nodes,
     write_relationship,
 )
 
 if TYPE_CHECKING:
+    from dbxcarta.spark.ingest.load.writer import Neo4jConfig
+    from dbxcarta.spark.settings import SparkIngestSettings
     from neo4j import Driver
     from pyspark.sql import DataFrame
-
-    from dbxcarta.spark.settings import SparkIngestSettings
-    from dbxcarta.spark.ingest.load.writer import Neo4jConfig
 
 logger = logging.getLogger(__name__)
 
@@ -33,9 +32,10 @@ def _single_count(result: Any) -> int:
     return int(record["cnt"])
 
 
-def bootstrap_constraints(driver: "Driver", settings: "SparkIngestSettings") -> None:
+def bootstrap_constraints(driver: Driver, settings: SparkIngestSettings) -> None:
     """Create id-uniqueness constraints, data_type index, and per-label vector
-    indexes when the matching embedding flag is enabled."""
+    indexes when the matching embedding flag is enabled.
+    """
     from neo4j.exceptions import ClientError
 
     embedding_label_flags = [
@@ -89,7 +89,7 @@ def bootstrap_constraints(driver: "Driver", settings: "SparkIngestSettings") -> 
 
 
 def delete_stale_values(
-    driver: "Driver",
+    driver: Driver,
     run_start_iso: str,
     catalogs: list[str],
     schemas: list[str],
@@ -122,7 +122,7 @@ def delete_stale_values(
     )
 
 
-def query_counts(driver: "Driver") -> dict[str, int]:
+def query_counts(driver: Driver) -> dict[str, int]:
     """Post-load Cypher count probes. Keyed by enum .value for JSON serializability."""
     counts: dict[str, int] = {}
     with driver.session() as session:
@@ -130,21 +130,19 @@ def query_counts(driver: "Driver") -> dict[str, int]:
             result = session.run(f"MATCH (n:{label.value}) RETURN count(n) AS cnt")
             counts[label.value] = _single_count(result)
         for rel_type in RelType:
-            result = session.run(
-                f"MATCH ()-[r:{rel_type.value}]->() RETURN count(r) AS cnt"
-            )
+            result = session.run(f"MATCH ()-[r:{rel_type.value}]->() RETURN count(r) AS cnt")
             counts[rel_type.value] = _single_count(result)
     return counts
 
 
-def write_node(df: "DataFrame", neo4j: "Neo4jConfig", label: NodeLabel) -> None:
+def write_node(df: DataFrame, neo4j: Neo4jConfig, label: NodeLabel) -> None:
     """Thin enum-typed wrapper — all pipeline node writes go through here."""
     write_nodes(df, neo4j, label.value)
 
 
 def write_rel(
-    df: "DataFrame",
-    neo4j: "Neo4jConfig",
+    df: DataFrame,
+    neo4j: Neo4jConfig,
     rel_type: RelType,
     source_label: NodeLabel,
     target_label: NodeLabel,
@@ -152,16 +150,20 @@ def write_rel(
     properties: tuple[str, ...] = (),
 ) -> None:
     write_relationship(
-        df, neo4j, rel_type.value, source_label.value, target_label.value,
+        df,
+        neo4j,
+        rel_type.value,
+        source_label.value,
+        target_label.value,
         properties=properties,
     )
 
 
 __all__ = [
+    "REFERENCES_PROPERTIES",
     "bootstrap_constraints",
     "delete_stale_values",
     "query_counts",
     "write_node",
     "write_rel",
-    "REFERENCES_PROPERTIES",
 ]

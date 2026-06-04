@@ -7,7 +7,7 @@ connections through shared anchor tables.
 
 Usage:
     uv run dbxcarta-dense-generate --tables 500 --schema dense_500
-    uv run dbxcarta-dense-generate --tables 1000 --schema dense_1000
+    uv run dbxcarta-dense-generate --tables 1000 --schema dense-1000
 """
 
 from __future__ import annotations
@@ -22,16 +22,22 @@ from typing import Any
 
 from faker import Faker
 
-
 _SUPPORTED_COUNTS = (500, 1000)
 _ROWS_PER_TABLE = 10
 _CANDIDATE_FORMAT_VERSION = 2
 _TERMS_PER_DOMAIN = 10
 
 _ANALYTICS_SUFFIXES = [
-    "daily_metrics", "weekly_stats", "monthly_kpis", "quarterly_reports",
-    "annual_summaries", "trending_data", "benchmark_data", "forecast_metrics",
-    "anomaly_flags", "performance_index",
+    "daily_metrics",
+    "weekly_stats",
+    "monthly_kpis",
+    "quarterly_reports",
+    "annual_summaries",
+    "trending_data",
+    "benchmark_data",
+    "forecast_metrics",
+    "anomaly_flags",
+    "performance_index",
 ]
 
 # 10 domains with larger entity/event pools. Each generated fixture samples
@@ -39,156 +45,346 @@ _ANALYTICS_SUFFIXES = [
 _DOMAIN_SPECS: dict[str, dict[str, list[str]]] = {
     "hr": {
         "entities": [
-            "employees", "departments", "positions", "locations", "cost_centers",
-            "job_grades", "employment_types", "work_schedules", "skill_categories",
-            "benefit_plans", "pay_bands", "certifications", "office_sites",
-            "manager_groups", "recruiting_sources", "onboarding_tracks",
+            "employees",
+            "departments",
+            "positions",
+            "locations",
+            "cost_centers",
+            "job_grades",
+            "employment_types",
+            "work_schedules",
+            "skill_categories",
+            "benefit_plans",
+            "pay_bands",
+            "certifications",
+            "office_sites",
+            "manager_groups",
+            "recruiting_sources",
+            "onboarding_tracks",
         ],
         "events": [
-            "payroll_runs", "leave_requests", "performance_reviews",
-            "training_sessions", "job_applications", "disciplinary_actions",
-            "expense_reports", "time_entries", "employee_transfers",
-            "exit_interviews", "offer_approvals", "compensation_changes",
-            "succession_reviews", "workplace_incidents", "policy_acknowledgements",
+            "payroll_runs",
+            "leave_requests",
+            "performance_reviews",
+            "training_sessions",
+            "job_applications",
+            "disciplinary_actions",
+            "expense_reports",
+            "time_entries",
+            "employee_transfers",
+            "exit_interviews",
+            "offer_approvals",
+            "compensation_changes",
+            "succession_reviews",
+            "workplace_incidents",
+            "policy_acknowledgements",
         ],
     },
     "crm": {
         "entities": [
-            "customers", "contacts", "companies", "industries", "territories",
-            "segments", "channels", "personas", "contact_sources",
-            "relationship_types", "account_tiers", "buying_committees",
-            "lead_sources", "market_verticals", "engagement_models",
+            "customers",
+            "contacts",
+            "companies",
+            "industries",
+            "territories",
+            "segments",
+            "channels",
+            "personas",
+            "contact_sources",
+            "relationship_types",
+            "account_tiers",
+            "buying_committees",
+            "lead_sources",
+            "market_verticals",
+            "engagement_models",
         ],
         "events": [
-            "opportunities", "campaigns", "activities", "customer_agreements",
-            "customer_interactions", "campaign_responses", "win_loss_analyses",
-            "referral_submissions", "churn_events", "renewal_proposals",
-            "lead_qualifications", "account_reviews", "contact_updates",
+            "opportunities",
+            "campaigns",
+            "activities",
+            "customer_agreements",
+            "customer_interactions",
+            "campaign_responses",
+            "win_loss_analyses",
+            "referral_submissions",
+            "churn_events",
+            "renewal_proposals",
+            "lead_qualifications",
+            "account_reviews",
+            "contact_updates",
             "customer_health_snapshots",
         ],
     },
     "fin": {
         "entities": [
-            "accounts", "ledgers", "currencies", "tax_codes", "payment_methods",
-            "payment_terms", "fiscal_periods", "exchange_rates", "account_types",
-            "fiscal_years", "cost_allocations", "profit_centers",
-            "bank_accounts", "billing_entities", "revenue_streams",
+            "accounts",
+            "ledgers",
+            "currencies",
+            "tax_codes",
+            "payment_methods",
+            "payment_terms",
+            "fiscal_periods",
+            "exchange_rates",
+            "account_types",
+            "fiscal_years",
+            "cost_allocations",
+            "profit_centers",
+            "bank_accounts",
+            "billing_entities",
+            "revenue_streams",
         ],
         "events": [
-            "journal_entries", "invoices", "payments", "expense_claims",
-            "budget_revisions", "bank_statements", "asset_depreciation_runs",
-            "period_closings", "tax_filings", "audit_reports",
-            "revenue_recognition_runs", "collections_cases", "refund_batches",
+            "journal_entries",
+            "invoices",
+            "payments",
+            "expense_claims",
+            "budget_revisions",
+            "bank_statements",
+            "asset_depreciation_runs",
+            "period_closings",
+            "tax_filings",
+            "audit_reports",
+            "revenue_recognition_runs",
+            "collections_cases",
+            "refund_batches",
         ],
     },
     "inv": {
         "entities": [
-            "products", "categories", "warehouses", "suppliers",
-            "units_of_measure", "supplier_contracts", "stock_locations",
-            "quality_standards", "product_variants", "barcodes",
-            "demand_classes", "lot_attributes", "storage_zones",
+            "products",
+            "categories",
+            "warehouses",
+            "suppliers",
+            "units_of_measure",
+            "supplier_contracts",
+            "stock_locations",
+            "quality_standards",
+            "product_variants",
+            "barcodes",
+            "demand_classes",
+            "lot_attributes",
+            "storage_zones",
             "procurement_groups",
         ],
         "events": [
-            "purchase_orders", "inventory_movements", "stock_adjustments",
-            "receiving_logs", "quality_inspections", "supplier_evaluations",
-            "replenishment_orders", "cycle_counts", "product_returns",
-            "inventory_write_offs", "lot_reclassifications", "transfer_orders",
-            "reservation_requests", "demand_forecasts",
+            "purchase_orders",
+            "inventory_movements",
+            "stock_adjustments",
+            "receiving_logs",
+            "quality_inspections",
+            "supplier_evaluations",
+            "replenishment_orders",
+            "cycle_counts",
+            "product_returns",
+            "inventory_write_offs",
+            "lot_reclassifications",
+            "transfer_orders",
+            "reservation_requests",
+            "demand_forecasts",
         ],
     },
     "mfg": {
         "entities": [
-            "production_lines", "machines", "bill_of_materials", "operations",
-            "routings", "maintenance_schedules", "bom_versions",
-            "quality_checkpoints", "operators", "shift_patterns",
-            "tooling_assets", "inspection_plans", "work_centers",
+            "production_lines",
+            "machines",
+            "bill_of_materials",
+            "operations",
+            "routings",
+            "maintenance_schedules",
+            "bom_versions",
+            "quality_checkpoints",
+            "operators",
+            "shift_patterns",
+            "tooling_assets",
+            "inspection_plans",
+            "work_centers",
             "material_specs",
         ],
         "events": [
-            "work_orders", "production_runs", "quality_checks",
-            "maintenance_events", "machine_downtimes", "setup_events",
-            "changeover_records", "scrap_events", "rework_orders",
-            "yield_calculations", "material_issues", "labor_bookings",
-            "calibration_events", "capacity_reviews",
+            "work_orders",
+            "production_runs",
+            "quality_checks",
+            "maintenance_events",
+            "machine_downtimes",
+            "setup_events",
+            "changeover_records",
+            "scrap_events",
+            "rework_orders",
+            "yield_calculations",
+            "material_issues",
+            "labor_bookings",
+            "calibration_events",
+            "capacity_reviews",
         ],
     },
     "sales": {
         "entities": [
-            "price_lists", "discount_rules", "sales_regions", "sales_channels",
-            "revenue_categories", "contract_types", "rebate_programs",
-            "commission_plans", "sales_quotas", "product_bundles",
-            "order_types", "fulfillment_rules", "sales_teams",
+            "price_lists",
+            "discount_rules",
+            "sales_regions",
+            "sales_channels",
+            "revenue_categories",
+            "contract_types",
+            "rebate_programs",
+            "commission_plans",
+            "sales_quotas",
+            "product_bundles",
+            "order_types",
+            "fulfillment_rules",
+            "sales_teams",
             "promotion_groups",
         ],
         "events": [
-            "sales_orders", "quotations", "sales_contracts", "order_deliveries",
-            "sales_returns", "credit_notes", "rebate_accruals",
-            "commission_calculations", "forecast_submissions",
-            "territory_reviews", "pipeline_snapshots", "pricing_overrides",
-            "deal_approvals", "shipment_requests",
+            "sales_orders",
+            "quotations",
+            "sales_contracts",
+            "order_deliveries",
+            "sales_returns",
+            "credit_notes",
+            "rebate_accruals",
+            "commission_calculations",
+            "forecast_submissions",
+            "territory_reviews",
+            "pipeline_snapshots",
+            "pricing_overrides",
+            "deal_approvals",
+            "shipment_requests",
         ],
     },
     "proj": {
         "entities": [
-            "projects", "project_types", "milestones", "deliverables",
-            "resource_pools", "skill_requirements", "project_phases",
-            "risk_categories", "budget_categories", "project_templates",
-            "portfolio_groups", "funding_sources", "dependency_types",
+            "projects",
+            "project_types",
+            "milestones",
+            "deliverables",
+            "resource_pools",
+            "skill_requirements",
+            "project_phases",
+            "risk_categories",
+            "budget_categories",
+            "project_templates",
+            "portfolio_groups",
+            "funding_sources",
+            "dependency_types",
             "governance_boards",
         ],
         "events": [
-            "tasks", "proj_time_entries", "resource_bookings",
-            "risk_assessments", "issue_tickets", "change_requests",
-            "sprint_sessions", "retrospectives", "stakeholder_reviews",
-            "project_closings", "scope_reviews", "status_updates",
-            "budget_forecasts", "dependency_reviews",
+            "tasks",
+            "proj_time_entries",
+            "resource_bookings",
+            "risk_assessments",
+            "issue_tickets",
+            "change_requests",
+            "sprint_sessions",
+            "retrospectives",
+            "stakeholder_reviews",
+            "project_closings",
+            "scope_reviews",
+            "status_updates",
+            "budget_forecasts",
+            "dependency_reviews",
         ],
     },
     "log": {
         "entities": [
-            "carriers", "shipping_methods", "routes", "freight_classes",
-            "packaging_types", "customs_codes", "delivery_zones",
-            "log_warehouses", "tracking_providers", "incoterms",
-            "fleet_assets", "terminal_locations", "service_lanes",
+            "carriers",
+            "shipping_methods",
+            "routes",
+            "freight_classes",
+            "packaging_types",
+            "customs_codes",
+            "delivery_zones",
+            "log_warehouses",
+            "tracking_providers",
+            "incoterms",
+            "fleet_assets",
+            "terminal_locations",
+            "service_lanes",
             "rate_cards",
         ],
         "events": [
-            "shipments", "deliveries", "pick_lists", "packing_events",
-            "customs_declarations", "freight_bookings", "carrier_bookings",
-            "return_shipments", "last_mile_events", "proof_of_deliveries",
-            "route_exceptions", "dock_appointments", "freight_audits",
+            "shipments",
+            "deliveries",
+            "pick_lists",
+            "packing_events",
+            "customs_declarations",
+            "freight_bookings",
+            "carrier_bookings",
+            "return_shipments",
+            "last_mile_events",
+            "proof_of_deliveries",
+            "route_exceptions",
+            "dock_appointments",
+            "freight_audits",
             "delivery_attempts",
         ],
     },
     "svc": {
         "entities": [
-            "services", "service_levels", "support_tiers", "asset_types",
-            "warranty_types", "knowledge_categories", "escalation_paths",
-            "resolution_types", "sla_definitions", "service_contracts",
-            "case_origins", "entitlement_rules", "service_regions",
+            "services",
+            "service_levels",
+            "support_tiers",
+            "asset_types",
+            "warranty_types",
+            "knowledge_categories",
+            "escalation_paths",
+            "resolution_types",
+            "sla_definitions",
+            "service_contracts",
+            "case_origins",
+            "entitlement_rules",
+            "service_regions",
             "agent_groups",
         ],
         "events": [
-            "service_cases", "field_visits", "escalations",
-            "knowledge_articles", "customer_surveys", "asset_registrations",
-            "warranty_claims", "case_resolutions", "agent_activities",
-            "service_training_events", "sla_breaches", "dispatch_requests",
-            "service_renewals", "triage_reviews",
+            "service_cases",
+            "field_visits",
+            "escalations",
+            "knowledge_articles",
+            "customer_surveys",
+            "asset_registrations",
+            "warranty_claims",
+            "case_resolutions",
+            "agent_activities",
+            "service_training_events",
+            "sla_breaches",
+            "dispatch_requests",
+            "service_renewals",
+            "triage_reviews",
         ],
     },
     "sys": {
         "entities": [
-            "users", "roles", "permissions", "modules", "features", "tenants",
-            "api_keys", "webhook_configs", "integrations", "system_parameters",
-            "identity_providers", "access_policies", "data_retention_rules",
+            "users",
+            "roles",
+            "permissions",
+            "modules",
+            "features",
+            "tenants",
+            "api_keys",
+            "webhook_configs",
+            "integrations",
+            "system_parameters",
+            "identity_providers",
+            "access_policies",
+            "data_retention_rules",
             "notification_templates",
         ],
         "events": [
-            "user_sessions", "audit_events", "api_calls", "job_executions",
-            "error_events", "data_exports", "batch_jobs", "sync_events",
-            "feature_flags", "health_checks", "permission_changes",
-            "login_attempts", "webhook_deliveries", "backup_runs",
+            "user_sessions",
+            "audit_events",
+            "api_calls",
+            "job_executions",
+            "error_events",
+            "data_exports",
+            "batch_jobs",
+            "sync_events",
+            "feature_flags",
+            "health_checks",
+            "permission_changes",
+            "login_attempts",
+            "webhook_deliveries",
+            "backup_runs",
         ],
     },
 }
@@ -301,9 +497,7 @@ def generate_candidates_json(
 ) -> dict[str, Any]:
     """Return a candidates.json dict for `table_count` tables in `uc_schema`."""
     if table_count not in _SUPPORTED_COUNTS:
-        raise ValueError(
-            f"table_count must be one of {_SUPPORTED_COUNTS}, got {table_count}"
-        )
+        raise ValueError(f"table_count must be one of {_SUPPORTED_COUNTS}, got {table_count}")
     sub_module_count = table_count // (len(_DOMAIN_SPECS) * 10)
     tables = _generate_all_tables(sub_module_count, seed)
     total_fk_edges = sum(len(t.foreign_keys) for t in tables)
@@ -315,10 +509,7 @@ def generate_candidates_json(
             {
                 "source_id": f"synthetic_{table_count}",
                 "uc_schema": uc_schema,
-                "rationale": (
-                    f"tables={len(tables)} synthetic=True"
-                    f" fk_edges={total_fk_edges}"
-                ),
+                "rationale": (f"tables={len(tables)} synthetic=True fk_edges={total_fk_edges}"),
                 "tables": [t.to_dict() for t in tables],
             }
         ],
@@ -418,9 +609,7 @@ def _select_domain_terms(
     return [*required, *available[: _TERMS_PER_DOMAIN - len(required)]]
 
 
-def _entity_table(
-    domain: str, entity: str, rng: random.Random, fake: Faker
-) -> TableSpec:
+def _entity_table(domain: str, entity: str, rng: random.Random, fake: Faker) -> TableSpec:
     name = f"{domain}_{entity}"
     cols: list[tuple[str, str]] = [
         ("id", "INT"),
@@ -486,9 +675,7 @@ def _event_table(
     )
 
 
-def _item_table(
-    domain: str, event: str, entity: str, rng: random.Random, fake: Faker
-) -> TableSpec:
+def _item_table(domain: str, event: str, entity: str, rng: random.Random, fake: Faker) -> TableSpec:
     name = f"{domain}_{event}_lines"
     event_fk_col = f"{event}_id"
     entity_fk_col = f"{entity}_id"
@@ -519,9 +706,7 @@ def _item_table(
     )
 
 
-def _config_table(
-    domain: str, entity: str, rng: random.Random, fake: Faker
-) -> TableSpec:
+def _config_table(domain: str, entity: str, rng: random.Random, fake: Faker) -> TableSpec:
     name = f"{domain}_{entity}_config"
     entity_fk_col = f"{entity}_id"
     cols: list[tuple[str, str]] = [
@@ -575,9 +760,7 @@ def _analytics_table(
     )
 
 
-def _approval_table(
-    domain: str, event: str, rng: random.Random, fake: Faker
-) -> TableSpec:
+def _approval_table(domain: str, event: str, rng: random.Random, fake: Faker) -> TableSpec:
     name = f"{domain}_{event}_approvals"
     event_fk_col = f"{event}_id"
     cols: list[tuple[str, str]] = [
@@ -606,9 +789,7 @@ def _approval_table(
     )
 
 
-def _notification_table(
-    domain: str, entity: str, rng: random.Random, fake: Faker
-) -> TableSpec:
+def _notification_table(domain: str, entity: str, rng: random.Random, fake: Faker) -> TableSpec:
     name = f"{domain}_{entity}_alerts"
     entity_fk_col = f"{entity}_id"
     cols: list[tuple[str, str]] = [
@@ -637,9 +818,7 @@ def _notification_table(
     )
 
 
-def _integration_table(
-    domain: str, event: str, rng: random.Random, fake: Faker
-) -> TableSpec:
+def _integration_table(domain: str, event: str, rng: random.Random, fake: Faker) -> TableSpec:
     name = f"{domain}_{event}_sync_logs"
     event_fk_col = f"{event}_id"
     cols: list[tuple[str, str]] = [
@@ -665,9 +844,7 @@ def _integration_table(
     )
 
 
-def _schedule_table(
-    domain: str, entity: str, rng: random.Random, fake: Faker
-) -> TableSpec:
+def _schedule_table(domain: str, entity: str, rng: random.Random, fake: Faker) -> TableSpec:
     name = f"{domain}_{entity}_schedules"
     entity_fk_col = f"{entity}_id"
     cols: list[tuple[str, str]] = [
@@ -693,9 +870,7 @@ def _schedule_table(
     )
 
 
-def _archive_table(
-    domain: str, entity: str, rng: random.Random, fake: Faker
-) -> TableSpec:
+def _archive_table(domain: str, entity: str, rng: random.Random, fake: Faker) -> TableSpec:
     name = f"{domain}_{entity}_history"
     entity_fk_col = f"{entity}_id"
     cols: list[tuple[str, str]] = [
@@ -824,12 +999,14 @@ def _gen_value(
     if "message_body" in col_name:
         return fake.paragraph(nb_sentences=2)
     if "location" in col_name:
-        return rng.choice([
-            fake.city(),
-            fake.street_address(),
-            "Remote",
-            "Conference Room 1",
-        ])
+        return rng.choice(
+            [
+                fake.city(),
+                fake.street_address(),
+                "Remote",
+                "Conference Room 1",
+            ]
+        )
     if "archive_reason" in col_name or "decision_notes" in col_name:
         return fake.sentence(nb_words=8)
     if "error_message" in col_name:
@@ -842,20 +1019,26 @@ def _gen_value(
 
 
 def _fake_name(table_name: str, fake: Faker) -> str:
-    if any(token in table_name for token in (
-        "employees",
-        "contacts",
-        "operators",
-        "users",
-    )):
+    if any(
+        token in table_name
+        for token in (
+            "employees",
+            "contacts",
+            "operators",
+            "users",
+        )
+    ):
         return fake.name()
-    if any(token in table_name for token in (
-        "companies",
-        "customers",
-        "suppliers",
-        "carriers",
-        "tenants",
-    )):
+    if any(
+        token in table_name
+        for token in (
+            "companies",
+            "customers",
+            "suppliers",
+            "carriers",
+            "tenants",
+        )
+    ):
         return fake.company()
     if "products" in table_name or "product_" in table_name:
         return f"{fake.color_name()} {fake.word().title()}"
@@ -870,8 +1053,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         prog="dbxcarta-dense-generate",
         description=(
-            "Generate a synthetic dense-schema candidates.json for dbxcarta"
-            " Phase G evaluation."
+            "Generate a synthetic dense-schema candidates.json for dbxcarta Phase G evaluation."
         ),
     )
     parser.add_argument(
@@ -885,10 +1067,7 @@ def main() -> int:
         "--schema",
         type=str,
         default=None,
-        help=(
-            "UC schema name for the generated schema"
-            " (default: dense_500 or dense_1000)."
-        ),
+        help=("UC schema name for the generated schema (default: dense_500 or dense-1000)."),
     )
     parser.add_argument(
         "--seed",
@@ -900,10 +1079,7 @@ def main() -> int:
         "--output",
         type=Path,
         default=None,
-        help=(
-            "Output path for candidates.json"
-            " (default: .cache/candidates_<tables>.json)."
-        ),
+        help=("Output path for candidates.json (default: .cache/candidates_<tables>.json)."),
     )
     args = parser.parse_args()
 
@@ -915,9 +1091,7 @@ def main() -> int:
     output.write_text(json.dumps(payload, indent=2))
 
     n_tables = len(payload["schemas"][0]["tables"])
-    total_fks = sum(
-        len(t["foreign_keys"]) for t in payload["schemas"][0]["tables"]
-    )
+    total_fks = sum(len(t["foreign_keys"]) for t in payload["schemas"][0]["tables"])
     print(
         f"[dense] wrote {n_tables} tables ({total_fks} FK edges) to {output}",
         file=sys.stderr,

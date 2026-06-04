@@ -96,9 +96,7 @@ class ContextBundle:
                 if entry is None:
                     continue
                 joined = ", ".join(vals[:_PER_COLUMN_SAMPLE_LIMIT])
-                value_lines.append(
-                    f"  {entry.column_name} ({entry.table_fqn}): {joined}"
-                )
+                value_lines.append(f"  {entry.column_name} ({entry.table_fqn}): {joined}")
             if value_lines:
                 lines.append("")
                 lines.append("Sample values:")
@@ -109,14 +107,12 @@ class ContextBundle:
 
 class Retriever(ABC):
     @abstractmethod
-    def retrieve(self, question: str, embedding: list[float]) -> ContextBundle:
-        ...
+    def retrieve(self, question: str, embedding: list[float]) -> ContextBundle: ...
 
-    def close(self) -> None:
+    def close(self) -> None:  # noqa: B027 — deliberate optional no-op override hook
         """Release any held resources.
 
         No-op by default. Implementations that hold a connection (e.g. the
         Neo4j-backed ``GraphRetriever``) override this. The shared graph_rag
         seam closes a retriever it constructs itself.
         """
-

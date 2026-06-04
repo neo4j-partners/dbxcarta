@@ -44,7 +44,8 @@ DEFAULT_EMBEDDING_ENDPOINT = "databricks-gte-large-en"
 class NodeLabel(StrEnum):
     """Neo4j node labels. `.value` yields the literal label string used in
     Cypher (e.g., 'Column'); StrEnum members are str subclasses so they
-    interpolate cleanly into f-strings."""
+    interpolate cleanly into f-strings.
+    """
 
     DATABASE = "Database"
     SCHEMA = "Schema"
@@ -65,7 +66,8 @@ class RelType(StrEnum):
 
 class EdgeSource(StrEnum):
     """Provenance tag on REFERENCES edges. DECLARED is the Unity Catalog
-    declared-FK source; INFERRED_METADATA is name/PK heuristic inference."""
+    declared-FK source; INFERRED_METADATA is name/PK heuristic inference.
+    """
 
     DECLARED = "declared"
     INFERRED_METADATA = "inferred_metadata"
@@ -98,17 +100,40 @@ NODE_PROPERTIES: dict[NodeLabel, tuple[str, ...]] = {
     NodeLabel.DATABASE: ("id", "name", "contract_version", "embedding"),
     NodeLabel.SCHEMA: ("id", "name", "comment", "contract_version", "embedding"),
     NodeLabel.TABLE: (
-        "id", "name", "catalog", "schema", "layer", "comment", "table_type",
-        "created", "last_altered", "contract_version", "embedding",
+        "id",
+        "name",
+        "catalog",
+        "schema",
+        "layer",
+        "comment",
+        "table_type",
+        "created",
+        "last_altered",
+        "contract_version",
+        "embedding",
     ),
     NodeLabel.COLUMN: (
-        "id", "name", "catalog", "schema", "table", "data_type",
-        "is_nullable", "ordinal_position", "comment",
-        "contract_version", "embedding",
+        "id",
+        "name",
+        "catalog",
+        "schema",
+        "table",
+        "data_type",
+        "is_nullable",
+        "ordinal_position",
+        "comment",
+        "contract_version",
+        "embedding",
     ),
     NodeLabel.VALUE: (
-        "id", "value", "count", "catalog", "schema", "last_run",
-        "contract_version", "embedding",
+        "id",
+        "value",
+        "count",
+        "catalog",
+        "schema",
+        "last_run",
+        "contract_version",
+        "embedding",
     ),
 }
 

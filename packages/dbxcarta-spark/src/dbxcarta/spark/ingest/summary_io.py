@@ -12,12 +12,14 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from dbxcarta.spark.databricks import quote_qualified_name
-from dbxcarta.spark.ingest.summary import RunSummary
+from dbxcarta.core.identifiers import quote_qualified_name
+from dbxcarta.core.volume_io import ensure_volume_subdirs
 
 if TYPE_CHECKING:
     from databricks.sdk import WorkspaceClient
+    from dbxcarta.spark.ingest.summary import RunSummary
     from pyspark.sql import SparkSession
+    from pyspark.sql.types import StructType
 
 
 class LoadSummaryError(Exception):
@@ -28,35 +30,44 @@ class LoadSummaryError(Exception):
 
 
 def load_summary_from_volume(
-    ws: "WorkspaceClient",
+    ws: WorkspaceClient,
     volume_path: str,
     *,
     run_id: str | None = None,
+    job_name: str = "dbxcarta",
 ) -> dict[str, Any] | None:
     """Load a run summary JSON from a UC Volume (the file emitted by `emit_json`).
 
-    `emit_json` writes `{job_name}_{run_id}_{ts}.json` files. With `run_id`
-    set, filter for that token; otherwise scan newest-first by filename and
-    return the first summary with `status == 'success'`.
+    `emit_json` writes `{job_name}_{run_id}_{ts}.json` files. Every job type
+    (ingest `dbxcarta`, `dbxcarta_materialize`, `dbxcarta_client`) writes into
+    the same shared volume, so selection must be scoped to one `job_name` or a
+    caller asking for an ingest summary can be handed a materialize or client
+    summary that happens to sort first. `job_name` defaults to `"dbxcarta"`,
+    the ingest job that `verify` consumes.
+
+    With `run_id` set, match the exact `{job_name}_{run_id}_` filename token;
+    otherwise scan newest-first by filename and return the first summary whose
+    content has `status == 'success'` and `job_name == job_name`. The content
+    guard is required because `"dbxcarta"` is also a filename prefix of
+    `"dbxcarta_materialize"` and `"dbxcarta_client"`.
 
     Returns the parsed dict, or `None` if no matching file exists. Raises
     `LoadSummaryError` if `run_id` matches multiple files (ambiguity).
     """
     entries = list(ws.files.list_directory_contents(directory_path=volume_path))
     candidates = [
-        e for e in entries
-        if e.name is not None
-        and e.name.startswith("dbxcarta_")
-        and e.name.endswith(".json")
+        e
+        for e in entries
+        if e.name is not None and e.name.startswith("dbxcarta_") and e.name.endswith(".json")
     ]
     if not candidates:
         return None
 
     if run_id:
         matched = [
-            e for e in candidates
-            if e.name is not None
-            and e.name.startswith(f"dbxcarta_{run_id}_")
+            e
+            for e in candidates
+            if e.name is not None and e.name.startswith(f"{job_name}_{run_id}_")
         ]
         if not matched:
             return None
@@ -71,35 +82,17 @@ def load_summary_from_volume(
         if downloaded.contents is None:
             raise LoadSummaryError(f"summary file has no contents: {target.name}")
         content = downloaded.contents.read()
-        return cast(dict[str, Any], json.loads(content))
+        return cast("dict[str, Any]", json.loads(content))
 
     for entry in sorted(candidates, key=lambda e: e.name or "", reverse=True):
         downloaded = ws.files.download(file_path=f"{volume_path}/{entry.name}")
         if downloaded.contents is None:
             raise LoadSummaryError(f"summary file has no contents: {entry.name}")
         content = downloaded.contents.read()
-        loaded = cast(dict[str, Any], json.loads(content))
-        if loaded.get("status") == "success":
+        loaded = cast("dict[str, Any]", json.loads(content))
+        if loaded.get("status") == "success" and loaded.get("job_name") == job_name:
             return loaded
     return None
-
-
-def _mkdirs(dirpath: Path) -> None:
-    """Create local or UC Volume subdirectories needed for JSON summaries.
-
-    UC Volumes expose a FUSE path whose root must be provisioned by Databricks,
-    so this helper only creates subdirectories below the volume root.
-    """
-    parts = dirpath.parts
-    if len(parts) > 1 and parts[1] == "Volumes":
-        # UC Volume FUSE mount: creating the volume root (/Volumes/cat/schema/vol)
-        # is handled by CREATE VOLUME in preflight and returns errno 95 if
-        # attempted via os.mkdir. Only create subdirectories beyond the volume
-        # root (depth > 5).
-        for depth in range(6, len(parts) + 1):
-            Path(*parts[:depth]).mkdir(exist_ok=True)
-    else:
-        dirpath.mkdir(parents=True, exist_ok=True)
 
 
 def emit_stdout(summary: RunSummary) -> None:
@@ -125,17 +118,23 @@ def emit_json(summary: RunSummary, volume_path: str) -> None:
     """Write the JSON summary file under the configured UC Volume path."""
     ts = (summary.ended_at or summary.started_at).strftime("%Y%m%dT%H%M%SZ")
     path = Path(volume_path) / f"{summary.job_name}_{summary.run_id}_{ts}.json"
-    _mkdirs(path.parent)
+    ensure_volume_subdirs(path.parent)
     path.write_text(json.dumps(summary.to_json_dict(), indent=2))
 
 
-def emit_delta(summary: RunSummary, spark: "SparkSession", table_name: str) -> None:
-    """Append one summary row to the configured Delta history table.
+def summary_table_schema() -> StructType:
+    """Return the explicit Delta schema for the run-summary history table.
 
-    The explicit schema keeps Spark from inferring unstable map and
+    Exposed as a function rather than inlined in ``emit_delta`` so a test can
+    assert it agrees with the preflight ``CREATE TABLE`` DDL
+    (``preflight._SUMMARY_TABLE_COLUMNS_SQL``). A column type that drifts
+    between this writer schema and the preflight create surfaces only when the
+    table is recreated from scratch; on an existing table the append's
+    ``mergeSchema`` masks the conflict until then.
+
+    The explicit schema also keeps Spark from inferring unstable map and
     timestamp types from a single Python Row.
     """
-    from pyspark.sql import Row
     from pyspark.sql.types import (
         ArrayType,
         BooleanType,
@@ -148,31 +147,43 @@ def emit_delta(summary: RunSummary, spark: "SparkSession", table_name: str) -> N
         TimestampType,
     )
 
-    schema = StructType([
-        StructField("run_id", StringType(), nullable=False),
-        StructField("job_name", StringType()),
-        StructField("contract_version", StringType()),
-        StructField("catalog", StringType()),
-        StructField("schemas", ArrayType(StringType())),
-        StructField("started_at", TimestampType()),
-        StructField("ended_at", TimestampType()),
-        StructField("status", StringType()),
-        StructField("row_counts", MapType(StringType(), LongType())),
-        StructField("neo4j_counts", MapType(StringType(), LongType())),
-        StructField("error", StringType()),
-        StructField("value_sampling_warning", StringType()),
-        StructField("embedding_model", StringType()),
-        StructField("embedding_flags", MapType(StringType(), BooleanType())),
-        StructField("embedding_attempts", MapType(StringType(), LongType())),
-        StructField("embedding_successes", MapType(StringType(), LongType())),
-        StructField("embedding_failure_rate_per_label", MapType(StringType(), DoubleType())),
-        StructField("embedding_failure_rate", DoubleType()),
-        StructField("embedding_failure_threshold", LongType()),
-        StructField("embedding_ledger_hits", MapType(StringType(), LongType())),
-        StructField("verify_ok", BooleanType()),
-        StructField("verify_violation_count", LongType()),
-    ])
+    return StructType(
+        [
+            StructField("run_id", StringType(), nullable=False),
+            StructField("job_name", StringType()),
+            StructField("contract_version", StringType()),
+            StructField("catalog", StringType()),
+            StructField("schemas", ArrayType(StringType())),
+            StructField("started_at", TimestampType()),
+            StructField("ended_at", TimestampType()),
+            StructField("status", StringType()),
+            StructField("row_counts", MapType(StringType(), LongType())),
+            StructField("neo4j_counts", MapType(StringType(), LongType())),
+            StructField("error", StringType()),
+            StructField("value_sampling_warning", StringType()),
+            StructField("embedding_model", StringType()),
+            StructField("embedding_flags", MapType(StringType(), BooleanType())),
+            StructField("embedding_attempts", MapType(StringType(), LongType())),
+            StructField("embedding_successes", MapType(StringType(), LongType())),
+            StructField("embedding_failure_rate_per_label", MapType(StringType(), DoubleType())),
+            StructField("embedding_failure_rate", DoubleType()),
+            StructField("embedding_failure_threshold", LongType()),
+            StructField("embedding_ledger_hits", MapType(StringType(), LongType())),
+            StructField("verify_ok", BooleanType()),
+            StructField("verify_violation_count", LongType()),
+        ]
+    )
 
+
+def emit_delta(summary: RunSummary, spark: SparkSession, table_name: str) -> None:
+    """Append one summary row to the configured Delta history table.
+
+    The explicit schema keeps Spark from inferring unstable map and
+    timestamp types from a single Python Row.
+    """
+    from pyspark.sql import Row
+
+    schema = summary_table_schema()
     quoted_table = quote_qualified_name(table_name, expected_parts=3)
     row = Row(**summary.to_dict())
     (
@@ -184,9 +195,7 @@ def emit_delta(summary: RunSummary, spark: "SparkSession", table_name: str) -> N
     )
 
 
-def emit(
-    summary: RunSummary, spark: "SparkSession", volume_path: str, table_name: str
-) -> None:
+def emit(summary: RunSummary, spark: SparkSession, volume_path: str, table_name: str) -> None:
     """Emit the run summary through all configured sinks."""
     emit_stdout(summary)
     emit_json(summary, volume_path)

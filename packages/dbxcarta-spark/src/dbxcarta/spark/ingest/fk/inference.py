@@ -82,7 +82,8 @@ class CoarseFKCounts:
 
 # --- Shared expressions -----------------------------------------------------
 
-def canonicalize_expr(data_type: "Column") -> "Column":
+
+def canonicalize_expr(data_type: Column) -> Column:
     """Native port of `common.canonicalize`, returning one comparable token.
 
     `canonicalize` reduces a declared type to `(family, detail)` where detail
@@ -115,7 +116,8 @@ def canonicalize_expr(data_type: "Column") -> "Column":
     for raw, fam in _TYPE_EQUIV.items():
         cond = tt == F.lit(raw)
         equiv = F.when(cond, F.lit(fam)) if equiv is None else equiv.when(cond, F.lit(fam))
-    assert equiv is not None  # _TYPE_EQUIV is non-empty
+    if equiv is None:  # _TYPE_EQUIV is non-empty; guards type narrowing below
+        raise ValueError("_TYPE_EQUIV must define at least one type-equivalence mapping")
 
     return (
         F.when(tt.rlike(string_re), F.lit("STRING"))
@@ -130,7 +132,7 @@ def canonicalize_expr(data_type: "Column") -> "Column":
     )
 
 
-def _comment_tokens_expr(comment: "Column") -> "Column":
+def _comment_tokens_expr(comment: Column) -> Column:
     """Native port of `metadata._comment_tokens`.
 
     split(lower(comment)) on the non-alphanumeric class, keep tokens with
@@ -147,8 +149,8 @@ def _comment_tokens_expr(comment: "Column") -> "Column":
 
 
 def build_columns_frame(
-    columns_df: "DataFrame",
-) -> "DataFrame":
+    columns_df: DataFrame,
+) -> DataFrame:
     """Per-column working frame for metadata FK inference.
 
     `columns_df` is the cached information_schema.columns snapshot
@@ -172,7 +174,10 @@ def build_columns_frame(
         .withColumn(
             "col_id",
             id_expr_from_columns(
-                F.col("catalog"), F.col("schema"), F.col("table"), F.col("column"),
+                F.col("catalog"),
+                F.col("schema"),
+                F.col("table"),
+                F.col("column"),
             ),
         )
         .withColumn("canon", canonicalize_expr(F.col("data_type")))
@@ -181,9 +186,9 @@ def build_columns_frame(
 
 
 def build_pk_gate(
-    columns_frame: "DataFrame",
-    constraints_df: "DataFrame",
-) -> tuple["DataFrame", int]:
+    columns_frame: DataFrame,
+    constraints_df: DataFrame,
+) -> tuple[DataFrame, int]:
     """Classify every column's PK-likeness as a Spark frame.
 
     Reproduces `PKIndex.from_constraints` + `common.pk_kind` without a
@@ -267,18 +272,19 @@ def build_pk_gate(
     return pk_gate, composite_pk_count
 
 
-def _score_table_df(spark: "SparkSession") -> "DataFrame":
+def _score_table_df(spark: SparkSession) -> DataFrame:
     """Materialize `_SCORE_TABLE` as a tiny broadcastable lookup DataFrame."""
     rows = [
         (kind.value, pk_ev.value, comment_present, score)
         for (kind, pk_ev, comment_present), score in _SCORE_TABLE.items()
     ]
     return spark.createDataFrame(
-        rows, schema=["name_kind", "pk_evidence", "comment_present", "score"],
+        rows,
+        schema=["name_kind", "pk_evidence", "comment_present", "score"],
     )
 
 
-def _select_as(df: "DataFrame", mapping: "dict[str, str]") -> "DataFrame":
+def _select_as(df: DataFrame, mapping: dict[str, str]) -> DataFrame:
     """Project `df` to exactly `mapping`'s columns, renaming each old → new.
 
     One declarative spec for the self-join projections below. Keeping the
@@ -297,15 +303,16 @@ def _select_as(df: "DataFrame", mapping: "dict[str, str]") -> "DataFrame":
 
 # --- Metadata strategy ------------------------------------------------------
 
+
 def infer_metadata_edges(
-    spark: "SparkSession",
-    columns_frame: "DataFrame",
-    pk_gate: "DataFrame",
-    declared_edges_df: "DataFrame | None",
+    spark: SparkSession,
+    columns_frame: DataFrame,
+    pk_gate: DataFrame,
+    declared_edges_df: DataFrame | None,
     *,
     composite_pk_count: int = 0,
     threshold: float = 0.8,
-) -> tuple["DataFrame", CoarseFKCounts, int]:
+) -> tuple[DataFrame, CoarseFKCounts, int]:
     """Spark-native metadata FK inference.
 
     Returns `(edges_df, counts, composite_pk_skipped)` where `edges_df` has
@@ -326,8 +333,11 @@ def infer_metadata_edges(
     col_l = F.lower(cf["column"])
     tbl_l = F.lower(cf["table"])
 
-    src_keys = [F.struct(F.concat(F.lit("E|"), col_l).alias("lk"),
-                         F.lit(NameMatchKind.EXACT.value).alias("kind"))]
+    src_keys = [
+        F.struct(
+            F.concat(F.lit("E|"), col_l).alias("lk"), F.lit(NameMatchKind.EXACT.value).alias("kind")
+        )
+    ]
     for suf in _STEM_SUFFIXES:
         applies = col_l.endswith(suf) & (F.length(col_l) > F.lit(len(suf)))
         stem = F.expr(f"substring(lower(column), 1, length(lower(column)) - {len(suf)})")
@@ -358,17 +368,42 @@ def infer_metadata_edges(
     # table forms) only when the column is literally `id`, matching
     # _stem_matches_table (t == s | s+'s' | s+'es').
     is_id = col_l == F.lit("id")
-    tgt_keys = [F.struct(F.concat(F.lit("E|"), col_l).alias("lk"),
-                         F.lit(NameMatchKind.EXACT.value).alias("kind"))]
-    tgt_keys.append(F.when(is_id, F.struct(
-        F.concat(F.lit("S|"), tbl_l).alias("lk"),
-        F.lit(NameMatchKind.SUFFIX.value).alias("kind"))))
-    tgt_keys.append(F.when(is_id & tbl_l.endswith("s"), F.struct(
-        F.concat(F.lit("S|"), F.expr("substring(lower(table), 1, length(lower(table)) - 1)")).alias("lk"),
-        F.lit(NameMatchKind.SUFFIX.value).alias("kind"))))
-    tgt_keys.append(F.when(is_id & tbl_l.endswith("es"), F.struct(
-        F.concat(F.lit("S|"), F.expr("substring(lower(table), 1, length(lower(table)) - 2)")).alias("lk"),
-        F.lit(NameMatchKind.SUFFIX.value).alias("kind"))))
+    tgt_keys = [
+        F.struct(
+            F.concat(F.lit("E|"), col_l).alias("lk"), F.lit(NameMatchKind.EXACT.value).alias("kind")
+        )
+    ]
+    tgt_keys.append(
+        F.when(
+            is_id,
+            F.struct(
+                F.concat(F.lit("S|"), tbl_l).alias("lk"),
+                F.lit(NameMatchKind.SUFFIX.value).alias("kind"),
+            ),
+        )
+    )
+    tgt_keys.append(
+        F.when(
+            is_id & tbl_l.endswith("s"),
+            F.struct(
+                F.concat(
+                    F.lit("S|"), F.expr("substring(lower(table), 1, length(lower(table)) - 1)")
+                ).alias("lk"),
+                F.lit(NameMatchKind.SUFFIX.value).alias("kind"),
+            ),
+        )
+    )
+    tgt_keys.append(
+        F.when(
+            is_id & tbl_l.endswith("es"),
+            F.struct(
+                F.concat(
+                    F.lit("S|"), F.expr("substring(lower(table), 1, length(lower(table)) - 2)")
+                ).alias("lk"),
+                F.lit(NameMatchKind.SUFFIX.value).alias("kind"),
+            ),
+        )
+    )
     tgt = _select_as(
         cf.withColumn("_k", F.explode(F.array_compact(F.array(*tgt_keys)))),
         {
@@ -384,7 +419,7 @@ def infer_metadata_edges(
     )
 
     # The id↔id term below is a scale prune, NOT a correctness gate: it keeps
-    # an id-count × id-count cartesian out of the join/window/dedup. Do not
+    # an id-count x id-count cartesian out of the join/window/dedup. Do not
     # "simplify" it away — attenuation would also suppress generic id→id
     # fanout, and a genuine shared-PK FK is declared and caught by the
     # declared path, so dropping it only adds a large useless intermediate to
@@ -430,7 +465,9 @@ def infer_metadata_edges(
     ).withColumn("name_kind", F.col("kind"))
     score_df = F.broadcast(_score_table_df(spark))
     scored = scored_in.join(
-        score_df, ["name_kind", "pk_evidence", "comment_present"], "inner",
+        score_df,
+        ["name_kind", "pk_evidence", "comment_present"],
+        "inner",
     )
 
     # Window set = post name-dedup, type, PK, and score>=threshold. cnt over
@@ -456,12 +493,12 @@ def infer_metadata_edges(
 
     if declared_edges_df is not None:
         prior = declared_edges_df.select(
-            F.col("source_id").alias("_p_s"), F.col("target_id").alias("_p_t"),
+            F.col("source_id").alias("_p_s"),
+            F.col("target_id").alias("_p_t"),
         )
         edges = edges.join(
             prior,
-            (F.col("source_id") == F.col("_p_s"))
-            & (F.col("target_id") == F.col("_p_t")),
+            (F.col("source_id") == F.col("_p_s")) & (F.col("target_id") == F.col("_p_t")),
             "left_anti",
         )
 

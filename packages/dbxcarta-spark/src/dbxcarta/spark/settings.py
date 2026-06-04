@@ -9,42 +9,18 @@ Internal DTOs elsewhere are `@dataclass`, per the skill's decision table.
 
 from __future__ import annotations
 
-from pydantic import field_validator, model_validator
-from pydantic_settings import BaseSettings
-
-from dbxcarta.spark.contract import DEFAULT_EMBEDDING_ENDPOINT
-from dbxcarta.spark.databricks import (
+from dbxcarta.core.catalogs import resolve_catalogs
+from dbxcarta.core.config import derive_ops_config
+from dbxcarta.core.identifiers import (
+    parse_volume_path,
     split_qualified_name,
     validate_identifier,
     validate_serving_endpoint_name,
     validate_uc_volume_subpath,
 )
-
-
-def resolve_catalogs(catalog: str, catalogs: str) -> list[str]:
-    """Catalogs to ingest, order-preserving and de-duplicated.
-
-    The single source of truth for "which catalogs does this run touch".
-    Both the readiness check and the pipeline resolve their catalog set
-    through this one function, so they can never disagree.
-
-    Each entry in ``catalogs`` is ``catalog`` or ``catalog:layer``; the
-    ``:layer`` suffix is stripped here. A blank list falls back to the single
-    ``catalog``, preserving the historical single-catalog behavior. Duplicates
-    are collapsed: a repeated catalog would otherwise double-count extract
-    totals and re-write every node. Every resolved name is validated with the
-    same rule the pipeline uses, so a malformed catalog fails loud wherever the
-    list is resolved.
-    """
-    listed: list[str] = []
-    for part in catalogs.split(","):
-        name = part.split(":", 1)[0].strip()
-        if name:
-            listed.append(name)
-    resolved = list(dict.fromkeys(listed)) or [catalog]
-    for name in resolved:
-        validate_identifier(name, label="catalog")
-    return resolved
+from dbxcarta.spark.contract import DEFAULT_EMBEDDING_ENDPOINT
+from pydantic import field_validator, model_validator
+from pydantic_settings import BaseSettings
 
 
 class SparkIngestSettings(BaseSettings):
@@ -88,8 +64,15 @@ class SparkIngestSettings(BaseSettings):
     # within the same (catalog, schema), so listing many schemas produces
     # disjoint subgraphs by design.
     dbxcarta_schemas: str = ""
-    dbxcarta_summary_volume: str
-    dbxcarta_summary_table: str
+    # The ops volume root (/Volumes/<ops_catalog>/<ops_schema>/<volume>) the
+    # summary sinks derive from. Optional today because the overlays still set
+    # the summary fields explicitly; required only once Phase 6 removes them so
+    # derivation must fire. Kept blank in the historical tests that set the
+    # summary fields directly.
+    databricks_volume_path: str = ""
+    # Derivable from databricks_volume_path when blank (see _resolve_summary_sinks).
+    dbxcarta_summary_volume: str = ""
+    dbxcarta_summary_table: str = ""
     # Sample values
     dbxcarta_include_values: bool = True
     dbxcarta_sample_limit: int = 10
@@ -153,8 +136,7 @@ class SparkIngestSettings(BaseSettings):
         """Reject negative: 0 means unlimited (disabled), > 0 is the cap."""
         if v < 0:
             raise ValueError(
-                "DBXCARTA_FK_MAX_COLUMNS must be >= 0"
-                f" (got {v}); 0 disables the guardrail"
+                f"DBXCARTA_FK_MAX_COLUMNS must be >= 0 (got {v}); 0 disables the guardrail"
             )
         return v
 
@@ -218,12 +200,27 @@ class SparkIngestSettings(BaseSettings):
             out[catalog] = layer
         return out
 
+    @field_validator("databricks_volume_path")
+    @classmethod
+    def _validate_volume_root(cls, v: str) -> str:
+        """Validate the ops volume root, allowing blank (not always supplied)."""
+        if not v.strip():
+            return ""
+        # Validate through the shared core rule (exactly /Volumes/<cat>/<schema>/
+        # <volume>, each part a safe identifier) rather than re-deriving it here.
+        parse_volume_path(v)
+        return v.rstrip("/")
+
     @field_validator("dbxcarta_summary_table")
     @classmethod
     def _validate_summary_table(cls, v: str) -> str:
         """Require summary history to target catalog.schema.table explicitly."""
-        # Persisted run history is a UC artifact, so require an explicit
-        # catalog.schema.table target rather than relying on workspace defaults.
+        # Blank is derived from databricks_volume_path in _resolve_summary_sinks;
+        # the derived value is well-formed by construction, so only validate
+        # input. Persisted run history is a UC artifact, so a supplied target
+        # must be an explicit catalog.schema.table rather than a workspace default.
+        if not v.strip():
+            return ""
         split_qualified_name(v, expected_parts=3, label="summary table")
         return v
 
@@ -231,6 +228,8 @@ class SparkIngestSettings(BaseSettings):
     @classmethod
     def _validate_summary_volume(cls, v: str) -> str:
         """Require a UC Volume subpath for JSON summary output."""
+        if not v.strip():
+            return ""
         return validate_uc_volume_subpath(v, label="DBXCARTA_SUMMARY_VOLUME")
 
     @field_validator("dbxcarta_embedding_batch_tables")
@@ -270,17 +269,38 @@ class SparkIngestSettings(BaseSettings):
         return validate_serving_endpoint_name(v)
 
     @model_validator(mode="after")
-    def _validate_feature_coherence(self) -> "SparkIngestSettings":
+    def _resolve_summary_sinks(self) -> SparkIngestSettings:
+        """Derive the summary volume and table from the ops volume root when unset.
+
+        The shared core resolver is the single owner of the base-plus-tail rule.
+        When both summary fields are supplied (every overlay today, and the
+        historical tests), derivation is skipped and databricks_volume_path is
+        never touched, so the change is behavior-neutral until Phase 6 removes
+        the explicit values. Mirrors ``ClientSettings._resolve_defaults``;
+        unlike the client, databricks_volume_path is optional here, so a missing
+        base when the sinks are also unset fails loudly rather than deriving
+        from nothing.
+        """
+        if not (self.dbxcarta_summary_volume and self.dbxcarta_summary_table):
+            if not self.databricks_volume_path:
+                raise ValueError(
+                    "DBXCARTA_SUMMARY_VOLUME/DBXCARTA_SUMMARY_TABLE are unset and "
+                    "cannot be derived: DATABRICKS_VOLUME_PATH is also unset."
+                )
+            derived = derive_ops_config(self.databricks_volume_path)
+            self.dbxcarta_summary_volume = self.dbxcarta_summary_volume or derived.summary_volume
+            self.dbxcarta_summary_table = self.dbxcarta_summary_table or derived.summary_table
+        return self
+
+    @model_validator(mode="after")
+    def _validate_feature_coherence(self) -> SparkIngestSettings:
         """Cross-field sanity checks.
 
         Fail at Settings construction (job startup) rather than halfway through
         a run. Value embeddings require sample-values to be enabled: there are
         no Value nodes to embed otherwise.
         """
-        if (
-            self.dbxcarta_include_embeddings_values
-            and not self.dbxcarta_include_values
-        ):
+        if self.dbxcarta_include_embeddings_values and not self.dbxcarta_include_values:
             raise ValueError(
                 "DBXCARTA_INCLUDE_EMBEDDINGS_VALUES=true requires"
                 " DBXCARTA_INCLUDE_VALUES=true (nothing to embed otherwise)"

@@ -175,7 +175,7 @@ pass-through commands.
 Add `DBXCARTA_TEARDOWN_TARGET` to each overlay, reproducing exactly what each
 example's `--drop-all` does today:
 
-- dense: `DBXCARTA_TEARDOWN_TARGET=schema:schemapile_lakehouse.dense_1000`
+- dense: `DBXCARTA_TEARDOWN_TARGET=schema:schemapile_lakehouse.dense-1000`
 - schemapile: `DBXCARTA_TEARDOWN_TARGET=catalog:schemapile_lakehouse`
 - finance: `DBXCARTA_TEARDOWN_TARGET=schema:dbxcarta-catalog.finance_genie_ops`
 

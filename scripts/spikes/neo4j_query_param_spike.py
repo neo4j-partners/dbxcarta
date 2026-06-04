@@ -156,9 +156,7 @@ def _repo_env() -> dict[str, str | None]:
     if override:
         path = Path(override)
         if not path.is_file():
-            raise FileNotFoundError(
-                f"NEO4J_SPIKE_ENV_FILE set but not a file: {override}"
-            )
+            raise FileNotFoundError(f"NEO4J_SPIKE_ENV_FILE set but not a file: {override}")
         return dotenv_values(path)
     for parent in Path(__file__).resolve().parents:
         candidate = parent / ".env"
@@ -190,9 +188,7 @@ def _setup(driver: Driver) -> None:
 def _teardown(driver: Driver) -> None:
     driver.execute_query(f"DROP INDEX {_INDEX} IF EXISTS")
     driver.execute_query(f"DROP INDEX {_FILTER_INDEX} IF EXISTS")
-    driver.execute_query(
-        "MATCH (n) WHERE n:__SpikeCol OR n:__SpikeKeyCol DETACH DELETE n"
-    )
+    driver.execute_query("MATCH (n) WHERE n:__SpikeCol OR n:__SpikeKeyCol DETACH DELETE n")
 
 
 def _run(driver: Driver, cypher: str, params: dict[str, object]) -> int:
@@ -207,9 +203,7 @@ def _eval_form(driver: Driver, name: str, template: str) -> FormResult:
     # Bound: $k via the driver (control — the driver always supports binds;
     # this isolates "does the Cypher form parse/run on this server").
     try:
-        bound_rows = _run(
-            driver, template.format(idx=_INDEX, k="$k"), {"k": _K}
-        )
+        bound_rows = _run(driver, template.format(idx=_INDEX, k="$k"), {"k": _K})
         bound_ok = True
     except Neo4jError as exc:
         bound_err = (exc.message or str(exc)).splitlines()[0]
@@ -217,16 +211,19 @@ def _eval_form(driver: Driver, name: str, template: str) -> FormResult:
     # Interpolated: a literal trusted int, no params — the proposed
     # read_query fix (k comes from a validated >=1 setting, not user input).
     try:
-        interp_rows = _run(
-            driver, template.format(idx=_INDEX, k=str(_K)), {}
-        )
+        interp_rows = _run(driver, template.format(idx=_INDEX, k=str(_K)), {})
         interp_ok = True
     except Neo4jError as exc:
         interp_err = (exc.message or str(exc)).splitlines()[0]
 
     return FormResult(
-        name, bound_ok, bound_rows, bound_err,
-        interp_ok, interp_rows, interp_err,
+        name,
+        bound_ok,
+        bound_rows,
+        bound_err,
+        interp_ok,
+        interp_rows,
+        interp_err,
     )
 
 
@@ -240,7 +237,8 @@ def _eval_form(driver: Driver, name: str, template: str) -> FormResult:
 _IN_INDEX_VARIANTS: dict[str, tuple[str, dict[str, object]]] = {
     # Correlated outer ref, not-self as a post-filter outside SEARCH.
     # This is the canonical shape (== shipped per-source NN intent).
-    "search_in_index_filtered": ("""
+    "search_in_index_filtered": (
+        """
 MATCH (s:__SpikeCol)
 WHERE s.embedding IS NOT NULL
 CALL (s) {{
@@ -255,11 +253,14 @@ CALL (s) {{
   RETURN t.id AS target_id, score
 }}
 RETURN s.id AS source_id, target_id, score
-""", {}),
+""",
+        {},
+    ),
     # not-self pushed *inside* the in-index WHERE. Question: does the
     # preview WHERE subset accept an inequality on a correlated ref, and
     # does it keep a self-hit from consuming a top-k slot (correctness)?
-    "inidx_selfnot_inside": ("""
+    "inidx_selfnot_inside": (
+        """
 MATCH (s:__SpikeCol)
 WHERE s.embedding IS NOT NULL
 CALL (s) {{
@@ -273,12 +274,15 @@ CALL (s) {{
   RETURN t.id AS target_id, score
 }}
 RETURN s.id AS source_id, target_id, score
-""", {}),
+""",
+        {},
+    ),
     # Filter by $params instead of the correlated `s.*`. This is the
     # building block for the Phase 6b "batch the NN read per source-table
     # range / per-partition" candidate: proves param-driven in-index
     # filtering works so a partition can be driven from the connector.
-    "inidx_param_filter": ("""
+    "inidx_param_filter": (
+        """
 MATCH (s:__SpikeCol)
 WHERE s.embedding IS NOT NULL
 CALL (s) {{
@@ -293,11 +297,14 @@ CALL (s) {{
   RETURN t.id AS target_id, score
 }}
 RETURN s.id AS source_id, target_id, score
-""", {"catalog": "c", "schema": "s"}),
+""",
+        {"catalog": "c", "schema": "s"},
+    ),
     # No CALL (s) scoped-subquery wrapper. Question: is the wrapper
     # required, or is the flatter shape valid? Fewer nesting layers can
     # matter for the connector `query` round-trip and the planner.
-    "inidx_toplevel": ("""
+    "inidx_toplevel": (
+        """
 MATCH (s:__SpikeCol)
 WHERE s.embedding IS NOT NULL
 MATCH (t:__SpikeKeyCol)
@@ -309,7 +316,9 @@ SEARCH t IN (
 ) SCORE AS score
 WHERE t.id <> s.id
 RETURN s.id AS source_id, t.id AS target_id, score
-""", {}),
+""",
+        {},
+    ),
 }
 
 _PROFILE_VARIANT = "search_in_index_filtered"
@@ -320,7 +329,8 @@ def _render_profile(node: dict[str, object], depth: int = 0) -> list[str]:
     tree. The push-down signal is whether the catalog/schema predicate and
     the LIMIT ride *inside* a vector-index operator's detail (HNSW
     push-down) or sit in a separate `Filter`/`Top` operator above a plain
-    vector seek (post-filter)."""
+    vector seek (post-filter).
+    """
     op = str(node.get("operatorType", "?"))
     args = node.get("args", {})
     args = args if isinstance(args, dict) else {}
@@ -411,29 +421,30 @@ def _eval_in_index_filter(
                 interp_ok = True
             except Neo4jError as exc:
                 interp_err = (exc.message or str(exc)).splitlines()[0]
-            results.append(FormResult(
-                name, bound_ok, bound_rows, bound_err,
-                interp_ok, interp_rows, interp_err,
-            ))
+            results.append(
+                FormResult(
+                    name,
+                    bound_ok,
+                    bound_rows,
+                    bound_err,
+                    interp_ok,
+                    interp_rows,
+                    interp_err,
+                )
+            )
 
-        canonical = next(
-            (r for r in results if r.name == _PROFILE_VARIANT), None
-        )
+        canonical = next((r for r in results if r.name == _PROFILE_VARIANT), None)
         if canonical is not None and canonical.interp_ok:
             tpl, extra = _IN_INDEX_VARIANTS[_PROFILE_VARIANT]
             cypher = "PROFILE " + tpl.format(idx=_FILTER_INDEX, k=str(_K))
             try:
-                plan = driver.execute_query(
-                    cypher, parameters_=dict(extra)
-                ).summary.profile
+                plan = driver.execute_query(cypher, parameters_=dict(extra)).summary.profile
                 if isinstance(plan, dict):
                     body = "\n".join(_render_profile(plan))
                 else:
                     body = f"(no structured profile: {plan!r})"
             except Neo4jError as exc:
-                body = "PROFILE failed: " + (
-                    exc.message or str(exc)
-                ).splitlines()[0]
+                body = "PROFILE failed: " + (exc.message or str(exc)).splitlines()[0]
             profile = (
                 f"\n=== IN-INDEX FILTER PLAN (PROFILE, {_PROFILE_VARIANT})"
                 " ===\nLook for the catalog/schema predicate and LIMIT "
@@ -470,9 +481,7 @@ def _verdict(results: list[FormResult]) -> None:
             "_SEMANTIC_NN_CYPHER must be rewritten to a form that does "
             "(see per-form errors above)."
         )
-    in_index = next(
-        (r for r in results if r.name == "search_in_index_filtered"), None
-    )
+    in_index = next((r for r in results if r.name == "search_in_index_filtered"), None)
     if in_index is not None:
         if in_index.interp_ok and in_index.bound_ok:
             print(
@@ -504,10 +513,7 @@ def main() -> int:
         print(f"connected: {_server_info(driver)}")
         try:
             _setup(driver)
-            results = [
-                _eval_form(driver, name, tpl)
-                for name, tpl in _FORMS.items()
-            ]
+            results = [_eval_form(driver, name, tpl) for name, tpl in _FORMS.items()]
             inidx_results, inidx_profile = _eval_in_index_filter(driver)
             results.extend(inidx_results)
         finally:
@@ -516,11 +522,7 @@ def main() -> int:
     for r in results:
         print(f"\n[{r.name}]")
         b = f"PASS rows={r.bound_rows}" if r.bound_ok else f"FAIL {r.bound_err}"
-        i = (
-            f"PASS rows={r.interp_rows}"
-            if r.interp_ok
-            else f"FAIL {r.interp_err}"
-        )
+        i = f"PASS rows={r.interp_rows}" if r.interp_ok else f"FAIL {r.interp_err}"
         print(f"  bound $k     : {b}")
         print(f"  interpolated : {i}")
 

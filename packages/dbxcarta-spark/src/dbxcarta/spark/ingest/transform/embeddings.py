@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from dbxcarta.spark.databricks import validate_serving_endpoint_name
+from dbxcarta.core.identifiers import validate_serving_endpoint_name
 
 if TYPE_CHECKING:
     from pyspark.sql import Column, DataFrame
 
 
-def _validate_embedding(raw_col: "Column", expected_dim: int) -> tuple["Column", "Column"]:
+def _validate_embedding(raw_col: Column, expected_dim: int) -> tuple[Column, Column]:
     """Return (embedding, embedding_error) for an ai_query _emb_raw struct column.
 
     Precedence: endpoint error wins. If raw_col.errorMessage is non-null the
@@ -41,12 +41,12 @@ def _validate_embedding(raw_col: "Column", expected_dim: int) -> tuple["Column",
 
 
 def add_embedding_column(
-    df: "DataFrame",
+    df: DataFrame,
     endpoint: str,
     expected_dimension: int,
     *,
     label: str,
-) -> "DataFrame":
+) -> DataFrame:
     """Append embedding_text_hash, embedding, embedding_error,
     embedding_model, embedded_at to df, then drop the input embedding_text.
 
@@ -76,9 +76,8 @@ def add_embedding_column(
     raw = expr(f"ai_query('{endpoint}', embedding_text, failOnError => false)")
     embedding_col, error_col = _validate_embedding(col("_emb_raw"), expected_dimension)
 
-    df = (
-        df
-        .withColumn("embedding_text_hash", sha2(col("embedding_text"), 256))
+    return (
+        df.withColumn("embedding_text_hash", sha2(col("embedding_text"), 256))
         .withColumn("_emb_raw", raw)
         .withColumn("embedding", embedding_col)
         .withColumn("embedding_error", error_col)
@@ -88,10 +87,8 @@ def add_embedding_column(
         .drop("embedding_text")
     )
 
-    return df
 
-
-def compute_failure_stats(df: "DataFrame") -> tuple[float, int, int]:
+def compute_failure_stats(df: DataFrame) -> tuple[float, int, int]:
     """Return (failure_rate, attempts, successes). Triggers a Spark action.
 
     Expects df to contain an 'embedding' column produced by add_embedding_column().

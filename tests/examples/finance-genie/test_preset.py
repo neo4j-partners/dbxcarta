@@ -1,26 +1,25 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-import pytest
-from dotenv import dotenv_values
-
-from dbxcarta.spark.loader import load_preset
-from dbxcarta.spark.presets import (
+from dbxcarta.core.presets import (
     Preset,
     QuestionsUploadable,
     ReadinessCheckable,
     StandardPreset,
 )
+from dbxcarta.spark.loader import load_preset
 from dbxcarta.spark.settings import SparkIngestSettings
 from dbxcarta_finance_genie_example import preset
+from dotenv import dotenv_values
+
+if TYPE_CHECKING:
+    import pytest
 
 # The committed overlay is the single source of per-example dbxcarta config.
 _OVERLAY = (
-    Path(__file__).resolve().parents[3]
-    / "examples"
-    / "finance-genie"
-    / "dbxcarta-overlay.env"
+    Path(__file__).resolve().parents[3] / "examples" / "finance-genie" / "dbxcarta-overlay.env"
 )
 
 

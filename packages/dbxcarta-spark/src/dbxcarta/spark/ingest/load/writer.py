@@ -28,13 +28,15 @@ class Neo4jConfig:
         }
 
 
-def write_nodes(df: "DataFrame", config: Neo4jConfig, label: str) -> None:
+def write_nodes(df: DataFrame, config: Neo4jConfig, label: str) -> None:
     """MERGE nodes on id, updating all other properties on match."""
     write_nodes_multi(df, config, (label,))
 
 
 def write_nodes_multi(
-    df: "DataFrame", config: Neo4jConfig, labels: tuple[str, ...],
+    df: DataFrame,
+    config: Neo4jConfig,
+    labels: tuple[str, ...],
 ) -> None:
     """MERGE nodes on id with one or more labels.
 
@@ -58,8 +60,10 @@ def write_nodes_multi(
 
 
 def read_query(
-    spark: "SparkSession", config: Neo4jConfig, cypher: str,
-) -> "DataFrame":
+    spark: SparkSession,
+    config: Neo4jConfig,
+    cypher: str,
+) -> DataFrame:
     """Run a server-side Cypher read through the connector `query` option.
 
     The connector executes `cypher` entirely on the Neo4j side and streams
@@ -72,16 +76,11 @@ def read_query(
     set: the default single-partition read is correct, and partitioning is
     the only batching lever to add later if a result set ever warrants it.
     """
-    return (
-        spark.read.format(_FORMAT)
-        .options(**config._base_opts())
-        .option("query", cypher)
-        .load()
-    )
+    return spark.read.format(_FORMAT).options(**config._base_opts()).option("query", cypher).load()
 
 
 def write_relationship(
-    df: "DataFrame",
+    df: DataFrame,
     config: Neo4jConfig,
     rel_type: str,
     source_label: str,

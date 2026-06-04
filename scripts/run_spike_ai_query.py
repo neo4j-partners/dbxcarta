@@ -12,16 +12,16 @@ Confirms:
 Submit:
     dbxcarta-submit submit run_spike_ai_query.py
 """
-from dbxcarta.spark.env import inject_params
+
+from dbxcarta.core.env import inject_params
 
 inject_params()
 
 import os  # noqa: E402
 
+from dbxcarta.core.identifiers import validate_serving_endpoint_name  # noqa: E402
 from pyspark.sql import Row, SparkSession  # noqa: E402
 from pyspark.sql.functions import expr  # noqa: E402
-
-from dbxcarta.spark.databricks import validate_serving_endpoint_name  # noqa: E402
 
 ENDPOINT = validate_serving_endpoint_name(
     os.environ.get("DBXCARTA_EMBEDDING_ENDPOINT", "databricks-gte-large-en")

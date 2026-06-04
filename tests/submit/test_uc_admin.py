@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import pytest
-
 from databricks.sdk.service.sql import StatementState
-
 from dbxcarta.submit.uc_admin import (
     TeardownKind,
     TeardownTarget,
@@ -14,7 +12,6 @@ from dbxcarta.submit.uc_admin import (
     execute_statement,
     parse_teardown_target,
     parse_teardown_targets,
-    read_required_warehouse_id,
 )
 
 
@@ -29,24 +26,63 @@ class _FakeStatus:
         self.error = error
 
 
+class _FakeResult:
+    def __init__(self, rows: list[list[str]]) -> None:
+        self.data_array = rows
+        self.next_chunk_index = None
+
+
+class _FakeColumn:
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+
+class _FakeManifest:
+    def __init__(self, columns: list[str]) -> None:
+        self.schema = _FakeSchema(columns)
+
+
+class _FakeSchema:
+    def __init__(self, columns: list[str]) -> None:
+        self.columns = [_FakeColumn(name) for name in columns]
+
+
 class _FakeResponse:
-    def __init__(self, state: StatementState, error: _FakeError | None) -> None:
+    def __init__(
+        self,
+        state: StatementState,
+        error: _FakeError | None,
+        *,
+        result: _FakeResult | None = None,
+        manifest: _FakeManifest | None = None,
+    ) -> None:
         self.status = _FakeStatus(state, error)
         self.statement_id = "stmt-1"
+        self.result = result
+        self.manifest = manifest
 
 
 class _FakeStatementExecution:
     def __init__(
-        self, state: StatementState, error: _FakeError | None
+        self, state: StatementState, error: _FakeError | None, catalogs: list[str]
     ) -> None:
         self.statements: list[str] = []
         self._state = state
         self._error = error
+        self._catalogs = catalogs
 
-    def execute_statement(
-        self, *, statement: str, **kwargs: object
-    ) -> _FakeResponse:
+    def execute_statement(self, *, statement: str, **kwargs: object) -> _FakeResponse:
         self.statements.append(statement)
+        # SHOW CATALOGS is a read used by the catalog-existence guard; answer it
+        # successfully regardless of the injected DDL failure state, so failure
+        # injection exercises the CREATE path rather than the precheck.
+        if statement.strip().upper().startswith("SHOW CATALOGS"):
+            return _FakeResponse(
+                StatementState.SUCCEEDED,
+                None,
+                result=_FakeResult([[name] for name in self._catalogs]),
+                manifest=_FakeManifest(["catalog"]),
+            )
         return _FakeResponse(self._state, self._error)
 
 
@@ -55,7 +91,9 @@ class _FakeWorkspaceClient:
 
     Returns a synthetic statement response so :func:`execute_statement` can
     inspect its terminal state. Defaults to ``SUCCEEDED``; pass a different
-    state (and optional error) to exercise the failure path.
+    state (and optional error) to exercise the failure path. ``catalogs`` is the
+    set the ``SHOW CATALOGS`` guard sees (empty by default, so the catalog is
+    treated as absent and ``CREATE CATALOG`` runs).
     """
 
     def __init__(
@@ -63,16 +101,15 @@ class _FakeWorkspaceClient:
         *,
         state: StatementState = StatementState.SUCCEEDED,
         error_message: str | None = None,
+        catalogs: list[str] | None = None,
     ) -> None:
         error = _FakeError(error_message) if error_message is not None else None
-        self.statement_execution = _FakeStatementExecution(state, error)
+        self.statement_execution = _FakeStatementExecution(state, error, catalogs or [])
 
 
 def test_parse_teardown_target_catalog() -> None:
     target = parse_teardown_target("catalog:schemapile_lakehouse")
-    assert target == TeardownTarget(
-        kind=TeardownKind.CATALOG, catalog="schemapile_lakehouse"
-    )
+    assert target == TeardownTarget(kind=TeardownKind.CATALOG, catalog="schemapile_lakehouse")
     assert target.describe() == "catalog schemapile_lakehouse"
 
 
@@ -88,7 +125,7 @@ def test_parse_teardown_target_schema() -> None:
     "value",
     [
         "schemapile_lakehouse",  # no prefix
-        "schema:onlycatalog",    # schema form missing .schema
+        "schema:onlycatalog",  # schema form missing .schema
         "bogus:catalog.schema",  # unknown prefix
     ],
 )
@@ -134,10 +171,20 @@ def test_ensure_uc_volume_emits_idempotent_ddl() -> None:
     ws = _FakeWorkspaceClient()
     ensure_uc_volume(ws, "wh1", catalog="cat", schema="sch", volume="vol")
     stmts = ws.statement_execution.statements
-    assert len(stmts) == 3
-    assert stmts[0].startswith("CREATE CATALOG IF NOT EXISTS `cat`")
-    assert stmts[1].startswith("CREATE SCHEMA IF NOT EXISTS `cat`.`sch`")
-    assert stmts[2].startswith("CREATE VOLUME IF NOT EXISTS `cat`.`sch`.`vol`")
+    assert len(stmts) == 4
+    assert stmts[0].startswith("SHOW CATALOGS")
+    assert stmts[1].startswith("CREATE CATALOG IF NOT EXISTS `cat`")
+    assert stmts[2].startswith("CREATE SCHEMA IF NOT EXISTS `cat`.`sch`")
+    assert stmts[3].startswith("CREATE VOLUME IF NOT EXISTS `cat`.`sch`.`vol`")
+
+
+def test_ensure_uc_volume_skips_create_when_catalog_exists() -> None:
+    ws = _FakeWorkspaceClient(catalogs=["cat"])
+    ensure_uc_volume(ws, "wh1", catalog="cat", schema="sch", volume="vol")
+    stmts = ws.statement_execution.statements
+    assert not any(s.startswith("CREATE CATALOG") for s in stmts)
+    assert any(s.startswith("CREATE SCHEMA IF NOT EXISTS `cat`.`sch`") for s in stmts)
+    assert any(s.startswith("CREATE VOLUME IF NOT EXISTS `cat`.`sch`.`vol`") for s in stmts)
 
 
 def test_ensure_uc_volume_refuses_protected_catalog() -> None:
@@ -150,23 +197,17 @@ def test_ensure_uc_volume_refuses_protected_catalog() -> None:
 def test_drop_teardown_target_schema_cascades() -> None:
     ws = _FakeWorkspaceClient()
     drop_teardown_target(ws, "wh1", TeardownTarget(TeardownKind.SCHEMA, "cat", "sch"))
-    assert ws.statement_execution.statements == [
-        "DROP SCHEMA IF EXISTS `cat`.`sch` CASCADE"
-    ]
+    assert ws.statement_execution.statements == ["DROP SCHEMA IF EXISTS `cat`.`sch` CASCADE"]
 
 
 def test_drop_teardown_target_catalog_cascades() -> None:
     ws = _FakeWorkspaceClient()
     drop_teardown_target(ws, "wh1", TeardownTarget(TeardownKind.CATALOG, "cat"))
-    assert ws.statement_execution.statements == [
-        "DROP CATALOG IF EXISTS `cat` CASCADE"
-    ]
+    assert ws.statement_execution.statements == ["DROP CATALOG IF EXISTS `cat` CASCADE"]
 
 
 def test_execute_statement_raises_on_failed_state() -> None:
-    ws = _FakeWorkspaceClient(
-        state=StatementState.FAILED, error_message="permission denied"
-    )
+    ws = _FakeWorkspaceClient(state=StatementState.FAILED, error_message="permission denied")
     with pytest.raises(RuntimeError, match="permission denied"):
         execute_statement(ws, "wh1", "CREATE CATALOG `cat`")
 
@@ -175,16 +216,3 @@ def test_ensure_uc_volume_raises_when_create_fails() -> None:
     ws = _FakeWorkspaceClient(state=StatementState.FAILED, error_message="boom")
     with pytest.raises(RuntimeError, match="boom"):
         ensure_uc_volume(ws, "wh1", catalog="cat", schema="sch", volume="vol")
-
-
-def test_read_required_warehouse_id_prefers_override() -> None:
-    assert (
-        read_required_warehouse_id("wh-override", operation="bootstrap")
-        == "wh-override"
-    )
-
-
-def test_read_required_warehouse_id_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("DATABRICKS_WAREHOUSE_ID", raising=False)
-    with pytest.raises(ValueError, match="DATABRICKS_WAREHOUSE_ID"):
-        read_required_warehouse_id(None, operation="bootstrap")

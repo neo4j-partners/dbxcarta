@@ -29,10 +29,9 @@ from dbxcarta.spark.ingest.fk.inference import (
 from dbxcarta.spark.ingest.summary import FKSkipCounts, RunSummary
 
 if TYPE_CHECKING:
-    from pyspark.sql import DataFrame, SparkSession
-
     from dbxcarta.spark.ingest.extract import ExtractResult
     from dbxcarta.spark.settings import SparkIngestSettings
+    from pyspark.sql import DataFrame, SparkSession
 
 logger = logging.getLogger(__name__)
 
@@ -42,11 +41,12 @@ class FKDiscoveryResult:
     """Post-discovery DataFrames ready for the Neo4j REFERENCES write.
 
     None when the corresponding strategy produced zero edges (or was gated
-    off). The pipeline's load step skips writes whose DataFrame is None."""
+    off). The pipeline's load step skips writes whose DataFrame is None.
+    """
 
-    declared_edges_df: "DataFrame | None"
+    declared_edges_df: DataFrame | None
     declared_edge_count: int
-    metadata_edges_df: "DataFrame | None"
+    metadata_edges_df: DataFrame | None
     metadata_edge_count: int
 
     def unpersist_cached(self) -> None:
@@ -56,10 +56,10 @@ class FKDiscoveryResult:
 
 
 def run_fk_discovery(
-    spark: "SparkSession",
-    settings: "SparkIngestSettings",
+    spark: SparkSession,
+    settings: SparkIngestSettings,
     schema_list: list[str],
-    extract: "ExtractResult",
+    extract: ExtractResult,
     summary: RunSummary,
 ) -> FKDiscoveryResult:
     """Run declared → metadata, threading prior edges in Spark.
@@ -86,10 +86,11 @@ def run_fk_discovery(
     # too — otherwise a failed FK discovery leaks them into the session for
     # the rest of the job. This is separate from FKDiscoveryResult's edge
     # caches (FKDiscoveryResult.unpersist_cached), which the caller owns.
-    pk_gate: "DataFrame | None" = None
+    pk_gate: DataFrame | None = None
     try:
         pk_gate, composite_pk_count = build_pk_gate(
-            columns_frame, constraints_df,
+            columns_frame,
+            constraints_df,
         )
         pk_gate.cache()
 
@@ -98,25 +99,27 @@ def run_fk_discovery(
         # canonical 5-col REFERENCES schema, identical to the inferred edge
         # frames.
         declared_edges, declared_counters = discover_declared(
-            spark, settings, schema_list,
+            spark,
+            settings,
+            schema_list,
         )
         summary.fk_declared = declared_counters
         declared_edges_df = (
-            sg.build_references_rel(spark, declared_edges)
-            if declared_edges else None
+            sg.build_references_rel(spark, declared_edges) if declared_edges else None
         )
 
-        metadata_edges_df, metadata_counts, composite_skipped = (
-            infer_metadata_edges(
-                spark, columns_frame, pk_gate, declared_edges_df,
-                composite_pk_count=composite_pk_count,
-            )
+        metadata_edges_df, metadata_counts, composite_skipped = infer_metadata_edges(
+            spark,
+            columns_frame,
+            pk_gate,
+            declared_edges_df,
+            composite_pk_count=composite_pk_count,
         )
         summary.fk_metadata = metadata_counts
         logger.info(
-            "[dbxcarta] metadata inference: accepted=%d"
-            " composite_pks_skipped=%d",
-            metadata_counts.accepted, composite_skipped,
+            "[dbxcarta] metadata inference: accepted=%d composite_pks_skipped=%d",
+            metadata_counts.accepted,
+            composite_skipped,
         )
         metadata_out = metadata_edges_df if metadata_counts.accepted else None
         if metadata_out is None:
@@ -135,7 +138,8 @@ def run_fk_discovery(
 
 
 def _fk_guardrail_tripped(
-    settings: "SparkIngestSettings", summary: RunSummary,
+    settings: SparkIngestSettings,
+    summary: RunSummary,
 ) -> bool:
     """Skip FK discovery when the catalog is absurdly wide.
 
@@ -153,7 +157,8 @@ def _fk_guardrail_tripped(
     logger.warning(
         "[dbxcarta] FK discovery skipped by guardrail: %d columns > limit %d"
         " (DBXCARTA_FK_MAX_COLUMNS)",
-        columns, limit,
+        columns,
+        limit,
     )
     summary.fk_skip = FKSkipCounts(column_count=columns, column_limit=limit)
     return True
@@ -175,8 +180,10 @@ def _skipped_result() -> FKDiscoveryResult:
 
 
 def _constraints_df(
-    spark: "SparkSession", settings: "SparkIngestSettings", schema_list: list[str],
-) -> "DataFrame":
+    spark: SparkSession,
+    settings: SparkIngestSettings,
+    schema_list: list[str],
+) -> DataFrame:
     """PK/UNIQUE constraints across every ingested catalog as a Spark frame.
 
     Never collected — fed straight into `build_pk_gate`. Cross-catalog FK

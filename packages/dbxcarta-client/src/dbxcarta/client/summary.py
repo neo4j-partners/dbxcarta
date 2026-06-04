@@ -4,27 +4,15 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from dbxcarta.client.databricks import quote_qualified_name
+from dbxcarta.core.identifiers import quote_qualified_name
+from dbxcarta.core.volume_io import ensure_volume_subdirs
 
 if TYPE_CHECKING:
     from pyspark.sql import SparkSession
-
-
-def _mkdirs(dirpath: Path) -> None:
-    parts = dirpath.parts
-    if len(parts) > 1 and parts[1] == "Volumes":
-        # UC Volumes (/Volumes/<catalog>/<schema>/<volume>/...) reject
-        # parents=True mkdir on the managed prefix; the catalog/schema/volume
-        # already exist, so create only the subpath levels (depth >= 6) one
-        # at a time.
-        for depth in range(6, len(parts) + 1):
-            Path(*parts[:depth]).mkdir(exist_ok=True)
-    else:
-        dirpath.mkdir(parents=True, exist_ok=True)
 
 
 @dataclass
@@ -58,7 +46,7 @@ class ClientRunSummary:
     catalog: str
     schemas: list[str]
     arms: list[str]
-    started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     ended_at: datetime | None = None
     status: str = "running"
     error: str | None = None
@@ -131,8 +119,12 @@ class ClientRunSummary:
             for ar in qr.arm_results:
                 if ar.arm not in counts:
                     counts[ar.arm] = {
-                        "attempted": 0, "parsed": 0, "executed": 0,
-                        "non_empty": 0, "correct": 0, "gradable": 0,
+                        "attempted": 0,
+                        "parsed": 0,
+                        "executed": 0,
+                        "non_empty": 0,
+                        "correct": 0,
+                        "gradable": 0,
                     }
                     retrieval[ar.arm] = {"top1": [], "recall": [], "purity": []}
                 counts[ar.arm]["attempted"] += 1
@@ -169,14 +161,16 @@ class ClientRunSummary:
             if rv["top1"]:
                 self.arm_top1_schema_match_rate[arm] = round(sum(rv["top1"]) / len(rv["top1"]), 3)
             if rv["recall"]:
-                self.arm_schema_in_context_rate[arm] = round(sum(rv["recall"]) / len(rv["recall"]), 3)
+                self.arm_schema_in_context_rate[arm] = round(
+                    sum(rv["recall"]) / len(rv["recall"]), 3
+                )
             if rv["purity"]:
                 self.arm_mean_context_purity[arm] = round(sum(rv["purity"]) / len(rv["purity"]), 3)
 
     def finish(self, *, status: str, error: str | None = None) -> None:
         self.status = status
         self.error = error
-        self.ended_at = datetime.now(timezone.utc)
+        self.ended_at = datetime.now(UTC)
         self._compute_aggregates()
 
     def _to_delta_dict(self) -> dict:
@@ -246,7 +240,7 @@ class ClientRunSummary:
     def emit_json(self, volume_path: str) -> None:
         ts = (self.ended_at or self.started_at).strftime("%Y%m%dT%H%M%SZ")
         path = Path(volume_path) / f"{self.job_name}_{self.run_id}_{ts}.json"
-        _mkdirs(path.parent)
+        ensure_volume_subdirs(path.parent)
         path.write_text(json.dumps(self._to_json_dict(), indent=2))
 
     def emit_delta(self, spark: SparkSession, table_name: str) -> None:
@@ -262,30 +256,32 @@ class ClientRunSummary:
             TimestampType,
         )
 
-        schema = StructType([
-            StructField("run_id", StringType(), nullable=False),
-            StructField("job_name", StringType()),
-            StructField("catalog", StringType()),
-            StructField("schemas", ArrayType(StringType())),
-            StructField("arms", ArrayType(StringType())),
-            StructField("started_at", TimestampType()),
-            StructField("ended_at", TimestampType()),
-            StructField("status", StringType()),
-            StructField("error", StringType()),
-            StructField("arm_attempted", MapType(StringType(), LongType())),
-            StructField("arm_parsed", MapType(StringType(), LongType())),
-            StructField("arm_executed", MapType(StringType(), LongType())),
-            StructField("arm_non_empty", MapType(StringType(), LongType())),
-            StructField("arm_correct", MapType(StringType(), LongType())),
-            StructField("arm_gradable", MapType(StringType(), LongType())),
-            StructField("arm_parse_rate", MapType(StringType(), DoubleType())),
-            StructField("arm_execution_rate", MapType(StringType(), DoubleType())),
-            StructField("arm_non_empty_rate", MapType(StringType(), DoubleType())),
-            StructField("arm_correct_rate", MapType(StringType(), DoubleType())),
-            StructField("arm_top1_schema_match_rate", MapType(StringType(), DoubleType())),
-            StructField("arm_schema_in_context_rate", MapType(StringType(), DoubleType())),
-            StructField("arm_mean_context_purity", MapType(StringType(), DoubleType())),
-        ])
+        schema = StructType(
+            [
+                StructField("run_id", StringType(), nullable=False),
+                StructField("job_name", StringType()),
+                StructField("catalog", StringType()),
+                StructField("schemas", ArrayType(StringType())),
+                StructField("arms", ArrayType(StringType())),
+                StructField("started_at", TimestampType()),
+                StructField("ended_at", TimestampType()),
+                StructField("status", StringType()),
+                StructField("error", StringType()),
+                StructField("arm_attempted", MapType(StringType(), LongType())),
+                StructField("arm_parsed", MapType(StringType(), LongType())),
+                StructField("arm_executed", MapType(StringType(), LongType())),
+                StructField("arm_non_empty", MapType(StringType(), LongType())),
+                StructField("arm_correct", MapType(StringType(), LongType())),
+                StructField("arm_gradable", MapType(StringType(), LongType())),
+                StructField("arm_parse_rate", MapType(StringType(), DoubleType())),
+                StructField("arm_execution_rate", MapType(StringType(), DoubleType())),
+                StructField("arm_non_empty_rate", MapType(StringType(), DoubleType())),
+                StructField("arm_correct_rate", MapType(StringType(), DoubleType())),
+                StructField("arm_top1_schema_match_rate", MapType(StringType(), DoubleType())),
+                StructField("arm_schema_in_context_rate", MapType(StringType(), DoubleType())),
+                StructField("arm_mean_context_purity", MapType(StringType(), DoubleType())),
+            ]
+        )
         quoted = quote_qualified_name(table_name, expected_parts=3)
         row = Row(**self._to_delta_dict())
         (

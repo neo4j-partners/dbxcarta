@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
 
 def check(
-    driver: "Driver", summary: dict[str, Any], *, catalogs: list[str] | None = None
+    driver: Driver, summary: dict[str, Any], *, catalogs: list[str] | None = None
 ) -> list[Violation]:
     out: list[Violation] = []
     out.extend(_check_node_counts(driver, summary, catalogs=catalogs))
@@ -26,7 +26,7 @@ def check(
 
 
 def _check_node_counts(
-    driver: "Driver", summary: dict[str, Any], *, catalogs: list[str] | None = None
+    driver: Driver, summary: dict[str, Any], *, catalogs: list[str] | None = None
 ) -> list[Violation]:
     """Neo4j node counts match what the job reported writing.
 
@@ -50,8 +50,7 @@ def _check_node_counts(
     }
     _cypher: dict[NodeLabel, tuple[str, dict[str, Any]]] = {
         NodeLabel.DATABASE: (
-            f"MATCH (n:{NodeLabel.DATABASE}) WHERE n.id IN $catalog_ids"
-            " RETURN count(n) AS cnt",
+            f"MATCH (n:{NodeLabel.DATABASE}) WHERE n.id IN $catalog_ids RETURN count(n) AS cnt",
             {"catalog_ids": catalog_ids},
         ),
         NodeLabel.SCHEMA: (
@@ -81,52 +80,72 @@ def _check_node_counts(
             cypher, params = _cypher[label]
             actual = single_value(s.run(cypher, **params), "cnt")
             if actual != exp:
-                out.append(Violation(
-                    code=f"graph.node_count_mismatch.{label.value}",
-                    message=f"{label.value}: Neo4j has {actual}, run summary reported {exp}.",
-                    details={"label": label.value, "neo4j": actual, "summary": exp},
-                ))
+                out.append(
+                    Violation(
+                        code=f"graph.node_count_mismatch.{label.value}",
+                        message=f"{label.value}: Neo4j has {actual}, run summary reported {exp}.",
+                        details={"label": label.value, "neo4j": actual, "summary": exp},
+                    )
+                )
     return out
 
 
-def _check_contract_version(driver: "Driver") -> list[Violation]:
+def _check_contract_version(driver: Driver) -> list[Violation]:
     """Every written node carries the current contract version. Catches partial
-    re-runs that mix nodes from two wheel versions."""
+    re-runs that mix nodes from two wheel versions.
+    """
     labels = (NodeLabel.DATABASE, NodeLabel.SCHEMA, NodeLabel.TABLE, NodeLabel.COLUMN)
     out: list[Violation] = []
     with driver.session() as s:
         for label in labels:
-            wrong = single_value(s.run(
-                f"MATCH (n:{label}) WHERE n.contract_version <> $v RETURN count(n) AS cnt",
-                v=CONTRACT_VERSION,
-            ), "cnt")
+            wrong = single_value(
+                s.run(
+                    f"MATCH (n:{label}) WHERE n.contract_version <> $v RETURN count(n) AS cnt",
+                    v=CONTRACT_VERSION,
+                ),
+                "cnt",
+            )
             if wrong:
-                out.append(Violation(
-                    code=f"graph.wrong_contract_version.{label.value}",
-                    message=f"{wrong} {label.value} node(s) have contract_version != {CONTRACT_VERSION!r}.",
-                    details={"label": label.value, "count": wrong, "expected": CONTRACT_VERSION},
-                ))
+                out.append(
+                    Violation(
+                        code=f"graph.wrong_contract_version.{label.value}",
+                        message=f"{wrong} {label.value} node(s) have contract_version != {CONTRACT_VERSION!r}.",
+                        details={
+                            "label": label.value,
+                            "count": wrong,
+                            "expected": CONTRACT_VERSION,
+                        },
+                    )
+                )
     return out
 
 
-def _check_relationship_integrity(driver: "Driver") -> list[Violation]:
+def _check_relationship_integrity(driver: Driver) -> list[Violation]:
     """No orphan Schema/Table/Column nodes; no Schema with multiple Database parents."""
     out: list[Violation] = []
     queries = [
-        ("graph.orphan_schema",
-         "Schema node(s) have no incoming HAS_SCHEMA",
-         "MATCH (n:Schema) WHERE NOT (:Database)-[:HAS_SCHEMA]->(n) RETURN count(n) AS cnt"),
-        ("graph.orphan_table",
-         "Table node(s) have no incoming HAS_TABLE",
-         "MATCH (n:Table) WHERE NOT (:Schema)-[:HAS_TABLE]->(n) RETURN count(n) AS cnt"),
-        ("graph.orphan_column",
-         "Column node(s) have no incoming HAS_COLUMN",
-         "MATCH (n:Column) WHERE NOT (:Table)-[:HAS_COLUMN]->(n) RETURN count(n) AS cnt"),
-        ("graph.schema_multi_parent",
-         "Schema node(s) have more than one Database parent",
-         "MATCH (n:Schema)"
-         " WITH n, size([(db:Database)-[:HAS_SCHEMA]->(n) | db]) AS parents"
-         " WHERE parents > 1 RETURN count(n) AS cnt"),
+        (
+            "graph.orphan_schema",
+            "Schema node(s) have no incoming HAS_SCHEMA",
+            "MATCH (n:Schema) WHERE NOT (:Database)-[:HAS_SCHEMA]->(n) RETURN count(n) AS cnt",
+        ),
+        (
+            "graph.orphan_table",
+            "Table node(s) have no incoming HAS_TABLE",
+            "MATCH (n:Table) WHERE NOT (:Schema)-[:HAS_TABLE]->(n) RETURN count(n) AS cnt",
+        ),
+        (
+            "graph.orphan_column",
+            "Column node(s) have no incoming HAS_COLUMN",
+            "MATCH (n:Column) WHERE NOT (:Table)-[:HAS_COLUMN]->(n) RETURN count(n) AS cnt",
+        ),
+        (
+            "graph.schema_multi_parent",
+            "Schema node(s) have more than one Database parent",
+            "MATCH (n:Schema)"
+            " WITH n, size([(db:Database)-[:HAS_SCHEMA]->(n) | db]) AS parents"
+            " WHERE parents > 1 RETURN count(n) AS cnt",
+        ),
     ]
     with driver.session() as s:
         for code, msg, query in queries:

@@ -26,14 +26,11 @@ def _expected_edge_total(summary: dict[str, Any]) -> int:
     look high by `accepted` whenever inference is on (its default).
     """
     counts: dict[str, int] = summary.get("row_counts") or {}
-    return (
-        counts.get("fk_edges", 0)
-        + counts.get("fk_inferred_metadata_accepted", 0)
-    )
+    return counts.get("fk_edges", 0) + counts.get("fk_inferred_metadata_accepted", 0)
 
 
 def check(
-    driver: "Driver", summary: dict[str, Any], *, catalogs: list[str] | None = None
+    driver: Driver, summary: dict[str, Any], *, catalogs: list[str] | None = None
 ) -> list[Violation]:
     out: list[Violation] = []
     out.extend(_check_edge_count(driver, summary, catalogs=catalogs))
@@ -42,7 +39,7 @@ def check(
 
 
 def _check_edge_count(
-    driver: "Driver", summary: dict[str, Any], *, catalogs: list[str] | None = None
+    driver: Driver, summary: dict[str, Any], *, catalogs: list[str] | None = None
 ) -> list[Violation]:
     """Neo4j's REFERENCES edge count must match declared + inferred FKs from
     the summary. A mismatch implies the Spark Connector dropped rows where an
@@ -56,18 +53,23 @@ def _check_edge_count(
     _, prefixes = scoped_catalogs(summary, catalogs)
     expected = _expected_edge_total(summary)
     with driver.session() as s:
-        edges = single_value(s.run(
-            f"MATCH (src:{NodeLabel.COLUMN})-[r:{RelType.REFERENCES}]->()"
-            " WHERE any(p IN $prefixes WHERE src.id STARTS WITH p)"
-            " RETURN count(r) AS cnt",
-            prefixes=prefixes,
-        ), "cnt")
+        edges = single_value(
+            s.run(
+                f"MATCH (src:{NodeLabel.COLUMN})-[r:{RelType.REFERENCES}]->()"
+                " WHERE any(p IN $prefixes WHERE src.id STARTS WITH p)"
+                " RETURN count(r) AS cnt",
+                prefixes=prefixes,
+            ),
+            "cnt",
+        )
     if edges != expected:
-        return [Violation(
-            code="references.edge_count_mismatch",
-            message=f"Neo4j has {edges} REFERENCES edges; run summary reported {expected} (declared + inferred).",
-            details={"neo4j": edges, "summary_total": expected},
-        )]
+        return [
+            Violation(
+                code="references.edge_count_mismatch",
+                message=f"Neo4j has {edges} REFERENCES edges; run summary reported {expected} (declared + inferred).",
+                details={"neo4j": edges, "summary_total": expected},
+            )
+        ]
     return []
 
 
@@ -79,21 +81,27 @@ def _check_accounting(summary: dict[str, Any]) -> list[Violation]:
     skipped = counts.get("fk_skipped", 0)
     out: list[Violation] = []
     if skipped != declared - resolved:
-        out.append(Violation(
-            code="references.accounting_mismatch",
-            message=f"fk_skipped ({skipped}) != fk_declared - fk_resolved ({declared} - {resolved}).",
-            details={"declared": declared, "resolved": resolved, "skipped": skipped},
-        ))
+        out.append(
+            Violation(
+                code="references.accounting_mismatch",
+                message=f"fk_skipped ({skipped}) != fk_declared - fk_resolved ({declared} - {resolved}).",
+                details={"declared": declared, "resolved": resolved, "skipped": skipped},
+            )
+        )
     if resolved > declared:
-        out.append(Violation(
-            code="references.resolved_exceeds_declared",
-            message=f"fk_resolved ({resolved}) > fk_declared ({declared}).",
-            details={"declared": declared, "resolved": resolved},
-        ))
+        out.append(
+            Violation(
+                code="references.resolved_exceeds_declared",
+                message=f"fk_resolved ({resolved}) > fk_declared ({declared}).",
+                details={"declared": declared, "resolved": resolved},
+            )
+        )
     if skipped < 0:
-        out.append(Violation(
-            code="references.skipped_negative",
-            message=f"fk_skipped ({skipped}) is negative.",
-            details={"skipped": skipped},
-        ))
+        out.append(
+            Violation(
+                code="references.skipped_negative",
+                message=f"fk_skipped ({skipped}) is negative.",
+                details={"skipped": skipped},
+            )
+        )
     return out

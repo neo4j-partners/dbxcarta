@@ -19,17 +19,17 @@ import re
 import sys
 import textwrap
 from collections import deque
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from dbxcarta.client.databricks import build_workspace_client
+from dbxcarta.core.env import read_required_warehouse_id
+from dbxcarta.core.materialize import sanitize_identifier
+from dbxcarta.core.questions import GeneratedPair, ValidationOutcome
+from dbxcarta.core.sql_safety import sql_targets_only_catalog
+from dbxcarta.core.workspace import build_workspace_client
+
 from dbxcarta_dense_schema_example.config import DenseSchemaConfig, load_config
-from dbxcarta_dense_schema_example.materialize import _sanitize_name
-from dbxcarta_dense_schema_example.utils import (
-    load_dotenv_file,
-    read_required_warehouse_id,
-)
+from dbxcarta_dense_schema_example.utils import load_dotenv_file
 
 if TYPE_CHECKING:
     from databricks.sdk import WorkspaceClient
@@ -46,23 +46,6 @@ _CANDIDATE_MULTIPLIER = 4
 _PROMPT_VERSION = 2
 
 
-@dataclass(frozen=True)
-class GeneratedPair:
-    uc_schema: str
-    source_id: str
-    shape: str
-    question: str
-    sql: str
-
-
-@dataclass
-class ValidationOutcome:
-    accepted: list[GeneratedPair]
-    errored: int = 0
-    empty: int = 0
-    trivial: int = 0
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(prog="dbxcarta-dense-generate-questions")
     parser.add_argument("--dotenv", type=Path, default=Path(__file__).resolve().parents[2] / ".env")
@@ -71,10 +54,7 @@ def main() -> int:
         "--cache-dir",
         type=Path,
         default=None,
-        help=(
-            "Directory for LLM batch cache"
-            " (default: .cache/questions_<DENSE_TABLE_COUNT>)."
-        ),
+        help=("Directory for LLM batch cache (default: .cache/questions_<DENSE_TABLE_COUNT>)."),
     )
     parser.add_argument("--warehouse-id", type=str, default=None)
     parser.add_argument(
@@ -135,7 +115,7 @@ def _default_cache_dir(config: DenseSchemaConfig) -> Path:
 
 
 def _generate_all(
-    ws: "WorkspaceClient",
+    ws: WorkspaceClient,
     config: DenseSchemaConfig,
     schema_entry: dict[str, Any],
     cache_dir: Path,
@@ -146,7 +126,7 @@ def _generate_all(
         return []
 
     fk_graph = _build_fk_graph(tables)
-    table_names = [_sanitize_name(t.get("name", "")) for t in tables]
+    table_names = [sanitize_identifier(t.get("name", ""), prefix="t") for t in tables]
     table_names = [n for n in table_names if n]
 
     pairs: list[GeneratedPair] = []
@@ -163,8 +143,9 @@ def _generate_all(
             continue
 
         subgraph_tables = [
-            t for t in tables
-            if _sanitize_name(t.get("name", "")) in set(subgraph_names)
+            t
+            for t in tables
+            if sanitize_identifier(t.get("name", ""), prefix="t") in set(subgraph_names)
         ]
 
         cache_key = _cache_key(subgraph_names, config, batch_idx)
@@ -181,13 +162,15 @@ def _generate_all(
             sql = str(item.get("sql", "")).strip()
             if shape not in _SHAPES or not question or not sql:
                 continue
-            pairs.append(GeneratedPair(
-                uc_schema=schema_entry.get("uc_schema", ""),
-                source_id=schema_entry.get("source_id", ""),
-                shape=shape,
-                question=question,
-                sql=sql,
-            ))
+            pairs.append(
+                GeneratedPair(
+                    uc_schema=schema_entry.get("uc_schema", ""),
+                    source_id=schema_entry.get("source_id", ""),
+                    shape=shape,
+                    question=question,
+                    sql=sql,
+                )
+            )
 
         batch_idx += 1
 
@@ -197,12 +180,12 @@ def _generate_all(
 def _build_fk_graph(tables: list[dict[str, Any]]) -> dict[str, set[str]]:
     graph: dict[str, set[str]] = {}
     for table in tables:
-        name = _sanitize_name(table.get("name", ""))
+        name = sanitize_identifier(table.get("name", ""), prefix="t")
         if not name:
             continue
         graph.setdefault(name, set())
         for fk in table.get("foreign_keys") or []:
-            foreign = _sanitize_name(str(fk.get("foreign_table", "")))
+            foreign = sanitize_identifier(str(fk.get("foreign_table", "")), prefix="t")
             if foreign and foreign != name:
                 graph[name].add(foreign)
                 graph.setdefault(foreign, set()).add(name)
@@ -230,9 +213,7 @@ def _expand_subgraph(
     return list(visited)
 
 
-def _cache_key(
-    subgraph_names: list[str], config: DenseSchemaConfig, batch_idx: int
-) -> str:
+def _cache_key(subgraph_names: list[str], config: DenseSchemaConfig, batch_idx: int) -> str:
     sig = json.dumps(
         {
             "tables": sorted(subgraph_names),
@@ -248,7 +229,7 @@ def _cache_key(
 
 
 def _call_model(
-    ws: "WorkspaceClient",
+    ws: WorkspaceClient,
     config: DenseSchemaConfig,
     schema_entry: dict[str, Any],
     subgraph_tables: list[dict[str, Any]],
@@ -308,39 +289,30 @@ def _build_prompt(
     uc_schema = schema_entry.get("uc_schema", "")
     ddl_lines: list[str] = []
     for table in tables:
-        table_name = _sanitize_name(str(table.get("name", "")))
+        table_name = sanitize_identifier(str(table.get("name", "")), prefix="t")
         if not table_name:
             continue
         safe_cols = [
-            (_sanitize_name(str(c.get("name", ""))), c)
+            (sanitize_identifier(str(c.get("name", "")), prefix="c"), c)
             for c in (table.get("columns") or [])
         ]
         safe_cols = [(n, c) for n, c in safe_cols if n]
-        cols = ", ".join(
-            f"{name} {c.get('type', '')}" for name, c in safe_cols
-        )
-        pk = [
-            _sanitize_name(str(k)) for k in (table.get("primary_keys") or [])
-        ]
+        cols = ", ".join(f"{name} {c.get('type', '')}" for name, c in safe_cols)
+        pk = [sanitize_identifier(str(k), prefix="c") for k in (table.get("primary_keys") or [])]
         pk_clause = f" PK({', '.join(pk)})" if pk else ""
         fks = table.get("foreign_keys") or []
         fk_parts = []
         for fk in fks:
-            fk_cols = [_sanitize_name(str(c)) for c in (fk.get("columns") or [])]
-            ref_table = _sanitize_name(str(fk.get("foreign_table") or ""))
+            fk_cols = [sanitize_identifier(str(c), prefix="c") for c in (fk.get("columns") or [])]
+            ref_table = sanitize_identifier(str(fk.get("foreign_table") or ""), prefix="t")
             ref_cols = [
-                _sanitize_name(str(c))
-                for c in (fk.get("referred_columns") or [])
+                sanitize_identifier(str(c), prefix="c") for c in (fk.get("referred_columns") or [])
             ]
             if fk_cols and ref_table and ref_cols:
-                fk_parts.append(
-                    f"{', '.join(fk_cols)} -> {ref_table}({', '.join(ref_cols)})"
-                )
+                fk_parts.append(f"{', '.join(fk_cols)} -> {ref_table}({', '.join(ref_cols)})")
         fk_clause = f" FKs: {'; '.join(fk_parts)}" if fk_parts else ""
         sample_clause = _format_sample_rows(safe_cols, table.get("rows") or [])
-        ddl_lines.append(
-            f"- {table_name}({cols}){pk_clause}{fk_clause}{sample_clause}"
-        )
+        ddl_lines.append(f"- {table_name}({cols}){pk_clause}{fk_clause}{sample_clause}")
 
     schema_block = "\n".join(ddl_lines) if ddl_lines else "(no tables)"
     n = config.questions_per_batch
@@ -372,11 +344,7 @@ def _format_sample_rows(
     col_names = [name for name, _ in safe_cols]
     samples = []
     for row in rows[:2]:
-        sample = {
-            name: row[idx]
-            for idx, name in enumerate(col_names)
-            if idx < len(row)
-        }
+        sample = {name: row[idx] for idx, name in enumerate(col_names) if idx < len(row)}
         samples.append(sample)
     return f" Samples: {json.dumps(samples, default=str)}"
 
@@ -403,10 +371,7 @@ def _first_message_text(response: Any) -> str:
     if not choices:
         return ""
     first = choices[0]
-    if isinstance(first, dict):
-        message = first.get("message")
-    else:
-        message = getattr(first, "message", None)
+    message = first.get("message") if isinstance(first, dict) else getattr(first, "message", None)
     if message is None:
         return ""
     if isinstance(message, dict):
@@ -415,7 +380,7 @@ def _first_message_text(response: Any) -> str:
 
 
 def _validate_all(
-    ws: "WorkspaceClient",
+    ws: WorkspaceClient,
     warehouse_id: str,
     catalog: str,
     pairs: list[GeneratedPair],
@@ -431,7 +396,7 @@ def _validate_all(
     empty = 0
     trivial = 0
     for pair in pairs:
-        if not _sql_targets_only_catalog(pair.sql, catalog):
+        if not sql_targets_only_catalog(pair.sql, catalog):
             errored += 1
             continue
         try:
@@ -461,43 +426,6 @@ def _validate_all(
         if target is not None and len(accepted) >= target:
             break
     return ValidationOutcome(accepted=accepted, errored=errored, empty=empty, trivial=trivial)
-
-
-_FORBIDDEN_SQL_RE = re.compile(
-    r"\b("
-    r"alter|call|copy|create|delete|drop|execute|grant|insert|merge|msck|"
-    r"optimize|refresh|repair|replace|revoke|truncate|update|use|vacuum"
-    r")\b",
-    re.IGNORECASE,
-)
-_TABLE_REF_RE = re.compile(r"\b(?:from|join)\s+([`A-Za-z0-9_.-]+)", re.IGNORECASE)
-
-
-def _sql_targets_only_catalog(sql: str, catalog: str) -> bool:
-    normalized = sql.strip()
-    lowered = normalized.lower()
-    if not lowered.startswith("select"):
-        return False
-    if ";" in normalized.rstrip(";"):
-        return False
-    if _FORBIDDEN_SQL_RE.search(normalized):
-        return False
-    if "information_schema" in lowered or re.search(r"\bsystem\s*\.", lowered):
-        return False
-    target = f"`{catalog.lower()}`"
-    if target not in lowered:
-        return False
-    for match in _TABLE_REF_RE.finditer(sql):
-        ref = match.group(1).strip()
-        if ref.startswith("`"):
-            if not ref.lower().startswith(target):
-                return False
-        elif "." in ref:
-            if not ref.lower().startswith(f"{catalog.lower()}."):
-                return False
-        else:
-            return False
-    return True
 
 
 def _format_questions(pairs: list[GeneratedPair]) -> list[dict[str, Any]]:

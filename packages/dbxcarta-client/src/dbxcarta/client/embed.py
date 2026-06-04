@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from databricks.sdk import WorkspaceClient
 from databricks.sdk.errors import DatabricksError
+
+if TYPE_CHECKING:
+    from databricks.sdk import WorkspaceClient
 
 logger = logging.getLogger(__name__)
 

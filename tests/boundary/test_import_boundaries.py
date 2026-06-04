@@ -9,7 +9,6 @@ from pathlib import Path
 
 import pytest
 
-
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -48,21 +47,12 @@ def _imported_modules(path: Path) -> set[str]:
 
 
 def _layer_source_files(layer: str) -> list[Path]:
-    package_root = (
-        _REPO_ROOT
-        / "packages"
-        / f"dbxcarta-{layer}"
-        / "src"
-        / "dbxcarta"
-        / layer
-    )
+    package_root = _REPO_ROOT / "packages" / f"dbxcarta-{layer}" / "src" / "dbxcarta" / layer
     return sorted(package_root.rglob("*.py"))
 
 
 def _matches_forbidden(module: str, forbidden: tuple[str, ...]) -> bool:
-    return any(
-        module == prefix or module.startswith(f"{prefix}.") for prefix in forbidden
-    )
+    return any(module == prefix or module.startswith(f"{prefix}.") for prefix in forbidden)
 
 
 def _requirement_names(distribution: str) -> set[str]:
@@ -99,6 +89,22 @@ def test_top_level_namespace_has_no_compatibility_reexports() -> None:
     assert has_client == "False"
 
 
+def test_core_root_does_not_load_upstream_or_heavy_deps() -> None:
+    # dbxcarta.core is the bottom layer: importing it must pull in neither the
+    # spark nor client layers, nor the heavy Spark/Neo4j runtimes core exists
+    # to keep out of the light packages.
+    forbidden = {
+        "dbxcarta.spark",
+        "dbxcarta.client",
+        "pyspark",
+        "neo4j",
+    }
+
+    leaked = _matching_modules(_loaded_modules_after("import dbxcarta.core"), forbidden)
+
+    assert not leaked, f"Forbidden modules loaded by dbxcarta.core: {sorted(leaked)}"
+
+
 def test_client_root_does_not_load_spark_modules() -> None:
     forbidden = {
         "dbxcarta.spark",
@@ -125,7 +131,22 @@ def test_spark_root_does_not_load_client_eval() -> None:
     assert not leaked, f"Forbidden modules loaded by dbxcarta.spark: {sorted(leaked)}"
 
 
-@pytest.mark.parametrize("layer", ["spark", "client"])
+def test_materialize_root_does_not_load_sibling_layers_or_neo4j() -> None:
+    # dbxcarta.materialize is a sibling of spark and client over core. It owns
+    # the Spark shell, so pyspark is a legitimate dependency, but it must never
+    # reach into either sibling layer or pull in Neo4j.
+    forbidden = {
+        "dbxcarta.spark",
+        "dbxcarta.client",
+        "neo4j",
+    }
+
+    leaked = _matching_modules(_loaded_modules_after("import dbxcarta.materialize"), forbidden)
+
+    assert not leaked, f"Forbidden modules loaded by dbxcarta.materialize: {sorted(leaked)}"
+
+
+@pytest.mark.parametrize("layer", ["core", "spark", "client", "materialize"])
 def test_layer_root_does_not_load_job_runner(layer: str) -> None:
     # The job runner is the dependency the whole split exists to keep out
     # of the core and client closures. Importing either layer must not
@@ -138,7 +159,10 @@ def test_layer_root_does_not_load_job_runner(layer: str) -> None:
     assert not leaked, f"dbxcarta.{layer} loaded the job runner: {sorted(leaked)}"
 
 
-@pytest.mark.parametrize("distribution", ["dbxcarta-spark", "dbxcarta-client"])
+@pytest.mark.parametrize(
+    "distribution",
+    ["dbxcarta-core", "dbxcarta-spark", "dbxcarta-client", "dbxcarta-materialize"],
+)
 def test_distribution_does_not_require_job_runner(distribution: str) -> None:
     # A module-load check alone would miss a re-declared dependency that
     # is simply never imported at module top level. Guard the published
@@ -149,6 +173,8 @@ def test_distribution_does_not_require_job_runner(distribution: str) -> None:
 def test_source_imports_preserve_layer_boundaries() -> None:
     forbidden_by_layer: dict[str, tuple[str, ...]] = {
         "client": ("dbxcarta.spark",),
+        "core": ("dbxcarta.spark", "dbxcarta.client"),
+        "materialize": ("dbxcarta.spark", "dbxcarta.client"),
         "spark": ("dbxcarta.client",),
     }
     violations: list[str] = []

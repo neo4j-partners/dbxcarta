@@ -12,15 +12,14 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from dbxcarta.spark.contract import NodeLabel
-
 if TYPE_CHECKING:
+    from dbxcarta.spark.contract import NodeLabel
     from pyspark.sql import DataFrame, SparkSession
 
 logger = logging.getLogger(__name__)
 
 
-def read_ledger(spark: "SparkSession", ledger_root: str, label: NodeLabel) -> "DataFrame | None":
+def read_ledger(spark: SparkSession, ledger_root: str, label: NodeLabel) -> DataFrame | None:
     """Return the ledger DataFrame for label, or None if it doesn't exist yet.
 
     Catches only AnalysisException, which is what Spark raises when the Delta
@@ -37,8 +36,10 @@ def read_ledger(spark: "SparkSession", ledger_root: str, label: NodeLabel) -> "D
 
 
 def split_by_ledger(
-    df_hashed: "DataFrame", ledger_df: "DataFrame", endpoint: str,
-) -> tuple["DataFrame", "DataFrame"]:
+    df_hashed: DataFrame,
+    ledger_df: DataFrame,
+    endpoint: str,
+) -> tuple[DataFrame, DataFrame]:
     """Split df_hashed into (hits_df, misses_df) against the ledger.
 
     A hit requires: the ledger has a row with the same id, the same
@@ -48,32 +49,36 @@ def split_by_ledger(
     """
     from pyspark.sql.functions import col
 
-    ledger_filtered = (
-        ledger_df
-        .filter(col("embedding_model") == endpoint)
-        .select(
-            col("id").alias("_led_id"),
-            col("embedding_text_hash").alias("_led_hash"),
-            col("embedding").alias("_led_embedding"),
-            col("embedding_model").alias("_led_model"),
-            col("embedded_at").alias("_led_embedded_at"),
-        )
+    ledger_filtered = ledger_df.filter(col("embedding_model") == endpoint).select(
+        col("id").alias("_led_id"),
+        col("embedding_text_hash").alias("_led_hash"),
+        col("embedding").alias("_led_embedding"),
+        col("embedding_model").alias("_led_model"),
+        col("embedded_at").alias("_led_embedded_at"),
     )
 
     joined = df_hashed.join(
-        ledger_filtered, df_hashed["id"] == ledger_filtered["_led_id"], "left",
+        ledger_filtered,
+        df_hashed["id"] == ledger_filtered["_led_id"],
+        "left",
     )
     hit_cond = col("_led_id").isNotNull() & (col("_curr_hash") == col("_led_hash"))
 
-    ledger_cols = ["_curr_hash", "_led_id", "_led_hash", "_led_embedding",
-                   "_led_model", "_led_embedded_at"]
+    ledger_cols = [
+        "_curr_hash",
+        "_led_id",
+        "_led_hash",
+        "_led_embedding",
+        "_led_model",
+        "_led_embedded_at",
+    ]
     hits_df = joined.filter(hit_cond)
     misses_df = joined.filter(~hit_cond).drop(*ledger_cols)
 
     return hits_df, misses_df
 
 
-def upsert_ledger(staged_df: "DataFrame", ledger_root: str, label: NodeLabel) -> None:
+def upsert_ledger(staged_df: DataFrame, ledger_root: str, label: NodeLabel) -> None:
     """Upsert newly-embedded rows (excluding errors) into the per-label ledger.
 
     Merge key: (id, embedding_model). Rows where embedding_error is non-null
@@ -91,8 +96,7 @@ def upsert_ledger(staged_df: "DataFrame", ledger_root: str, label: NodeLabel) ->
     # Deduplicate on merge key — Delta MERGE requires at most one source row per
     # target row; while node IDs should be unique in practice, guard explicitly.
     rows_to_upsert = (
-        staged_df
-        .filter(col("embedding_error").isNull())
+        staged_df.filter(col("embedding_error").isNull())
         .select("id", "embedding_text_hash", "embedding", "embedding_model", "embedded_at")
         .dropDuplicates(["id", "embedding_model"])
     )
@@ -101,12 +105,7 @@ def upsert_ledger(staged_df: "DataFrame", ledger_root: str, label: NodeLabel) ->
     try:
         existing = DeltaTable.forPath(spark, ledger_path)
     except AnalysisException:
-        (
-            rows_to_upsert.write
-            .format("delta")
-            .mode("overwrite")
-            .save(ledger_path)
-        )
+        (rows_to_upsert.write.format("delta").mode("overwrite").save(ledger_path))
         logger.info("[dbxcarta] created ledger for %s at %s", label.value, ledger_path)
         return
 

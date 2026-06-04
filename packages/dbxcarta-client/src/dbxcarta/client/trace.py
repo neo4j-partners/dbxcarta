@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from dbxcarta.client.databricks import quote_qualified_name
 from dbxcarta.client.ids import schema_from_node_id
+from dbxcarta.core.identifiers import quote_qualified_name
 
 if TYPE_CHECKING:
     from pyspark.sql import SparkSession
@@ -35,7 +35,7 @@ def _normalized_schema_scores(
     seed_scores: list[float],
 ) -> dict[str, float]:
     raw: dict[str, float] = {}
-    for node_id, score in zip(seed_ids, seed_scores):
+    for node_id, score in zip(seed_ids, seed_scores, strict=False):
         schema = schema_from_node_id(node_id)
         if schema:
             raw[schema] = raw.get(schema, 0.0) + score
@@ -93,8 +93,7 @@ def compute_retrieval_metrics(trace: RetrievalTrace) -> None:
     trace.schema_in_context = trace.target_schema in trace.chosen_schemas
     if trace.final_col_ids:
         from_target = sum(
-            1 for cid in trace.final_col_ids
-            if schema_from_node_id(cid) == trace.target_schema
+            1 for cid in trace.final_col_ids if schema_from_node_id(cid) == trace.target_schema
         )
         trace.context_purity = from_target / len(trace.final_col_ids)
 
@@ -118,30 +117,32 @@ def emit_retrieval_traces(
         StructType,
     )
 
-    schema = StructType([
-        StructField("run_id", StringType(), nullable=False),
-        StructField("question_id", StringType()),
-        StructField("question", StringType()),
-        StructField("target_schema", StringType()),
-        StructField("col_seed_ids", ArrayType(StringType())),
-        StructField("col_seed_scores", ArrayType(DoubleType())),
-        StructField("tbl_seed_ids", ArrayType(StringType())),
-        StructField("tbl_seed_scores", ArrayType(DoubleType())),
-        StructField("schema_scores", MapType(StringType(), DoubleType())),
-        StructField("chosen_schemas", ArrayType(StringType())),
-        StructField("expansion_tbl_ids", ArrayType(StringType())),
-        StructField("final_col_ids", ArrayType(StringType())),
-        StructField("rendered_context", StringType()),
-        StructField("generated_sql", StringType()),
-        StructField("reference_sql", StringType()),
-        StructField("parsed", BooleanType()),
-        StructField("executed", BooleanType()),
-        StructField("correct", BooleanType()),
-        StructField("execution_error", StringType()),
-        StructField("top1_schema_match", BooleanType()),
-        StructField("schema_in_context", BooleanType()),
-        StructField("context_purity", DoubleType()),
-    ])
+    schema = StructType(
+        [
+            StructField("run_id", StringType(), nullable=False),
+            StructField("question_id", StringType()),
+            StructField("question", StringType()),
+            StructField("target_schema", StringType()),
+            StructField("col_seed_ids", ArrayType(StringType())),
+            StructField("col_seed_scores", ArrayType(DoubleType())),
+            StructField("tbl_seed_ids", ArrayType(StringType())),
+            StructField("tbl_seed_scores", ArrayType(DoubleType())),
+            StructField("schema_scores", MapType(StringType(), DoubleType())),
+            StructField("chosen_schemas", ArrayType(StringType())),
+            StructField("expansion_tbl_ids", ArrayType(StringType())),
+            StructField("final_col_ids", ArrayType(StringType())),
+            StructField("rendered_context", StringType()),
+            StructField("generated_sql", StringType()),
+            StructField("reference_sql", StringType()),
+            StructField("parsed", BooleanType()),
+            StructField("executed", BooleanType()),
+            StructField("correct", BooleanType()),
+            StructField("execution_error", StringType()),
+            StructField("top1_schema_match", BooleanType()),
+            StructField("schema_in_context", BooleanType()),
+            StructField("context_purity", DoubleType()),
+        ]
+    )
 
     rows = [
         Row(

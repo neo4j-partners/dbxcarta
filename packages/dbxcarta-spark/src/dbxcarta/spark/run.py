@@ -21,10 +21,11 @@ from typing import TYPE_CHECKING
 from dbxcarta.spark.contract import (
     CONTRACT_VERSION,
     NODE_PROPERTIES,
-    NodeLabel,
     REFERENCES_PROPERTIES,
+    NodeLabel,
     RelType,
 )
+from dbxcarta.spark.ingest import summary_io
 from dbxcarta.spark.ingest.extract import ExtractResult, extract
 from dbxcarta.spark.ingest.fk.discovery import (
     FKDiscoveryResult,
@@ -37,8 +38,9 @@ from dbxcarta.spark.ingest.load.neo4j_io import (
     write_node,
     write_rel,
 )
+from dbxcarta.spark.ingest.load.writer import Neo4jConfig
 from dbxcarta.spark.ingest.preflight import preflight
-from dbxcarta.spark.settings import SparkIngestSettings
+from dbxcarta.spark.ingest.summary import EmbeddingCounts, RunSummary
 from dbxcarta.spark.ingest.transform.embed_stage import (
     embedded_batch,
     finalize_embedding_summary,
@@ -51,9 +53,7 @@ from dbxcarta.spark.ingest.transform.value_stage import (
     ValueResult,
     transform_sample_values,
 )
-import dbxcarta.spark.ingest.summary_io as summary_io
-from dbxcarta.spark.ingest.summary import EmbeddingCounts, RunSummary
-from dbxcarta.spark.ingest.load.writer import Neo4jConfig
+from dbxcarta.spark.settings import SparkIngestSettings
 
 if TYPE_CHECKING:
     from neo4j import Driver
@@ -65,7 +65,7 @@ logger = logging.getLogger(__name__)
 def run_dbxcarta(
     *,
     settings: SparkIngestSettings | None = None,
-    spark: "SparkSession | None" = None,
+    spark: SparkSession | None = None,
 ) -> RunSummary:
     """Run a complete ingest and return the finished RunSummary.
 
@@ -80,11 +80,7 @@ def run_dbxcarta(
 
         spark = SparkSession.builder.getOrCreate()
     run_id = os.environ.get("DATABRICKS_JOB_RUN_ID", "local")
-    schema_list = [
-        s.strip()
-        for s in resolved_settings.dbxcarta_schemas.split(",")
-        if s.strip()
-    ]
+    schema_list = [s.strip() for s in resolved_settings.dbxcarta_schemas.split(",") if s.strip()]
 
     summary = _build_summary(run_id, resolved_settings, schema_list)
     primary_error: BaseException | None = None
@@ -111,7 +107,9 @@ def run_dbxcarta(
     return summary
 
 
-def _build_summary(run_id: str, settings: SparkIngestSettings, schema_list: list[str]) -> RunSummary:
+def _build_summary(
+    run_id: str, settings: SparkIngestSettings, schema_list: list[str]
+) -> RunSummary:
     """Create the run summary shell before any Spark or Neo4j work begins.
 
     Embedding flags are copied from Settings at startup so the emitted summary
@@ -141,7 +139,7 @@ def _build_summary(run_id: str, settings: SparkIngestSettings, schema_list: list
 
 def _emit_summary(
     summary: RunSummary,
-    spark: "SparkSession",
+    spark: SparkSession,
     volume_path: str,
     table_name: str,
     *,
@@ -152,15 +150,13 @@ def _emit_summary(
         summary_io.emit(summary, spark, volume_path, table_name)
     except Exception:
         if primary_error is not None:
-            logger.exception(
-                "[dbxcarta] failed to emit run summary after run failure"
-            )
+            logger.exception("[dbxcarta] failed to emit run summary after run failure")
             return
         raise
 
 
 def _run(
-    spark: "SparkSession",
+    spark: SparkSession,
     settings: SparkIngestSettings,
     schema_list: list[str],
     summary: RunSummary,
@@ -204,7 +200,11 @@ def _run(
             # batched pass. Sampling-only now: no Neo4j write or stale purge
             # happens here.
             values = transform_sample_values(
-                spark, settings, schema_list, extract_result, summary,
+                spark,
+                settings,
+                schema_list,
+                extract_result,
+                summary,
             )
 
             # Node embedding + node writes are batched by table range here;
@@ -212,20 +212,37 @@ def _run(
             # active. Relationship writes stay in _load and run after FK
             # discovery, MERGE-matching the nodes this loop already wrote.
             _embed_and_write_node_chunks(
-                spark, neo4j, settings, extract_result,
-                ledger_path, transient_root, summary,
+                spark,
+                neo4j,
+                settings,
+                extract_result,
+                ledger_path,
+                transient_root,
+                summary,
                 values.value_node_df if values else None,
             )
             # Schema/Database are per-schema / per-catalog scale, not
             # table-scale: embed (if enabled) and write once, outside the loop.
             _write_label_nodes(
-                extract_result.database_df, NodeLabel.DATABASE, neo4j,
-                settings, ledger_path, transient_root, "all", summary,
+                extract_result.database_df,
+                NodeLabel.DATABASE,
+                neo4j,
+                settings,
+                ledger_path,
+                transient_root,
+                "all",
+                summary,
                 settings.dbxcarta_include_embeddings_databases,
             )
             _write_label_nodes(
-                extract_result.schema_node_df, NodeLabel.SCHEMA, neo4j,
-                settings, ledger_path, transient_root, "all", summary,
+                extract_result.schema_node_df,
+                NodeLabel.SCHEMA,
+                neo4j,
+                settings,
+                ledger_path,
+                transient_root,
+                "all",
+                summary,
                 settings.dbxcarta_include_embeddings_schemas,
             )
 
@@ -237,7 +254,11 @@ def _run(
             # §5).
             if values is not None:
                 _stale_value_cleanup(
-                    driver, settings, schema_list, values, summary,
+                    driver,
+                    settings,
+                    schema_list,
+                    values,
+                    summary,
                 )
 
             # Per-batch counts accumulated across every chunk and the
@@ -246,7 +267,11 @@ def _run(
             finalize_embedding_summary(summary)
 
             fk_result = run_fk_discovery(
-                spark, settings, schema_list, extract_result, summary,
+                spark,
+                settings,
+                schema_list,
+                extract_result,
+                summary,
             )
 
             _load(neo4j, settings, extract_result, fk_result, values, summary)
@@ -266,9 +291,7 @@ def _run(
                 fk_result.unpersist_cached()
             except Exception:
                 if run_error is not None:
-                    logger.exception(
-                        "[dbxcarta] failed to unpersist cached FK edge DataFrames"
-                    )
+                    logger.exception("[dbxcarta] failed to unpersist cached FK edge DataFrames")
                 else:
                     raise
         if values is not None:
@@ -286,16 +309,14 @@ def _run(
                 extract_result.unpersist_cached()
             except Exception:
                 if run_error is not None:
-                    logger.exception(
-                        "[dbxcarta] failed to unpersist cached extraction DataFrames"
-                    )
+                    logger.exception("[dbxcarta] failed to unpersist cached extraction DataFrames")
                 else:
                     raise
     logger.info("[dbxcarta] neo4j counts: %s", summary.neo4j_counts)
 
 
 def _stale_value_cleanup(
-    driver: "Driver",
+    driver: Driver,
     settings: SparkIngestSettings,
     schema_list: list[str],
     values: ValueResult,
@@ -337,7 +358,7 @@ def _stale_value_cleanup(
     )
 
 
-def _verify(driver: "Driver", settings: SparkIngestSettings, summary: RunSummary) -> None:
+def _verify(driver: Driver, settings: SparkIngestSettings, summary: RunSummary) -> None:
     """Final pipeline step: re-run dbxcarta.spark.verify against the run summary just
     built. Records the outcome on summary.verify (durable in JSON + Delta).
     Warn-only by default; raises when settings.dbxcarta_verify_gate is True.
@@ -383,12 +404,13 @@ def _verify(driver: "Driver", settings: SparkIngestSettings, summary: RunSummary
     logger.warning(
         "[dbxcarta] verify reported %d violation(s) (warn-only; set"
         " DBXCARTA_VERIFY_GATE=true to gate):\n%s",
-        len(report.violations), report.format(),
+        len(report.violations),
+        report.format(),
     )
 
 
 def _write_label_nodes(
-    df: "DataFrame",
+    df: DataFrame,
     label: NodeLabel,
     neo4j: Neo4jConfig,
     settings: SparkIngestSettings,
@@ -409,7 +431,13 @@ def _write_label_nodes(
     """
     if embed_enabled:
         with embedded_batch(
-            df, label, settings, ledger_path, transient_root, batch_tag, summary,
+            df,
+            label,
+            settings,
+            ledger_path,
+            transient_root,
+            batch_tag,
+            summary,
         ) as staged:
             write_node(_project(staged, label), neo4j, label)
     else:
@@ -417,14 +445,14 @@ def _write_label_nodes(
 
 
 def _embed_and_write_node_chunks(
-    spark: "SparkSession",
+    spark: SparkSession,
     neo4j: Neo4jConfig,
     settings: SparkIngestSettings,
     extract_result: ExtractResult,
     ledger_path: str,
     transient_root: str,
     summary: RunSummary,
-    value_node_df: "DataFrame | None" = None,
+    value_node_df: DataFrame | None = None,
 ) -> None:
     """Embed + write Table, Column, and Value nodes batched by table range.
 
@@ -454,18 +482,17 @@ def _embed_and_write_node_chunks(
     batch_size = settings.dbxcarta_embedding_batch_tables
 
     rows = (
-        extract_result.tables_df
-        .select("table_catalog", "table_schema", "table_name")
+        extract_result.tables_df.select("table_catalog", "table_schema", "table_name")
         .distinct()
         .collect()
     )
-    triples = [
-        (r["table_catalog"], r["table_schema"], r["table_name"]) for r in rows
-    ]
+    triples = [(r["table_catalog"], r["table_schema"], r["table_name"]) for r in rows]
 
     def _filter_to_chunk(
-        df: "DataFrame", keys: "DataFrame", table_col: str,
-    ) -> "DataFrame":
+        df: DataFrame,
+        keys: DataFrame,
+        table_col: str,
+    ) -> DataFrame:
         cond = (
             (df["catalog"] == keys["_k_cat"])
             & (df["schema"] == keys["_k_sch"])
@@ -475,10 +502,12 @@ def _embed_and_write_node_chunks(
 
     for start in range(0, len(triples), batch_size):
         idx = start // batch_size
-        chunk = triples[start:start + batch_size]
+        chunk = triples[start : start + batch_size]
         tag = f"b{idx}"
         logger.info(
-            "[dbxcarta] embedding batch %s: %d table(s)", tag, len(chunk),
+            "[dbxcarta] embedding batch %s: %d table(s)",
+            tag,
+            len(chunk),
         )
         # Build the broadcast key frame once per chunk and reuse it for the
         # Table/Column/Value semi-joins. createDataFrame is a driver action;
@@ -489,21 +518,41 @@ def _embed_and_write_node_chunks(
         )
         _write_label_nodes(
             _filter_to_chunk(extract_result.table_node_df, keys, "name"),
-            NodeLabel.TABLE, neo4j, settings, ledger_path, transient_root,
-            tag, summary, table_flag,
+            NodeLabel.TABLE,
+            neo4j,
+            settings,
+            ledger_path,
+            transient_root,
+            tag,
+            summary,
+            table_flag,
         )
         _write_label_nodes(
             _filter_to_chunk(extract_result.column_node_df, keys, "table"),
-            NodeLabel.COLUMN, neo4j, settings, ledger_path, transient_root,
-            tag, summary, column_flag,
+            NodeLabel.COLUMN,
+            neo4j,
+            settings,
+            ledger_path,
+            transient_root,
+            tag,
+            summary,
+            column_flag,
         )
         if value_node_df is not None:
             value_slice = _filter_to_chunk(
-                value_node_df, keys, "table",
+                value_node_df,
+                keys,
+                "table",
             ).withColumn("last_run", lit(summary.started_at))
             _write_label_nodes(
-                value_slice, NodeLabel.VALUE, neo4j, settings, ledger_path,
-                transient_root, tag, summary,
+                value_slice,
+                NodeLabel.VALUE,
+                neo4j,
+                settings,
+                ledger_path,
+                transient_root,
+                tag,
+                summary,
                 settings.dbxcarta_include_embeddings_values,
             )
 
@@ -528,28 +577,42 @@ def _load(
     nodes the earlier node writes already created.
     """
     if values is not None and values.sample_stats.value_nodes > 0:
-        logger.info("[dbxcarta] writing relationships: HAS_VALUE (%d)", values.sample_stats.has_value_edges)
+        logger.info(
+            "[dbxcarta] writing relationships: HAS_VALUE (%d)", values.sample_stats.has_value_edges
+        )
         write_rel(
-            _rel_partition(values.has_value_df, settings.dbxcarta_rel_write_partitions), neo4j,
-            RelType.HAS_VALUE, NodeLabel.COLUMN, NodeLabel.VALUE,
+            _rel_partition(values.has_value_df, settings.dbxcarta_rel_write_partitions),
+            neo4j,
+            RelType.HAS_VALUE,
+            NodeLabel.COLUMN,
+            NodeLabel.VALUE,
         )
 
     logger.info("[dbxcarta] writing relationships: HAS_SCHEMA")
     write_rel(
-        _rel_partition(extract_result.has_schema_df, settings.dbxcarta_rel_write_partitions), neo4j,
-        RelType.HAS_SCHEMA, NodeLabel.DATABASE, NodeLabel.SCHEMA,
+        _rel_partition(extract_result.has_schema_df, settings.dbxcarta_rel_write_partitions),
+        neo4j,
+        RelType.HAS_SCHEMA,
+        NodeLabel.DATABASE,
+        NodeLabel.SCHEMA,
     )
 
     logger.info("[dbxcarta] writing relationships: HAS_TABLE")
     write_rel(
-        _rel_partition(extract_result.has_table_df, settings.dbxcarta_rel_write_partitions), neo4j,
-        RelType.HAS_TABLE, NodeLabel.SCHEMA, NodeLabel.TABLE,
+        _rel_partition(extract_result.has_table_df, settings.dbxcarta_rel_write_partitions),
+        neo4j,
+        RelType.HAS_TABLE,
+        NodeLabel.SCHEMA,
+        NodeLabel.TABLE,
     )
 
     logger.info("[dbxcarta] writing relationships: HAS_COLUMN")
     write_rel(
-        _rel_partition(extract_result.has_column_df, settings.dbxcarta_rel_write_partitions), neo4j,
-        RelType.HAS_COLUMN, NodeLabel.TABLE, NodeLabel.COLUMN,
+        _rel_partition(extract_result.has_column_df, settings.dbxcarta_rel_write_partitions),
+        neo4j,
+        RelType.HAS_COLUMN,
+        NodeLabel.TABLE,
+        NodeLabel.COLUMN,
     )
 
     if fk_result.declared_edge_count > 0 and fk_result.declared_edges_df is not None:
@@ -558,8 +621,11 @@ def _load(
             fk_result.declared_edge_count,
         )
         write_rel(
-            _rel_partition(fk_result.declared_edges_df, settings.dbxcarta_rel_write_partitions), neo4j,
-            RelType.REFERENCES, NodeLabel.COLUMN, NodeLabel.COLUMN,
+            _rel_partition(fk_result.declared_edges_df, settings.dbxcarta_rel_write_partitions),
+            neo4j,
+            RelType.REFERENCES,
+            NodeLabel.COLUMN,
+            NodeLabel.COLUMN,
             properties=REFERENCES_PROPERTIES,
         )
 
@@ -569,13 +635,16 @@ def _load(
             fk_result.metadata_edge_count,
         )
         write_rel(
-            _rel_partition(fk_result.metadata_edges_df, settings.dbxcarta_rel_write_partitions), neo4j,
-            RelType.REFERENCES, NodeLabel.COLUMN, NodeLabel.COLUMN,
+            _rel_partition(fk_result.metadata_edges_df, settings.dbxcarta_rel_write_partitions),
+            neo4j,
+            RelType.REFERENCES,
+            NodeLabel.COLUMN,
+            NodeLabel.COLUMN,
             properties=REFERENCES_PROPERTIES,
         )
 
 
-def _project(df: "DataFrame", label: NodeLabel) -> "DataFrame":
+def _project(df: DataFrame, label: NodeLabel) -> DataFrame:
     """Project a node DataFrame to its declared per-label property set.
 
     This is the fail-closed write boundary: a column reaches Neo4j if and
@@ -601,7 +670,7 @@ def _project(df: "DataFrame", label: NodeLabel) -> "DataFrame":
     return df.select(*[c for c in declared if c in present])
 
 
-def _rel_partition(df: "DataFrame", n: int) -> "DataFrame":
+def _rel_partition(df: DataFrame, n: int) -> DataFrame:
     """Set relationship-write partitioning per `dbxcarta_rel_write_partitions`.
 
     `repartition(1)` is deliberately not the `n <= 1` branch: it forces a

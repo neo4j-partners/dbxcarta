@@ -6,7 +6,7 @@ the ingest pipeline.
 
 from __future__ import annotations
 
-from dbxcarta.spark.env import inject_params
+from dbxcarta.core.env import inject_params
 from dbxcarta.spark.run import run_dbxcarta
 
 

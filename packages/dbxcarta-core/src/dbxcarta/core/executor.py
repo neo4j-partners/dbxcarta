@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
-from typing import Any
+import time
+from typing import TYPE_CHECKING, Any
 
-from databricks.sdk import WorkspaceClient
 from databricks.sdk.service.sql import (
     Disposition,
+    ExecuteStatementRequestOnWaitTimeout,
     Format,
     StatementState,
     StatementStatus,
 )
+
+if TYPE_CHECKING:
+    from databricks.sdk import WorkspaceClient
 
 
 def _statement_error(status: StatementStatus | None, state: StatementState | None) -> str:
@@ -79,11 +83,7 @@ def fetch_rows(
 
     if state == StatementState.SUCCEEDED:
         columns: list[str] = []
-        if (
-            response.manifest
-            and response.manifest.schema
-            and response.manifest.schema.columns
-        ):
+        if response.manifest and response.manifest.schema and response.manifest.schema.columns:
             columns = [
                 col.name or f"col_{index + 1}"
                 for index, col in enumerate(response.manifest.schema.columns)
@@ -105,6 +105,21 @@ def fetch_rows(
         return None, None, _statement_error(status, state)
 
     return None, None, f"statement did not complete within {timeout_sec}s (state={state})"
+
+
+def catalog_exists(ws: WorkspaceClient, warehouse_id: str, catalog: str) -> bool:
+    """Return True if *catalog* already exists in the metastore.
+
+    Guards ``CREATE CATALOG``: on accounts with Default Storage enabled but no
+    metastore storage root URL, ``CREATE CATALOG`` fails unless given a
+    ``MANAGED LOCATION``, even with ``IF NOT EXISTS`` on a catalog that already
+    exists. Callers check this first and skip the create when the catalog is
+    already present (for example, pre-created in the workspace UI).
+    """
+    _, rows, error = fetch_rows(ws, warehouse_id, "SHOW CATALOGS")
+    if error is not None or rows is None:
+        raise RuntimeError(f"could not list catalogs to check for {catalog!r}: {error}")
+    return any(row and row[0] == catalog for row in rows)
 
 
 def execute_ddl(
@@ -132,6 +147,56 @@ def execute_ddl(
     if state in (StatementState.FAILED, StatementState.CANCELED):
         return False, _statement_error(status, state)
     return False, f"statement did not complete within {timeout_sec}s (state={state})"
+
+
+def execute_ddl_blocking(
+    ws: WorkspaceClient,
+    warehouse_id: str,
+    statement: str,
+    *,
+    label: str = "",
+    total_timeout_sec: float = 600.0,
+    poll_interval_sec: float = 3.0,
+) -> None:
+    """Execute one statement and block until it reaches a terminal state.
+
+    Unlike :func:`execute_ddl`, this polls ``get_statement`` past the API's 50s
+    synchronous ``wait_timeout`` cap, so a slow ``CREATE TABLE`` or ``INSERT``
+    on a large catalog runs to completion instead of being reported as a
+    spurious timeout. Raises ``RuntimeError`` on a failed statement and
+    ``TimeoutError`` when it does not finish within ``total_timeout_sec``. The
+    ``label`` appears only in error messages.
+    """
+    start = time.monotonic()
+    response = ws.statement_execution.execute_statement(
+        statement=statement,
+        warehouse_id=warehouse_id,
+        wait_timeout="50s",
+        on_wait_timeout=ExecuteStatementRequestOnWaitTimeout.CONTINUE,
+    )
+    statement_id = response.statement_id
+    if statement_id is None:
+        raise RuntimeError(f"no statement id returned for: {label or statement[:80]}")
+
+    status = response.status
+    state = status.state if status else StatementState.SUCCEEDED
+    deadline = start + total_timeout_sec
+    while state in (StatementState.PENDING, StatementState.RUNNING):
+        if time.monotonic() > deadline:
+            raise TimeoutError(
+                f"statement did not complete within {total_timeout_sec:.0f}s:"
+                f" {label or statement[:80]}"
+            )
+        time.sleep(poll_interval_sec)
+        response = ws.statement_execution.get_statement(statement_id)
+        status = response.status
+        state = status.state if status else StatementState.SUCCEEDED
+
+    if state != StatementState.SUCCEEDED:
+        raise RuntimeError(
+            f"statement failed (state={state}): {label or statement[:80]}"
+            f" — {_statement_error(status, state)}"
+        )
 
 
 def split_sql_statements(sql: str) -> list[str]:
@@ -185,8 +250,7 @@ def split_sql_statements(sql: str) -> list[str]:
     # trailing segment with no final semicolon
     segment = "".join(current).strip()
     has_sql = any(
-        line and not line.startswith("--")
-        for line in (raw.strip() for raw in segment.splitlines())
+        line and not line.startswith("--") for line in (raw.strip() for raw in segment.splitlines())
     )
     if has_sql:
         result.append(segment)

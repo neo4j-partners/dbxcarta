@@ -7,7 +7,6 @@ import os
 from pathlib import Path
 
 import pytest
-
 from dbxcarta_dense_schema_example.config import DenseSchemaConfig
 from dbxcarta_dense_schema_example.generator import generate_candidates_json
 from dbxcarta_dense_schema_example.question_generator import (
@@ -25,7 +24,7 @@ def test_generate_500_table_count():
 
 
 def test_generate_1000_table_count():
-    result = generate_candidates_json(1000, "dense_1000")
+    result = generate_candidates_json(1000, "dense-1000")
     schema = result["schemas"][0]
     tables = schema["tables"]
     assert len(tables) == 1000
@@ -67,9 +66,7 @@ def test_rows_match_column_count():
 
 def test_fk_edges_exist():
     result = generate_candidates_json(500, "dense_500")
-    total_fks = sum(
-        len(t["foreign_keys"]) for t in result["schemas"][0]["tables"]
-    )
+    total_fks = sum(len(t["foreign_keys"]) for t in result["schemas"][0]["tables"])
     assert total_fks > 500, f"Expected >500 FK edges, got {total_fks}"
 
 
@@ -116,9 +113,7 @@ def test_descriptive_values_use_faker_data():
     description_idx = [c["name"] for c in employees["columns"]].index("description")
 
     assert employees["rows"][0][name_idx] != "Name 1"
-    assert not employees["rows"][0][description_idx].startswith(
-        "Sample description row"
-    )
+    assert not employees["rows"][0][description_idx].startswith("Sample description row")
 
 
 def test_unsupported_table_count_raises():
@@ -127,7 +122,7 @@ def test_unsupported_table_count_raises():
 
 
 def test_unique_table_names():
-    result = generate_candidates_json(1000, "dense_1000")
+    result = generate_candidates_json(1000, "dense-1000")
     names = [t["name"] for t in result["schemas"][0]["tables"]]
     assert len(names) == len(set(names)), "Duplicate table names found"
 
@@ -141,10 +136,10 @@ def test_question_cache_dir_defaults_to_table_count():
     config = DenseSchemaConfig(
         catalog="schemapile_lakehouse",
         table_count=1000,
-        uc_schema="dense_1000",
+        uc_schema="dense-1000",
         seed=42,
         candidate_cache=Path(".cache/candidates_1000.json"),
-        volume_path="/Volumes/dbxcarta-catalog/dense_ops/dbxcarta-ops",
+        volume_path="/Volumes/dbxcarta-catalog/dense-ops/dbxcarta-ops",
         questions_path="/Volumes/example/questions.json",
         question_model="databricks-meta-llama-3-3-70b-instruct",
         questions_target=60,

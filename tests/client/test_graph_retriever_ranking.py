@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from dbxcarta.client.graph_retriever import _rank_by_combined_score
 
-
 # ---------------------------------------------------------------------------
 # _rank_by_combined_score
 # ---------------------------------------------------------------------------
+
 
 def test_high_cosine_beats_high_fk_at_alpha_0():
     """At alpha=0 (pure cosine), highest cosine score wins regardless of FK."""

@@ -14,17 +14,16 @@ in this module cover two orthogonal halves of the feature:
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Self
 from unittest.mock import MagicMock
 
 from dbxcarta.client.graph_retriever import (
-    GraphRetriever,
     _REFERENCES_CRITERIA_CYPHER,
+    GraphRetriever,
     _references_criteria,
 )
 from dbxcarta.client.prompt import graph_rag_prompt
 from dbxcarta.client.retriever import ColumnEntry, ContextBundle, JoinLine
-
 
 _PREDICATE = "orders.customer_id = customers.id"
 
@@ -73,6 +72,7 @@ def test_join_lines_default_empty_back_compat() -> None:
 
 # --- Flag-gating tests via stub session -------------------------------------
 
+
 class _StubRow:
     """Accepts any key access and returns a sentinel string."""
 
@@ -96,10 +96,10 @@ class _StubSession:
         self.statements.append(statement)
         return [_StubRow()]
 
-    def __enter__(self) -> "_StubSession":
+    def __enter__(self) -> Self:
         return self
 
-    def __exit__(self, *_: Any) -> None:
+    def __exit__(self, *_: object) -> None:
         return None
 
 
@@ -152,15 +152,17 @@ def test_retriever_skips_criteria_cypher_when_flag_off() -> None:
 
 
 def test_references_criteria_uses_persisted_criteria_when_present() -> None:
-    session = _CriteriaSession([
-        {
-            "crit": _PREDICATE,
-            "source_col_id": "cat.s.orders.customer_id",
-            "target_col_id": "cat.s.customers.id",
-            "source": "declared",
-            "confidence": 1.0,
-        }
-    ])
+    session = _CriteriaSession(
+        [
+            {
+                "crit": _PREDICATE,
+                "source_col_id": "cat.s.orders.customer_id",
+                "target_col_id": "cat.s.customers.id",
+                "source": "declared",
+                "confidence": 1.0,
+            }
+        ]
+    )
     lines = _references_criteria(session, ["cat.s.orders.customer_id"], 0.8)
     assert len(lines) == 1
     assert lines[0].predicate == _PREDICATE
@@ -169,15 +171,17 @@ def test_references_criteria_uses_persisted_criteria_when_present() -> None:
 
 
 def test_references_criteria_synthesizes_predicate_when_criteria_missing() -> None:
-    session = _CriteriaSession([
-        {
-            "crit": None,
-            "source_col_id": "cat.s.orders.customer_id",
-            "target_col_id": "cat.s.customers.id",
-            "source": "inferred_metadata",
-            "confidence": 0.91,
-        }
-    ])
+    session = _CriteriaSession(
+        [
+            {
+                "crit": None,
+                "source_col_id": "cat.s.orders.customer_id",
+                "target_col_id": "cat.s.customers.id",
+                "source": "inferred_metadata",
+                "confidence": 0.91,
+            }
+        ]
+    )
     lines = _references_criteria(session, ["cat.s.orders.customer_id"], 0.8)
     assert len(lines) == 1
     assert lines[0].predicate == "cat.s.orders.customer_id = cat.s.customers.id"

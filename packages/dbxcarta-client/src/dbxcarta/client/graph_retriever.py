@@ -16,21 +16,60 @@ except ModuleNotFoundError as exc:  # pragma: no cover - dependency guard
 from dbxcarta.client.ids import schema_from_node_id
 from dbxcarta.client.neo4j_utils import neo4j_credentials
 from dbxcarta.client.retriever import ColumnEntry, ContextBundle, JoinLine, Retriever
-from dbxcarta.client.settings import ClientSettings
 
 if TYPE_CHECKING:
+    from dbxcarta.client.settings import ClientSettings
     from neo4j import Session
 
 _COL_INDEX = "column_embedding"
 _TABLE_INDEX = "table_embedding"
 
-_STOP_WORDS = frozenset({
-    "a", "an", "the", "in", "on", "of", "by", "to", "for", "from",
-    "and", "or", "is", "are", "that", "this", "with", "what", "how",
-    "where", "which", "all", "each", "many", "have", "has", "out",
-    "who", "show", "list", "get", "find", "do", "did", "does",
-    "per", "avg", "sum", "any", "its", "be", "been",
-})
+_STOP_WORDS = frozenset(
+    {
+        "a",
+        "an",
+        "the",
+        "in",
+        "on",
+        "of",
+        "by",
+        "to",
+        "for",
+        "from",
+        "and",
+        "or",
+        "is",
+        "are",
+        "that",
+        "this",
+        "with",
+        "what",
+        "how",
+        "where",
+        "which",
+        "all",
+        "each",
+        "many",
+        "have",
+        "has",
+        "out",
+        "who",
+        "show",
+        "list",
+        "get",
+        "find",
+        "do",
+        "did",
+        "does",
+        "per",
+        "avg",
+        "sum",
+        "any",
+        "its",
+        "be",
+        "been",
+    }
+)
 _MAX_VALUES_PER_COLUMN = 20
 _MAX_VALUE_CHARS = 80
 _MAX_VALUES_TOTAL = 2000
@@ -103,9 +142,7 @@ def _question_tokens(question: str) -> list[str]:
     return [t for t in tokens if len(t) >= 3 and t not in _STOP_WORDS]
 
 
-def _lexical_table_ids(
-    session: Session, question: str, schemas: list[str]
-) -> list[str]:
+def _lexical_table_ids(session: Session, question: str, schemas: list[str]) -> list[str]:
     tokens = _question_tokens(question)
     if not tokens:
         return []
@@ -121,9 +158,7 @@ def _lexical_table_ids(
     return [row["id"] for row in result]
 
 
-def _lexical_column_table_ids(
-    session: Session, question: str, schemas: list[str]
-) -> list[str]:
+def _lexical_column_table_ids(session: Session, question: str, schemas: list[str]) -> list[str]:
     """Return parent table IDs of columns whose name contains a question token.
 
     Surfaces tables that are only discoverable through a column name (e.g.
@@ -167,12 +202,8 @@ class GraphRetriever(Retriever):
             raw_col_seed_pairs = _query_vector_seeds(session, _COL_INDEX, embedding, top_k)
             raw_tbl_seed_pairs = _query_vector_seeds(session, _TABLE_INDEX, embedding, top_k)
 
-            col_seed_pairs = _filter_seed_pairs_to_schemas(
-                raw_col_seed_pairs, configured_schemas
-            )
-            tbl_seed_pairs = _filter_seed_pairs_to_schemas(
-                raw_tbl_seed_pairs, configured_schemas
-            )
+            col_seed_pairs = _filter_seed_pairs_to_schemas(raw_col_seed_pairs, configured_schemas)
+            tbl_seed_pairs = _filter_seed_pairs_to_schemas(raw_tbl_seed_pairs, configured_schemas)
             selected_schemas = _select_schemas(col_seed_pairs, tbl_seed_pairs)
             # _select_schemas returns normalized id parts. Map them back to the
             # configured true names so the `.name`-filtered fetch and lexical
@@ -206,21 +237,17 @@ class GraphRetriever(Retriever):
             )
             fetch_schemas = selected_true or configured_schemas
             lexical_tbl_ids = _lexical_table_ids(session, question, fetch_schemas)
-            lexical_col_tbl_ids = _lexical_column_table_ids(
-                session, question, fetch_schemas
-            )
+            lexical_col_tbl_ids = _lexical_column_table_ids(session, question, fetch_schemas)
 
-            expansion_tbl_ids = list(dict.fromkeys(
-                parent_tbl_ids + ref_tbl_ids + lexical_tbl_ids + lexical_col_tbl_ids
-            ))
+            expansion_tbl_ids = list(
+                dict.fromkeys(parent_tbl_ids + ref_tbl_ids + lexical_tbl_ids + lexical_col_tbl_ids)
+            )
             all_tbl_ids = list(dict.fromkeys(active_tbl_seeds + expansion_tbl_ids))
             columns = _fetch_columns(session, all_tbl_ids, fetch_schemas)
 
             join_col_ids = _join_column_ids(session, active_col_seeds, threshold)
             retrieved_col_ids = [c.column_id for c in columns if c.column_id]
-            value_col_ids = list(dict.fromkeys(
-                active_col_seeds + join_col_ids + retrieved_col_ids
-            ))
+            value_col_ids = list(dict.fromkeys(active_col_seeds + join_col_ids + retrieved_col_ids))
             values = _fetch_values(session, value_col_ids)
 
             join_lines = (
@@ -276,9 +303,7 @@ def _filter_seed_pairs_to_schemas(
     # (true) schema names must be normalized to the same space to match.
     allowed = {_normalize_id_part(s) for s in schemas}
     return [
-        (node_id, score)
-        for node_id, score in seed_pairs
-        if schema_from_node_id(node_id) in allowed
+        (node_id, score) for node_id, score in seed_pairs if schema_from_node_id(node_id) in allowed
     ]
 
 
@@ -321,14 +346,14 @@ def _parent_table_ids(session: Session, col_ids: list[str]) -> list[str]:
     return [row["tid"] for row in result]
 
 
-def _references_table_ids(
-    session: Session, col_ids: list[str], threshold: float
-) -> list[str]:
+def _references_table_ids(session: Session, col_ids: list[str], threshold: float) -> list[str]:
     """Follow REFERENCES edges in both directions to find joinable tables."""
     if not col_ids:
         return []
     result = session.run(
-        _REFERENCES_TABLE_IDS_CYPHER, col_ids=col_ids, threshold=threshold,
+        _REFERENCES_TABLE_IDS_CYPHER,
+        col_ids=col_ids,
+        threshold=threshold,
     )
     return [row["tid"] for row in result]
 
@@ -344,6 +369,7 @@ def _rank_by_combined_score(
     Pure function — no I/O. Tables absent from cosine_scores receive 0.0
     cosine similarity so they can still rank via FK confidence alone.
     """
+
     def _score(pair: tuple[str, float]) -> float:
         tid, fk = pair
         return alpha * fk + (1.0 - alpha) * cosine_scores.get(tid, 0.0)
@@ -392,7 +418,9 @@ def _references_table_ids_capped(
     if max_tables <= 0:
         return _references_table_ids(session, col_ids, threshold)
     result = session.run(
-        _REFERENCES_SCORED_TABLE_IDS_CYPHER, col_ids=col_ids, threshold=threshold,
+        _REFERENCES_SCORED_TABLE_IDS_CYPHER,
+        col_ids=col_ids,
+        threshold=threshold,
     )
     pairs = [(row["tid"], row["max_conf"]) for row in result if row["tid"]]
     return [tid for tid, _ in pairs[:max_tables]]
@@ -420,7 +448,9 @@ def _references_table_ids_ranked(
     if max_tables <= 0:
         return _references_table_ids(session, col_ids, threshold)
     result = session.run(
-        _REFERENCES_SCORED_TABLE_IDS_CYPHER, col_ids=col_ids, threshold=threshold,
+        _REFERENCES_SCORED_TABLE_IDS_CYPHER,
+        col_ids=col_ids,
+        threshold=threshold,
     )
     fk_pairs = [(row["tid"], row["max_conf"]) for row in result if row["tid"]]
     if not fk_pairs:
@@ -430,21 +460,18 @@ def _references_table_ids_ranked(
     return _rank_by_combined_score(fk_pairs, cosine_scores, alpha, max_tables)
 
 
-def _references_criteria(
-    session: Session, col_ids: list[str], threshold: float
-) -> list[JoinLine]:
+def _references_criteria(session: Session, col_ids: list[str], threshold: float) -> list[JoinLine]:
     """Pull join predicates (with source and confidence) off REFERENCES edges above the threshold."""
     if not col_ids:
         return []
     result = session.run(
-        _REFERENCES_CRITERIA_CYPHER, col_ids=col_ids, threshold=threshold,
+        _REFERENCES_CRITERIA_CYPHER,
+        col_ids=col_ids,
+        threshold=threshold,
     )
     return [
         JoinLine(
-            predicate=(
-                row["crit"]
-                or f"{row['source_col_id']} = {row['target_col_id']}"
-            ),
+            predicate=(row["crit"] or f"{row['source_col_id']} = {row['target_col_id']}"),
             source=row["source"],
             confidence=row["confidence"],
         )
@@ -454,21 +481,19 @@ def _references_criteria(
     ]
 
 
-def _join_column_ids(
-    session: Session, col_ids: list[str], threshold: float
-) -> list[str]:
+def _join_column_ids(session: Session, col_ids: list[str], threshold: float) -> list[str]:
     """Return the far-side column IDs of REFERENCES edges from seed columns."""
     if not col_ids:
         return []
     result = session.run(
-        _JOIN_COLUMN_IDS_CYPHER, col_ids=col_ids, threshold=threshold,
+        _JOIN_COLUMN_IDS_CYPHER,
+        col_ids=col_ids,
+        threshold=threshold,
     )
     return [row["col_id"] for row in result if row["col_id"] is not None]
 
 
-def _fetch_columns(
-    session: Session, table_ids: list[str], schemas: list[str]
-) -> list[ColumnEntry]:
+def _fetch_columns(session: Session, table_ids: list[str], schemas: list[str]) -> list[ColumnEntry]:
     if not table_ids:
         return []
     result = session.run(
@@ -494,19 +519,19 @@ def _fetch_columns(
         # what reconstructs a correct, executable FQN.
         catalog = row["catalog_name"] or ""
         fqt = f"`{catalog}`.`{row['schema_name']}`.`{row['table_name']}`"
-        entries.append(ColumnEntry(
-            table_fqn=fqt,
-            column_name=row["col_name"],
-            data_type=row["data_type"] or "",
-            comment=row["comment"] or "",
-            column_id=row["col_id"] or "",
-        ))
+        entries.append(
+            ColumnEntry(
+                table_fqn=fqt,
+                column_name=row["col_name"],
+                data_type=row["data_type"] or "",
+                comment=row["comment"] or "",
+                column_id=row["col_id"] or "",
+            )
+        )
     return entries
 
 
-def _fetch_values(
-    session: Session, col_ids: list[str]
-) -> dict[str, list[str]]:
+def _fetch_values(session: Session, col_ids: list[str]) -> dict[str, list[str]]:
     """Return {col_id: [values]} for the given column IDs.
 
     Three guards bound prompt growth: per-column cap (categorical columns

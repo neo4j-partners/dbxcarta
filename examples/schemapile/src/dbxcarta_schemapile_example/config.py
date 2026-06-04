@@ -8,19 +8,29 @@ and validation errors fail loudly at one place.
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
+from dbxcarta.core.config import derive_ops_config
 
-_PROJECT_CATALOGS_BLOCKLIST: frozenset[str] = frozenset({
-    "graph-enriched-lakehouse",
-    "dbxcarta-catalog",
-    "main",
-    "hive_metastore",
-    "samples",
-    "system",
-})
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+_PROJECT_CATALOGS_BLOCKLIST: frozenset[str] = frozenset(
+    {
+        "graph-enriched-lakehouse",
+        "dbxcarta-catalog",
+        "main",
+        "hive_metastore",
+        "samples",
+        "system",
+    }
+)
+
+# The blueprint is committed under the example dir, not generated into .cache,
+# so the default resolves against the package location rather than the cwd.
+_BLUEPRINT_DIR = Path(__file__).resolve().parents[2] / "blueprint"
 
 
 @dataclass(frozen=True)
@@ -111,29 +121,24 @@ def load_config(env: Mapping[str, str] | None = None) -> SchemaPileConfig:
         min_tables=int(e.get("SCHEMAPILE_MIN_TABLES", "2")),
         max_tables=int(e.get("SCHEMAPILE_MAX_TABLES", "100")),
         min_fk_edges=int(e.get("SCHEMAPILE_MIN_FK_EDGES", "1")),
-        require_self_contained=_truthy(
-            e.get("SCHEMAPILE_REQUIRE_SELF_CONTAINED", "true")
-        ),
+        require_self_contained=_truthy(e.get("SCHEMAPILE_REQUIRE_SELF_CONTAINED", "true")),
         require_data=_truthy(e.get("SCHEMAPILE_REQUIRE_DATA", "false")),
-        slice_cache=Path(
-            e.get("SCHEMAPILE_SLICE_CACHE", ".cache/slice_random_1000.json")
-        ),
+        slice_cache=Path(e.get("SCHEMAPILE_SLICE_CACHE", ".cache/slice_random_1000.json")),
         candidate_cache=Path(
-            e.get("SCHEMAPILE_CANDIDATE_CACHE", ".cache/candidates_random_1000.json")
+            e.get("SCHEMAPILE_CANDIDATE_CACHE") or _BLUEPRINT_DIR / "candidates_random_1000.json"
         ),
         candidate_min_tables=int(e.get("SCHEMAPILE_CANDIDATE_MIN_TABLES", "3")),
         candidate_max_tables=int(e.get("SCHEMAPILE_CANDIDATE_MAX_TABLES", "20")),
         candidate_min_fk_edges=int(e.get("SCHEMAPILE_CANDIDATE_MIN_FK_EDGES", "2")),
-        candidate_require_data=_truthy(
-            e.get("SCHEMAPILE_CANDIDATE_REQUIRE_DATA", "false")
-        ),
+        candidate_require_data=_truthy(e.get("SCHEMAPILE_CANDIDATE_REQUIRE_DATA", "false")),
         candidate_limit=int(e.get("SCHEMAPILE_CANDIDATE_LIMIT", "20")),
         catalog=catalog,
         volume_path=volume_path,
-        questions_path=e.get(
-            "DBXCARTA_CLIENT_QUESTIONS",
-            f"{volume_path}/dbxcarta/questions.json",
-        ),
+        # Single core rule for "given the ops volume root, where questions
+        # live". Derived only when the var is unset, so a malformed volume_path
+        # is not validated on the explicit-value path.
+        questions_path=e.get("DBXCARTA_CLIENT_QUESTIONS")
+        or derive_ops_config(volume_path).client_questions,
         question_model=e.get(
             "SCHEMAPILE_QUESTION_MODEL",
             "databricks-meta-llama-3-3-70b-instruct",
@@ -146,9 +151,7 @@ def load_config(env: Mapping[str, str] | None = None) -> SchemaPileConfig:
 def _required(env: Mapping[str, str], key: str) -> str:
     val = env.get(key, "").strip()
     if not val:
-        raise ValueError(
-            f"{key} is not set; check examples/schemapile/.env"
-        )
+        raise ValueError(f"{key} is not set; check examples/schemapile/.env")
     return val
 
 

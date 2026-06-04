@@ -10,13 +10,9 @@ def test_id_expr_matches_core_generate_id(local_spark) -> None:
     rows = [("Main Catalog", "Sales-Data", "Orders Table", "Customer-ID")]
     df = local_spark.createDataFrame(rows, ["catalog", "schema", "table", "column"])
 
-    got = df.select(
-        id_expr("catalog", "schema", "table", "column").alias("id")
-    ).collect()[0]["id"]
+    got = df.select(id_expr("catalog", "schema", "table", "column").alias("id")).collect()[0]["id"]
 
-    assert got == generate_id(
-        "Main Catalog", "Sales-Data", "Orders Table", "Customer-ID"
-    )
+    assert got == generate_id("Main Catalog", "Sales-Data", "Orders Table", "Customer-ID")
 
 
 def test_id_expr_from_columns_supports_literals_and_row_values(local_spark) -> None:
@@ -33,6 +29,4 @@ def test_id_expr_from_columns_supports_literals_and_row_values(local_spark) -> N
         ).alias("id")
     ).collect()[0]["id"]
 
-    assert got == generate_id(
-        "Main Catalog", "Sales-Data", "Orders Table", "Customer-ID"
-    )
+    assert got == generate_id("Main Catalog", "Sales-Data", "Orders Table", "Customer-ID")

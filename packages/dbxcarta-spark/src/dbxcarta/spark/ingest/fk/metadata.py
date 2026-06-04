@@ -25,13 +25,13 @@ class NameMatchKind(Enum):
 
 
 _SCORE_TABLE: dict[tuple[NameMatchKind, PKEvidence, bool], float] = {
-    (NameMatchKind.EXACT,  PKEvidence.DECLARED_PK,    True):  0.95,
-    (NameMatchKind.EXACT,  PKEvidence.DECLARED_PK,    False): 0.90,
-    (NameMatchKind.EXACT,  PKEvidence.UNIQUE_OR_HEUR, True):  0.88,
-    (NameMatchKind.EXACT,  PKEvidence.UNIQUE_OR_HEUR, False): 0.83,
-    (NameMatchKind.SUFFIX, PKEvidence.DECLARED_PK,    True):  0.88,
-    (NameMatchKind.SUFFIX, PKEvidence.DECLARED_PK,    False): 0.83,
-    (NameMatchKind.SUFFIX, PKEvidence.UNIQUE_OR_HEUR, True):  0.82,
+    (NameMatchKind.EXACT, PKEvidence.DECLARED_PK, True): 0.95,
+    (NameMatchKind.EXACT, PKEvidence.DECLARED_PK, False): 0.90,
+    (NameMatchKind.EXACT, PKEvidence.UNIQUE_OR_HEUR, True): 0.88,
+    (NameMatchKind.EXACT, PKEvidence.UNIQUE_OR_HEUR, False): 0.83,
+    (NameMatchKind.SUFFIX, PKEvidence.DECLARED_PK, True): 0.88,
+    (NameMatchKind.SUFFIX, PKEvidence.DECLARED_PK, False): 0.83,
+    (NameMatchKind.SUFFIX, PKEvidence.UNIQUE_OR_HEUR, True): 0.82,
     (NameMatchKind.SUFFIX, PKEvidence.UNIQUE_OR_HEUR, False): 0.78,
 }
 
@@ -41,6 +41,17 @@ _STEM_SUFFIXES = ("_id", "_fk", "_ref")
 # inference._comment_tokens_expr makes the short stops redundant; kept for
 # spec parity and so future edits to the length floor don't re-introduce
 # bleed.
-_STOPWORDS = frozenset({
-    "the", "of", "and", "a", "an", "to", "for", "id", "column", "table",
-})
+_STOPWORDS = frozenset(
+    {
+        "the",
+        "of",
+        "and",
+        "a",
+        "an",
+        "to",
+        "for",
+        "id",
+        "column",
+        "table",
+    }
+)

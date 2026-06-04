@@ -1,14 +1,16 @@
 from __future__ import annotations
 
-from pydantic import field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
-
-from dbxcarta.client.databricks import (
+from dbxcarta.core.catalogs import resolve_catalogs
+from dbxcarta.core.config import derive_ops_config
+from dbxcarta.core.identifiers import (
+    parse_volume_path,
     split_qualified_name,
     validate_identifier,
     validate_serving_endpoint_name,
     validate_uc_volume_subpath,
 )
+from pydantic import field_validator, model_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class ClientSettings(BaseSettings):
@@ -28,8 +30,11 @@ class ClientSettings(BaseSettings):
     # (dbxcarta-neo4j-<example>). No default, so a run without a selected overlay
     # fails at config load instead of silently reading an unprovisioned scope.
     databricks_secret_scope: str
-    dbxcarta_summary_volume: str
-    dbxcarta_summary_table: str
+    # Derivable from databricks_volume_path when blank (see _resolve_defaults).
+    # The overlays still set them today; derivation only fires once Phase 6
+    # removes them, so leaving them blank stays behavior-neutral until then.
+    dbxcarta_summary_volume: str = ""
+    dbxcarta_summary_table: str = ""
     databricks_volume_path: str
 
     # Client-specific — generation
@@ -38,7 +43,10 @@ class ClientSettings(BaseSettings):
     dbxcarta_embed_endpoint: str = ""  # defaults to dbxcarta_embedding_endpoint
 
     # Client-specific — runtime
-    dbxcarta_client_questions: str = ""  # defaults to {volume_path}/questions.json
+    dbxcarta_client_questions: str = ""  # derived: {volume_path}/dbxcarta/questions.json
+    # 0 = run the full question set; set to a small N (e.g. 5) to evaluate only
+    # the first N questions as a quick post-ingest smoke check.
+    dbxcarta_client_max_questions: int = 0
     dbxcarta_client_arms: str = "no_context,schema_dump,graph_rag"
     dbxcarta_client_top_k: int = 5
     # Force re-inference even when a matching cached staging table exists.
@@ -72,33 +80,41 @@ class ClientSettings(BaseSettings):
     @field_validator("dbxcarta_catalogs")
     @classmethod
     def _validate_catalogs(cls, v: str) -> str:
-        for part in v.split(","):
-            name = part.strip()
-            if name:
-                validate_identifier(name, label="catalog")
+        """Validate the multi-catalog list through the shared catalog rule.
+
+        Routes through :func:`resolve_catalogs` so the client accepts the same
+        ``catalog`` / ``catalog:layer`` list the pipeline does, stripping the
+        ``:layer`` suffix identically. A blank or separator-only list is the
+        single-catalog fallback and is left untouched, exactly as before.
+        """
+        names = [part.split(":", 1)[0].strip() for part in v.split(",")]
+        if any(names):
+            resolve_catalogs("", v)
         return v
 
     @field_validator("dbxcarta_summary_table")
     @classmethod
     def _validate_summary_table(cls, v: str) -> str:
+        # Blank is derived from databricks_volume_path in _resolve_defaults; the
+        # derived value is well-formed by construction, so only validate input.
+        if not v.strip():
+            return ""
         split_qualified_name(v, expected_parts=3, label="summary table")
         return v
 
     @field_validator("dbxcarta_summary_volume")
     @classmethod
     def _validate_summary_volume(cls, v: str) -> str:
+        if not v.strip():
+            return ""
         return validate_uc_volume_subpath(v, label="DBXCARTA_SUMMARY_VOLUME")
 
     @field_validator("databricks_volume_path")
     @classmethod
     def _validate_volume_root(cls, v: str) -> str:
-        parts = v.rstrip("/").lstrip("/").split("/")
-        if len(parts) != 4 or parts[0] != "Volumes":
-            raise ValueError(
-                "DATABRICKS_VOLUME_PATH must be /Volumes/<catalog>/<schema>/<volume>"
-            )
-        for part in parts[1:]:
-            validate_identifier(part, label="volume path part")
+        # Validate through the shared core rule (exactly /Volumes/<cat>/<schema>/
+        # <volume>, each part a safe identifier) rather than re-deriving it here.
+        parse_volume_path(v)
         return v.rstrip("/")
 
     @field_validator(
@@ -116,9 +132,21 @@ class ClientSettings(BaseSettings):
     def _resolve_defaults(self) -> ClientSettings:
         if not self.dbxcarta_embed_endpoint:
             self.dbxcarta_embed_endpoint = self.dbxcarta_embedding_endpoint
-        if not self.dbxcarta_client_questions:
+        # The ops-side values are one base path with a tail; the shared core
+        # resolver is the single owner of that rule. Mirrors
+        # ``SparkIngestSettings._resolve_summary_sinks``, except that
+        # databricks_volume_path is required (and already validated non-blank)
+        # here, so deriving is always safe and needs no missing-base guard.
+        if not (
+            self.dbxcarta_summary_volume
+            and self.dbxcarta_summary_table
+            and self.dbxcarta_client_questions
+        ):
+            derived = derive_ops_config(self.databricks_volume_path)
+            self.dbxcarta_summary_volume = self.dbxcarta_summary_volume or derived.summary_volume
+            self.dbxcarta_summary_table = self.dbxcarta_summary_table or derived.summary_table
             self.dbxcarta_client_questions = (
-                f"{self.databricks_volume_path}/questions.json"
+                self.dbxcarta_client_questions or derived.client_questions
             )
         return self
 
@@ -126,11 +154,12 @@ class ClientSettings(BaseSettings):
     def resolved_catalogs(self) -> list[str]:
         """Catalogs the graph spans, order-preserving and de-duplicated.
 
-        Falls back to the single dbxcarta_catalog when dbxcarta_catalogs is
-        blank, preserving single-catalog behavior.
+        Delegates to the shared :func:`resolve_catalogs` so the client strips
+        the ``:layer`` suffix and falls back to the single ``dbxcarta_catalog``
+        the same way the pipeline does. This is the fix that unblocks a
+        ``catalog:layer`` client run.
         """
-        listed = [c.strip() for c in self.dbxcarta_catalogs.split(",") if c.strip()]
-        return list(dict.fromkeys(listed)) or [self.dbxcarta_catalog]
+        return resolve_catalogs(self.dbxcarta_catalog, self.dbxcarta_catalogs)
 
     @property
     def schemas_list(self) -> list[str]:

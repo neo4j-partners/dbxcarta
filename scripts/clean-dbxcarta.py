@@ -32,6 +32,7 @@ Usage:
         -e examples/finance-genie/dbxcarta-overlay.env \
         --warehouse-id 1234567890abcdef
 """
+
 from __future__ import annotations
 
 import argparse
@@ -62,20 +63,28 @@ def parse_args() -> argparse.Namespace:
         description="Drop DBxCarta ops tables and empty the ops volume.",
     )
     parser.add_argument(
-        "-p", "--profile", required=True,
+        "-p",
+        "--profile",
+        required=True,
         help="Databricks profile from ~/.databrickscfg.",
     )
     parser.add_argument(
-        "-e", "--env-file", required=True, type=Path,
+        "-e",
+        "--env-file",
+        required=True,
+        type=Path,
         help="dbxcarta overlay env file (provides the ops location).",
     )
     parser.add_argument(
-        "--warehouse-id", default=None,
+        "--warehouse-id",
+        default=None,
         help="SQL warehouse id. Default: DATABRICKS_WAREHOUSE_ID from the "
         "overlay or repo-root .env, else the first available warehouse.",
     )
     parser.add_argument(
-        "-y", "--yes", action="store_true",
+        "-y",
+        "--yes",
+        action="store_true",
         help="Skip the y/n prompt and delete the listed targets.",
     )
     return parser.parse_args()
@@ -119,9 +128,7 @@ def resolve_ops_location(env_file: Path) -> tuple[str, str, str]:
     return catalog, schema, volume_path.rstrip("/")
 
 
-def resolve_warehouse_id(
-    cli_value: str | None, env_file: Path, client: WorkspaceClient
-) -> str:
+def resolve_warehouse_id(cli_value: str | None, env_file: Path, client: WorkspaceClient) -> str:
     if cli_value:
         return cli_value
     for source in (env_file, REPO_ROOT / ".env"):
@@ -137,7 +144,9 @@ def resolve_warehouse_id(
 
 def run_sql(client: WorkspaceClient, warehouse_id: str, statement: str) -> None:
     resp = client.statement_execution.execute_statement(
-        statement=statement, warehouse_id=warehouse_id, wait_timeout="30s",
+        statement=statement,
+        warehouse_id=warehouse_id,
+        wait_timeout="30s",
     )
     statement_id = resp.statement_id
     state = resp.status.state if resp.status else None
@@ -158,22 +167,21 @@ def collect_ops_tables(
     """Return ops table names to drop, ordered."""
     resp = client.statement_execution.execute_statement(
         statement=f"SHOW TABLES IN `{catalog}`.`{schema}`",
-        warehouse_id=warehouse_id, wait_timeout="30s",
+        warehouse_id=warehouse_id,
+        wait_timeout="30s",
     )
     rows = (resp.result.data_array if resp.result else None) or []
     # SHOW TABLES columns: database, tableName, isTemporary.
     table_names = [row[1] for row in rows]
     targets = [
-        name for name in table_names
-        if name in OPS_TABLE_NAMES
-        or any(name.startswith(p) for p in OPS_TABLE_PREFIXES)
+        name
+        for name in table_names
+        if name in OPS_TABLE_NAMES or any(name.startswith(p) for p in OPS_TABLE_PREFIXES)
     ]
     return sorted(targets)
 
 
-def collect_volume_entries(
-    client: WorkspaceClient, volume_root: str
-) -> list[tuple[str, bool]]:
+def collect_volume_entries(client: WorkspaceClient, volume_root: str) -> list[tuple[str, bool]]:
     """Return (path, is_directory) under volume_root in delete order.
 
     Post-order: a directory's children precede the directory itself, so
@@ -228,8 +236,7 @@ def main() -> None:
             print(f"    - {quote_fqn(catalog, schema, name)}")
     else:
         print("    (none)")
-    print(f"\n  Volume files ({len(files)}) and directories ({len(dirs)}) "
-          f"under {volume_root}:")
+    print(f"\n  Volume files ({len(files)}) and directories ({len(dirs)}) under {volume_root}:")
     if volume_entries:
         for path, is_dir in volume_entries:
             print(f"    - {path}{'/' if is_dir else ''}")
