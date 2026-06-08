@@ -15,6 +15,13 @@ a queryable property. Text-to-SQL is the workload that exercises it, and the
 evaluation harness is how the project proves the layer retrieves the right
 slice instead of asserting that it does.
 
+The deliverable is the build and the graph it produces: `dbxcarta-spark` reading
+Unity Catalog and writing the Neo4j semantic layer, on the `dbxcarta-core`
+foundation. The client is how the project proves that layer is worth building,
+not part of what ships. That boundary is why the build path and the validation
+harness are described separately below: one is the product, the other is the
+evidence.
+
 The semantic layer is only useful if it faithfully reflects the catalog it
 describes. That fidelity drives the rest of the design: the data being mapped,
 the semantic layer derived from it, and the bookkeeping that records what each
@@ -106,6 +113,41 @@ build reads, and the semantic layer would start encoding meaning about its own
 exhaust. The ops catalog is the boundary that keeps the layer a model of the
 catalog and nothing else.
 
+## Packages and layer responsibilities
+
+DBxCarta is five packages over a shared, Spark-free core, in three tiers. The
+product builds and serves the semantic layer; operator tooling runs it on
+Databricks; the evaluation and demo tier proves and showcases it. The siblings
+each depend on core but never on one another. The README carries the plain-English
+summary; this section is the precise component breakdown each layer owns.
+
+**The product**
+
+- **Core** owns identifier and path quoting, the single `catalog:layer` parsing
+  rule (`resolve_catalogs`), workspace and secret access, the SQL warehouse
+  runner, the preset capability protocols and `StandardPreset`, the `.env`
+  overlay loader, and the pure table-materialize SQL builders. It pulls in only
+  the Databricks SDK, never Spark, Neo4j, or the job runner. The boundaries are
+  enforced by `tests/boundary/test_import_boundaries.py`.
+- **Spark** owns the concrete Unity Catalog ingest implementation, the graph
+  contract, verification, the Databricks validators, the preset capability
+  protocols, and the `dbxcarta` / `dbxcarta-ingest` entrypoints.
+
+**Operator tooling**
+
+- **Submit** builds the wheels, uploads them, and submits the spark, client, and
+  materialize jobs. It is the only layer that depends on `databricks-job-runner`,
+  runs on the operator's machine, and is never installed on the cluster.
+
+**Evaluation & demo**
+
+- **Client** owns the retrieval primitives, SQL parsing and read-only guards,
+  result comparison, `ClientSettings`, and the `dbxcarta.client.eval` harness.
+- **Materialize** is the serverless Spark shell that runs core's materialize SQL
+  builders: core builds the `CREATE` / `INSERT` / foreign-key SQL as pure
+  strings, and this layer owns the `SparkSession` and the bounded thread pool
+  that runs them.
+
 ## Building the layer
 
 The build path is server-side and runs in Spark. `dbxcarta-spark` reads Unity
@@ -119,6 +161,19 @@ logic is native Spark and never a Python UDF, are in
 [`best-practices.md`](best-practices.md). One current limitation: post-write
 verify keys off the single anchor catalog, so in a multi-catalog build the other
 catalogs are written but not independently verified.
+
+Three architectural choices shape that path. It is a **single submission**: one
+installed wheel entrypoint drives extract, embed, sample, FK discovery, and the
+Neo4j write as one Databricks Job, with scope controlled by per-label embedding
+flags rather than by separate jobs. It is **materialize-once**: enriched node
+DataFrames are written to a Delta staging table between transform and load, so
+the failure-rate aggregation and the Neo4j write both read the staged rows
+without re-invoking `ai_query`, and each row is embedded exactly once per run.
+And the write boundary is **fail-closed**: a partial graph is a wrong graph, so a
+failed run leaves no half-written layer rather than a silently incomplete one.
+The operational tuning these choices imply, Neo4j connector partitioning and
+batch size, preflight grant checks, secret handling, and run observability, is in
+[`best-practices.md`](best-practices.md).
 
 ### How we validate
 
@@ -138,17 +193,11 @@ and both clear `no_context`; the cap is what turns `schema_dump` from a "paste
 everything" strawman into a real competitor for the same budget.
 
 The harness caches generation so iterating on retrieval and prompts does not pay
-model latency every run. Each arm generates SQL for all questions in one batched
-`ai_query` pass, materialized to a `client_staging_<arm>` Delta table in the ops
-catalog that doubles as the cache. A write stamps an `_input_hash` over the
-ordered endpoint, arm, and question prompts; an unchanged re-run reads the prior
-responses and skips inference, while any change to a prompt, the retrieved
-context, the question set, or the endpoint name forces fresh generation.
-`DBXCARTA_CLIENT_REFRESH=true` covers the one case the hash cannot see, a model
-swap behind a stable endpoint name. The tables use stable names and overwrite
-mode, so logical size stays at one run's worth of rows per arm; Delta retains
-tombstoned files until a `VACUUM`, and at evaluation scale that is a deliberate
-non-decision rather than a missing retention policy.
+model latency every run, hashing the prompts so an unchanged re-run reuses prior
+responses and any change forces fresh generation. The cache table layout, the
+`_input_hash` rules, the `DBXCARTA_CLIENT_REFRESH` override, and the Delta
+retention stance are reference detail in
+[`public-api.md`](public-api.md#client-evaluation-harness).
 
 The scores are only trustworthy if the grader is. When a generated query is
 correct but the harness grades it wrong, the fix is the grader, never a prompt

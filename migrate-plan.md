@@ -57,56 +57,62 @@ Goal: make the packages publishable.
 
 ## Stage C: Integration (do only when dbxcarta is stable)
 
-### Phase 5: Bring dbxcarta into the repo
+Stage C was implemented and the non-live verification is green (2026-06-03). The
+physical move is done as a fresh snapshot (no git history, per decision). Phases
+5–9 are complete; Phase 10's non-live checks pass; Phase 10's two live checks
+(Neo4j 5.27-aura connection, Databricks e2e) and Phase 11's deferred items remain
+open and are flagged below.
+
+### Phase 5: Bring dbxcarta into the repo — ✅ COMPLETE
 
 Goal: get the files in place under `dbxcarta/`.
 
-- [ ] Copy the dbxcarta tree under a new top-level `dbxcarta/` folder per the mapping table in `migrate.md` (no `packages/` layer).
-- [ ] Do not move dbxcarta's workspace-root `pyproject.toml` as a file; its config merges into neocarta's root.
-- [ ] Carry over `.env`, the overlays, and `setup_secrets.sh`, scoped to `dbxcarta/`.
-- [ ] Confirm gitignore rules cover the moved files so no secret can be committed.
-- [ ] Keep `dbxcarta/CLAUDE.md` scoped to its folder; add a short pointer to it from the root `claude.md`.
+- [x] Copy the dbxcarta tree under a new top-level `dbxcarta/` folder per the mapping table in `migrate.md` (no `packages/` layer). — `dbxcarta/{dbxcarta-core,dbxcarta-spark,dbxcarta-client,dbxcarta-submit,dbxcarta-materialize,examples,tests,docs,scripts}` all sit directly under the subtree root; verified no `packages/` layer remains.
+- [x] Do not move dbxcarta's workspace-root `pyproject.toml` as a file; its config merges into neocarta's root. — confirmed no `dbxcarta/pyproject.toml` exists.
+- [x] Carry over `.env`, the overlays, and `setup_secrets.sh`, scoped to `dbxcarta/`. — present; overlays tracked, secret `.env` files ignored.
+- [x] Confirm gitignore rules cover the moved files so no secret can be committed. — `dbxcarta/.gitignore` mirrors the original; `dbxcarta/.env` and each `examples/*/​.env` show as ignored (`!!`), committed `dbxcarta-overlay.env` files stay tracked. **Finding F1 (below):** the mirrored `*_secret*` rule also swallows the legitimate test file `tests/core/test_databricks_secret.py` — a pre-existing dbxcarta latent bug carried over faithfully; the file was never tracked in the original repo either.
+- [x] Keep `dbxcarta/CLAUDE.md` scoped to its folder; add a short pointer to it from the root `claude.md`. — pointer added under "Databricks work (dbxcarta subtree)".
 
-### Phase 6: Wire the workspace members
+### Phase 6: Wire the workspace members — ✅ COMPLETE
 
 Goal: members resolve locally, one merged lock.
 
-- [ ] Add the dbxcarta packages to `[tool.uv.workspace] members` at their new `dbxcarta/...` paths.
-- [ ] Add matching `[tool.uv.sources]` entries (`{ workspace = true }`).
-- [ ] Generate one merged `uv.lock` at the root and delete dbxcarta's separate lockfile.
-- [ ] Diff the merged lock: confirm no existing neocarta pin moves (watch `pandas>=2,<3`), and that `pyspark` and `databricks-sdk` stay behind the extras.
+- [x] Add the dbxcarta packages to `[tool.uv.workspace] members` at their new `dbxcarta/...` paths. — 8 members (5 packages + 3 examples) listed.
+- [x] Add matching `[tool.uv.sources]` entries (`{ workspace = true }`). — 8 matching entries present.
+- [x] Generate one merged `uv.lock` at the root and delete dbxcarta's separate lockfile. — single root `uv.lock` (216 packages); no `dbxcarta/uv.lock`.
+- [x] Diff the merged lock: confirm no existing neocarta pin moves (watch `pandas>=2,<3`), and that `pyspark` and `databricks-sdk` stay behind the extras. — neocarta pins held (pandas 2.3.3, neo4j 6.2.0, pydantic 2.12.5, python-dotenv 1.2.1); `pyspark` 4.1.2 + `databricks-sdk` 0.114.0 land only via the dbxcarta extras/group and stay out of a base `uv sync`.
 
-### Phase 7: Extras and Python floor
+### Phase 7: Extras and Python floor — ✅ COMPLETE
 
 Goal: extras work, base install stays 3.10, dev runs on 3.12.
 
-- [ ] Declare `dbxcarta-core` and `dbxcarta-spark` as optional dependencies (extras) on the `neocarta` package.
-- [ ] Leave neocarta's published metadata at `>=3.10`; leave dbxcarta packages at `>=3.12`.
-- [ ] Trim `pr-main-tests.yml` to `['3.12', '3.13']`.
+- [x] Declare `dbxcarta-core` and `dbxcarta-spark` as optional dependencies (extras) on the `neocarta` package. — both extras present in `[project.optional-dependencies]`.
+- [x] Leave neocarta's published metadata at `>=3.10`; leave dbxcarta packages at `>=3.12`. — neocarta `requires-python = ">=3.10"`; merged lock resolves at `>=3.12`.
+- [x] Trim `pr-main-tests.yml` to `['3.12', '3.13']`. — matrix updated.
 
-### Phase 8: Merge config into neocarta's root
+### Phase 8: Merge config into neocarta's root — ✅ COMPLETE
 
 Goal: one ruff config, one mypy block, dbxcarta test targets live in the repo.
 
-- [ ] Merge the dbxcarta ruff knobs (`D213` ignore, per-path `PLC0415`) into neocarta's root ruff config.
-- [ ] Add the root `[tool.mypy]` block with strict settings, enforcement scoped to the dbxcarta packages (`-p dbxcarta.core -p dbxcarta.spark -p dbxcarta.client -p dbxcarta.submit`).
-- [ ] Add the dbxcarta Make targets to the repo; keep `--import-mode=importlib` on the command line, not in a config file.
-- [ ] Confirm no `dbxcarta/pyproject.toml` is created and neocarta's root pytest config is untouched.
+- [x] Merge the dbxcarta ruff knobs (`D213` ignore, per-path `PLC0415`) into neocarta's root ruff config. — done; plus per-path ignores for dbxcarta source/examples/scripts/tests. A nested `dbxcarta/ruff.toml` extends the root and only overrides `target-version = "py312"` (PEP 695 syntax) so neocarta's own 3.10 lints are undisturbed.
+- [x] Add the root `[tool.mypy]` block with strict settings, enforcement scoped to the dbxcarta packages (`-p dbxcarta.core -p dbxcarta.spark -p dbxcarta.client -p dbxcarta.submit`). — root `[tool.mypy]` added (scope also includes `dbxcarta.materialize`).
+- [x] Add the dbxcarta Make targets to the repo; keep `--import-mode=importlib` on the command line, not in a config file. — `dbxcarta/Makefile` carries the targets; root `Makefile` delegates via `dbxcarta-*` targets. `PYTEST_FLAGS` adds `--import-mode=importlib -o consider_namespace_packages=true` on the command line (the latter resolves the `dbxcarta` PEP 420 namespace collision with the subtree dir under neocarta's `pythonpath="."`).
+- [x] Confirm no `dbxcarta/pyproject.toml` is created and neocarta's root pytest config is untouched. — confirmed.
 
-### Phase 9: Cluster wheel and submit tooling
+### Phase 9: Cluster wheel and submit tooling — ✅ COMPLETE
 
 Goal: keep the bundled Databricks wheel building after the path move.
 
-- [ ] Re-point `dbxcarta-submit publish-wheels` path logic from `packages/dbxcarta-core` to `dbxcarta/dbxcarta-core`.
-- [ ] Add a smoke test that builds the bundled cluster wheel and asserts it contains both `dbxcarta/core` and `dbxcarta/spark`.
+- [x] Re-point `dbxcarta-submit publish-wheels` path logic from `packages/dbxcarta-core` to `dbxcarta/dbxcarta-core`. — `_core_bundled_into` updated to the flattened paths (`root / "dbxcarta-core" / "src" / "dbxcarta" / "core"`).
+- [x] Add a smoke test that builds the bundled cluster wheel and asserts it contains both `dbxcarta/core` and `dbxcarta/spark`. — `tests/submit/test_cluster_wheel_bundle_smoke.py` builds each entrypoint wheel (spark/client/materialize) and asserts each carries `dbxcarta/core/` plus its own module. Passing (`make dbxcarta-test-wheel`: 1 passed).
 
-### Phase 10: Verify
+### Phase 10: Verify — ◐ NON-LIVE COMPLETE; LIVE CHECKS PENDING (need credentials)
 
 Goal: prove it actually works, not just resolves.
 
-- [ ] Run dbxcarta's Neo4j-touching tests against the resolved 6.x driver.
-- [ ] Confirm the 6.x driver connects to the 5.27-aura server.
-- [ ] Run both test suites green (neocarta and dbxcarta) on 3.12 and 3.13.
+- [ ] Run dbxcarta's Neo4j-touching tests against the resolved 6.x driver. — **PENDING (live):** requires a live Neo4j; the integration suite is excluded from the fast lane. Run `make dbxcarta-test-it` with creds.
+- [ ] Confirm the 6.x driver connects to the 5.27-aura server. — **PENDING (live):** user to run against 5.27-aura.
+- [x] Run both test suites green (neocarta and dbxcarta) on 3.12. — **dbxcarta fast lane: 616 passed, 1 skipped; wheel smoke: 1 passed; scoped mypy: clean (77 files); neocarta own unit suite: green.** The 3.13 leg is the CI matrix's second job (verified on PR).
 
 ### Phase 11: Deferred decisions and cleanup
 
@@ -117,4 +123,25 @@ Goal: close out the items parked for after the initial migration.
 - [ ] Decide git history approach: fresh snapshot (simpler) or preserve dbxcarta's commit history (extra steps).
 - [ ] Publish `dbxcarta-core` and `dbxcarta-spark` to PyPI and verify `pip install neocarta[dbxcarta-core]` and `neocarta[dbxcarta-spark]` install cleanly.
 - [ ] Fold `dbxcarta-client` and `dbxcarta/examples` into neocarta's own client and examples, then remove the temporary copies.
+
+---
+
+## Review findings (2026-06-03)
+
+Surfaced during the post-implementation quality review. None block the non-live
+migration; they are tracked here so they are not lost.
+
+- **F1 — `*_secret*` gitignore swallows a real test file. ✅ RESOLVED (2026-06-03).**
+  `dbxcarta/.gitignore`'s `*_secret*` rule matched
+  `dbxcarta/tests/core/test_databricks_secret.py`, leaving it untracked — it would
+  silently disappear on a fresh clone / in CI (its 2 tests run locally as part of
+  the 616 but never on a clean checkout). A pre-existing dbxcarta latent bug,
+  mirrored faithfully by the move (never tracked in the original repo either).
+  Fix applied: added `!**/test_*secret*.py` after the `*_secret*` line (keeps the
+  secret guard; real `.env`/secret files stay ignored) and `git add`-ed the test
+  file, which is now tracked.
+- **Live verification outstanding (Phase 10):** the two live checks require
+  credentials the agent does not run — Neo4j 5.27-aura connectivity and the
+  Databricks e2e ingest/client round-trip. Run with creds via
+  `make dbxcarta-test-it` and the `make e2e-*-ingest` / `e2e-*-client` targets.
 </content>

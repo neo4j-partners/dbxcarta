@@ -100,6 +100,10 @@ These were agreed during the walkthrough and fold into the steps above.
 
 - **Tests run independently first.** Neocarta drives tests with Make targets; dbxcarta uses pytest. Keep them runnable independently at first (new dbxcarta Make targets), then wire dbxcarta into the workspace test flow once it is stable.
 - **Gate exemption is intentional (decision #6).** While scoped to `dbxcarta/`, dbxcarta code is exempt from neocarta's per-PR CHANGELOG-update and numpy-docstring gates. Record this exemption explicitly so it reads as deliberate. Revisit at full integration.
-- **Preserve git history if it matters.** Decide whether to bring dbxcarta's commit history into neocarta or move it in as a fresh snapshot. The snapshot is simpler; preserving history takes extra steps.
+- **Preserve git history if it matters.** Decided: **fresh snapshot, no history preserved** (2026-06-03). The tree was copied/updated in place rather than grafted, per the simpler option.
+
+## Status (2026-06-03)
+
+Stage A and Stage B are complete. Stage C (Phases 5–9) is implemented as a fresh snapshot, and Phase 10's non-live verification is green: dbxcarta fast lane 616 passed / 1 skipped, cluster-wheel bundle smoke test passing, scoped mypy clean across 77 files, and neocarta's own unit suite still green (no regression). Outstanding: Phase 10's two live checks (Neo4j 5.27-aura connectivity, Databricks e2e) need credentials the user runs; Phase 11's deferred items remain open; and review finding F1 (the `*_secret*` gitignore rule hiding `tests/core/test_databricks_secret.py`) awaits a go-ahead before fixing. See `migrate-plan.md` for the phase-by-phase status and findings.
 </content>
 </invoke>
