@@ -4,6 +4,9 @@ This document records design trade-offs the pipeline deliberately makes,
 in plain terms. It is the place to look when a behavior seems surprising
 and you want to know whether it was a choice and why.
 
+For the higher-level view of what FK discovery does and why it exists, see
+[`../explanation/fk-discovery.md`](../explanation/fk-discovery.md).
+
 ## Key-like columns
 
 ### What they are

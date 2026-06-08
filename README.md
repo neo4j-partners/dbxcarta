@@ -39,6 +39,11 @@ and the validation model are documented in
 [`docs/reference/architecture.md`](docs/reference/architecture.md), the
 canonical architecture reference.
 
+For the full documentation map and a suggested reading order, see
+[`docs/README.md`](docs/README.md). For why a graph layer earns its place over
+Unity Catalog alone, see
+[`docs/explanation/why-semantic.md`](docs/explanation/why-semantic.md).
+
 ## Packages
 
 dbxcarta is five packages in three tiers over a shared, Spark-free core. The

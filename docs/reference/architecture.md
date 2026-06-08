@@ -15,6 +15,10 @@ a queryable property. Text-to-SQL is the workload that exercises it, and the
 evaluation harness is how the project proves the layer retrieves the right
 slice instead of asserting that it does.
 
+The fuller case for choosing a graph layer over querying `information_schema`
+directly or relying on a curated Genie space is in
+[`../explanation/why-semantic.md`](../explanation/why-semantic.md).
+
 The deliverable is the build and the graph it produces: `dbxcarta-spark` reading
 Unity Catalog and writing the Neo4j semantic layer, on the `dbxcarta-core`
 foundation. The client is how the project proves that layer is worth building,
@@ -89,7 +93,9 @@ and are discovered from declared constraints and metadata heuristics, so a join
 path the catalog never declared is still navigable and ranked by how much to
 trust it. The `layer` property under graph contract v1.1
 records each table's medallion tier, so a retriever can prefer the curated gold
-table over a rawer silver one when both could answer a question.
+table over a rawer silver one when both could answer a question. The exact node
+labels, properties, relationship types, indexes, and the versioned contract that
+clients read are in [`../schema/SCHEMA.md`](../schema/SCHEMA.md).
 
 This plane is the one the client reads at query time, and it is regenerable by
 design. Because Unity Catalog is the source of truth, the semantic layer can be
@@ -158,7 +164,10 @@ semantic layer to Neo4j behind a fail-closed boundary, then records its run
 summary in the ops catalog. The pipeline internals are documented in
 [`pipeline.md`](pipeline.md); the rules that constrain it, including why rule
 logic is native Spark and never a Python UDF, are in
-[`best-practices.md`](best-practices.md). One current limitation: post-write
+[`best-practices.md`](best-practices.md); how foreign keys are discovered and
+scored, and the trade-offs the inference deliberately makes, are in
+[`../explanation/fk-discovery.md`](../explanation/fk-discovery.md) and
+[`design-decisions.md`](design-decisions.md). One current limitation: post-write
 verify keys off the single anchor catalog, so in a multi-catalog build the other
 catalogs are written but not independently verified.
 
