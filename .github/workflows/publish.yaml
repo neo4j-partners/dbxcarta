@@ -27,9 +27,14 @@ jobs:
           python-version-file: .python-version
 
       - name: Build wheels and sdists
-        # Example packages (dense-schema, finance-genie, schemapile) are workspace
-        # members but are not published to PyPI — only client and spark are released.
+        # Core, client, and spark are the published distributions. client and
+        # spark both depend on dbxcarta-core, and a normal build of either carries
+        # only its own module (not a bundled core), so core must ship to PyPI for a
+        # clean install to resolve. Example packages (dense-schema, finance-genie,
+        # schemapile) and the operator-local submit/materialize packages are
+        # workspace members but are not published.
         run: |
+          uv build --package dbxcarta-core
           uv build --package dbxcarta-client
           uv build --package dbxcarta-spark
 

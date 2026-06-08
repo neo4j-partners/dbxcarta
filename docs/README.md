@@ -16,6 +16,12 @@ A reading path from why the project exists to how it is built:
 6. [reference/best-practices.md](reference/best-practices.md): the design rules that constrain the pipeline.
 7. [reference/public-api.md](reference/public-api.md): the stable public surfaces and the version contract.
 
+## Tutorials
+
+Step-by-step guides for common tasks.
+
+- [tutorials/add-a-data-source.md](tutorials/add-a-data-source.md): add a new integration end to end, covering the preset, the overlay, getting data into Unity Catalog, ingest, and how to test and verify it.
+
 ## Reference
 
 Stable technical references for the current system.
