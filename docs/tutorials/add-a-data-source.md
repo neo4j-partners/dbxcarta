@@ -19,6 +19,41 @@ use the operator-only `dbxcarta-submit` CLI, and does not have a sibling dbxcart
 checkout. If you are adding an integration inside the dbxcarta repo itself, that
 is a different workflow and not what this guide covers.
 
+## Quick start: copy and adapt
+
+The fastest way to a new consumer is to copy the worked example and edit three
+config files. The Python code is config-driven, so no catalog name is baked into
+it, and `databricks.yml` holds no dbxcarta config (it reads the overlay at run
+time), so there is no bundle to edit for a new data source.
+
+```bash
+# From your repo, copy the reference subproject:
+cp -r <path-to>/graph-on-databricks/finance-genie/dbxcarta <consumer>/dbxcarta
+cd <consumer>/dbxcarta
+```
+
+Then edit, in order of importance:
+
+1. **`dbxcarta-overlay.env`** (the single source of dbxcarta config): set
+   `DBXCARTA_CATALOG`, `DBXCARTA_SCHEMAS`, `DATABRICKS_VOLUME_PATH`, the two
+   `DBXCARTA_SUMMARY_*` paths, `DBXCARTA_CLIENT_QUESTIONS`, and
+   `DATABRICKS_SECRET_SCOPE` to your catalog and scope. Keep it secret-free.
+2. **`.env`** (copy from `.env.sample`): your `DATABRICKS_PROFILE`,
+   `DATABRICKS_WAREHOUSE_ID`, `DATABRICKS_CLUSTER_ID`, and the `NEO4J_*` values
+   for local tooling. This file also carries its own copy of the catalog values
+   for the local demo, so match them to the overlay.
+3. **`questions.json`**: your question set, with `reference_sql` retargeted to
+   your catalog on the gradable questions.
+
+Then provision the secret scope (`./setup_secrets.sh --profile <profile>`) and
+run the flow. Parts 3 through 5 below cover each of these in full.
+
+Optional, cosmetic: rename the Python package `finance_genie_dbxcarta` to
+`<consumer>_dbxcarta` (and update `pyproject.toml`, `scripts/run_jobs.py`'s
+job-name constants, and the bundle and job names in `databricks.yml`). Skip it
+and everything still runs; your bundle and jobs just keep the `finance_genie`
+names. The rename is the only reason to touch `databricks.yml` at all.
+
 ## What you are building
 
 A consumer subproject has four moving parts:
