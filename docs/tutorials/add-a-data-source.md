@@ -1,86 +1,149 @@
-# Adding a New Data Source
+# Adding a New Data Source as an External Client
 
-This is a step-by-step guide to standing up a new integration in dbxcarta: a new
-preset, a new set of catalogs to ingest, and the checks that confirm it works.
-It is written for someone who has run an existing example once and wants to add
-their own.
+This is a step-by-step guide to standing up a new data source from **outside** the
+dbxcarta repo: a standalone consumer subproject that depends on dbxcarta as a
+published, versioned library, points the pipeline at your own Unity Catalog
+tables, and runs ingest and evaluation through your own Databricks Asset Bundle.
+It is written for someone who owns a separate repository and wants dbxcarta to
+build a semantic layer over data they already have.
 
-If you have not run an example yet, read one of the example READMEs first
-(`examples/finance-genie/README.md` is the most complete), then come back here.
+The worked example is the `finance-genie/dbxcarta` subproject in
+`graph-on-databricks`:
+<https://github.com/neo4j-partners/graph-on-databricks/tree/main/finance-genie>.
+Read its `dbxcarta/README.md` alongside this guide. Everything below generalizes
+that subproject to a new consumer.
+
+This is the published-library path. It is different from adding an in-repo
+`examples/<name>/` integration: a consumer imports no dbxcarta source, does not
+use the operator-only `dbxcarta-submit` CLI, and does not have a sibling dbxcarta
+checkout. If you are adding an integration inside the dbxcarta repo itself, that
+is a different workflow and not what this guide covers.
 
 ## What you are building
 
-A dbxcarta integration has three moving parts:
+A consumer subproject has four moving parts:
 
-- **An example package**: a small standalone Python package under `examples/<name>/`
-  that owns the configuration for one data source. It exposes a `preset` object
-  and ships a demo question set.
-- **An overlay env file**: `examples/<name>/dbxcarta-overlay.env`, a committed,
-  secret-free file that names the catalogs, schemas, volume, and feature flags
-  for this integration. It is the single source of truth for the integration's
-  dbxcarta config.
-- **The data itself in Unity Catalog**: either tables that already exist in your
-  workspace, or tables you generate from a committed blueprint.
+- **A consumer Python package**: a small standalone package (for example
+  `<consumer>/dbxcarta/`) whose `pyproject.toml` pins dbxcarta by version with no
+  `[tool.uv.sources]`. It exposes a `preset` object, ships a `questions.json`,
+  and carries a read-only local demo CLI.
+- **An overlay env file**: `dbxcarta-overlay.env`, a committed, secret-free file
+  that names the catalog, schema, volume, and feature flags for this data source.
+  It is the single source of truth for the integration's dbxcarta config.
+- **A consumer-owned Databricks Asset Bundle**: a `databricks.yml` with two
+  `python_wheel_task` jobs that run the published `dbxcarta-ingest` and
+  `dbxcarta-client` entry points on a cluster. This replaces `dbxcarta-submit`,
+  which is operator-only, unpublished, and rebuilds wheels from the dbxcarta
+  source tree a consumer does not have.
+- **The data itself in Unity Catalog**: tables an upstream process already owns
+  and populates. A consumer points at existing data. There is no blueprint and
+  no materialize step.
 
-The dbxcarta pipeline reads Unity Catalog metadata, builds a Neo4j semantic
-layer with embeddings and inferred foreign keys, then runs a Text2SQL
-evaluation against it. Your job when adding a data source is to point that
-pipeline at new tables and give it a question set to evaluate.
+The dbxcarta pipeline reads Unity Catalog metadata, builds a Neo4j semantic layer
+with embeddings and inferred foreign keys, then runs a Text2SQL evaluation
+against it. Your job when adding a data source is to point that pipeline at your
+tables, give it a question set, and run the two jobs from your bundle.
 
-## Two kinds of data source
+## How dbxcarta reaches your project
 
-Pick the path that matches where your data comes from. Everything else in this
-guide is shared.
+dbxcarta publishes three packages a consumer pins by version:
 
-- **Point at existing data** (the `finance-genie` pattern). Some upstream
-  project already owns and populates the Unity Catalog tables. You only tell
-  dbxcarta which catalogs and schemas to read. There is no blueprint and no
-  materialize step.
-- **Generate your own data** (the `dense-schema` and `schemapile` pattern). You
-  commit a **blueprint** JSON that describes schemas and tables, then run a
-  shared `materialize` job that creates those Delta tables in your data catalog.
-  Use this when you have no upstream source and want a synthetic or sliced
-  dataset.
+- `dbxcarta-core`: the foundation. `StandardPreset`, the env loader, and the job
+  entry-point plumbing.
+- `dbxcarta-spark`: `SparkIngestSettings`, `run_dbxcarta`, and the `dbxcarta` and
+  `dbxcarta-ingest` console entry points.
+- `dbxcarta-client[graph]`: the Text2SQL evaluation harness, the `dbxcarta-client`
+  entry point, and the Neo4j driver via the `[graph]` extra.
+
+While PyPI publishing is unavailable, these wheels are **vendored** into the
+consumer repo and resolved locally with a relative find-links path. The
+consumer's `pyproject.toml` still pins normal versions with no source overrides,
+so it is identical to the eventual published case. Only where uv looks for the
+wheels changes. See `dbxcarta/docs/reference/simulate-publish.md` for the full
+mechanism, and "Vendored wheels" below for the consumer-side steps.
 
 ## Concepts in one minute
 
-- **Preset**: the `StandardPreset` object your package exposes. It provides two
-  optional hooks the CLI uses: `readiness()` to confirm your catalogs hold data,
-  and `upload_questions()` to push your `questions.json` to the ops volume. The
-  preset carries no config; config lives in the overlay.
-- **Base `.env`**: the repo-root file with shared Databricks infra and the Neo4j
-  secrets. You never edit it per integration.
-- **Overlay**: `examples/<name>/dbxcarta-overlay.env`. Committed, secret-free,
-  per-integration. Selected with `DBXCARTA_ENV_FILE` or `--env-file`. Precedence
-  is process env over overlay over base.
-- **Ops plane**: a catalog, schema, and volume that hold run summaries, the
-  question set, and caches. Created by `bootstrap`. Separate from your data.
-- **Blueprint**: a committed JSON of schemas and tables, used only on the
-  generate-your-own-data path, materialized into Delta tables by the shared
-  `materialize` job.
+- **Preset**: the `StandardPreset` object your package exposes. `StandardPreset`
+  itself is implemented in `dbxcarta-core`, so your `preset.py` only supplies the
+  `questions.json` path; the behavior is inherited from the library. It provides
+  two hooks: `readiness()` to confirm your catalog holds data, and
+  `upload_questions()` to push your `questions.json` to the ops volume. Both run
+  locally through the `dbxcarta preset` CLI only. The cluster jobs never call the
+  preset, so it carries no config; config lives in the overlay.
+- **Overlay**: `dbxcarta-overlay.env`. Committed, secret-free, per-integration.
+  Selected with `DBXCARTA_ENV_FILE` or `--env-file`. It holds dbxcarta-scoped
+  values only: catalog, schema, volume, summary table, embedding flags, client
+  arms, and the per-integration `DATABRICKS_SECRET_SCOPE` (a scope name, not a
+  secret).
+- **Standalone `.env`**: the consumer's own infra and secrets for local tooling
+  (the local demo, readiness checks). It holds the Databricks profile, the
+  warehouse, the cluster ID, and, for local use, the `NEO4J_*` connection
+  values. It is gitignored. Copy it from the committed `.env.sample`.
+- **Consumer DAB**: `databricks.yml`. Two jobs run the published entry points on
+  a preprovisioned classic cluster. It carries no dbxcarta config: `run_jobs.py`
+  forwards the overlay's `KEY=VALUE` pairs to each job at run time, so the overlay
+  is the single source and the two cannot diverge. The entry points parse those
+  pairs into the environment, then fetch `NEO4J_*` from the secret scope.
+- **Vendored wheels**: `dbxcarta-dist/`, a committed directory of dbxcarta wheels
+  plus a committed `uv.toml` find-links. It is the simulated index until dbxcarta
+  is on PyPI, reached both by local `uv sync` and by the cluster jobs.
+- **Secret scope**: a Databricks secret scope holding `NEO4J_URI`,
+  `NEO4J_USERNAME`, and `NEO4J_PASSWORD`. The ingest entry point reads these from
+  the scope itself on the cluster, given the `DATABRICKS_SECRET_SCOPE` parameter.
 
 ## Prerequisites
 
-- A Databricks profile that can create catalogs, schemas, and volumes.
-- A Databricks SQL warehouse ID.
-- Neo4j connection details for the secret scope.
-- The repo synced: `uv sync` from the repo root.
+- A Databricks profile that can read your catalog, deploy bundles, and read
+  secrets.
+- A Databricks SQL warehouse ID for catalog metadata reads and evaluation
+  queries.
+- A preprovisioned classic single-user cluster
+  (`data_security_mode=SINGLE_USER`). Ingest needs it because the Neo4j Spark
+  connector is a task-level Maven library and is not supported on serverless.
+- The upstream tables already present in Unity Catalog.
+- A Neo4j instance, and its connection values, for the secret scope.
 
-## Part 1: Create the example package
+## Part 1: Scaffold the consumer subproject
 
-Copy an existing example and rename it. `dense-schema` is the best starting
-point if you will generate data; `finance-genie` is best if you point at
-existing data.
+The fastest start is to copy the `finance-genie/dbxcarta` layout and rename it.
+Its files are the reference for every step below.
 
-```bash
-# Copy an existing example as your starting layout
-cp -r examples/finance-genie examples/my-source
+```
+<consumer>/dbxcarta/
+├── pyproject.toml              # pinned dbxcarta deps, no source overrides
+├── databricks.yml              # ingest + client jobs (consumer-owned DAB, config-free)
+├── dbxcarta-overlay.env        # committed, secret-free dbxcarta config (single source)
+├── .env.sample                 # standalone local-demo config (copy to .env)
+├── setup_secrets.sh            # provision the Neo4j secret scope from the overlay + .env
+├── questions.json              # eval fixture for your tables
+├── uv.toml                     # committed find-links to ./dbxcarta-dist
+├── dbxcarta-dist/              # vendored dbxcarta wheels (committed)
+├── scripts/refresh_dbxcarta_dist.sh  # maintainer: refresh dbxcarta-dist
+├── scripts/run_jobs.py         # deploy + run ingest then client
+├── src/<consumer>_dbxcarta/
+│   ├── __init__.py             # re-exports `preset`
+│   ├── preset.py               # StandardPreset(questions_file=...)
+│   └── local_demo.py           # read-only local CLI
+└── tests/                      # non-live tests
 ```
 
 Then change the following:
 
-- **Package name** in `examples/my-source/pyproject.toml` and the `src/` folder
-  name (for example `src/dbxcarta_my_source_example/`).
+- **`pyproject.toml`**: pin the three dbxcarta packages by version, with no
+  `[tool.uv.sources]`. This is the whole point of the published-library
+  approach.
+
+  ```toml
+  dependencies = [
+      "dbxcarta-core==1.1.0",
+      "dbxcarta-spark==1.1.0",
+      "dbxcarta-client[graph]==1.1.0",
+      "databricks-sdk>=0.40",
+      "python-dotenv",
+  ]
+  ```
+
 - **`preset.py`** stays a one-liner. It constructs the shared `StandardPreset`
   with the bundled question file:
 
@@ -93,239 +156,276 @@ Then change the following:
   __all__ = ["preset"]
   ```
 
+  `StandardPreset` is defined in `dbxcarta-core`, so `readiness()` and
+  `upload_questions()` come with the library. Your `preset.py` only points it at
+  your `questions.json`. There is nothing to implement here, and nothing about
+  the preset is required by the ingest job.
+
 - **`__init__.py`** re-exports `preset`.
 - **`questions.json`**: your demo question set. Each item is an object with a
   non-empty `question_id` and `question`. Add `reference_sql` for any question
-  you want graded for correctness:
+  you want graded for correctness, targeting your actual catalog and schema:
 
   ```json
   [
     {
-      "question_id": "ms_q01",
-      "question": "How many customers are there?",
+      "question_id": "fg_q01",
+      "question": "How many accounts are there?",
       "notes": "single base table count",
-      "reference_sql": "SELECT COUNT(*) AS customer_count FROM ..."
+      "reference_sql": "SELECT COUNT(*) FROM `graph-enriched-lakehouse`.`graph-enriched-schema`.accounts"
     }
   ]
   ```
 
-Install the package so the CLI can resolve your preset by import path:
+- **`local_demo.py`**: the read-only CLI. It answers one question with graph
+  context locally, with no Databricks job, and allows only `SELECT`, `WITH`, and
+  `EXPLAIN`. Keep its consumer-root anchor pointed at your `questions.json`.
+
+### Vendored wheels
+
+While dbxcarta is not on PyPI, commit a copy of its wheels into `dbxcarta-dist/`
+and point uv at them with a relative find-links path. A maintainer builds the
+wheels in the dbxcarta checkout and refreshes the vendored copy:
 
 ```bash
-# Install the new example package in editable mode
-uv pip install -e examples/my-source/
+# In the dbxcarta checkout (maintainer only):
+uv build --package dbxcarta-core
+uv build --package dbxcarta-spark
+uv build --package dbxcarta-client
+
+# In the consumer subproject:
+./scripts/refresh_dbxcarta_dist.sh   # copies dbxcarta/dist/* into ./dbxcarta-dist
 ```
 
-The preset is now resolvable at `dbxcarta_my_source_example:preset`.
+Commit `dbxcarta-dist/`, `uv.toml`, and `uv.lock`. The find-links path is
+relative, so the lock is portable and a new developer needs only `uv sync`. The
+`uv.toml` is a single line:
 
-## Part 2: Get the data into Unity Catalog
+```toml
+find-links = ["./dbxcarta-dist"]
+```
 
-### Path A: Point at existing data
+When dbxcarta is published to PyPI, delete `uv.toml` and `dbxcarta-dist/`, and the
+same pins resolve from PyPI unchanged.
 
-If an upstream process already created your tables, there is nothing to
-generate. Confirm the catalogs and schemas exist, and note their exact names.
-You will list them in the overlay in Part 3, and readiness in Part 4 will
-confirm each catalog holds a data schema.
+## Part 2: Confirm the data in Unity Catalog
 
-### Path B: Generate your own data from a blueprint
+A consumer points at existing data. An upstream process owns and populates the
+tables, so there is nothing to generate. Confirm the catalog and schema exist,
+and note their exact names. You will list them in the overlay in Part 3, and
+readiness in Part 4 will confirm the catalog holds a data schema.
 
-1. Write a blueprint JSON under `examples/my-source/blueprint/` describing the
-   schemas and tables you want. Commit it. It is the source of truth for the
-   dataset. Existing examples ship one file, for example
-   `blueprint/candidates_500.json`.
-2. Bootstrap and materialize are covered in Part 4. The `materialize` command
-   stages the committed blueprint to the ops volume and submits the shared
-   `dbxcarta-materialize` job, which creates the schemas and Delta tables in the
-   data catalog that `bootstrap` created.
+The same catalog can hold the dbxcarta ops artifacts (the run-summary table, the
+uploaded question set, and the generation cache on the ops volume), so there is
+usually no separate ops catalog to create. The run-summary table is created
+automatically on the first ingest.
 
-Blueprint generation and question generation are example-local concerns. They
-are not part of the `dbxcarta-spark` or `dbxcarta-client` public APIs.
-`materialize` is the one shared product step every generate-your-own example
-uses.
+Generating your own data from a blueprint is an in-repo example concern and is
+not part of the published consumer path.
 
-## Part 3: Configure the overlay
+## Part 3: Configure the overlay and the standalone `.env`
 
-Edit `examples/my-source/dbxcarta-overlay.env`. It is committed and must stay
-secret-free, so never put `NEO4J_*` or tokens in it. The submit path forwards
-these key/value pairs to the cluster as job parameters.
+### The overlay
+
+Edit `dbxcarta-overlay.env`. It is committed and must stay secret-free, so never
+put `NEO4J_*` or tokens in it. The bundle forwards these key/value pairs to the
+cluster as job parameters.
 
 Set at least the following:
 
-- `DATABRICKS_SECRET_SCOPE` — the per-integration secret scope name, for example
-  `dbxcarta-neo4j-my-source`. This is a scope name, not a secret.
-- `DBXCARTA_CATALOG` — the single anchor catalog used for preflight, verify, and
-  ops.
-- `DBXCARTA_CATALOGS` — comma-separated catalogs to ingest. Each entry is
-  `catalog` or `catalog:layer`. Example:
-  `my-source-silver:silver,my-source-gold:gold`.
-- `DBXCARTA_SCHEMAS` — comma-separated bare schema names, or blank to
-  auto-discover every schema in the catalogs.
-- `DATABRICKS_VOLUME_PATH` — the ops volume root, in exact
+- `DATABRICKS_SECRET_SCOPE`: the per-integration secret scope name, for example
+  `dbxcarta-neo4j-<consumer>`. This is a scope name, not a secret.
+- `DBXCARTA_CATALOG`: the catalog the semantic layer is built over.
+- `DBXCARTA_SCHEMAS`: comma-separated bare schema names, or blank to
+  auto-discover every schema in the catalog.
+- `DATABRICKS_VOLUME_PATH`: the ops volume root, in exact
   `/Volumes/<catalog>/<schema>/<volume>` form.
-- `DBXCARTA_SUMMARY_TABLE` — fully qualified `catalog.schema.table` for run
-  history.
-- `DBXCARTA_CLIENT_QUESTIONS` — the volume path your `questions.json` is uploaded
+- `DBXCARTA_SUMMARY_VOLUME` and `DBXCARTA_SUMMARY_TABLE`: the run-summary volume
+  path and the fully qualified `catalog.schema.table` for run history.
+- `DBXCARTA_CLIENT_QUESTIONS`: the volume path your `questions.json` is uploaded
   to.
-- `DBXCARTA_CLIENT_ARMS` — the evaluation arms to run, for example
+- `DBXCARTA_CLIENT_ARMS`: the evaluation arms to run, for example
   `no_context,schema_dump,graph_rag`.
-- `DBXCARTA_TEARDOWN_TARGET` — what `teardown` is allowed to drop, for example
-  `catalog:my-source-data,schema:dbxcarta-catalog.my_source_ops`.
-- The embedding flags you want, for example
-  `DBXCARTA_INCLUDE_EMBEDDINGS_TABLES=true`. For a cheaper first run, enable only
-  the tables flag.
-
-Select the overlay for every dbxcarta command in this session:
-
-```bash
-# Point every dbxcarta command at your overlay for this shell
-export DBXCARTA_ENV_FILE=examples/my-source/dbxcarta-overlay.env
-```
+- The embedding flags and endpoint, for example
+  `DBXCARTA_INCLUDE_EMBEDDINGS_TABLES=true`, `DBXCARTA_EMBEDDING_ENDPOINT`, and
+  `DBXCARTA_EMBEDDING_DIMENSION`. For a cheaper first run, enable only the tables
+  flag.
 
 A selected overlay that does not resolve is a hard error, never a silent
-fallback to base-only. `DATABRICKS_SECRET_SCOPE` has no code default, so a run
-with no overlay fails loudly at config load.
+fallback. `DATABRICKS_SECRET_SCOPE` has no code default, so a run with no overlay
+fails loudly at config load.
 
-## Part 4: Provision and ingest
+### The standalone `.env`
 
-Run these from the repo root. Every step is idempotent, so re-running is safe.
+Copy the committed template and fill in your infra and local secrets:
 
-1. **Bootstrap the ops plane.** Creates the ops catalog, schema, and volume from
-   `DATABRICKS_VOLUME_PATH`. On the generate-your-own path it also creates the
-   data catalog from `DBXCARTA_CATALOG`.
+```bash
+cp .env.sample .env
+```
+
+This file holds the Databricks profile, the warehouse ID, the cluster ID, and,
+for local tooling, the `NEO4J_*` values. It is gitignored and never layered into
+the overlay. Local readiness checks and the local demo read it; the cluster
+jobs do not, since they read secrets from the scope.
+
+## What each stage needs
+
+The pipeline has two cluster jobs (ingest, then eval) plus local helpers. They do
+not share prerequisites, so it helps to see what each one actually requires before
+running anything. The preset hooks (`readiness`, `upload_questions`) are local CLI
+steps, not stages the jobs enforce.
+
+| Stage | Where it runs | What it needs | What it produces |
+|-------|---------------|---------------|------------------|
+| Setup | local | `uv sync` (vendored wheels), the secret scope provisioned, `.env` filled in | a working consumer |
+| Readiness (optional) | local CLI | the warehouse, and `DBXCARTA_CATALOG` from the overlay | confirmation the catalog holds a data schema |
+| Ingest job | cluster | catalog and schema, the ops volume, the warehouse, the secret scope, the embedding endpoint and flags, the classic cluster with the Neo4j Maven connector | the Neo4j semantic layer, embeddings, and the run-summary table |
+| Upload questions | local CLI | `questions.json` and `DBXCARTA_CLIENT_QUESTIONS` from the overlay | `questions.json` on the ops volume |
+| Eval (client) job | cluster | the semantic layer the ingest built, the chat endpoint, the embedding endpoint, and `questions.json` already on the volume | per-arm Text2SQL metrics |
+| Local demo | local | `.env`, and for `ask` the built semantic layer; it reads the bundled `questions.json` from the package, not the volume | one answered question locally |
+
+Two points the table makes explicit:
+
+- **Readiness is an optional preflight, not an ingest gate.** The ingest job never
+  calls the preset. Skip readiness and ingest still runs; it only tells you in
+  advance whether the catalog has data.
+- **Uploading questions is a prerequisite of the eval job, not of ingest.** The
+  client job reads `questions.json` from the volume, so upload it before that job.
+  Ingest ignores `questions.json` entirely.
+
+## Part 4: Provision and run
+
+Run these from the consumer subproject. Every step is idempotent.
+
+1. **Sync.** dbxcarta resolves from the vendored `./dbxcarta-dist`; third-party
+   deps resolve from PyPI.
 
    ```bash
-   uv run dbxcarta-submit bootstrap
+   uv sync
    ```
 
-2. **Materialize the data** (generate-your-own path only). Stages the committed
-   blueprint and runs the serverless materialize job.
-
-   ```bash
-   uv run dbxcarta-submit materialize
-   ```
-
-3. **Provision the Neo4j secret scope.** `setup_secrets.sh` reads the scope name
-   from the overlay and the `NEO4J_*` values from the integration's standalone
-   `.env`.
+2. **Provision the Neo4j secret scope.** Put `NEO4J_URI`, `NEO4J_USERNAME`, and
+   `NEO4J_PASSWORD` into the scope named in the overlay. The consumer repo's
+   `setup_secrets.sh` (modeled on dbxcarta's) reads the scope name from the
+   overlay and the values from the standalone `.env`.
 
    ```bash
    ./setup_secrets.sh --profile <your-profile>
    ```
 
-4. **Check readiness.** Confirms each ingested catalog holds at least one data
-   schema beyond the auto-created `information_schema` and `default`.
+3. **Check readiness (optional).** Confirms the catalog holds at least one data
+   schema beyond the auto-created `information_schema` and `default`. This is a
+   preflight for your own confidence; the ingest job does not require it.
 
    ```bash
-   uv run dbxcarta preset dbxcarta_my_source_example:preset --check-ready
+   uv run dbxcarta preset <consumer>_dbxcarta:preset --check-ready \
+     --env-file dbxcarta-overlay.env
    ```
 
-5. **Upload the question set.** Pushes `questions.json` to
-   `DBXCARTA_CLIENT_QUESTIONS`.
+4. **Upload the question set.** Pushes `questions.json` to
+   `DBXCARTA_CLIENT_QUESTIONS` on the volume. This is a prerequisite of the eval
+   job, which reads questions from that path. It is not needed for ingest, so you
+   can do it any time before the client job.
 
    ```bash
-   uv run dbxcarta preset dbxcarta_my_source_example:preset --upload-questions
+   uv run dbxcarta preset <consumer>_dbxcarta:preset --upload-questions \
+     --env-file dbxcarta-overlay.env
    ```
 
-6. **Build and ship the wheels.** Rebuilds the per-package wheels from current
-   source and ships the bootstrap script.
+5. **Deploy and run the bundle.** The vendored wheels ship to the cluster as
+   `whl:` libraries, so there is no separate wheel-publish step. `run_jobs.py` is
+   the supported path: it reads the overlay, deploys, then runs ingest, then the
+   client after ingest finishes (each `bundle run` blocks), forwarding the overlay
+   plus the warehouse to each job as run-time parameters.
 
    ```bash
-   uv run dbxcarta-submit publish-wheels
+   uv run scripts/run_jobs.py \
+     --cluster-id <cluster-id> --warehouse-id <warehouse-id>
    ```
 
-7. **Submit the ingest job.** Builds the Neo4j semantic layer. Ingest requires a
-   cluster, since the Neo4j connector is not supported on serverless.
+   Add `--target prod`, `--no-deploy` to reuse the last deployment, or
+   `--no-client` to stop after ingest. Running `databricks bundle` by hand works
+   too, but because `databricks.yml` carries no config you must forward the
+   overlay pairs and the warehouse after `--` on each run; a bare run fails loud
+   rather than using stale values.
 
-   ```bash
-   uv run dbxcarta-submit submit-entrypoint ingest
-   ```
+The ingest job runs the `dbxcarta-ingest` entry point: it reads Unity Catalog
+metadata, writes embeddings and the Neo4j semantic graph, and creates the
+run-summary table. The client job runs `dbxcarta-client`: it benchmarks
+`questions.json` across the configured arms.
 
 ## Part 5: Test and verify
 
-- **Verify the semantic layer.** Checks node counts, catalog against graph, and
-  embeddings. Defaults to the most recent successful run.
+- **Run the local demo.** It needs the standalone `.env` and a built semantic
+  layer for the `ask` subcommand, but `questions` and a read-only `sql` query
+  work against the catalog alone.
 
   ```bash
-  uv run dbxcarta verify
+  uv run python -m <consumer>_dbxcarta.local_demo questions
+  uv run python -m <consumer>_dbxcarta.local_demo preflight
+  uv run python -m <consumer>_dbxcarta.local_demo ask --question-id fg_q01 --show-context
   ```
 
-- **Run the client evaluation.** Submits the Text2SQL evaluation across the arms
-  in `DBXCARTA_CLIENT_ARMS`.
+- **Read the client scores.** The client job reports per-arm metrics (attempted,
+  parsed, executed, non_empty, exec_rate, correct_rate) in its job output. The
+  result you are checking for is `graph_rag` matching or beating `schema_dump` on
+  `correct_rate`. The `no_context` arm is the zero-context baseline floor. The
+  three arms are a progression, not three attempts at one task.
+
+- **Run the non-live tests.** They run today against the vendored wheels, with no
+  live Databricks or Neo4j.
 
   ```bash
-  uv run dbxcarta-submit submit-entrypoint client
+  uv run pytest
   ```
 
-- **Read the scores.** The job reports `SUCCESS`, but the per-arm scores are in
-  the job stdout. Print them with the run ID the submit step echoes:
+The local demo and the non-live tests run with only `uv sync`. The ingest and
+client jobs additionally require the upstream catalog populated, the secret scope
+provisioned, and a preprovisioned cluster and warehouse. They cannot complete end
+to end until those are in place.
 
-  ```bash
-  uv run dbxcarta-submit logs <run-id>
-  ```
+## Who does what
 
-  The result you are checking for is `graph_rag` matching or beating
-  `schema_dump` on `correct_rate`. The `no_context` arm is the zero-context
-  baseline floor.
+The flow spans three places. A new developer resolves and runs entirely from the
+consumer subproject; only refreshing the vendored wheels reaches into dbxcarta.
 
-- **Run the project test suites.**
-
-  ```bash
-  make test        # fast unit and light integration suite
-  make test-it     # live integration tests; needs a loaded catalog
-  make test-slow   # slow Spark FK discovery regression guard
-  ```
-
-Once setup is in place, the loop you repeat on every code change is just two
-make targets. Run ingest first, let it finish, then run the client:
-
-```bash
-make e2e-my-source-ingest   # add these targets to the Makefile alongside the others
-make e2e-my-source-client
-```
-
-To add those targets, copy the `e2e-dense-schema-*` block in the `Makefile` and
-change the example name and overlay path.
-
-## Dry runs and cleanup
-
-- **Dry-run bootstrap or materialize** to print the plan without changing
-  anything:
-
-  ```bash
-  uv run dbxcarta-submit bootstrap --dry-run
-  uv run dbxcarta-submit materialize --dry-run
-  ```
-
-- **Tear down** drops only `DBXCARTA_TEARDOWN_TARGET` and requires an explicit
-  confirmation flag, so it never drops silently:
-
-  ```bash
-  uv run dbxcarta-submit teardown --yes-i-mean-it
-  ```
+| Step | Runs in | What it does |
+|------|---------|--------------|
+| (maintainer) Refresh dbxcarta wheels | **dbxcarta** + consumer | Rebuild dbxcarta wheels, then `./scripts/refresh_dbxcarta_dist.sh` and commit `dbxcarta-dist/`. New developers skip this. |
+| Populate the catalog | **upstream pipeline** | Create the data the semantic layer is built over. |
+| Provision the secret scope | **consumer** (`setup_secrets.sh`) | Put `NEO4J_*` in the per-integration scope. |
+| Resolve, configure, run, demo | **consumer subproject** | `uv sync`, the overlay, readiness, upload questions, the bundle jobs, the local demo. |
 
 ## Checklist for a new data source
 
-- [ ] Copied an example, renamed the package and `src/` folder.
+- [ ] Copied the `finance-genie/dbxcarta` layout, renamed the package and `src/`
+      folder.
+- [ ] `pyproject.toml` pins `dbxcarta-core`, `dbxcarta-spark`, and
+      `dbxcarta-client[graph]` by version, with no `[tool.uv.sources]`.
 - [ ] `preset.py` constructs `StandardPreset` with the bundled `questions.json`.
-- [ ] `questions.json` written, with `reference_sql` on the gradable questions.
-- [ ] Package installed with `uv pip install -e examples/my-source/`.
-- [ ] Data is in Unity Catalog, either upstream-owned or materialized from a
-      committed blueprint.
-- [ ] `dbxcarta-overlay.env` set with catalogs, schemas, volume, summary table,
+- [ ] `questions.json` written, with `reference_sql` targeting your catalog on
+      the gradable questions.
+- [ ] Vendored wheels committed in `dbxcarta-dist/`, with `uv.toml` find-links and
+      a committed `uv.lock`.
+- [ ] `dbxcarta-overlay.env` set with catalog, schema, volume, summary table,
       secret scope, client questions, and arms. No secrets in it.
-- [ ] `DBXCARTA_ENV_FILE` exported to the overlay.
-- [ ] Ops plane bootstrapped, secrets provisioned, readiness passes, questions
-      uploaded.
-- [ ] Wheels published, ingest submitted, `verify` passes.
-- [ ] Client evaluation run and scores read from the job logs.
-- [ ] `make e2e-my-source-*` targets added to the Makefile.
+- [ ] `.env` copied from `.env.sample` and filled in for local tooling.
+- [ ] Secret scope provisioned, readiness passes, questions uploaded.
+- [ ] `databricks.yml` deployed; ingest job run, then the client job.
+- [ ] Client scores read from the job output; local demo and non-live tests pass.
 
 ## Where to read more
 
-- `examples/finance-genie/README.md`: the most complete point-at-existing-data
-  walkthrough.
-- `examples/dense-schema/README.md`: the generate-your-own-data and blueprint
-  walkthrough.
+- The reference consumer:
+  <https://github.com/neo4j-partners/graph-on-databricks/tree/main/finance-genie>,
+  and its `dbxcarta/README.md`.
+- `docs/reference/simulate-publish.md`: how a consumer resolves dbxcarta from
+  vendored wheels until PyPI, and how to flip to PyPI.
+- `docs/proposals/published.md`: the published-library consumer design.
+- `docs/reference/public-api.md`: the stable public surfaces and the version
+  contract a consumer pins against.
 - `docs/reference/pipeline.md`: what the ingest pipeline does, stage by stage.
 - `docs/reference/best-practices.md`: the design rules the pipeline must follow.
 - `docs/proposals/env-layering.md`: the full env layering model.
+</content>
+</invoke>
