@@ -1,14 +1,19 @@
 [project]
 name = "dbxcarta-submit"
-version = "1.0.0"
-description = "Operator CLI for building, uploading, and submitting dbxcarta Databricks jobs"
+version = "1.1.0"
+description = "Operator CLI and library for building, uploading, and submitting dbxcarta Databricks jobs"
+readme = "README.md"
 authors = [
     { name = "Ryan Knight" },
 ]
 requires-python = ">=3.12"
+# databricks-job-runner is the only external dependency. dbxcarta-core is NOT
+# listed: the published wheel bundles the core modules submit imports (see
+# scripts/build_submit_wheel.py), so the wheel is self-contained and installs
+# without the unpublished dbxcarta-core distribution. In-repo dev still imports
+# dbxcarta.core through the workspace install, which keeps dbxcarta-core present.
 dependencies = [
     "databricks-job-runner==0.6.2",
-    "dbxcarta-core",
 ]
 
 [project.optional-dependencies]
@@ -22,5 +27,12 @@ dbxcarta = "dbxcarta.submit.cli:main"
 requires = ["uv_build>=0.11.0,<0.12.0"]
 build-backend = "uv_build"
 
+# module-name is the whole ``dbxcarta`` namespace (not just ``dbxcarta.submit``)
+# with namespace packaging, so the published wheel can physically carry the
+# bundled ``dbxcarta/core`` modules alongside ``dbxcarta/submit``. A normal build
+# with no core copied in produces exactly today's ``dbxcarta/submit`` contents;
+# scripts/build_submit_wheel.py copies the curated core subset in first so the
+# self-contained release wheel carries it. Mirrors dbxcarta-materialize.
 [tool.uv.build-backend]
-module-name = "dbxcarta.submit"
+module-name = "dbxcarta"
+namespace = true

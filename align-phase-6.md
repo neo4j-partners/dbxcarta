@@ -362,12 +362,35 @@ Connector `5.4.3_for_spark_3` — versions confirmed by operator). Session live.
     (up from 66.7% — the type/description fix improved the prompt).
   - `graph_rag`: attempted 12, parsed **6**, executed **0**, non_empty 0,
     correct **0.0%**.
-- **ANOMALY for human judgment:** the fatal index error is gone and graph_rag
-  no longer crashes, but it executes 0/12 while schema_dump executes 12/12
-  against the same warehouse. graph_rag generated parseable SQL for only half
-  the questions and none executed. The blocking bug is fixed; this looks like a
-  separate context-quality / retrieval issue, not the index-name crash. Flagged,
-  not silently accepted.
+- **ANOMALY investigated and fixed (2026-06-14):** the 0% was a second,
+  separate bug — the retriever handed the model an **empty context** (the
+  cached `graph_rag.json` showed responses like *"Since no schema context was
+  provided…"* and hallucinated catalogs `financial-fraud-detection`,
+  `silver-catalog`, `global-fraud-demo`). Empty context → half the answers were
+  prose (unparsed: 6/12), the rest SQL against invented tables (executed 0/12).
+  - **Root cause:** a key-space/name-space confusion in `graph_retriever.py`.
+    `_select_schemas` returns the **normalized id-part** `graph_enriched_schema`
+    (a lossy identity key: neocarta `compose_id` lowercases and maps `-`/space
+    → `_`). The code then mapped that back to a true name **only when a schema
+    list was configured**; finance-genie sets no `DBXCARTA_SCHEMAS`, so the
+    normalized `graph_enriched_schema` flowed straight into the `_fetch_columns`
+    and lexical filters, which match on `Schema.name` = the true hyphenated
+    `graph-enriched-schema`. Normalized ≠ true → **0 columns** matched. Proven
+    against the live graph: `s.name IN ['graph_enriched_schema']` → 0 rows;
+    `IN ['graph-enriched-schema']` → 59. `schema_dump` dodged it by filtering on
+    `db.name IN $catalogs` with true catalog names, never touching the id.
+  - **Deeper fix (operator decision: fix the core issue, don't paper over it):**
+    stop deriving a name from a lossy id. New helper
+    `_resolve_true_schema_names` reads the authoritative `Schema.name` from the
+    graph and matches it to the selected key via the canonical
+    `_normalize_id_part`, replacing the `configured_schemas`-dependent mapping.
+    Names now come from name-space, identity stays in key-space. Works whether
+    or not `DBXCARTA_SCHEMAS` is set, so the latent bug is closed for every
+    future integration, not just this one. Two unit tests added
+    (`test_resolve_true_schema_names_*`); neocarta unchanged.
+  - **Re-run after fix:** `graph_rag` attempted 12, parsed 12, executed 12,
+    non_empty 12, correct **100.0%** — now ahead of `schema_dump` (83.3%).
+    Retriever now returns 44 columns with correct hyphenated FQNs.
 
 #### Step 4: full test suite and linters
 
@@ -408,8 +431,9 @@ Grepped code, workflows, and docs. All surviving hits are expected:
 
 ### Summary
 
-**finance-genie end-to-end run, 2026-06-14. Result: PASS with one anomaly
-flagged for human judgment.**
+**finance-genie end-to-end run, 2026-06-14. Result: PASS. The one flagged
+anomaly (graph_rag 0%) was investigated and fixed; graph_rag now scores
+100%.**
 
 - **Ran:** Section 1 provisioning + Steps 1–5. No teardown (as directed); the
   graph and ops plane are left standing for inspection.
@@ -430,11 +454,9 @@ flagged for human judgment.**
 
 **For a human to decide / follow up:**
 
-1. **graph_rag arm scores 0%** (attempted 12, parsed 6, executed 0, correct 0)
-   while schema_dump executes 12/12. The fatal index crash is fixed, but
-   graph_rag still produces no executable SQL. Looks like a context-quality /
-   retrieval issue separate from the index-name bug. Needs investigation before
-   graph_rag can be called usable end to end.
+1. **graph_rag arm — RESOLVED.** Was 0% (empty context from the key/name
+   confusion above); fixed via `_resolve_true_schema_names`. Now 100% correct,
+   44 columns retrieved. See the Step 3 detail. No open action.
 2. **REFERENCES (FK) edges: 0** — confirmed to be the upstream data shape
    (`fk_declared: 0`), not a pipeline fault. Confirm finance-genie genuinely
    declares no foreign keys.

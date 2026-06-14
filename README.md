@@ -257,7 +257,7 @@ Python object:
 
 The operator CLI and the local client read both directly. `dbxcarta ready`
 resolves the catalog list from the loaded overlay and confirms each ingested
-catalog holds a data schema; its logic lives in `dbxcarta.core.readiness`. The
+catalog holds a data schema; its logic lives in `dbxcarta.submit.readiness`. The
 client runs locally and opens `questions.json` straight off local disk at the
 path `DBXCARTA_CLIENT_QUESTIONS` names (by default the file beside the overlay).
 There is no upload step; nothing stages the questions to a Volume anymore.

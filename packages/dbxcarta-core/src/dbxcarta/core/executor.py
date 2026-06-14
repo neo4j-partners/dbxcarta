@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import time
 from typing import TYPE_CHECKING, Any
 
 from databricks.sdk.service.sql import (
     Disposition,
-    ExecuteStatementRequestOnWaitTimeout,
     Format,
     StatementState,
     StatementStatus,
@@ -147,56 +145,6 @@ def execute_ddl(
     if state in (StatementState.FAILED, StatementState.CANCELED):
         return False, _statement_error(status, state)
     return False, f"statement did not complete within {timeout_sec}s (state={state})"
-
-
-def execute_ddl_blocking(
-    ws: WorkspaceClient,
-    warehouse_id: str,
-    statement: str,
-    *,
-    label: str = "",
-    total_timeout_sec: float = 600.0,
-    poll_interval_sec: float = 3.0,
-) -> None:
-    """Execute one statement and block until it reaches a terminal state.
-
-    Unlike :func:`execute_ddl`, this polls ``get_statement`` past the API's 50s
-    synchronous ``wait_timeout`` cap, so a slow ``CREATE TABLE`` or ``INSERT``
-    on a large catalog runs to completion instead of being reported as a
-    spurious timeout. Raises ``RuntimeError`` on a failed statement and
-    ``TimeoutError`` when it does not finish within ``total_timeout_sec``. The
-    ``label`` appears only in error messages.
-    """
-    start = time.monotonic()
-    response = ws.statement_execution.execute_statement(
-        statement=statement,
-        warehouse_id=warehouse_id,
-        wait_timeout="50s",
-        on_wait_timeout=ExecuteStatementRequestOnWaitTimeout.CONTINUE,
-    )
-    statement_id = response.statement_id
-    if statement_id is None:
-        raise RuntimeError(f"no statement id returned for: {label or statement[:80]}")
-
-    status = response.status
-    state = status.state if status else StatementState.SUCCEEDED
-    deadline = start + total_timeout_sec
-    while state in (StatementState.PENDING, StatementState.RUNNING):
-        if time.monotonic() > deadline:
-            raise TimeoutError(
-                f"statement did not complete within {total_timeout_sec:.0f}s:"
-                f" {label or statement[:80]}"
-            )
-        time.sleep(poll_interval_sec)
-        response = ws.statement_execution.get_statement(statement_id)
-        status = response.status
-        state = status.state if status else StatementState.SUCCEEDED
-
-    if state != StatementState.SUCCEEDED:
-        raise RuntimeError(
-            f"statement failed (state={state}): {label or statement[:80]}"
-            f" — {_statement_error(status, state)}"
-        )
 
 
 def split_sql_statements(sql: str) -> list[str]:

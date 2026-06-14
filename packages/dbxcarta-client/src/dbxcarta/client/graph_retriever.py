@@ -140,6 +140,28 @@ def _normalize_id_part(name: str) -> str:
     return name.lower().replace(" ", "_").replace("-", "_")
 
 
+def _resolve_true_schema_names(session: Session, normalized_parts: set[str]) -> list[str]:
+    """Map selected schema id-parts back to their true ``Schema.name`` values.
+
+    A node id is a lossy identity key: ingest lowercases it and collapses
+    spaces and hyphens to underscores (neocarta ``compose_id``), so the true,
+    query-able schema name cannot be reconstructed from the id. Read it from the
+    authoritative ``Schema.name`` property and match it to the selected parts
+    through the same normalization used to build the id. This keeps name lookups
+    in name-space and identity in key-space rather than crossing the two — the
+    bug that left the ``.name``-filtered fetch matching nothing when the schema
+    name was hyphenated and no schema list was configured.
+    """
+    if not normalized_parts:
+        return []
+    result = session.run("MATCH (s:Schema) RETURN DISTINCT s.name AS name")
+    return [
+        row["name"]
+        for row in result
+        if row["name"] and _normalize_id_part(row["name"]) in normalized_parts
+    ]
+
+
 def _question_tokens(question: str) -> list[str]:
     tokens = re.findall(r"[a-zA-Z]+", question.lower())
     return [t for t in tokens if len(t) >= 3 and t not in _STOP_WORDS]
@@ -208,15 +230,14 @@ class GraphRetriever(Retriever):
             col_seed_pairs = _filter_seed_pairs_to_schemas(raw_col_seed_pairs, configured_schemas)
             tbl_seed_pairs = _filter_seed_pairs_to_schemas(raw_tbl_seed_pairs, configured_schemas)
             selected_schemas = _select_schemas(col_seed_pairs, tbl_seed_pairs)
-            # _select_schemas returns normalized id parts. Map them back to the
-            # configured true names so the `.name`-filtered fetch and lexical
-            # queries get the real (possibly hyphenated) schema names.
+            # _select_schemas returns normalized id parts (schema_from_node_id
+            # reads them off the node id, a lossy identity key). The `.name`-
+            # filtered fetch and lexical queries need the real, query-able schema
+            # name, which lives on the Schema node — resolve it from Schema.name
+            # rather than reconstructing it from the id (irreversible) or relying
+            # on a configured schema list (absent on this integration).
             _selected_norm = {_normalize_id_part(s) for s in selected_schemas}
-            selected_true = (
-                [s for s in configured_schemas if _normalize_id_part(s) in _selected_norm]
-                if _selected_norm and configured_schemas
-                else selected_schemas
-            )
+            selected_true = _resolve_true_schema_names(session, _selected_norm)
             active_col_seed_pairs = (
                 _filter_seed_pairs_to_schemas(col_seed_pairs, selected_schemas)
                 if selected_schemas

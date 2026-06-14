@@ -127,13 +127,3 @@ def validate_uc_volume_subpath(value: str, *, label: str = "UC Volume path") -> 
 def validate_serving_endpoint_name(value: str, *, label: str = "serving endpoint") -> str:
     """Validate endpoint names interpolated into ai_query string literals."""
     return validate_identifier(value, label=label)
-
-
-def uc_volume_parts(value: str) -> list[str]:
-    validate_uc_volume_subpath(value)
-    return value.rstrip("/").lstrip("/").split("/")
-
-
-def uc_volume_parent(value: str) -> str:
-    parts = uc_volume_parts(value)
-    return "/" + "/".join(parts[:-1])

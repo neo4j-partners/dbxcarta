@@ -5,6 +5,7 @@ from __future__ import annotations
 from dbxcarta.client.graph_retriever import (
     _fetch_columns,
     _filter_seed_pairs_to_schemas,
+    _resolve_true_schema_names,
     _select_schemas,
 )
 from dbxcarta.client.retriever import ColumnEntry, ContextBundle, JoinLine, Retriever
@@ -348,6 +349,36 @@ def test_fetch_columns_emits_true_hyphenated_name_not_normalized_id() -> None:
     assert columns[0].table_fqn == (
         "`graph-enriched-finance-silver`.`graph-enriched-schema`.`accounts`"
     )
+
+
+def test_resolve_true_schema_names_reads_name_not_id() -> None:
+    """The selected normalized id-part resolves to the true hyphenated name.
+
+    Regression: when the schema name is hyphenated and no schema list is
+    configured, the retriever used to pass the normalized id-part
+    (graph_enriched_schema) into the `.name`-filtered fetch, which matched
+    nothing because Schema.name is graph-enriched-schema. The fix reads the
+    authoritative Schema.name and matches it via the canonical normalization.
+    """
+
+    class SessionStub:
+        def run(self, _query, **_kwargs):
+            return [
+                {"name": "graph-enriched-schema"},
+                {"name": "other-schema"},
+                {"name": None},
+            ]
+
+    result = _resolve_true_schema_names(SessionStub(), {"graph_enriched_schema"})
+    assert result == ["graph-enriched-schema"]
+
+
+def test_resolve_true_schema_names_empty_selection_skips_query() -> None:
+    class SessionStub:
+        def run(self, _query, **_kwargs):  # pragma: no cover - must not run
+            raise AssertionError("should not query the graph for an empty selection")
+
+    assert _resolve_true_schema_names(SessionStub(), set()) == []
 
 
 def test_filter_seed_pairs_matches_hyphenated_configured_schema() -> None:
