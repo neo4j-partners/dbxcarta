@@ -111,10 +111,11 @@ published case. Only where uv looks for the wheels changes. See
   `questions.json` directly. There is no per-integration Python object to publish.
   The cluster jobs never call them; config lives in the overlay.
 - **Overlay**: `dbxcarta-overlay.env`. Committed, secret-free, per-integration.
-  Selected with `DBXCARTA_ENV_FILE` or `--env-file`. It holds dbxcarta-scoped
-  values only: catalog, schema, volume, summary table, embedding flags, client
-  arms, and the per-integration `DATABRICKS_SECRET_SCOPE` (a scope name, not a
-  secret).
+  Selected with `DBXCARTA_ENV_FILE` or `--env-file`. It holds the operator/client
+  `DBXCARTA_*` values and the `NEOCARTA_DATABRICKS_*` ingest contract: catalog,
+  schemas, volume, embedding flags, client arms, and the per-integration secret
+  scope (a scope name, not a secret), set as both `DATABRICKS_SECRET_SCOPE` and
+  `NEOCARTA_DATABRICKS_SECRET_SCOPE`.
 - **Standalone `.env`**: the consumer's own infra and secrets for local tooling
   (the local demo, readiness checks). It holds the Databricks profile, the
   warehouse, the cluster ID, and, for local use, the `NEO4J_*` connection
@@ -124,12 +125,14 @@ published case. Only where uv looks for the wheels changes. See
   forwards the overlay's `KEY=VALUE` pairs to each job at run time, so the overlay
   is the single source and the two cannot diverge. The entry points parse those
   pairs into the environment, then fetch `NEO4J_*` from the secret scope.
-- **Vendored wheels**: `dbxcarta-dist/`, a committed directory of dbxcarta wheels
-  plus a committed `uv.toml` find-links. It is the simulated index until dbxcarta
-  is on PyPI, reached both by local `uv sync` and by the cluster jobs.
+- **Vendored wheels**: `dbxcarta-dist/`, a committed directory of the dbxcarta
+  wheels and the neocarta connector wheel plus a committed `uv.toml` find-links.
+  It is the simulated index until those projects are on PyPI, reached both by
+  local `uv sync` and by the cluster jobs.
 - **Secret scope**: a Databricks secret scope holding `NEO4J_URI`,
-  `NEO4J_USERNAME`, and `NEO4J_PASSWORD`. The ingest entry point reads these from
-  the scope itself on the cluster, given the `DATABRICKS_SECRET_SCOPE` parameter.
+  `NEO4J_USERNAME`, and `NEO4J_PASSWORD`. The neocarta ingest entry point reads
+  these from the scope itself on the cluster, given the
+  `NEOCARTA_DATABRICKS_SECRET_SCOPE` parameter.
 
 ## Prerequisites
 
@@ -209,18 +212,21 @@ Then change the following:
 
 ### Vendored wheels
 
-While dbxcarta is not on PyPI, commit a copy of its wheels into `dbxcarta-dist/`
-and point uv at them with a relative find-links path. A maintainer builds the
-wheels in the dbxcarta checkout and refreshes the vendored copy:
+While dbxcarta and neocarta are not on PyPI, commit a copy of their wheels into
+`dbxcarta-dist/` and point uv at them with a relative find-links path. A
+maintainer builds the dbxcarta wheels in the dbxcarta checkout and the neocarta
+connector wheel in the neocarta checkout, then refreshes the vendored copy:
 
 ```bash
 # In the dbxcarta checkout (maintainer only):
 uv build --package dbxcarta-core
-uv build --package dbxcarta-spark
 uv build --package dbxcarta-client
 
+# In the neocarta checkout (maintainer only):
+uv build --wheel   # the neocarta connector wheel, databricks-spark extra
+
 # In the consumer subproject:
-./scripts/refresh_dbxcarta_dist.sh   # copies dbxcarta/dist/* into ./dbxcarta-dist
+./scripts/refresh_dbxcarta_dist.sh   # copies the built wheels into ./dbxcarta-dist
 ```
 
 Commit `dbxcarta-dist/`, `uv.toml`, and `uv.lock`. The find-links path is
@@ -241,10 +247,12 @@ tables, so there is nothing to generate. Confirm the catalog and schema exist,
 and note their exact names. You will list them in the overlay in Part 3, and
 readiness in Part 4 will confirm the catalog holds a data schema.
 
-The same catalog can hold the dbxcarta ops artifacts (the run-summary table, the
-uploaded question set, and the generation cache on the ops volume), so there is
-usually no separate ops catalog to create. The run-summary table is created
-automatically on the first ingest.
+The same catalog can hold the dbxcarta ops artifacts (the per-run
+`summary_<run_id>.json` reports on the ops volume, the uploaded question set, and
+the client generation cache), so there is usually no separate ops catalog to
+create. neocarta writes the run summary as a JSON report to the summary volume;
+the client's generation-cache tables are created automatically on the first eval
+run.
 
 Generating your own data from a blueprint is an in-repo example concern and is
 not part of the published consumer path.
@@ -257,25 +265,40 @@ Edit `dbxcarta-overlay.env`. It is committed and must stay secret-free, so never
 put `NEO4J_*` or tokens in it. The bundle forwards these key/value pairs to the
 cluster as job parameters.
 
-Set at least the following:
+The overlay carries two sets of keys. The neocarta ingest wheel reads only its
+own `NEOCARTA_DATABRICKS_*` contract; the operator helpers and the client read the
+`DBXCARTA_*` / `DATABRICKS_*` keys. Set both sets so the same scope and catalog
+reach each side. Set at least the following:
+
+Operator and client keys:
 
 - `DATABRICKS_SECRET_SCOPE`: the per-integration secret scope name, for example
   `dbxcarta-neo4j-<consumer>`. This is a scope name, not a secret.
-- `DBXCARTA_CATALOG`: the catalog the semantic layer is built over.
-- `DBXCARTA_SCHEMAS`: comma-separated bare schema names, or blank to
-  auto-discover every schema in the catalog.
+- `DBXCARTA_CATALOG`: the catalog readiness and provisioning anchor on.
 - `DATABRICKS_VOLUME_PATH`: the ops volume root, in exact
   `/Volumes/<catalog>/<schema>/<volume>` form.
-- `DBXCARTA_SUMMARY_VOLUME` and `DBXCARTA_SUMMARY_TABLE`: the run-summary volume
-  path and the fully qualified `catalog.schema.table` for run history.
 - `DBXCARTA_CLIENT_QUESTIONS`: the volume path your `questions.json` is uploaded
   to.
 - `DBXCARTA_CLIENT_ARMS`: the evaluation arms to run, for example
   `no_context,schema_dump,graph_rag`.
-- The embedding flags and endpoint, for example
-  `DBXCARTA_INCLUDE_EMBEDDINGS_TABLES=true`, `DBXCARTA_EMBEDDING_ENDPOINT`, and
-  `DBXCARTA_EMBEDDING_DIMENSION`. For a cheaper first run, enable only the tables
-  flag.
+
+neocarta ingest contract (the ingest job reads these):
+
+- `NEOCARTA_DATABRICKS_SECRET_SCOPE`: the same scope name as above; neocarta reads
+  `NEO4J_*` from it on the cluster.
+- `NEOCARTA_DATABRICKS_CATALOG` and `NEOCARTA_DATABRICKS_CATALOGS`: the anchor
+  catalog and the `catalog:layer` list folded into one graph.
+- `NEOCARTA_DATABRICKS_SCHEMAS`: comma-separated bare schema names, or blank to
+  auto-discover every schema in the catalog.
+- The embedding flags and endpoint:
+  `NEOCARTA_DATABRICKS_INCLUDE_EMBEDDINGS_TABLES=true` (and the column/schema/
+  database flags), `NEOCARTA_DATABRICKS_EMBEDDING_ENDPOINT`, and
+  `NEOCARTA_DATABRICKS_EMBEDDING_DIMENSION`. For a cheaper first run, enable only
+  the tables flag.
+- `NEOCARTA_DATABRICKS_EMBEDDING_STAGING_VOLUME`: required whenever any
+  include-embeddings flag is on (inline mode stages here).
+- `NEOCARTA_DATABRICKS_SUMMARY_VOLUME`: where each detached run writes its
+  `summary_<run_id>.json` report.
 
 A selected overlay that does not resolve is a hard error, never a silent
 fallback. `DATABRICKS_SECRET_SCOPE` has no code default, so a run with no overlay
@@ -305,7 +328,7 @@ are local CLI steps, not stages the jobs enforce.
 |-------|---------------|---------------|------------------|
 | Setup | local | `uv sync` (vendored wheels), the secret scope provisioned, `.env` filled in | a working consumer |
 | Readiness (optional) | local CLI | the warehouse, and `DBXCARTA_CATALOG` from the overlay | confirmation the catalog holds a data schema |
-| Ingest job | cluster | catalog and schema, the ops volume, the warehouse, the secret scope, the embedding endpoint and flags, the classic cluster with the Neo4j Maven connector | the Neo4j semantic layer, embeddings, and the run-summary table |
+| Ingest job | cluster | catalog and schema, the ops volume, the warehouse, the secret scope, the embedding endpoint and flags, the classic cluster with the Neo4j Maven connector | the fully embedded Neo4j semantic layer, and a `summary_<run_id>.json` report on the volume |
 | Upload questions | local CLI | `questions.json` and `DBXCARTA_CLIENT_QUESTIONS` from the overlay | `questions.json` on the ops volume |
 | Eval (client) job | cluster | the semantic layer the ingest built, the chat endpoint, the embedding endpoint, and `questions.json` already on the volume | per-arm Text2SQL metrics |
 | Local demo | local | `.env`, and for `ask` the built semantic layer; it reads the bundled `questions.json` from the package, not the volume | one answered question locally |
@@ -373,10 +396,10 @@ Run these from the consumer subproject. Every step is idempotent.
    overlay pairs and the warehouse after `--` on each run; a bare run fails loud
    rather than using stale values.
 
-The ingest job runs the `dbxcarta-ingest` entry point: it reads Unity Catalog
-metadata, writes embeddings and the Neo4j semantic graph, and creates the
-run-summary table. The client job runs `dbxcarta-client`: it benchmarks
-`questions.json` across the configured arms.
+The ingest job runs the neocarta connector's `neocarta-databricks-ingest` entry
+point: it reads Unity Catalog metadata, embeds inline, and writes the fully
+embedded Neo4j semantic graph. The client job runs `dbxcarta-client`: it
+benchmarks `questions.json` across the configured arms.
 
 ## Part 5: Test and verify
 
@@ -424,14 +447,15 @@ consumer subproject; only refreshing the vendored wheels reaches into dbxcarta.
 
 - [ ] Copied the `finance-genie/dbxcarta` layout, renamed the package and `src/`
       folder.
-- [ ] `pyproject.toml` pins `dbxcarta-core`, `dbxcarta-spark`, and
-      `dbxcarta-client[graph]` by version, with no `[tool.uv.sources]`.
+- [ ] `pyproject.toml` pins `dbxcarta-core`, `dbxcarta-client[graph]`, and
+      `neocarta[databricks-spark]` by version, with no `[tool.uv.sources]`.
 - [ ] `questions.json` written beside the overlay, with `reference_sql` targeting
       your catalog on the gradable questions.
 - [ ] Vendored wheels committed in `dbxcarta-dist/`, with `uv.toml` find-links and
       a committed `uv.lock`.
-- [ ] `dbxcarta-overlay.env` set with catalog, schema, volume, summary table,
-      secret scope, client questions, and arms. No secrets in it.
+- [ ] `dbxcarta-overlay.env` set with the operator/client `DBXCARTA_*` keys and the
+      `NEOCARTA_DATABRICKS_*` ingest contract (catalog, schemas, embedding flags +
+      endpoint, staging and summary volumes, secret scope). No secrets in it.
 - [ ] `.env` copied from `.env.sample` and filled in for local tooling.
 - [ ] Secret scope provisioned, readiness passes, questions uploaded.
 - [ ] `databricks.yml` deployed; ingest job run, then the client job.
@@ -445,10 +469,9 @@ consumer subproject; only refreshing the vendored wheels reaches into dbxcarta.
 - `docs/reference/simulate-publish.md`: how a consumer resolves dbxcarta from
   vendored wheels until PyPI, and how to flip to PyPI.
 - `docs/proposals/published.md`: the published-library consumer design.
-- `docs/reference/public-api.md`: the stable public surfaces and the version
-  contract a consumer pins against.
-- `docs/reference/pipeline.md`: what the ingest pipeline does, stage by stage.
+- `docs/reference/architecture.md`: the package responsibilities and how the
+  pieces fit, including the client cache mechanics.
+- `docs/reference/pipeline.md`: where the ingest pipeline now lives (the neocarta
+  connector) and what dbxcarta still owns.
 - `docs/reference/best-practices.md`: the design rules the pipeline must follow.
 - `docs/proposals/env-layering.md`: the full env layering model.
-</content>
-</invoke>

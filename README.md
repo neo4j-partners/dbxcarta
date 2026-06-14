@@ -384,7 +384,7 @@ MATCH (n) DETACH DELETE n;
 
 `scripts/run_demo.py` uses `DBXCARTA_CATALOG`, `DATABRICKS_WAREHOUSE_ID`, and `DATABRICKS_VOLUME_PATH` from `.env`. It creates and populates the demo source schemas in Unity Catalog.
 
-This quickstart uses the built-in demo catalog, created locally through the SQL warehouse by `run_demo.py`. The bundled examples (finance-genie, schemapile, dense-schema) instead seed their tables with the serverless `dbxcarta-submit materialize` job; see each example's README.
+This quickstart uses the built-in demo catalog, created locally through the SQL warehouse by `run_demo.py`. The bundled examples (finance-genie, schemapile, dense-schema) instead seed their tables with the serverless `dbxcarta materialize` job; see each example's README.
 
 ```bash
 uv run python scripts/run_demo.py

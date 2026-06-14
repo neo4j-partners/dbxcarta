@@ -1,16 +1,10 @@
-"""Unit tests for client utilities: parse_sql, _resolve_staging_table,
-_format_schema, and ClientRunSummary aggregates."""
+"""Unit tests for client utilities: parse_sql, _format_schema, and
+ClientRunSummary aggregates."""
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 import pytest
 from dbxcarta.client import compare_result_sets, parse_sql
-from dbxcarta.client.eval.run import (
-    _is_table_ref,
-    _resolve_staging_table,
-)
 from dbxcarta.client.schema_dump import _format_schema
 from dbxcarta.client.settings import ClientSettings
 from dbxcarta.client.summary import ClientRunSummary
@@ -64,37 +58,6 @@ def test_parse_sql_case_insensitive_fence():
     sql, ok = parse_sql("```SQL\nSELECT 1\n```")
     assert ok
     assert sql == "SELECT 1"
-
-
-# ---------------------------------------------------------------------------
-# _resolve_staging_table
-# ---------------------------------------------------------------------------
-
-
-def _fake_settings(summary_table: str):
-    return SimpleNamespace(dbxcarta_summary_table=summary_table)
-
-
-def test_resolve_staging_table_standard():
-    table = _resolve_staging_table(_fake_settings("cat.schema.run_summary"))
-    assert table == "cat.schema.client_staging"
-
-
-def test_resolve_staging_table_accepts_hyphenated_identifiers():
-    table = _resolve_staging_table(
-        _fake_settings("graph-enriched-lakehouse.graph-enriched-schema.run_summary")
-    )
-    assert table == "graph-enriched-lakehouse.graph-enriched-schema.client_staging"
-
-
-def test_resolve_staging_table_rejects_short_name():
-    with pytest.raises(ValueError):
-        _resolve_staging_table(_fake_settings("schema.run_summary"))
-
-
-def test_resolve_staging_table_rejects_invalid_identifier():
-    with pytest.raises(ValueError):
-        _resolve_staging_table(_fake_settings("cat.bad schema.run_summary"))
 
 
 # ---------------------------------------------------------------------------
@@ -278,27 +241,6 @@ def test_emit_stdout_skips_incomplete_retrieval_metrics(capsys):
 
     summary.emit_stdout()
     assert "retrieval:" not in capsys.readouterr().out
-
-
-# ---------------------------------------------------------------------------
-# _is_table_ref
-# ---------------------------------------------------------------------------
-
-
-def test_is_table_ref_three_part_name():
-    assert _is_table_ref("cat.schema.table")
-
-
-def test_is_table_ref_absolute_path():
-    assert not _is_table_ref("/Volumes/cat/schema/vol/questions.json")
-
-
-def test_is_table_ref_relative_path():
-    assert not _is_table_ref("./questions.json")
-
-
-def test_is_table_ref_two_parts():
-    assert not _is_table_ref("schema.table")
 
 
 def test_client_settings_requires_three_part_summary_table() -> None:

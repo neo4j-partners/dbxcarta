@@ -1,18 +1,14 @@
-"""Client run-summary: stdout, JSON volume file, and Delta table."""
+"""Client run-summary: a truncated stdout report.
+
+The client runs locally and persists nothing remote, so the run prints a
+per-arm summary to the screen. A code-wide check found nothing reads a Delta
+table or JSON file from the client, so those outputs were dropped in Phase 3.
+"""
 
 from __future__ import annotations
 
-import json
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from pathlib import Path
-from typing import TYPE_CHECKING
-
-from dbxcarta.core.identifiers import quote_qualified_name
-from dbxcarta.core.volume_io import ensure_volume_subdirs
-
-if TYPE_CHECKING:
-    from pyspark.sql import SparkSession
 
 
 @dataclass
@@ -173,39 +169,6 @@ class ClientRunSummary:
         self.ended_at = datetime.now(UTC)
         self._compute_aggregates()
 
-    def _to_delta_dict(self) -> dict:
-        return {
-            "run_id": self.run_id,
-            "job_name": self.job_name,
-            "catalog": self.catalog,
-            "schemas": self.schemas,
-            "arms": self.arms,
-            "started_at": self.started_at,
-            "ended_at": self.ended_at,
-            "status": self.status,
-            "error": self.error,
-            "arm_attempted": self.arm_attempted,
-            "arm_parsed": self.arm_parsed,
-            "arm_executed": self.arm_executed,
-            "arm_non_empty": self.arm_non_empty,
-            "arm_correct": self.arm_correct,
-            "arm_gradable": self.arm_gradable,
-            "arm_parse_rate": self.arm_parse_rate,
-            "arm_execution_rate": self.arm_execution_rate,
-            "arm_non_empty_rate": self.arm_non_empty_rate,
-            "arm_correct_rate": self.arm_correct_rate,
-            "arm_top1_schema_match_rate": self.arm_top1_schema_match_rate,
-            "arm_schema_in_context_rate": self.arm_schema_in_context_rate,
-            "arm_mean_context_purity": self.arm_mean_context_purity,
-        }
-
-    def _to_json_dict(self) -> dict:
-        d = self._to_delta_dict()
-        d["started_at"] = self.started_at.isoformat()
-        d["ended_at"] = self.ended_at.isoformat() if self.ended_at else None
-        d["question_results"] = [asdict(qr) for qr in self.question_results]
-        return d
-
     def emit_stdout(self) -> None:
         print(
             f"[dbxcarta_client] run_id={self.run_id} job={self.job_name} "
@@ -236,63 +199,3 @@ class ClientRunSummary:
                 )
         if self.error:
             print(f"  error: {self.error}")
-
-    def emit_json(self, volume_path: str) -> None:
-        ts = (self.ended_at or self.started_at).strftime("%Y%m%dT%H%M%SZ")
-        path = Path(volume_path) / f"{self.job_name}_{self.run_id}_{ts}.json"
-        ensure_volume_subdirs(path.parent)
-        path.write_text(json.dumps(self._to_json_dict(), indent=2))
-
-    def emit_delta(self, spark: SparkSession, table_name: str) -> None:
-        from pyspark.sql import Row
-        from pyspark.sql.types import (
-            ArrayType,
-            DoubleType,
-            LongType,
-            MapType,
-            StringType,
-            StructField,
-            StructType,
-            TimestampType,
-        )
-
-        schema = StructType(
-            [
-                StructField("run_id", StringType(), nullable=False),
-                StructField("job_name", StringType()),
-                StructField("catalog", StringType()),
-                StructField("schemas", ArrayType(StringType())),
-                StructField("arms", ArrayType(StringType())),
-                StructField("started_at", TimestampType()),
-                StructField("ended_at", TimestampType()),
-                StructField("status", StringType()),
-                StructField("error", StringType()),
-                StructField("arm_attempted", MapType(StringType(), LongType())),
-                StructField("arm_parsed", MapType(StringType(), LongType())),
-                StructField("arm_executed", MapType(StringType(), LongType())),
-                StructField("arm_non_empty", MapType(StringType(), LongType())),
-                StructField("arm_correct", MapType(StringType(), LongType())),
-                StructField("arm_gradable", MapType(StringType(), LongType())),
-                StructField("arm_parse_rate", MapType(StringType(), DoubleType())),
-                StructField("arm_execution_rate", MapType(StringType(), DoubleType())),
-                StructField("arm_non_empty_rate", MapType(StringType(), DoubleType())),
-                StructField("arm_correct_rate", MapType(StringType(), DoubleType())),
-                StructField("arm_top1_schema_match_rate", MapType(StringType(), DoubleType())),
-                StructField("arm_schema_in_context_rate", MapType(StringType(), DoubleType())),
-                StructField("arm_mean_context_purity", MapType(StringType(), DoubleType())),
-            ]
-        )
-        quoted = quote_qualified_name(table_name, expected_parts=3)
-        row = Row(**self._to_delta_dict())
-        (
-            spark.createDataFrame([row], schema=schema)
-            .write.format("delta")
-            .mode("append")
-            .option("mergeSchema", "true")
-            .saveAsTable(quoted)
-        )
-
-    def emit(self, spark: SparkSession, volume_path: str, table_name: str) -> None:
-        self.emit_stdout()
-        self.emit_json(volume_path)
-        self.emit_delta(spark, table_name)

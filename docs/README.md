@@ -29,7 +29,7 @@ Stable technical references for the current system.
 - [reference/pipeline.md](reference/pipeline.md): where the ingest pipeline now lives (the neocarta connector) and what dbxcarta still owns.
 - [reference/best-practices.md](reference/best-practices.md): the authoritative pipeline design rules with cited sources, spanning Spark, the Neo4j connector, and project principles.
 - [reference/design-decisions.md](reference/design-decisions.md): FK discovery trade-offs in plain terms, including key-like columns, name-match precision, and the gaps the design accepts.
-- [reference/fk-inference-internal-types.md](reference/fk-inference-internal-types.md): the typed layer between Spark DataFrames and FK discovery, and its invariants.
+- [reference/fk-inference-internal-types.md](reference/fk-inference-internal-types.md): where the FK-inference typed layer now lives (neocarta), and what stays in dbxcarta.
 - [reference/operational-lessons.md](reference/operational-lessons.md): lessons learned from running the pipeline.
 
 ## Explanation

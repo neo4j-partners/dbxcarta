@@ -26,7 +26,7 @@ export DBXCARTA_ENV_FILE=examples/finance-genie/dbxcarta-overlay.env
 uv run dbxcarta ready
 
 # Provision the ops plane: catalog, finance_genie_ops schema, dbxcarta-ops volume
-uv run dbxcarta-submit bootstrap
+uv run dbxcarta bootstrap
 
 # Provision the Neo4j secret scope
 ./setup_secrets.sh --profile aws-partner-rk
@@ -60,7 +60,7 @@ the make output. Print them with the run ID the submit step echoes:
 
 ```bash
 # Print the client job's stdout, where the evaluation scores are
-uv run dbxcarta-submit logs <run-id>
+uv run dbxcarta logs <run-id>
 ```
 
 The summary is one line per arm:
@@ -120,25 +120,19 @@ examples/finance-genie/
 The package declares dbxcarta as a normal pip dependency in `pyproject.toml`.
 Inside this repo, `uv` resolves it to the editable parent through
 `[tool.uv.sources]`; from outside, you would pin it like
-`dependencies = ["dbxcarta-spark", "dbxcarta-client"]` and pip would fetch
-those distributions from your wheel index. There is nothing privileged about
-the example's relationship to the dbxcarta workspace.
+`dependencies = ["dbxcarta-core", "dbxcarta-client[graph]"]` and pip would fetch
+those distributions from your wheel index. The ingest connector itself
+(`neocarta[databricks-spark]`) is not a local dependency: the submit step stages
+its wheel onto the cluster. There is nothing privileged about the example's
+relationship to the dbxcarta workspace.
 
 The Finance Genie per-example config lives in the committed
-`examples/finance-genie/dbxcarta-overlay.env` (the single source of truth). A
-direct library call can load that overlay over the base `.env` and run the
-Spark ingest from the resulting environment:
-
-```python
-from dbxcarta.spark import SparkIngestSettings, run_dbxcarta
-from dbxcarta.spark.env import resolve_env_files, load_env_files
-
-files, _ = resolve_env_files(
-    ["--env-file", "examples/finance-genie/dbxcarta-overlay.env"]
-)
-load_env_files(files)  # overlay over base .env; process env still wins
-run_dbxcarta(settings=SparkIngestSettings())
-```
+`examples/finance-genie/dbxcarta-overlay.env` (the single source of truth). The
+ingest pipeline itself is the neocarta connector, submitted from that overlay:
+`dbxcarta submit-entrypoint ingest` stages the neocarta wheel and runs its
+`neocarta-databricks-ingest` entrypoint on the cluster, reading the
+`NEOCARTA_DATABRICKS_*` contract keys the overlay forwards as job parameters.
+There is no dbxcarta Python ingest object to import.
 
 The CLI reads the overlay and the bundled `questions.json` directly. There is no
 per-example Python object to publish. The two operational commands are:
@@ -184,9 +178,10 @@ dbxcarta (via this example's overlay) owns:
 - GraphRAG schema retrieval and Text2SQL evaluation.
 
 The ops run-summary table (`DBXCARTA_SUMMARY_TABLE`) is created automatically
-on the first ingest from the writer's own schema. It holds run history only,
-not source data, so it is disposable: drop it to reset, and the next run
-recreates it with the current schema.
+on the first run that writes to it (materialize and the client evaluation),
+from the writer's own schema. It holds run history only, not source data, so it
+is disposable: drop it to reset, and the next run recreates it with the current
+schema.
 
 ## Quick iterate loop (testing dbxcarta changes)
 
@@ -300,7 +295,7 @@ does not create the upstream medallion data catalogs:
 
 ```bash
 # Create the ops catalog, finance_genie_ops schema, and dbxcarta-ops volume
-uv run dbxcarta-submit bootstrap
+uv run dbxcarta bootstrap
 ```
 
 `bootstrap` checks whether the catalog already exists before issuing
@@ -316,7 +311,7 @@ run `teardown` (it drops the overlay's `DBXCARTA_TEARDOWN_TARGET`,
 
 ```bash
 # Drop only the finance_genie_ops schema, leaving the shared ops catalog intact
-uv run dbxcarta-submit teardown --yes-i-mean-it
+uv run dbxcarta teardown --yes-i-mean-it
 ```
 
 ### 6. Refresh Neo4j secrets
@@ -343,14 +338,14 @@ This uploads the package's `questions.json` to the path named by
 
 ```bash
 # Rebuild the per-package wheels and ship the bootstrap script
-uv run dbxcarta-submit publish-wheels
+uv run dbxcarta publish-wheels
 ```
 
 `publish-wheels` rebuilds the per-package wheels from current source and
 already ships the bootstrap script (it calls `upload_all` internally), so
 no separate `upload --all` step is needed.
 
-> Every `dbxcarta` and `dbxcarta-submit` command in steps 7–10 reads the overlay from the
+> Every `dbxcarta` command in steps 7–10 reads the overlay from the
 > `DBXCARTA_ENV_FILE` you exported in step 3. If you skipped that,
 > export it now:
 > `export DBXCARTA_ENV_FILE=examples/finance-genie/dbxcarta-overlay.env`.
@@ -361,21 +356,18 @@ Submit the installed wheel's ingest entrypoint:
 
 ```bash
 # Submit the ingest job to build the semantic layer
-uv run dbxcarta-submit submit-entrypoint ingest
+uv run dbxcarta submit-entrypoint ingest
 ```
 
-Verify the result:
-
-```bash
-# Verify the semantic layer was built
-uv run dbxcarta verify
-```
+The ingest job writes `summary_<run_id>.json` to `DBXCARTA_SUMMARY_VOLUME`;
+read it (or the job's stdout via `uv run dbxcarta logs <run-id>`) to confirm
+the run built the semantic layer.
 
 ### 10. Run the client evaluation
 
 ```bash
 # Submit the client evaluation job
-uv run dbxcarta-submit submit-entrypoint client
+uv run dbxcarta submit-entrypoint client
 ```
 
 ### 11. Run the local CLI demo

@@ -8,7 +8,6 @@ from dbxcarta.client.trace import (
     RetrievalTrace,
     chosen_schemas_from_columns,
     compute_retrieval_metrics,
-    emit_retrieval_traces,
     schema_scores_from_seeds,
 )
 
@@ -259,11 +258,3 @@ def test_top1_none_when_no_schema_scores() -> None:
     )
     compute_retrieval_metrics(t)
     assert t.top1_schema_match is None
-
-
-def test_emit_retrieval_traces_noops_for_empty_trace_list() -> None:
-    class SparkStub:
-        def createDataFrame(self, *_args, **_kwargs):  # pragma: no cover
-            raise AssertionError("createDataFrame should not be called")
-
-    emit_retrieval_traces(SparkStub(), [], "cat.schema.client_retrieval")

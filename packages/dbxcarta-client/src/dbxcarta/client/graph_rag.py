@@ -5,10 +5,11 @@ arm. Both the evaluation harness (``eval/arms.py``) and the finance-genie
 local demo build context and prompt through ``build_graph_rag_context`` so
 the retrieval-and-prompt behavior cannot drift between them.
 
-The model call is deliberately excluded. The harness generates SQL through
-Spark ``ai_query`` batch generation; the demo generates SQL through a Model
-Serving REST call. The seam stops once the prompt is built so each caller
-keeps its own model transport and post-generation handling.
+The model call is deliberately excluded. Both the harness and the demo now
+generate SQL through a Model Serving REST call (see ``generation.py`` and
+``local_generation.py``); the harness adds a local response cache on top. The
+seam stops once the prompt is built so each caller keeps its own model
+transport and post-generation handling.
 """
 
 from __future__ import annotations

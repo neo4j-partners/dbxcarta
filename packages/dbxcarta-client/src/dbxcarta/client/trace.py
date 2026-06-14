@@ -3,13 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 from dbxcarta.client.ids import schema_from_node_id
-from dbxcarta.core.identifiers import quote_qualified_name
-
-if TYPE_CHECKING:
-    from pyspark.sql import SparkSession
 
 
 def schema_scores_from_seeds(
@@ -96,87 +91,3 @@ def compute_retrieval_metrics(trace: RetrievalTrace) -> None:
             1 for cid in trace.final_col_ids if schema_from_node_id(cid) == trace.target_schema
         )
         trace.context_purity = from_target / len(trace.final_col_ids)
-
-
-def emit_retrieval_traces(
-    spark: SparkSession,
-    traces: list[RetrievalTrace],
-    table_name: str,
-) -> None:
-    if not traces:
-        return
-
-    from pyspark.sql import Row
-    from pyspark.sql.types import (
-        ArrayType,
-        BooleanType,
-        DoubleType,
-        MapType,
-        StringType,
-        StructField,
-        StructType,
-    )
-
-    schema = StructType(
-        [
-            StructField("run_id", StringType(), nullable=False),
-            StructField("question_id", StringType()),
-            StructField("question", StringType()),
-            StructField("target_schema", StringType()),
-            StructField("col_seed_ids", ArrayType(StringType())),
-            StructField("col_seed_scores", ArrayType(DoubleType())),
-            StructField("tbl_seed_ids", ArrayType(StringType())),
-            StructField("tbl_seed_scores", ArrayType(DoubleType())),
-            StructField("schema_scores", MapType(StringType(), DoubleType())),
-            StructField("chosen_schemas", ArrayType(StringType())),
-            StructField("expansion_tbl_ids", ArrayType(StringType())),
-            StructField("final_col_ids", ArrayType(StringType())),
-            StructField("rendered_context", StringType()),
-            StructField("generated_sql", StringType()),
-            StructField("reference_sql", StringType()),
-            StructField("parsed", BooleanType()),
-            StructField("executed", BooleanType()),
-            StructField("correct", BooleanType()),
-            StructField("execution_error", StringType()),
-            StructField("top1_schema_match", BooleanType()),
-            StructField("schema_in_context", BooleanType()),
-            StructField("context_purity", DoubleType()),
-        ]
-    )
-
-    rows = [
-        Row(
-            run_id=t.run_id,
-            question_id=t.question_id,
-            question=t.question,
-            target_schema=t.target_schema,
-            col_seed_ids=t.col_seed_ids,
-            col_seed_scores=t.col_seed_scores,
-            tbl_seed_ids=t.tbl_seed_ids,
-            tbl_seed_scores=t.tbl_seed_scores,
-            schema_scores=t.schema_scores,
-            chosen_schemas=t.chosen_schemas,
-            expansion_tbl_ids=t.expansion_tbl_ids,
-            final_col_ids=t.final_col_ids,
-            rendered_context=t.rendered_context,
-            generated_sql=t.generated_sql,
-            reference_sql=t.reference_sql,
-            parsed=t.parsed,
-            executed=t.executed,
-            correct=t.correct,
-            execution_error=t.execution_error,
-            top1_schema_match=t.top1_schema_match,
-            schema_in_context=t.schema_in_context,
-            context_purity=t.context_purity,
-        )
-        for t in traces
-    ]
-
-    quoted = quote_qualified_name(table_name, expected_parts=3)
-    (
-        spark.createDataFrame(rows, schema=schema)
-        .write.format("delta")
-        .mode("append")
-        .option("mergeSchema", "true")
-        .saveAsTable(quoted)
-    )

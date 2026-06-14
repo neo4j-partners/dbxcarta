@@ -5,9 +5,10 @@ This directory is a standalone integration example package,
 Unity Catalog workload with hundreds of tables so dbxcarta retrieval can be
 tested against dense schema context.
 
-The package depends on `dbxcarta-spark` and `dbxcarta-client`. Its tests live
-under `tests/examples/dense-schema/` and run in CI as a first-class sample
-consumer.
+The package depends on `dbxcarta-core` and `dbxcarta-client[graph]`. Its tests
+live under `tests/examples/dense-schema/` and run in CI as a first-class sample
+consumer. The ingest connector (`neocarta[databricks-spark]`) is not a local
+dependency; the submit step stages its wheel onto the cluster.
 
 ## Quick Start
 
@@ -24,9 +25,9 @@ uv pip install -e examples/dense-schema/
 # Copy the env template, then edit it for your profile and warehouse
 cp examples/dense-schema/.env.sample examples/dense-schema/.env
 # Create the ops plane and the dense-schema-example data catalog
-uv run dbxcarta-submit bootstrap --env-file examples/dense-schema/dbxcarta-overlay.env
+uv run dbxcarta bootstrap --env-file examples/dense-schema/dbxcarta-overlay.env
 # Stage the committed dense_500 blueprint and run the serverless materialize job
-uv run dbxcarta-submit materialize --env-file examples/dense-schema/dbxcarta-overlay.env
+uv run dbxcarta materialize --env-file examples/dense-schema/dbxcarta-overlay.env
 
 # Point every dbxcarta command at the dense-schema overlay
 export DBXCARTA_ENV_FILE=examples/dense-schema/dbxcarta-overlay.env
@@ -113,7 +114,7 @@ changes nothing; the `-ingest` make target also runs it first:
 
 ```bash
 # Provision the ops plane and create the dense-schema-example data catalog
-uv run dbxcarta-submit bootstrap --env-file examples/dense-schema/dbxcarta-overlay.env
+uv run dbxcarta bootstrap --env-file examples/dense-schema/dbxcarta-overlay.env
 ```
 
 Materialize the committed blueprint into Unity Catalog. Materialize is a shared
@@ -124,7 +125,7 @@ schema and its tables in the data catalog that bootstrap already created:
 
 ```bash
 # Stage the blueprint to the volume and run the serverless materialize job
-uv run dbxcarta-submit materialize --env-file examples/dense-schema/dbxcarta-overlay.env
+uv run dbxcarta materialize --env-file examples/dense-schema/dbxcarta-overlay.env
 ```
 
 To remove dense's full footprint later, run `teardown`. It drops the overlay's
@@ -135,7 +136,7 @@ the other examples:
 
 ```bash
 # Drop the data catalog and dense's ops schema, leaving the shared catalog intact
-uv run dbxcarta-submit teardown --env-file examples/dense-schema/dbxcarta-overlay.env --yes-i-mean-it
+uv run dbxcarta teardown --env-file examples/dense-schema/dbxcarta-overlay.env --yes-i-mean-it
 ```
 
 Then run the normal dbxcarta operational CLI against the selected overlay:
@@ -146,11 +147,12 @@ uv run dbxcarta ready
 # Upload the question set to the ops volume
 uv run dbxcarta upload-questions
 # Submit the ingest job to build the semantic layer
-uv run dbxcarta-submit submit-entrypoint ingest
+uv run dbxcarta submit-entrypoint ingest
 # Submit the client evaluation job
-uv run dbxcarta-submit submit-entrypoint client
+uv run dbxcarta submit-entrypoint client
 ```
 
 Synthetic blueprint generation and question generation stay inside this example.
-They are not part of the `dbxcarta-spark` or `dbxcarta-client` public APIs.
-Materialize is the shared product step, run as the `dbxcarta-materialize` job.
+They are not part of `dbxcarta-core`, `dbxcarta-client`, or the neocarta ingest
+connector. Materialize is the shared product step, run as the
+`dbxcarta-materialize` job.

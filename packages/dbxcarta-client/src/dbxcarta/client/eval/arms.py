@@ -45,11 +45,6 @@ def _retrieval_concurrency() -> int:
     return value
 
 
-def _client_retrieval_table(settings: ClientSettings) -> str:
-    parts = settings.dbxcarta_summary_table.split(".")
-    return f"{parts[0]}.{parts[1]}.client_retrieval"
-
-
 class _ReferenceCache:
     """Memoize one ``fetch_rows`` per question's reference SQL across arms.
 
@@ -161,14 +156,13 @@ def _run_reference_arm(
 
 
 def _run_llm_arm(
-    spark: Any,
     ws: WorkspaceClient,
     settings: ClientSettings,
     questions: list[Question],
     summary: ClientRunSummary,
     ref_cache: _ReferenceCache,
     arm: str,
-    staging_table: str,
+    cache_dir: str,
     schema_text: str | None = None,
 ) -> None:
     from dbxcarta.client.generation import generate_sql_batch
@@ -190,10 +184,10 @@ def _run_llm_arm(
         questions_with_prompts.append({"question_id": q.question_id, "prompt": prompt})
 
     responses = generate_sql_batch(
-        spark,
+        ws,
         settings.dbxcarta_chat_endpoint,
         questions_with_prompts,
-        staging_table,
+        cache_dir,
         arm,
         refresh=settings.dbxcarta_client_refresh,
     )
@@ -235,13 +229,12 @@ def _run_llm_arm(
 
 
 def _run_graph_rag_arm(
-    spark: Any,
     ws: WorkspaceClient,
     settings: ClientSettings,
     questions: list[Question],
     summary: ClientRunSummary,
     ref_cache: _ReferenceCache,
-    staging_table: str,
+    cache_dir: str,
 ) -> None:
     from dbxcarta.client.generation import generate_sql_batch
     from dbxcarta.client.graph_rag import build_graph_rag_context
@@ -250,7 +243,6 @@ def _run_graph_rag_arm(
         RetrievalTrace,
         chosen_schemas_from_columns,
         compute_retrieval_metrics,
-        emit_retrieval_traces,
         schema_scores_from_seeds,
     )
 
@@ -334,10 +326,10 @@ def _run_graph_rag_arm(
         retriever.close()
 
     responses = generate_sql_batch(
-        spark,
+        ws,
         settings.dbxcarta_chat_endpoint,
         questions_with_prompts,
-        staging_table,
+        cache_dir,
         "graph_rag",
         refresh=settings.dbxcarta_client_refresh,
     )
@@ -393,5 +385,3 @@ def _run_graph_rag_arm(
             schema_in_context=trace.schema_in_context,
             context_purity=trace.context_purity,
         )
-
-    emit_retrieval_traces(spark, list(traces.values()), _client_retrieval_table(settings))

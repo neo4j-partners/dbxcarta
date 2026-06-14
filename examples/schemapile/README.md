@@ -6,9 +6,11 @@ as Delta tables in a dedicated Unity Catalog catalog and runs dbxcarta
 against the result. It is a second reference consumer alongside the
 finance-genie example and shares no state with it.
 
-The package depends on `dbxcarta-spark` and `dbxcarta-client`. Its tests live
-under `tests/examples/schemapile/` so the repo-level CI can run it as a
-first-class integration consumer.
+The package depends on `dbxcarta-core` and `dbxcarta-client[graph]`. Its tests
+live under `tests/examples/schemapile/` so the repo-level CI can run it as a
+first-class integration consumer. The ingest connector
+(`neocarta[databricks-spark]`) is not a local dependency; the submit step stages
+its wheel onto the cluster.
 
 ## Quick Start
 
@@ -27,12 +29,12 @@ uv pip install -e examples/schemapile/
 # examples/schemapile/.env, so run them from that directory.
 cd examples/schemapile
 cp .env.sample .env                             # edit SCHEMAPILE_REPO, profile, warehouse, catalog
-uv run dbxcarta-submit bootstrap --env-file dbxcarta-overlay.env     # ops catalog + volume + data catalog
+uv run dbxcarta bootstrap --env-file dbxcarta-overlay.env     # ops catalog + volume + data catalog
 # Run the upstream slice.py with the .env parameters; writes the cached slice JSON (idempotent on its params sidecar).
 uv run dbxcarta-schemapile-slice
 # Filter, rank, and cap the slice into the committed candidate-table JSON read by materialize and question generation.
 uv run dbxcarta-schemapile-select
-uv run dbxcarta-submit materialize --env-file dbxcarta-overlay.env   # stage blueprint, run serverless job
+uv run dbxcarta materialize --env-file dbxcarta-overlay.env   # stage blueprint, run serverless job
 uv run dbxcarta-schemapile-generate-questions
 cd ../..
 
@@ -151,7 +153,7 @@ Requires catalog-create privilege on the workspace.
 
 ```bash
 cd examples/schemapile
-uv run dbxcarta-submit bootstrap --env-file dbxcarta-overlay.env
+uv run dbxcarta bootstrap --env-file dbxcarta-overlay.env
 ```
 
 This provisions the **ops plane** named by the overlay's
@@ -168,7 +170,7 @@ the ops schema `dbxcarta-catalog.schemapile_ops`. The shared
 `dbxcarta-catalog` itself is left intact for other examples.
 
 ```bash
-uv run dbxcarta-submit teardown --env-file dbxcarta-overlay.env --yes-i-mean-it
+uv run dbxcarta teardown --env-file dbxcarta-overlay.env --yes-i-mean-it
 ```
 
 ### 5. Produce the SchemaPile slice (host-only, no credentials needed)
@@ -196,7 +198,7 @@ place, so commit the result for a fully reproducible run.
 ### 7. Materialize the slice as Delta tables
 
 ```bash
-uv run dbxcarta-submit materialize --env-file dbxcarta-overlay.env
+uv run dbxcarta materialize --env-file dbxcarta-overlay.env
 ```
 
 Materialize is a shared product step, the same serverless Spark
@@ -246,7 +248,7 @@ values only. Selecting it is one variable, no root `.env` edit. There is
 no schema list to copy: `DBXCARTA_SCHEMAS` ships blank because
 `schemapile_lakehouse` is data-only and auto-discovered. Export
 `DBXCARTA_ENV_FILE` once and run the standard flow from the repo root.
-The `dbxcarta-submit` subcommands read the overlay from the environment
+The `dbxcarta` subcommands read the overlay from the environment
 and do not accept a `--env-file` flag, so the export is the mechanism
 that selects it:
 
@@ -263,12 +265,11 @@ uv run dbxcarta upload-questions
 # Build and submit the ingest job. publish-wheels rebuilds the wheels and
 # ships the bootstrap script (it calls upload_all internally), so no
 # separate `upload --all` step is needed.
-uv run dbxcarta-submit publish-wheels
-uv run dbxcarta-submit submit-entrypoint ingest
-uv run dbxcarta verify
+uv run dbxcarta publish-wheels
+uv run dbxcarta submit-entrypoint ingest
 
 # Run the client evaluation arms.
-uv run dbxcarta-submit submit-entrypoint client
+uv run dbxcarta submit-entrypoint client
 ```
 
 For the wheel-rebuild-and-submit half of this step on every code change,

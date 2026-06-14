@@ -1,16 +1,25 @@
-"""Batch SQL generation via ai_query (best-practices Spark §1 and §4)."""
+"""Batch SQL generation via local serving-endpoint calls with a local cache.
+
+Each question's prompt is sent straight to the chat serving endpoint with the
+operator's normal Databricks credentials (see ``client/local_generation.py``),
+the same plain-web-call pattern ``client/embed.py`` uses for embeddings. No
+cluster, no Spark, and no remote staging table: responses are cached in a small
+local JSON file keyed by an input hash so an identical rerun skips inference.
+"""
 
 from __future__ import annotations
 
 import hashlib
 import json
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING
 
-from dbxcarta.core.identifiers import quote_qualified_name, validate_serving_endpoint_name
+from dbxcarta.client.local_generation import LocalGenerationError, generate_sql_local
+from dbxcarta.core.identifiers import validate_serving_endpoint_name
 
 if TYPE_CHECKING:
-    from pyspark.sql import DataFrame, SparkSession
+    from databricks.sdk import WorkspaceClient
 
 logger = logging.getLogger(__name__)
 
@@ -34,109 +43,96 @@ def _input_hash(endpoint: str, arm: str, questions_with_prompts: list[dict]) -> 
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def _results_from_rows(rows: list) -> dict[str, tuple[str | None, str | None]]:
-    results: dict[str, tuple[str | None, str | None]] = {}
-    for row in rows:
-        qid = row["question_id"]
-        response = row["response"]
-        if response is None:
-            results[qid] = (None, "ai_query returned null struct")
-        else:
-            error = response["errorMessage"]
-            results[qid] = (response["result"], error or None)
-    return results
+def _cache_file(cache_dir: str, arm: str) -> Path:
+    return Path(cache_dir) / f"{arm}.json"
 
 
 def _read_cached(
-    spark: SparkSession,
-    full_table: str,
+    cache_dir: str,
+    arm: str,
     want_hash: str,
     want_ids: set[str],
 ) -> dict[str, tuple[str | None, str | None]] | None:
-    """Return prior responses if the staging table matches this exact input.
+    """Return prior responses if the local cache file matches this exact input.
 
-    A miss (table absent, pre-cache schema, different input hash, or a
-    different question set) returns None so the caller re-infers.
+    A miss (file absent, unreadable, different input hash, or a different
+    question set) returns None so the caller re-infers.
     """
     try:
-        df: DataFrame = spark.table(full_table)
-    except Exception:
+        payload = json.loads(_cache_file(cache_dir, arm).read_text())
+    except (OSError, ValueError):
         return None
-    if "_input_hash" not in df.columns:
+    if not isinstance(payload, dict) or payload.get("input_hash") != want_hash:
         return None
-    rows = df.collect()
-    if not rows:
+    results = payload.get("results")
+    if not isinstance(results, dict) or set(results) != want_ids:
         return None
-    if {r["_input_hash"] for r in rows} != {want_hash}:
-        return None
-    if {r["question_id"] for r in rows} != want_ids:
-        return None
-    return _results_from_rows(rows)
+    return {qid: (entry.get("sql"), entry.get("error")) for qid, entry in results.items()}
+
+
+def _write_cache(
+    cache_dir: str,
+    arm: str,
+    want_hash: str,
+    results: dict[str, tuple[str | None, str | None]],
+) -> None:
+    path = _cache_file(cache_dir, arm)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "input_hash": want_hash,
+        "results": {qid: {"sql": sql, "error": error} for qid, (sql, error) in results.items()},
+    }
+    path.write_text(json.dumps(payload, indent=2))
 
 
 def generate_sql_batch(
-    spark: SparkSession,
+    ws: WorkspaceClient,
     endpoint: str,
     questions_with_prompts: list[dict],
-    staging_table: str,
+    cache_dir: str,
     arm: str,
     *,
     refresh: bool = False,
 ) -> dict[str, tuple[str | None, str | None]]:
-    """Generate SQL for every question in one ai_query pass.
+    """Generate SQL for every question with one serving-endpoint call each.
 
-    *questions_with_prompts* is a list of dicts with keys ``question_id``
-    and ``prompt``.  Returns a mapping from question_id to
-    ``(sql_text, error_message)``.
+    *questions_with_prompts* is a list of dicts with keys ``question_id`` and
+    ``prompt``. Returns a mapping from question_id to ``(sql_text,
+    error_message)``; on a failed call the SQL is None and the error is the
+    failure message, matching the prior per-row ai_query contract.
 
-    Results are cached in the per-arm staging Delta table keyed by an input
-    hash; an identical re-run (same endpoint, arm, and question prompts) skips
-    ai_query entirely and reuses the prior responses. Pass ``refresh=True`` to
+    Results are cached in ``<cache_dir>/<arm>.json`` keyed by an input hash; an
+    identical re-run (same endpoint, arm, and question prompts) reuses the
+    cached responses without calling the endpoint. Pass ``refresh=True`` to
     force re-inference (e.g. the endpoint's model changed but prompts did not).
-
-    Materializes to a UC-managed Delta table after ai_query (best-practices
-    Spark §4) so the downstream execute loop never re-triggers inference.
     """
-    # Guard before interpolation: ai_query requires the endpoint as a string
-    # literal. validate_serving_endpoint_name rejects characters that would
-    # break the SQL expression.
     validate_serving_endpoint_name(endpoint)
 
-    from pyspark.sql import Row
-    from pyspark.sql.functions import expr, lit
-
-    full_table = quote_qualified_name(f"{staging_table}_{arm}", expected_parts=3)
     want_hash = _input_hash(endpoint, arm, questions_with_prompts)
     want_ids = {q["question_id"] for q in questions_with_prompts}
 
     if not refresh:
-        cached = _read_cached(spark, full_table, want_hash, want_ids)
+        cached = _read_cached(cache_dir, arm, want_hash, want_ids)
         if cached is not None:
             logger.info(
-                "[dbxcarta] %s: cache hit, skipping ai_query (%d questions)",
+                "[dbxcarta] %s: cache hit, skipping generation (%d questions)",
                 arm,
                 len(want_ids),
             )
             return cached
 
     logger.info(
-        "[dbxcarta] %s: running ai_query for %d questions",
+        "[dbxcarta] %s: generating SQL for %d questions",
         arm,
         len(want_ids),
     )
-    rows = [Row(question_id=q["question_id"], prompt=q["prompt"]) for q in questions_with_prompts]
-    df = spark.createDataFrame(rows)
+    results: dict[str, tuple[str | None, str | None]] = {}
+    for q in questions_with_prompts:
+        qid = q["question_id"]
+        try:
+            results[qid] = (generate_sql_local(ws, endpoint, q["prompt"]), None)
+        except LocalGenerationError as exc:
+            results[qid] = (None, str(exc))
 
-    enriched = df.withColumn(
-        "response",
-        expr(f"ai_query('{endpoint}', prompt, failOnError => false)"),
-    ).withColumn("_input_hash", lit(want_hash))
-
-    (
-        enriched.write.format("delta")
-        .mode("overwrite")
-        .option("overwriteSchema", "true")
-        .saveAsTable(full_table)
-    )
-
-    return _results_from_rows(spark.table(full_table).collect())
+    _write_cache(cache_dir, arm, want_hash, results)
+    return results

@@ -1,4 +1,4 @@
-"""Unit tests for client question loading and upload shape."""
+"""Unit tests for client question loading from a local JSON file."""
 
 from __future__ import annotations
 

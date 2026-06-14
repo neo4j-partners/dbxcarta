@@ -136,7 +136,12 @@ Shrink the submit tooling now that the client is no longer a cluster entry point
 
 **Phase 3 is done when:** the client runs locally end to end with no cluster and no warehouse or Delta writes, printing a truncated result; the `upload-questions` command is gone; and the submit tooling has a single dedicated ingest-submit path with no name-based dispatch, knowing only about staging the neocarta ingest wheel and building the `materialize` job.
 
-**Status: In progress.** The `upload-questions` retirement is complete (command, core helpers, and tests removed; default suite green, mypy and ruff clean). The client refactor and the submit-tooling shrink are pending.
+**Status: In progress.**
+
+- **`upload-questions` retirement — done.** Command, core helpers, and tests removed.
+- **Client off Spark — done.** SQL generation now calls the chat serving endpoint directly per question through `client/local_generation.py` (the `embed.py` web-call pattern), with responses cached in a local `<cache_dir>/<arm>.json` file keyed by the same input hash (`DBXCARTA_CLIENT_CACHE_DIR`, default `.dbxcarta_cache`). `client/questions.py` reads a local JSON file only (the Delta-table branch and `is_table_ref` are gone). The three Delta writes (`run_summary`, `client_retrieval`, `client_questions`) and the JSON summary file are dropped: `summary.py` keeps only the truncated `emit_stdout`, `trace.py` no longer has `emit_retrieval_traces`, and `manage_questions` is deleted. `run.py` no longer creates a `SparkSession`, and the `spark` parameter is gone from the `arms.py`, `generation.py`, `summary.py`, and `trace.py` seams. The client package now contains no `pyspark`/`SparkSession`/`ai_query` live code (only provenance comments remain). Validation: full default suite green (418 passed, 3 deselected), mypy clean (42 source files), ruff clean.
+- **Submit-tooling shrink — pending.** Removing the client cluster entry point, `_CLIENT_PINNED_CLOSURE`, and the client core-copy branch; collapsing the name-based submit-entrypoint dispatch to a single dedicated ingest path; and shrinking the entry-point lookup tables to the ingest entry only.
+- **Example overlay question paths — pending.** The three `examples/<name>/dbxcarta-overlay.env` still set `DBXCARTA_CLIENT_QUESTIONS` to a `/Volumes/...` path (correct for the old cluster client). A local run needs them repointed at the committed local `examples/<name>/questions.json`. Deferred to the live local run (Phase 6) unless repointed sooner.
 
 ## Phase 4: Update the automation (CI)
 

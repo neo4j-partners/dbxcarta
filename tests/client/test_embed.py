@@ -105,13 +105,13 @@ def _questions(n: int) -> list[Question]:
 def test_graph_rag_raises_when_embedding_fails(monkeypatch) -> None:
     monkeypatch.setattr(arms, "_embed_questions", lambda *_a, **_k: (None, "boom"))
     with pytest.raises(RuntimeError, match="graph_rag embedding failed"):
-        arms._run_graph_rag_arm(None, None, _settings(), _questions(3), None, None, "staging")
+        arms._run_graph_rag_arm(None, _settings(), _questions(3), None, None, "cache")
 
 
 def test_graph_rag_raises_on_embedding_count_mismatch(monkeypatch) -> None:
     monkeypatch.setattr(arms, "_embed_questions", lambda *_a, **_k: ([[0.1]], None))
     with pytest.raises(RuntimeError, match="misaligned embeddings"):
-        arms._run_graph_rag_arm(None, None, _settings(), _questions(3), None, None, "staging")
+        arms._run_graph_rag_arm(None, _settings(), _questions(3), None, None, "cache")
 
 
 def test_retrieval_concurrency_default(monkeypatch) -> None:
@@ -136,10 +136,9 @@ def test_retrieval_concurrency_rejects_non_positive(monkeypatch) -> None:
 def test_graph_rag_preserves_question_order_after_parallel_retrieval(
     monkeypatch,
 ) -> None:
-    from dbxcarta.client import generation, graph_retriever, trace
+    from dbxcarta.client import generation, graph_retriever
 
     recorded_prompt_ids: list[str] = []
-    emitted_trace_ids: list[str] = []
 
     class RetrieverStub:
         def __init__(self, _settings) -> None:
@@ -165,10 +164,10 @@ def test_graph_rag_preserves_question_order_after_parallel_retrieval(
             self.closed = True
 
     def fake_generate_sql_batch(
-        _spark,
+        _ws,
         _endpoint,
         questions_with_prompts,
-        _staging_table,
+        _cache_dir,
         _arm,
         *,
         refresh=False,
@@ -181,13 +180,6 @@ def test_graph_rag_preserves_question_order_after_parallel_retrieval(
     monkeypatch.setattr(graph_retriever, "GraphRetriever", RetrieverStub)
     monkeypatch.setattr(generation, "generate_sql_batch", fake_generate_sql_batch)
     monkeypatch.setattr(arms, "fetch_rows", lambda *_a, **_k: (["one"], [[1]], None))
-    monkeypatch.setattr(
-        trace,
-        "emit_retrieval_traces",
-        lambda _spark, traces, _table: emitted_trace_ids.extend(
-            item.question_id for item in traces
-        ),
-    )
 
     summary = ClientRunSummary(
         run_id="run",
@@ -197,12 +189,9 @@ def test_graph_rag_preserves_question_order_after_parallel_retrieval(
         arms=["graph_rag"],
     )
 
-    arms._run_graph_rag_arm(
-        None, object(), _settings(), _questions(3), summary, None, "cat.s.stage"
-    )
+    arms._run_graph_rag_arm(object(), _settings(), _questions(3), summary, None, "cache")
 
     assert recorded_prompt_ids == ["q0", "q1", "q2"]
-    assert emitted_trace_ids == ["q0", "q1", "q2"]
     assert [result.question_id for result in summary.question_results] == [
         "q0",
         "q1",
@@ -239,9 +228,7 @@ def test_graph_rag_closes_retriever_when_worker_fails(monkeypatch) -> None:
     )
 
     with pytest.raises(RuntimeError, match="retrieve failed"):
-        arms._run_graph_rag_arm(
-            None, object(), _settings(), _questions(1), summary, None, "cat.s.stage"
-        )
+        arms._run_graph_rag_arm(object(), _settings(), _questions(1), summary, None, "cache")
 
     assert instances
     assert instances[0].closed is True

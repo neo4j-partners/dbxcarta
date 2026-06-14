@@ -4,16 +4,13 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-if TYPE_CHECKING:
-    from pyspark.sql import SparkSession
-
 
 class Question(BaseModel):
-    """Validated client question loaded from JSON or a Delta table."""
+    """Validated client question loaded from a JSON file."""
 
     question_id: str
     question: str
@@ -52,20 +49,9 @@ class Question(BaseModel):
         return value
 
 
-def is_table_ref(source: str) -> bool:
-    """Return True when source looks like a three-part catalog.schema.table name."""
-    return len(source.split(".")) == 3 and not source.startswith(("/", "."))
-
-
-def load_questions(source: str, spark: SparkSession | None = None) -> list[Question]:
-    """Load and validate client questions from a Delta table or JSON file."""
-    if is_table_ref(source):
-        if spark is None:
-            raise RuntimeError("spark is required to load questions from a Delta table")
-        raw_questions = [row.asDict() for row in spark.table(source).collect()]
-    else:
-        text = Path(source).read_text()
-        raw_questions = json.loads(text)
+def load_questions(source: str) -> list[Question]:
+    """Load and validate client questions from a local JSON file."""
+    raw_questions = json.loads(Path(source).read_text())
 
     if not isinstance(raw_questions, list):
         # ValueError is the deliberate, uniform error contract for an invalid

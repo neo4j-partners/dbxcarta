@@ -2,7 +2,7 @@
 
 ## Dropping a data catalog on a Default-Storage account is not round-trippable through the tooling
 
-On 2026-06-03, clearing the example catalogs for a pipeline re-run surfaced a gap. `dbxcarta-submit teardown` dropped the dense and schemapile data catalogs with `DROP CATALOG ... CASCADE`, but the follow-up `dbxcarta-submit bootstrap` could not recreate them. This workspace runs on a Databricks account with Default Storage enabled and no metastore storage root URL. On such an account, a SQL `CREATE CATALOG` without an explicit `MANAGED LOCATION` fails, and the Unity Catalog catalogs API fails the same way. `bootstrap`'s `ensure_uc_catalog` only runs `CREATE CATALOG` when the catalog is missing, so it works for an existing catalog by skipping the create, but it cannot rebuild one that was dropped.
+On 2026-06-03, clearing the example catalogs for a pipeline re-run surfaced a gap. `dbxcarta teardown` dropped the dense and schemapile data catalogs with `DROP CATALOG ... CASCADE`, but the follow-up `dbxcarta bootstrap` could not recreate them. This workspace runs on a Databricks account with Default Storage enabled and no metastore storage root URL. On such an account, a SQL `CREATE CATALOG` without an explicit `MANAGED LOCATION` fails, and the Unity Catalog catalogs API fails the same way. `bootstrap`'s `ensure_uc_catalog` only runs `CREATE CATALOG` when the catalog is missing, so it works for an existing catalog by skipping the create, but it cannot rebuild one that was dropped.
 
 What this means in practice:
 
