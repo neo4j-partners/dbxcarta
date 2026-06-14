@@ -27,12 +27,12 @@ After this work, the only Spark in dbxcarta is the job-submit tooling that launc
 - **Goes away:** the Spark ingest pipeline that reads Unity Catalog tables and writes the semantic graph into Neo4j. That is the `dbxcarta-spark` package. neocarta owns this now.
 - **Goes away with it:** the `dbxcarta verify` command. It checks the output of a finished pipeline run, so it belongs with the pipeline. neocarta dropped this check during its migration, so dbxcarta drops it too.
 - **Stays on Spark:** the operator job-submit tooling and the `materialize` job. `materialize` runs `spark.sql` to build Delta tables, so it genuinely needs a cluster.
-- **Stays, but moves off Spark:** the example client. Its real work is Neo4j retrieval, prompt building, model calls, and scoring, all plain Python. It only used a cluster session to read the question table and write the summary, which it can do straight against the SQL warehouse instead. So it becomes a local Python command.
-- **Moves, does not die:** the `ready` and `upload-questions` commands. They are operator helpers, so they move out of the Spark package and into the operator tool. The readiness logic already lives in the shared core, so only the two thin command handlers move.
+- **Stays, but moves off Spark:** the example client. Its real work is Neo4j retrieval, prompt building, model calls, and scoring. A first reading of this plan assumed the client touched Spark only to read the question table and write the summary, so "move it to the warehouse" looked like the whole job. A closer look found Spark in five places, and the central one is the model-call path: SQL generation runs through the Spark `ai_query()` function over a staging Delta table, and three result tables (`run_summary`, `client_retrieval`, `client_questions`) are written as Delta. The simplification (decided in design discussion, see Phase 3) is to take the client fully off Spark and off remote storage: model calls become plain local web calls to the serving endpoint, exactly the pattern `client/embed.py` already uses for embeddings; questions are read from a local JSON file; the run prints a truncated result to the screen; and the Delta tables and the JSON summary file are dropped because nothing reads them. The client becomes a plain local Python command with no cluster and no warehouse writes.
+- **Goes away, not moved:** the `upload-questions` command. Phase 2 moved it into the operator tool alongside `ready`, on the assumption a remote job still needed questions staged to a Volume. The Phase 3 simplification removes that need: the client reads questions from a local JSON file, so nothing reads remotely staged questions anymore. The command and its core helper (`upload_questions`, `_validate_questions_file`) are therefore deleted outright. `ready` stays: it is a genuine operator helper that checks warehouse catalog state, and its logic already lives in the shared core.
 
 ## The command-line tools, so the change is clear
 
-- **`dbxcarta`** is the single operator command after this change. Today this name belongs to the old pipeline command inside the Spark package, which offers `verify`, `ready`, and `upload-questions`. The pipeline command is deleted. `verify` is retired. `ready` and `upload-questions` move to the operator tool, and the operator tool is renamed to `dbxcarta`.
+- **`dbxcarta`** is the single operator command after this change. Today this name belongs to the old pipeline command inside the Spark package, which offers `verify`, `ready`, and `upload-questions`. The pipeline command is deleted. `verify` is retired. `ready` moves to the operator tool, and the operator tool is renamed to `dbxcarta`. `upload-questions` is retired in Phase 3 once the client reads questions from a local file (see the "goes away" note above); Phase 2 moved it before that simplification was settled, so it lived in the operator tool only briefly.
 - **The cluster ingest entry point** is what the job runs on the cluster. Today it points at the Spark package. After this change it points at the neocarta connector's ingest entry point inside the neocarta wheel.
 - **`dbxcarta-client`** stays a command, but runs locally instead of on a cluster.
 
@@ -77,7 +77,7 @@ Validation: full default suite green (611 passed, 1 skipped), mypy and ruff clea
 
 Rescue the operator-facing commands and the command name, then remove the package and every workspace wiring that points at it, in one cutover.
 
-- Move the `ready` and `upload-questions` command handlers from the Spark package into the operator tool. The readiness logic they call already lives in the shared core, so only the thin handlers move.
+- Move the `ready` and `upload-questions` command handlers from the Spark package into the operator tool. The readiness logic they call already lives in the shared core, so only the thin handlers move. (Note added after design review: moving `upload-questions` turned out to be unnecessary. The Phase 3 simplification has the client read questions from a local file, so nothing reads remotely staged questions and `upload-questions` is deleted in Phase 3. It lived in the operator tool only between Phase 2 and Phase 3. `ready` is a genuine operator helper and stays.)
 - Retire the `verify` command. Do not move it. It checks pipeline output, which is now neocarta's job.
 - Rename the operator tool's command from `dbxcarta-submit` to `dbxcarta`, so the surviving command takes the name the old pipeline command used.
 - Delete the whole `dbxcarta-spark` package folder.
@@ -89,7 +89,7 @@ Rescue the operator-facing commands and the command name, then remove the packag
   - `tests/integration/conftest.py` imports `dbxcarta.spark.ingest.summary_io` (`load_summary_from_volume`). This checks finished pipeline output, which is now neocarta's job, so drop it along with the retired `verify` check.
   - `tests/boundary/test_import_boundaries.py` asserts on `import dbxcarta.spark`. Update or remove that expectation, since the namespace no longer exists here.
 
-**Phase 2 is done when:** `dbxcarta ready` and `dbxcarta upload-questions` work, the project builds and installs with no reference to the old package, and the old pipeline command is gone.
+**Phase 2 is done when:** `dbxcarta ready` works (and `dbxcarta upload-questions` worked at the time of Phase 2, before Phase 3 retired it), the project builds and installs with no reference to the old package, and the old pipeline command is gone.
 
 **Status: Complete.**
 
@@ -100,7 +100,9 @@ What was done:
 - The four external callers were fixed: `run_autotest.py` inlines the tiny id rule (the deleted `generate_id`) and calls the renamed command; `tests/integration/conftest.py` dropped the `run_summary` fixture (the pipeline-output loader); `tests/boundary/test_import_boundaries.py` dropped every `dbxcarta.spark`/`dbxcarta-spark` expectation; `test_overlay.py` was already decoupled in Phase 1.
 
 Deviation (in scope, completing the deletion):
-- The plan enumerated "four callers outside the package," but the package's own test suite, `tests/spark/` (34 files), imports `dbxcarta.spark` throughout and had to be deleted with the package — leaving it would have made the default suite red. Phase 4 still removes the CI step that ran "the Spark package's tests," confirming these are that suite. Coverage worth keeping was ported: the `_resolve_questions_file` tests moved into `tests/submit/test_cli.py`, and the live `test_semantic_search.py` was decoupled from the removed summary fixture (its real assertions are about the embedded-graph contract neocarta still produces) rather than deleted.
+- The plan enumerated "four callers outside the package," but the package's own test suite, `tests/spark/` (34 files), imports `dbxcarta.spark` throughout and had to be deleted with the package — leaving it would have made the default suite red. Phase 4 still removes the CI step that ran "the Spark package's tests," confirming these are that suite. Coverage worth keeping was ported: the `_resolve_questions_file` tests moved into `tests/submit/test_cli.py` (these were later removed in Phase 3 along with the `upload-questions` command), and the live `test_semantic_search.py` was decoupled from the removed summary fixture (its real assertions are about the embedded-graph contract neocarta still produces) rather than deleted.
+
+Superseded in Phase 3: the `upload-questions` command and its core helpers (`upload_questions`, `_validate_questions_file`) were deleted, along with their tests in `tests/submit/test_cli.py` and `tests/core/test_readiness.py`. Phase 2 moved them on the assumption a remote job still needed staged questions; the Phase 3 client reads questions from a local file, so that assumption no longer holds. `ready` is unaffected.
 
 Deferred to later phases (per plan): the `.github/` workflows still naming `dbxcarta-spark` (Phase 4) and the `docs/` references (Phase 5). The remaining `dbxcarta.spark`/`dbxcarta-spark` text in source is intentional provenance comments, not live imports.
 
@@ -110,15 +112,31 @@ Validation: full default suite green (433 passed, 3 deselected — the ~178 `tes
 
 Take the client off the cluster, then remove the cluster machinery that only the client and the old ingest wheel needed.
 
-- Change the client so it reads the question table and writes the summary straight against the SQL warehouse, the same way the local demo already does, instead of asking a cluster session to do it.
-- Remove the cluster session call from the client run path, so the client is plain local Python connecting to Neo4j and the warehouse.
+**Scope correction from the original framing.** This phase was first written as if the client touched Spark only to read the question table and write the summary, so the plan was to repoint those two operations at the SQL warehouse. A read of the code found Spark in five places, and the central one is the model-call path. The simplifications below were decided in design discussion and are the authoritative Phase 3 plan. They go further than the original "move it to the warehouse" idea: the client moves off Spark **and** off remote reads and writes entirely, becoming a self-contained local command. The reasoning for each choice is recorded inline so a future reader knows it was deliberate, not an oversight.
+
+Client, taken fully local:
+
+- **Model calls become plain local web calls.** SQL generation runs through the Spark `ai_query()` function over a staging Delta table in `client/generation.py`. Replace it with a direct call to the chat serving endpoint, the same `ws.api_client.do("POST", "/serving-endpoints/{endpoint}/invocations", ...)` pattern `client/embed.py` already uses for embeddings. *Why:* a serving endpoint is reachable from any machine with the operator's normal Databricks credentials, with no cluster. Embeddings already prove the pattern works locally, so chat generation joins it instead of going through Spark or a warehouse round trip.
+- **Read questions from a local JSON file only.** Drop the read-from-table branch in `client/questions.py:load_questions` and delete the now-dead `manage_questions` function in `client/eval/run.py` (it has no caller) and its export from `client/eval/__init__.py`. *Why:* the client runs locally, so the questions file is a local path. Reading questions from a remote Delta table existed only for the cluster client, which is going away.
+- **Cache model responses in a small local file.** The current cache is a per-arm staging Delta table keyed by an input hash. Replace it with a local file keyed by the same hash, so an identical rerun still skips inference. *Why:* keeps the "do not pay for the model twice" behavior without Spark or any remote table.
+- **Print a truncated result; drop all persisted client outputs.** Remove the three Delta-table writes (`run_summary` via `summary.py:emit_delta`, `client_retrieval` via `trace.py:emit_retrieval_traces`, `client_questions` via `manage_questions`) and the JSON summary file. Have the run print a truncated summary to the screen. *Why:* a code-wide check found nothing reads any of these client outputs. `scripts/run_autotest.py` reads the **ingest** job's summary JSON, which the neocarta ingest job still writes; it never reads the client's summary, so dropping the client outputs leaves it untouched.
+- **Remove the Spark session and the `spark` parameter threaded through the client.** `run.py` no longer calls `SparkSession.builder.getOrCreate()`, and `spark` is dropped from the `arms.py`, `generation.py`, `summary.py`, and `trace.py` seams. *Why:* with generation, caching, question reads, and outputs all off Spark, the session has nothing left to do, and the client is then plain local Python talking to Neo4j and the serving endpoints.
+- Confirm the examples run the client locally and still pass their checks.
+
+Retire the operator command the local client makes redundant:
+
+- **Delete the `upload-questions` command and its core helpers.** Remove the `upload-questions` handler and `_resolve_questions_file` from `submit/cli.py`, and `upload_questions` plus `_validate_questions_file` from `core/readiness.py`, with their tests. *Why:* it staged questions to a Volume only so a remote job could read them; the local client reads a local file, so nothing reads remotely staged questions. `ready` stays. **(Done.)**
+
+Shrink the submit tooling now that the client is no longer a cluster entry point:
+
 - Remove the client from the operator tool's set of cluster entry points, so there is no "submit the client to a cluster" path.
 - Remove the client's pinned dependency list and the client branch of the core-copying step. The only package the tool still builds and copies core into is `materialize`.
-- Confirm the examples run the client locally and still pass their checks.
 - With the client gone, the generic submit-entrypoint dispatch now has one caller left, ingest. Collapse it into a dedicated "submit ingest" path. Remove the indirection that chose between entry points by name, since there is nothing left to choose between.
 - Shrink the entry-point lookup tables to the single ingest entry, and delete the now-unused client and old-ingest entries.
 
-**Phase 3 is done when:** the client runs locally end to end with no cluster, the submit tooling has a single dedicated ingest-submit path with no name-based dispatch, and it only knows about staging the neocarta ingest wheel and building the `materialize` job.
+**Phase 3 is done when:** the client runs locally end to end with no cluster and no warehouse or Delta writes, printing a truncated result; the `upload-questions` command is gone; and the submit tooling has a single dedicated ingest-submit path with no name-based dispatch, knowing only about staging the neocarta ingest wheel and building the `materialize` job.
+
+**Status: In progress.** The `upload-questions` retirement is complete (command, core helpers, and tests removed; default suite green, mypy and ruff clean). The client refactor and the submit-tooling shrink are pending.
 
 ## Phase 4: Update the automation (CI)
 
@@ -144,8 +162,9 @@ Rewrite the docs so they describe the new shape: the pipeline lives in neocarta,
 - Update the add-a-data-source tutorial to point at the neocarta connector instead of building the old Spark wheel.
 - Update the schema doc so it points at the neocarta connector for the graph contract.
 - Update the test fixtures readme so it no longer says the self-check lives in the old Spark package.
+- Remove every `upload-questions` reference from the docs and the example readmes (Phase 3 deleted the command). Affected files include `README.md`, `docs/tutorials/add-a-data-source.md`, `docs/reference/public-api.md`, `docs/reference/architecture.md`, `docs/proposals/published.md`, the project `CLAUDE.md` "Environment configuration" section, and each `examples/<name>/README.md` and `examples/<name>/src/.../__init__.py` docstring. Replace the readme/CLAUDE.md description of how questions reach the client with the local-file model (the client reads a local `questions.json`), and drop the `dbxcarta upload-questions` command rows and steps.
 
-**Phase 5 is done when:** no doc tells a reader to build, install, or run the removed package, and the two-step flow is described: run the ingest job from the neocarta wheel, then run the operator follow-up.
+**Phase 5 is done when:** no doc tells a reader to build, install, or run the removed package, no doc references the retired `upload-questions` command, and the two-step flow is described: run the ingest job from the neocarta wheel, then run the operator follow-up.
 
 ## Phase 6: Full local end-to-end test and final sweep
 

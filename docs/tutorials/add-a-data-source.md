@@ -67,10 +67,11 @@ A consumer subproject has four moving parts:
   that names the catalog, schema, volume, and feature flags for this data source.
   It is the single source of truth for the integration's dbxcarta config.
 - **A consumer-owned Databricks Asset Bundle**: a `databricks.yml` with two
-  `python_wheel_task` jobs that run the published `dbxcarta-ingest` and
-  `dbxcarta-client` entry points on a cluster. This replaces `dbxcarta-submit`,
-  which is operator-only, unpublished, and rebuilds wheels from the dbxcarta
-  source tree a consumer does not have.
+  `python_wheel_task` jobs that run the neocarta connector's
+  `neocarta-databricks-ingest` entry point and the `dbxcarta-client` entry point
+  on a cluster. This replaces `dbxcarta-submit`, which is operator-only,
+  unpublished, and rebuilds wheels from the dbxcarta source tree a consumer does
+  not have.
 - **The data itself in Unity Catalog**: tables an upstream process already owns
   and populates. A consumer points at existing data. There is no blueprint and
   no materialize step.
@@ -82,21 +83,25 @@ tables, give it a question set, and run the two jobs from your bundle.
 
 ## How dbxcarta reaches your project
 
-dbxcarta publishes three packages a consumer pins by version:
+A consumer pins these by version:
 
 - `dbxcarta-core`: the foundation. The readiness check and question upload, the
   env loader, and the job entry-point plumbing.
-- `dbxcarta-spark`: `SparkIngestSettings`, `run_dbxcarta`, and the `dbxcarta` and
-  `dbxcarta-ingest` console entry points.
 - `dbxcarta-client[graph]`: the Text2SQL evaluation harness, the `dbxcarta-client`
   entry point, and the Neo4j driver via the `[graph]` extra.
+- `neocarta[databricks-spark]`: the ingest pipeline. It reads Unity Catalog,
+  embeds inline, infers foreign keys, and writes the Neo4j semantic layer, and
+  registers the `neocarta-databricks-ingest` console entry point. It lives in the
+  separate [neocarta](https://github.com/neo4j-field/neocarta) project; dbxcarta
+  no longer carries the pipeline.
 
-While PyPI publishing is unavailable, these wheels are **vendored** into the
-consumer repo and resolved locally with a relative find-links path. The
-consumer's `pyproject.toml` still pins normal versions with no source overrides,
-so it is identical to the eventual published case. Only where uv looks for the
-wheels changes. See `dbxcarta/docs/reference/simulate-publish.md` for the full
-mechanism, and "Vendored wheels" below for the consumer-side steps.
+While PyPI publishing is unavailable, these wheels (the two dbxcarta packages and
+the neocarta connector wheel) are **vendored** into the consumer repo and resolved
+locally with a relative find-links path. The consumer's `pyproject.toml` still
+pins normal versions with no source overrides, so it is identical to the eventual
+published case. Only where uv looks for the wheels changes. See
+`dbxcarta/docs/reference/simulate-publish.md` for the full mechanism, and
+"Vendored wheels" below for the consumer-side steps.
 
 ## Concepts in one minute
 
@@ -163,15 +168,15 @@ Its files are the reference for every step below.
 
 Then change the following:
 
-- **`pyproject.toml`**: pin the three dbxcarta packages by version, with no
-  `[tool.uv.sources]`. This is the whole point of the published-library
-  approach.
+- **`pyproject.toml`**: pin dbxcarta-core, dbxcarta-client, and the neocarta
+  connector wheel by version, with no `[tool.uv.sources]`. This is the whole
+  point of the published-library approach.
 
   ```toml
   dependencies = [
       "dbxcarta-core==1.1.0",
-      "dbxcarta-spark==1.1.0",
       "dbxcarta-client[graph]==1.1.0",
+      "neocarta[databricks-spark]==<neocarta version>",
       "databricks-sdk>=0.40",
       "python-dotenv",
   ]

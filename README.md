@@ -16,9 +16,10 @@ generating SQL.
 
 ```
 ┌──────────────────────┐   ┌───────────────┐   ┌──────────────────────┐   ┌──────────────────────┐   ┌──────────────────────┐   ┌───────────────┐
-│ dbxcarta-materialize │──►│ Unity Catalog │──►│ dbxcarta-spark       │──►│ Neo4j semantic layer │──►│ dbxcarta-client      │──►│ SQL / answer  │
-│ blueprint to tables  │   │ flat metadata │   │ build: extract,      │   │ typed nodes, vectors,│   │ query: embed,        │   │ generated     │
-│ (seeds example data) │   │               │   │ embed, infer FKs     │   │ confidence-scored FKs│   │ vector + graph fetch │   │ result        │
+│ dbxcarta-materialize │──►│ Unity Catalog │──►│ neocarta connector   │──►│ Neo4j semantic layer │──►│ dbxcarta-client      │──►│ SQL / answer  │
+│ blueprint to tables  │   │ flat metadata │   │ ingest job (wheel):  │   │ typed nodes, vectors,│   │ query: embed,        │   │ generated     │
+│ (seeds example data) │   │               │   │ extract, inline      │   │ confidence-scored FKs│   │ vector + graph fetch │   │ result        │
+│                      │   │               │   │ embed, infer FKs     │   │                      │   │                      │   │               │
 └──────────────────────┘   └───────────────┘   └──────────────────────┘   └──────────────────────┘   └──────────────────────┘   └───────────────┘
 ```
 
@@ -27,12 +28,13 @@ seeds their demo tables into Unity Catalog from a committed blueprint. Against
 your own catalog the tables already exist, so the flow starts at Unity Catalog
 and `dbxcarta-materialize` is not used.
 
-Two packages are dbxcarta: `dbxcarta-core` and `dbxcarta-spark` build the
-semantic layer, and that is the product. The rest support it. `dbxcarta-submit`
-deploys the pipeline as a Databricks job, and `dbxcarta-client`,
-`dbxcarta-materialize`, and the bundled `examples/` evaluate and demonstrate the
-layer. To map your own catalog you need only core and spark, plus submit to run
-them.
+The ingest pipeline that builds the semantic layer is the
+[neocarta](https://github.com/neo4j-field/neocarta) connector wheel; dbxcarta no
+longer carries its own copy. dbxcarta is the operator tooling and evaluation
+around it: `dbxcarta-submit` (the `dbxcarta` command) stages the neocarta wheel
+and deploys it as a Databricks job, and `dbxcarta-client`, `dbxcarta-materialize`,
+and the bundled `examples/` evaluate and demonstrate the resulting layer. To map
+your own catalog you pull the neocarta wheel and run it with `dbxcarta`.
 
 The semantic-layer thesis, the three storage planes (data, semantic layer, ops),
 and the validation model are documented in
@@ -46,14 +48,16 @@ Unity Catalog alone, see
 
 ## Packages
 
-dbxcarta is five packages in three tiers over a shared, Spark-free core. The
-product is `dbxcarta-core` and `dbxcarta-spark`: core is the foundation and spark
-builds the semantic layer. `dbxcarta-submit` is the operator-local CLI that
-builds, uploads, and submits the jobs, and you need it to run the real pipeline.
-`dbxcarta-client`, `dbxcarta-materialize`, and the bundled `examples/` are the
-evaluation and demo tier that proves and showcases the layer. The siblings each
-depend on core but never on one another, and there is no top-level `dbxcarta`
-import surface, so library consumers import the layer they need.
+dbxcarta is four packages over a shared, Spark-free core, plus the external
+neocarta connector wheel it pulls for ingest. The ingest pipeline is the neocarta
+connector: it reads Unity Catalog and writes the semantic layer. `dbxcarta-core`
+is the foundation, and `dbxcarta-submit` is the operator-local CLI (the
+`dbxcarta` command) that stages the neocarta wheel, builds and uploads the local
+wheels, and submits the jobs. `dbxcarta-client`, `dbxcarta-materialize`, and the
+bundled `examples/` are the evaluation and demo tier that proves and showcases
+the layer. The siblings each depend on core but never on one another, and there
+is no top-level `dbxcarta` import surface, so library consumers import the layer
+they need.
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────┐
@@ -64,12 +68,11 @@ import surface, so library consumers import the layer they need.
         ┌────────────────────────────┼────────────────────────────┐
         ▼                            ▼                            ▼
 ┌──────────────────────┐  ┌──────────────────────┐  ┌──────────────────────┐
-│ dbxcarta-spark       │  │ dbxcarta-client      │  │ dbxcarta-materialize │
+│ neocarta (external)  │  │ dbxcarta-client      │  │ dbxcarta-materialize │
 │ UC ingest to Neo4j   │  │ retrieval + eval     │  │ build demo tables    │
-│ +pyspark +neo4j      │  │ +requests            │  │ +pyspark (shell)     │
+│ +databricks-spark    │  │ +requests            │  │ +pyspark (shell)     │
 └──────────────────────┘  └──────────────────────┘  └──────────────────────┘
-        │                            │                            │
-        └────────────────────────────┼────────────────────────────┘
+                                     │            (client, materialize)
                                      ▼
 ┌───────────────────────────────────────────────────────────────────────────┐
 │ dbxcarta-core      Spark-free shared foundation · databricks-sdk only       │
@@ -77,23 +80,24 @@ import surface, so library consumers import the layer they need.
 │ materialize (pure SQL builders) · questions · config · volume_io            │
 └───────────────────────────────────────────────────────────────────────────┘
 
-   dbxcarta-submit   operator CLI · depends on core + databricks-job-runner
-                     builds wheels, uploads, and submits the spark / client /
-                     materialize jobs. Runs locally; never on the cluster.
+   dbxcarta-submit   operator CLI (the `dbxcarta` command) · depends on core +
+                     databricks-job-runner. Stages the neocarta ingest wheel,
+                     builds/uploads the client and materialize wheels, and
+                     submits the jobs. Runs locally; never on the cluster.
 ```
 
-**The product**: builds the semantic layer; the two packages you need for your own catalog.
+**The ingest pipeline**: builds the semantic layer; pulled from neocarta.
+
+| Distribution | Capability | Import path | Console script |
+|--------------|------------|-------------|----------------|
+| `neocarta` (external) | Reads Unity Catalog metadata, embeds it inline, infers foreign keys, and writes the semantic-layer graph into Neo4j. Pulled as a wheel with the `databricks-spark` extra; dbxcarta stages and runs it. | `neocarta` | `neocarta-databricks-ingest` |
+
+**Foundation & operator tooling**: pull the neocarta wheel and run it on Databricks.
 
 | Distribution | Capability | Import path | Console script |
 |--------------|------------|-------------|----------------|
 | `dbxcarta-core` | The shared foundation every other package builds on: common helpers for naming, config, secrets, and running SQL. Depends only on the Databricks SDK. | `dbxcarta.core` | — |
-| `dbxcarta-spark` | Reads Unity Catalog metadata, embeds it, infers foreign keys, and writes the semantic-layer graph into Neo4j. | `dbxcarta.spark` | `dbxcarta`, `dbxcarta-ingest` |
-
-**Operator tooling**: runs the pipeline on Databricks.
-
-| Distribution | Capability | Import path | Console script |
-|--------------|------------|-------------|----------------|
-| `dbxcarta-submit` | The command you run on your own machine to build, upload, and launch the Databricks jobs. | `dbxcarta.submit` | `dbxcarta-submit` |
+| `dbxcarta-submit` | The command you run on your own machine to stage the neocarta wheel, build and upload the local wheels, and launch the Databricks jobs. | `dbxcarta.submit` | `dbxcarta` |
 
 **Evaluation & demo**: prove and showcase the layer; not needed to build it for your own catalog.
 
@@ -102,20 +106,21 @@ import surface, so library consumers import the layer they need.
 | `dbxcarta-client` | Queries the finished graph to retrieve schema context and scores how well the semantic layer helps Text2SQL. | `dbxcarta.client` | `dbxcarta-client`, `dbxcarta-embed-probe` |
 | `dbxcarta-materialize` | A Databricks job that creates the example demo tables from a saved blueprint. | `dbxcarta.materialize` | `dbxcarta-materialize` |
 
-**Which package do I need?** To map your own catalog, install `dbxcarta-core` and
-`dbxcarta-spark` and run them with `dbxcarta-submit`. The rest are for evaluation
-and demos. New here? Jump to the [Quickstart](#quickstart-demo-catalog).
+**Which package do I need?** To map your own catalog, install `dbxcarta-core`,
+pull the `neocarta` wheel, and run them with the `dbxcarta` command (provided by
+`dbxcarta-submit`). The rest are for evaluation and demos. New here? Jump to the
+[Quickstart](#quickstart-demo-catalog).
 
 **Layer responsibilities:**
 
-*The product*
+*The ingest pipeline (external)*
 
-- **Core** is the shared bottom layer every other package builds on. It provides the common building blocks for naming and paths, reading config and secrets, running SQL, and loading settings. It depends only on the Databricks SDK, never Spark, Neo4j, or the job runner. The boundaries are enforced by `tests/boundary/test_import_boundaries.py`.
-- **Spark** reads Unity Catalog and builds the Neo4j semantic layer: extract, embed, infer foreign keys, write the graph, and verify it. It provides the `dbxcarta` command for verify, ready, and question upload.
+- **neocarta** reads Unity Catalog and builds the Neo4j semantic layer: extract, inline-embed, infer foreign keys, and write the graph. It is pulled as a wheel with the `databricks-spark` extra and run as the `neocarta-databricks-ingest` job; dbxcarta does not carry its source.
 
-*Operator tooling*
+*Foundation & operator tooling*
 
-- **Submit** is the command you run on your own machine to build, upload, and submit Databricks jobs. It is the only layer that touches the job runner, and it never runs on the cluster.
+- **Core** is the shared bottom layer every dbxcarta package builds on. It provides the common building blocks for naming and paths, reading config and secrets, running SQL, and loading settings. It depends only on the Databricks SDK, never Spark, Neo4j, or the job runner. The boundaries are enforced by `tests/boundary/test_import_boundaries.py`.
+- **Submit** is the `dbxcarta` command you run on your own machine to stage the neocarta ingest wheel, build and upload the client and materialize wheels, and submit Databricks jobs. It also provides the `ready` and `upload-questions` operator helpers. It is the only layer that touches the job runner, and it never runs on the cluster.
 
 *Evaluation & demo*
 
@@ -124,76 +129,86 @@ and demos. New here? Jump to the [Quickstart](#quickstart-demo-catalog).
 
 The component-level breakdown of each layer is in [`docs/reference/architecture.md`](docs/reference/architecture.md#packages-and-layer-responsibilities).
 
-This repository uses a clean boundary cutover. Old top-level imports are deleted
-instead of re-exported; see the migration table in
-[`docs/reference/public-api.md`](docs/reference/public-api.md#migration-notes).
+## The ingest pipeline (neocarta connector)
 
-## dbxcarta-spark
-
-The Spark package owns the concrete Unity Catalog ingest implementation, the
-graph contract, verification, Databricks validators, and the `dbxcarta` domain
-CLI for verify, ready, and question upload. It builds the Neo4j semantic layer.
+The Unity Catalog ingest is the [neocarta](https://github.com/neo4j-field/neocarta)
+connector wheel. It owns the concrete ingest implementation and the graph
+contract; dbxcarta stages the wheel and submits it as the ingest job.
 
 **What the build pipeline does:**
 
 - Extracts Unity Catalog metadata across one or more catalogs: table names, column descriptions, comments, and sampled values
-- Tags every table with its medallion layer from the `catalog:layer` entries in `DBXCARTA_CATALOGS`; dbxcarta reads only the silver and gold layers, folding them into one graph
-- Embeds each piece using a Databricks foundation model
+- Tags every table with its medallion layer from the `catalog:layer` entries in `DBXCARTA_CATALOGS` / `NEOCARTA_DATABRICKS_CATALOGS`; dbxcarta reads only the silver and gold layers, folding them into one graph
+- Embeds each piece inline, in-cluster, with a native `ai_query()` call against a Databricks serving endpoint, so a single job produces a fully embedded graph
 - Discovers foreign keys from declared constraints plus metadata and semantic inference, each edge scored by confidence
 - Writes the result to Neo4j as typed nodes with vector properties
 
+Because dbxcarta runs neocarta's inline embedding mode, the ingest job emits a
+fully embedded graph and the only operator follow-up is `materialize`. The
+decoupled external embedding path (re-embedding without re-running the job) is
+deferred to a later phase; see the alignment plan's Phase 7.
+
 ### Graph schema
 
-The build pipeline writes a stable typed contract the client traverses: nodes
+The pipeline writes a stable typed contract the client traverses: nodes
 `Database`, `Schema`, `Table`, `Column`, and `Value`, connected by `HAS_SCHEMA`,
 `HAS_TABLE`, `HAS_COLUMN`, `HAS_VALUE`, and confidence-scored `REFERENCES` edges
 between columns. Each node carries a dotted catalog-qualified `id`, a
 `description`, and an `embedding` where applicable; `Table` nodes also carry a
-`layer` tier under graph contract v1.1. The full contract, including identifier
-generation, per-node properties, embeddings, and versioning, is in
-[`docs/schema/SCHEMA.md`](docs/schema/SCHEMA.md).
+`layer` tier. neocarta owns the authoritative contract; the shape and a pointer
+to it are in [`docs/schema/SCHEMA.md`](docs/schema/SCHEMA.md).
 
 ![dbxcarta Graph Schema](docs/assets/graph-schema.png)
 
-### Build time: pipeline writes the graph
+### Build time: the ingest job writes the graph
 
-Unity Catalog metadata flows through a single Spark job: preflight checks grants
-and config, extract unions `information_schema` into DataFrames, transform shapes
-typed graph rows, embed calls `ai_query` per label, a Delta staging table
-materializes the enriched rows once, then `MERGE` writes nodes and relationships
-into Neo4j and refreshes the vector indexes. The stage-by-stage walkthrough is in
-[`docs/reference/pipeline.md`](docs/reference/pipeline.md).
+Unity Catalog metadata flows through a single Spark job run from the neocarta
+wheel: preflight checks grants and config, extract unions `information_schema`
+into DataFrames, transform shapes typed graph rows, embed calls `ai_query` per
+label inline, then the Neo4j write lands nodes and relationships and refreshes the
+vector indexes. The pipeline internals live in neocarta; see
+[`docs/reference/pipeline.md`](docs/reference/pipeline.md) for where.
 
-### Use as a library
+### Configuring the ingest job
 
-Code running with Databricks Spark access can construct `SparkIngestSettings` and call the ingest implementation directly:
+The neocarta wheel reads its own `NEOCARTA_DATABRICKS_*` environment contract. The
+example overlays set it directly:
 
-```python
-from dbxcarta.spark import SparkIngestSettings, run_dbxcarta
-
-settings = SparkIngestSettings(
-    dbxcarta_catalog="analytics_silver",
-    dbxcarta_catalogs="analytics_silver:silver,analytics_gold:gold",
-    dbxcarta_schemas="finance,customer_success",
-    dbxcarta_summary_volume="/Volumes/analytics/ops/dbxcarta/summaries",
-    dbxcarta_summary_table="analytics_ops.dbxcarta.dbxcarta_runs",
-    dbxcarta_include_embeddings_tables=True,
-    dbxcarta_include_embeddings_columns=True,
-)
-
-run_dbxcarta(settings=settings)
+```bash
+# In the selected dbxcarta-overlay.env — the neocarta wheel reads NEOCARTA_DATABRICKS_*
+NEOCARTA_DATABRICKS_CATALOG=analytics_silver
+NEOCARTA_DATABRICKS_CATALOGS=analytics_silver:silver,analytics_gold:gold
+NEOCARTA_DATABRICKS_SCHEMAS=finance,customer_success
+NEOCARTA_DATABRICKS_INCLUDE_EMBEDDINGS_TABLES=true
+NEOCARTA_DATABRICKS_INCLUDE_EMBEDDINGS_COLUMNS=true
+NEOCARTA_DATABRICKS_EMBEDDING_ENDPOINT=databricks-gte-large-en
+NEOCARTA_DATABRICKS_EMBEDDING_DIMENSION=1024
+NEOCARTA_DATABRICKS_EMBEDDING_STAGING_VOLUME=/Volumes/analytics/ops/dbxcarta/staging
+NEOCARTA_DATABRICKS_SUMMARY_VOLUME=/Volumes/analytics/ops/dbxcarta/summaries
+NEOCARTA_DATABRICKS_SECRET_SCOPE=dbxcarta-neo4j-analytics
 ```
 
-`dbxcarta_catalog` is the single anchor catalog used for preflight, verify, and ops provisioning. `dbxcarta_catalogs` lists every catalog folded into one graph and is the default model: a build normally spans several catalogs. A single-catalog build remains fully supported; leave `dbxcarta_catalogs` blank and it falls back to the anchor catalog. Each `dbxcarta_catalogs` entry is `catalog` or `catalog:layer`; the optional `:layer` suffix sets the `Table.layer` property, and an entry with no suffix yields a null layer. The summary table's catalog and schema determine the ops catalog, which is kept separate from the data catalogs being mapped.
+`NEOCARTA_DATABRICKS_CATALOG` is the single anchor catalog used for preflight and
+provisioning. `NEOCARTA_DATABRICKS_CATALOGS` lists every catalog folded into one
+graph and is the default model: a build normally spans several catalogs. A
+single-catalog build remains supported; leave `CATALOGS` blank and it falls back
+to the anchor. Each entry is `catalog` or `catalog:layer`; the optional `:layer`
+suffix sets the `Table.layer` property. Because dbxcarta runs inline embeddings,
+`EMBEDDING_STAGING_VOLUME` is required whenever any include-embeddings flag is on;
+`SUMMARY_VOLUME` is where each detached run writes its `summary_<run_id>.json`
+report. The full overlay contract is documented per example in
+`examples/<name>/dbxcarta-overlay.env`.
 
-The no-argument form, `run_dbxcarta()`, is the Databricks wheel entrypoint. It loads `SparkIngestSettings` from environment variables and runs the same pipeline.
+The operator forwards these `KEY=VALUE` pairs to the cluster as job parameters,
+and the neocarta wheel's settings load them on startup. Operator-only and
+client-only keys keep their `DBXCARTA_*` / `DATABRICKS_*` names and are harmlessly
+ignored by neocarta.
 
 ### Design principles
 
 Everything runs inside Databricks: no external orchestrators, no local execution,
-no service accounts. The build is a single Spark submission, embeds each row once
-via a materialize-once Delta staging step, and writes Neo4j behind a fail-closed
-boundary. That architectural rationale is in
+no service accounts. The build is a single Spark submission and writes Neo4j
+behind a fail-closed boundary. That architectural rationale is in
 [`docs/reference/architecture.md`](docs/reference/architecture.md#building-the-layer).
 The operational rules, Spark and Neo4j connector tuning, preflight grant checks,
 secret handling, metadata-source scope, and run observability, are in
@@ -202,7 +217,7 @@ secret handling, metadata-source scope, and run observability, are in
 ## dbxcarta-client: validation harness
 
 The client package owns retrieval primitives and the Text2SQL eval harness. It
-queries the Neo4j semantic layer the Spark package built.
+queries the Neo4j semantic layer the neocarta ingest job built.
 
 ### Query time: client retrieves schema context
 
@@ -227,9 +242,7 @@ against a reference result):
 - **`graph_rag`** is the semantic layer in use: vector-seed plus confidence-ranked `REFERENCES` expansion. It justifies the build pipeline only if it beats `schema_dump` at the matched budget and both clear `no_context`.
 
 The arms cache generation in the ops catalog so unchanged re-runs skip inference.
-The cache layout and refresh controls are in
-[`docs/reference/public-api.md`](docs/reference/public-api.md#client-evaluation-harness),
-and the validation rationale is in
+The cache layout and refresh controls, and the validation rationale, are in
 [`docs/reference/architecture.md`](docs/reference/architecture.md#how-we-validate).
 
 In the quickstart the client runs the `graph_rag` arm against
@@ -351,8 +364,8 @@ Open `.env` and replace the placeholders. Keep the demo defaults already organiz
 Use an existing UC catalog, schema, and volume, or create them if your principal has permission:
 
 ```bash
-uv run dbxcarta-submit schema create <catalog>.<schema>
-uv run dbxcarta-submit volume create <catalog>.<schema>.<volume>
+uv run dbxcarta schema create <catalog>.<schema>
+uv run dbxcarta volume create <catalog>.<schema>.<volume>
 ```
 
 Create the Neo4j secrets in Databricks. These keys are read from the secret scope at job runtime.
@@ -379,19 +392,20 @@ uv run python scripts/run_demo.py
 
 ### 3. Build the semantic layer
 
-Upload the package wheel, upload the demo questions file to the configured UC Volume, then submit the installed wheel's ingest entrypoint.
+Stage the neocarta ingest wheel and the local wheels, upload the demo questions
+file to the configured UC Volume, then submit the neocarta connector's ingest
+entrypoint.
 
 ```bash
-uv run dbxcarta-submit publish-wheels
-uv run dbxcarta-submit upload --data tests/fixtures
-uv run dbxcarta-submit submit-entrypoint ingest
+uv run dbxcarta publish-wheels
+uv run dbxcarta upload --data tests/fixtures
+uv run dbxcarta submit-entrypoint ingest
 ```
 
 The ingest run should finish with `status=success`. It:
 
-- Writes the graph to Neo4j
-- Writes JSON run output under `DBXCARTA_SUMMARY_VOLUME`
-- Appends a row to `DBXCARTA_SUMMARY_TABLE`
+- Writes the fully embedded graph to Neo4j
+- Writes a `summary_<run_id>.json` run report under `NEOCARTA_DATABRICKS_SUMMARY_VOLUME`
 
 ### 4. Run the demo client
 
@@ -404,13 +418,13 @@ The demo client:
 - Writes a client run summary
 
 ```bash
-uv run dbxcarta-submit submit-entrypoint client
+uv run dbxcarta submit-entrypoint client
 ```
 
 Check the job output for per-arm `executed` and `non_empty` rates:
 
 ```bash
-uv run dbxcarta-submit logs <run_id>
+uv run dbxcarta logs <run_id>
 ```
 
 ### 5. Verify and clean up
@@ -425,12 +439,6 @@ Run live integration tests after a successful ingest:
 
 ```bash
 uv run pytest tests/integration -m live
-```
-
-Re-run structural verification against the most recent successful run summary:
-
-```bash
-uv run dbxcarta verify
 ```
 
 Remove the demo schemas when you are done:
@@ -486,7 +494,7 @@ uv run python scripts/run_autotest.py
 | 0 — Preflight | Verifies workspace connectivity and that the SQL warehouse is reachable |
 | 1 — Unit test gate | Runs the fast offline pytest suite; aborts if any test fails |
 | 2 — Schema setup | Tears down and recreates the fixture schemas (`dbxcarta_test_{sales,inventory,hr,events}`) in `dbxcarta-catalog` using `tests/fixtures/setup_test_catalog.sql` |
-| 3 — Ingest run | Builds and uploads the wheel, submits `dbxcarta-ingest`, waits for `SUCCESS`, and downloads the `RunSummary` JSON |
+| 3 — Ingest run | Stages the neocarta wheel and submits `dbxcarta submit-entrypoint ingest`, waits for `SUCCESS`, and downloads the `RunSummary` JSON |
 | 4 — Assertions | Validates the `RunSummary`: `status=success`, `error=null`, `schemas >= 4`, `tables >= 19`, `fk_declared >= 16`, `fk_edges >= 16`, `neo4j_counts` non-empty |
 | 5 — Output JSON | Writes `autotest_results_<ts>.json` to `DBXCARTA_SUMMARY_VOLUME/autotest/` and locally to `outputs/` (git-ignored) |
 
@@ -543,7 +551,7 @@ Drops the catalog or schema named by the overlay's `DBXCARTA_TEARDOWN_TARGET` (`
 
 **`publish-wheels`**
 
-Builds each dbxcarta wheel, bumps the patch version, uploads the wheels to `DATABRICKS_VOLUME_PATH/wheels/`, and ships the cluster bootstrap script. Re-run whenever `packages/dbxcarta-*/src/` changes.
+Stages the prebuilt neocarta ingest wheel from its local build folder, builds the local client and materialize wheels and bumps their patch version, uploads all of them to `DATABRICKS_VOLUME_PATH/wheels/`, and ships the cluster bootstrap script. Re-run whenever `packages/dbxcarta-*/src/` changes or the neocarta wheel is rebuilt.
 
 **`upload`** (generic, passed through to `databricks-job-runner`)
 - `--all` — copies every `scripts/*.py` to the workspace. Re-run whenever `scripts/` changes.
@@ -571,12 +579,11 @@ uv run scripts/clean-dbxcarta.py \
 
 It first reads the workspace and prints every table and volume path it will delete, then waits for a `y/n` answer before touching anything. It drops the ops tables (`dbxcarta_run_summary`, `client_retrieval`, every `client_staging_*`) and empties the ops volume contents, including the embedding ledger. The schema and the volume object itself are kept. Pass `-y`/`--yes` to skip the prompt in automation, or `--warehouse-id` to override warehouse selection.
 
-## Public API and version contract
+## Package responsibilities
 
-External projects depend on the distribution that matches the capability they
-use. The per-distribution public surfaces, the registered commands, the
-breaking-change policy, and the old-to-new import migration table are in
-[`docs/reference/public-api.md`](docs/reference/public-api.md).
+The per-package public surfaces and how they fit together (core, submit, client,
+materialize, and the external neocarta ingest wheel) are in
+[`docs/reference/architecture.md`](docs/reference/architecture.md#packages-and-layer-responsibilities).
 
 ## Known operational gotchas
 

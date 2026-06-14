@@ -5,12 +5,14 @@ once dbxcarta is on PyPI, without running the trusted-publishing route. This unb
 development of `graph-on-databricks/finance-genie/dbxcarta` while PyPI publishing is
 unavailable.
 
-The idea: build the three published packages into a wheelhouse, **vendor that wheelhouse
-into the consumer repo**, and point uv at it with a relative **find-links**. The
-consumer's committed `pyproject.toml` pins normal versions with no source overrides, so
-it is identical to the eventual published case; only where uv looks for the wheels
-changes. Because the wheels are vendored and the find-links path is relative, a new
-developer needs only `uv sync`, with no dbxcarta checkout beside the consumer.
+The idea: build the published dbxcarta packages into a wheelhouse, add the prebuilt
+neocarta connector wheel (which carries the ingest pipeline) to the same wheelhouse,
+**vendor that wheelhouse into the consumer repo**, and point uv at it with a relative
+**find-links**. The consumer's committed `pyproject.toml` pins normal versions with no
+source overrides, so it is identical to the eventual published case; only where uv looks
+for the wheels changes. Because the wheels are vendored and the find-links path is
+relative, a new developer needs only `uv sync`, with no dbxcarta or neocarta checkout
+beside the consumer.
 
 ## Local publish (the dbxcarta-side setup)
 
@@ -22,12 +24,13 @@ consumer resolves against, both locally and on a Databricks cluster.
 cd <dbxcarta>
 uv build --package dbxcarta-core
 uv build --package dbxcarta-client
-uv build --package dbxcarta-spark
 ```
 
-The wheels and sdists land in `dbxcarta/dist/`. The consumer vendors a copy of them into
-its own committed `dbxcarta-dist/` directory, which becomes the simulated index, reached
-two ways (both detailed below):
+The dbxcarta wheels and sdists land in `dbxcarta/dist/`. The ingest pipeline is no longer
+a dbxcarta package: build the neocarta connector wheel in the neocarta checkout
+(`uv build --wheel` with the `databricks-spark` extra) and add it to the same wheelhouse.
+The consumer vendors a copy of all of them into its own committed `dbxcarta-dist/`
+directory, which becomes the simulated index, reached two ways (both detailed below):
 
 - **Local resolution** (`uv sync`, tests, the local demo): a committed `uv.toml` points
   `find-links` at the relative `./dbxcarta-dist`.
@@ -40,11 +43,11 @@ consumer-side and are covered in the consumer's own README.
 ## Flow
 
 ```
-  dbxcarta checkout                      consumer: finance-genie/dbxcarta
-  ─────────────────                      ────────────────────────────────
+  dbxcarta + neocarta checkouts          consumer: finance-genie/dbxcarta
+  ─────────────────────────────          ────────────────────────────────
   uv build --package dbxcarta-core ─┐
   uv build --package dbxcarta-client├─► dist/
-  uv build --package dbxcarta-spark ┘     │
+  (neocarta) uv build --wheel ──────┘     │
                                           │  copy (scripts/refresh_dbxcarta_dist.sh)
                                           ▼
                               dbxcarta-dist/  (COMMITTED, vendored)
@@ -52,19 +55,19 @@ consumer-side and are covered in the consumer's own README.
                           ┌───────────────┴───────────────┐
                           ▼                                ▼
               uv.toml (COMMITTED)              databricks.yml `whl:` libraries
-              find-links = ["./dbxcarta-dist"]  ./dbxcarta-dist/dbxcarta_*.whl
+              find-links = ["./dbxcarta-dist"]  ./dbxcarta-dist/*.whl
                           │                                │
                      uv sync                        bundle upload → cluster
                           ▼
             pyproject.toml (COMMITTED, production-identical)
               dbxcarta-core==1.1.0
-              dbxcarta-spark==1.1.0
               dbxcarta-client[graph]==1.1.0
+              neocarta[databricks-spark]==<neocarta version>
               (no [tool.uv.sources])
                           │
                           ▼
-       dbxcarta-* from ./dbxcarta-dist, third-party from PyPI
-       import dbxcarta.core / .spark / .client
+       dbxcarta-* + neocarta from ./dbxcarta-dist, third-party from PyPI
+       import dbxcarta.core / .client ; run neocarta-databricks-ingest
 ```
 
 ## Steps
@@ -83,8 +86,8 @@ consumer-side and are covered in the consumer's own README.
    ```
    dependencies = [
        "dbxcarta-core==1.1.0",
-       "dbxcarta-spark==1.1.0",
        "dbxcarta-client[graph]==1.1.0",
+       "neocarta[databricks-spark]==<neocarta version>",
        "databricks-sdk>=0.40",
        "python-dotenv",
    ]
@@ -126,9 +129,10 @@ the pins you test with are the pins you ship.
 
 ## What this does and does not prove
 
-Proven offline and on: the consumer's pins resolve, dbxcarta installs from the vendored
-`dbxcarta-dist`, and `import dbxcarta.core / .spark / .client` plus the bundled
-`questions.json` all work. This validates the published-library packaging end to end.
+Proven offline and on: the consumer's pins resolve, dbxcarta and neocarta install from the
+vendored `dbxcarta-dist`, and `import dbxcarta.core / .client` plus `import neocarta` and
+the bundled `questions.json` all work. This validates the published-library packaging end
+to end.
 
 Not covered: the GitHub Actions OIDC handshake with PyPI. That is exercised only by a
 real (Test)PyPI publish and is out of scope here by design.
@@ -137,8 +141,8 @@ real (Test)PyPI publish and is out of scope here by design.
 
 ```
 cd graph-on-databricks/finance-genie/dbxcarta
-uv sync                       # dbxcarta-{core,client,spark}==1.1.0 from ./dbxcarta-dist
-uv run python -c "import dbxcarta.core, dbxcarta.spark, dbxcarta.client; \
+uv sync                       # dbxcarta-{core,client}==1.1.0 + neocarta from ./dbxcarta-dist
+uv run python -c "import dbxcarta.core, dbxcarta.client, neocarta; \
   from pathlib import Path; print(Path('questions.json').exists())"
 ```
 

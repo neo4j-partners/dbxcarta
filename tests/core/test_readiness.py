@@ -1,20 +1,15 @@
-"""Tests for the shared readiness check and question upload.
+"""Tests for the shared readiness check.
 
-The readiness rule, the relabeled report, the questions-file validation, and
-the upload destination check are exercised here once rather than per example,
-because every example drives them through the same core functions.
+The readiness rule and the relabeled report are exercised here once rather than
+per example, because every example drives them through the same core function.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 from dbxcarta.core.readiness import (
     ReadinessReport,
-    _validate_questions_file,
     check_readiness,
-    upload_questions,
 )
 
 
@@ -128,52 +123,3 @@ def test_format_reports_missing_catalogs() -> None:
     formatted = report.format()
     assert "missing required: gold" in formatted
     assert "status: not ready" in formatted
-
-
-# --- Questions file validation -----------------------------------------------
-
-
-def test_validate_questions_file_accepts_non_empty_array(tmp_path: Path) -> None:
-    path = tmp_path / "questions.json"
-    path.write_text('[{"question_id": "q1", "question": "how many rows?"}]')
-    _validate_questions_file(path)  # does not raise
-
-
-def test_validate_questions_file_rejects_empty_array(tmp_path: Path) -> None:
-    path = tmp_path / "questions.json"
-    path.write_text("[]")
-    with pytest.raises(ValueError):
-        _validate_questions_file(path)
-
-
-def test_validate_questions_file_requires_question_fields(tmp_path: Path) -> None:
-    path = tmp_path / "questions.json"
-    path.write_text('[{"question_id": "q1"}]')
-    with pytest.raises(ValueError):
-        _validate_questions_file(path)
-
-
-def test_validate_questions_file_rejects_missing_file(tmp_path: Path) -> None:
-    with pytest.raises(FileNotFoundError):
-        _validate_questions_file(tmp_path / "nope.json")
-
-
-# --- Upload destination validation -------------------------------------------
-
-
-def test_upload_requires_destination(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("DBXCARTA_CLIENT_QUESTIONS", raising=False)
-    with pytest.raises(RuntimeError, match="DBXCARTA_CLIENT_QUESTIONS"):
-        upload_questions(ws=None, questions_file=Path("questions.json"))  # type: ignore[arg-type]
-
-
-@pytest.mark.parametrize(
-    "dest",
-    ["/tmp/questions.json", "/Volumes/cat/sch/vol/questions.txt"],
-)
-def test_upload_rejects_non_volumes_json_destination(
-    dest: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("DBXCARTA_CLIENT_QUESTIONS", dest)
-    with pytest.raises(ValueError, match="/Volumes/"):
-        upload_questions(ws=None, questions_file=Path("questions.json"))  # type: ignore[arg-type]

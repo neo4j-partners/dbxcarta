@@ -11,10 +11,9 @@ A reading path from why the project exists to how it is built:
 1. [Root README](../README.md): what dbxcarta is, what it produces, and how to run the demo.
 2. [explanation/why-semantic.md](explanation/why-semantic.md): why build a graph layer over Unity Catalog at all.
 3. [reference/architecture.md](reference/architecture.md): the three storage planes, the package tiers, and how the layer is validated.
-4. [schema/SCHEMA.md](schema/SCHEMA.md): the Neo4j contract every client reads.
-5. [reference/pipeline.md](reference/pipeline.md): the build pipeline, step by step.
+4. [schema/SCHEMA.md](schema/SCHEMA.md): the Neo4j contract the client reads, owned by neocarta.
+5. [reference/pipeline.md](reference/pipeline.md): where the ingest pipeline now lives (neocarta) and what stays in dbxcarta.
 6. [reference/best-practices.md](reference/best-practices.md): the design rules that constrain the pipeline.
-7. [reference/public-api.md](reference/public-api.md): the stable public surfaces and the version contract.
 
 ## Tutorials
 
@@ -26,10 +25,9 @@ Step-by-step guides for common tasks.
 
 Stable technical references for the current system.
 
-- [reference/architecture.md](reference/architecture.md): system design covering the storage planes, package tiers, build path, and validation model.
-- [reference/pipeline.md](reference/pipeline.md): stage-by-stage walkthrough of the Spark ingest pipeline.
+- [reference/architecture.md](reference/architecture.md): system design covering the storage planes, package tiers, build path, the validation model, and the client cache mechanics.
+- [reference/pipeline.md](reference/pipeline.md): where the ingest pipeline now lives (the neocarta connector) and what dbxcarta still owns.
 - [reference/best-practices.md](reference/best-practices.md): the authoritative pipeline design rules with cited sources, spanning Spark, the Neo4j connector, and project principles.
-- [reference/public-api.md](reference/public-api.md): public surfaces per package, the breaking-change policy, the import migration table, and the client cache mechanics.
 - [reference/design-decisions.md](reference/design-decisions.md): FK discovery trade-offs in plain terms, including key-like columns, name-match precision, and the gaps the design accepts.
 - [reference/fk-inference-internal-types.md](reference/fk-inference-internal-types.md): the typed layer between Spark DataFrames and FK discovery, and its invariants.
 - [reference/operational-lessons.md](reference/operational-lessons.md): lessons learned from running the pipeline.
@@ -43,7 +41,7 @@ Conceptual background and the rationale for the project.
 
 ## Schema
 
-- [schema/SCHEMA.md](schema/SCHEMA.md): the authoritative graph contract covering nodes, relationships, properties, indexes, and versioning.
+- [schema/SCHEMA.md](schema/SCHEMA.md): the graph shape the client reads, and a pointer to neocarta, which owns the authoritative contract.
 
 ## Security
 

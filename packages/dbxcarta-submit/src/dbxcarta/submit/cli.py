@@ -238,8 +238,6 @@ def main() -> None:
     - `dbxcarta teardown` drops the catalog and/or schema targets the
       selected overlay names in `DBXCARTA_TEARDOWN_TARGET` (comma-separated).
     - `dbxcarta ready` reports whether each ingested catalog holds a data schema.
-    - `dbxcarta upload-questions [--questions PATH]` uploads the example's
-      questions file (default: `questions.json` beside the `--env-file` overlay).
     """
     overlay = select_overlay_path()
     runner.env_file = overlay
@@ -260,8 +258,6 @@ def main() -> None:
         sys.exit(_handle_teardown(argv[1:]))
     if argv[:1] == ["ready"]:
         sys.exit(_handle_ready(argv[1:]))
-    if argv[:1] == ["upload-questions"]:
-        sys.exit(_handle_upload_questions(argv[1:]))
     if not argv or argv[0] in ("-h", "--help"):
         _print_help()
         sys.exit(0 if argv else 2)
@@ -274,9 +270,9 @@ def _print_help() -> None:
     """Summarize the dbxcarta commands, then the runner's own help.
 
     dbxcarta owns ``submit-entrypoint``, ``materialize``, ``publish-wheels``,
-    ``bootstrap``, ``teardown``, ``ready``, and ``upload-questions``; every
-    other command is the runner's. Delegating to the runner's ``--help`` keeps
-    that list authoritative instead of duplicating (and drifting from) it.
+    ``bootstrap``, ``teardown``, and ``ready``; every other command is the
+    runner's. Delegating to the runner's ``--help`` keeps that list
+    authoritative instead of duplicating (and drifting from) it.
     """
     print(
         "usage: dbxcarta <command> [options]\n"
@@ -295,8 +291,6 @@ def _print_help() -> None:
         "                                      DBXCARTA_TEARDOWN_TARGET (needs --yes-i-mean-it).\n"
         "  ready                               Report whether each ingested catalog holds a data\n"
         "                                      schema.\n"
-        "  upload-questions [--questions PATH]  Upload the example's questions file (default:\n"
-        "                                      questions.json beside the --env-file overlay).\n"
         "\n"
         "Commands passed through to databricks-job-runner:"
     )
@@ -714,66 +708,6 @@ def _handle_ready(argv: list[str]) -> int:
     report = check_readiness(build_workspace_client(), warehouse_id)
     print(report.format(strict_optional=args.strict_optional))
     return 0 if report.ok(strict_optional=args.strict_optional) else 1
-
-
-def _handle_upload_questions(argv: list[str]) -> int:
-    """Upload the example's questions file to the ops Volume.
-
-    Moved here from the retired ``dbxcarta-spark`` CLI; the upload logic lives
-    in ``dbxcarta.core.readiness``. Runs locally against the SQL warehouse.
-    """
-    import argparse
-
-    from dbxcarta.core.env import EnvFileError, load_env_files, resolve_env_files
-
-    try:
-        files, cleaned_argv = resolve_env_files(argv)
-    except EnvFileError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 2
-    load_env_files(files)
-
-    parser = argparse.ArgumentParser(prog="dbxcarta upload-questions")
-    parser.add_argument(
-        "--questions",
-        default="",
-        help="Path to questions.json (default: beside the --env-file overlay).",
-    )
-    args = parser.parse_args(cleaned_argv)
-
-    from dbxcarta.core.readiness import upload_questions
-    from dbxcarta.core.workspace import build_workspace_client
-
-    questions_file = _resolve_questions_file(args.questions)
-    if questions_file is None:
-        return 2
-    upload_questions(build_workspace_client(), questions_file)
-    return 0
-
-
-def _resolve_questions_file(override: str) -> Path | None:
-    """Resolve the questions file from ``--questions`` or beside the overlay.
-
-    Without ``--questions``, the file is ``questions.json`` in the same
-    directory as the selected ``--env-file`` overlay. Returns ``None`` after
-    printing an error when no path can be resolved or the file is missing.
-    """
-    if override:
-        path = Path(override)
-    else:
-        overlay = select_overlay_path()
-        if overlay is None:
-            print(
-                "error: no --questions given and no --env-file overlay selected"
-                " to locate questions.json",
-                file=sys.stderr,
-            )
-            return None
-        path = overlay.parent / "questions.json"
-    if not path.is_file():
-        print(f"error: questions file not found at {path}", file=sys.stderr)
-        return None
-    return path
 
 
 def _handle_submit_entrypoint(argv: list[str]) -> int:

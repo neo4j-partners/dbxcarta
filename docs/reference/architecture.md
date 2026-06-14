@@ -19,12 +19,15 @@ The fuller case for choosing a graph layer over querying `information_schema`
 directly or relying on a curated Genie space is in
 [`../explanation/why-semantic.md`](../explanation/why-semantic.md).
 
-The deliverable is the build and the graph it produces: `dbxcarta-spark` reading
-Unity Catalog and writing the Neo4j semantic layer, on the `dbxcarta-core`
-foundation. The client is how the project proves that layer is worth building,
-not part of what ships. That boundary is why the build path and the validation
-harness are described separately below: one is the product, the other is the
-evidence.
+The build that produces the graph is the [neocarta](https://github.com/neo4j-field/neocarta)
+connector: dbxcarta no longer carries its own ingest pipeline. It pulls the
+neocarta wheel (the `databricks-spark` extra), stages it, and submits it as the
+ingest job through the operator tooling on the `dbxcarta-core` foundation. The
+deliverable from dbxcarta's side is that operator flow plus the graph the
+neocarta job writes; the pipeline internals belong to neocarta. The client is how
+the project proves that layer is worth building, not part of what ships. That
+boundary is why the build path and the validation harness are described
+separately below: one is the product, the other is the evidence.
 
 The semantic layer is only useful if it faithfully reflects the catalog it
 describes. That fidelity drives the rest of the design: the data being mapped,
@@ -45,11 +48,11 @@ the tool's own exhaust.
             │ layer = the :layer suffix on each DBXCARTA_CATALOGS entry
             ▼
    ┌──────────────────────────┐        ┌──────────────────────────────┐
-   │   dbxcarta-spark         │        │  NEO4J  (the semantic layer)  │
-   │   build pipeline         │ write  │  Database─HAS_SCHEMA→Schema    │
+   │   neocarta connector     │        │  NEO4J  (the semantic layer)  │
+   │   ingest job (the wheel) │ write  │  Database─HAS_SCHEMA→Schema    │
    │   preflight → extract →  ├───────►│  ─HAS_TABLE→Table─HAS_COLUMN→  │
-   │   graph DFs → embed →    │ fail-  │  Column ; Table.layer (v1.1)   │
-   │   sample → FK discover   │ closed │  REFERENCES{confidence}        │
+   │   graph DFs → embed       │ fail-  │  Column ; Table.layer          │
+   │   (inline) → FK discover │ closed │  REFERENCES{confidence}        │
    └────────────┬─────────────┘        │  vector indexes on embeddings │
                 │                       └───────────────┬──────────────┘
                 │ run summary                  retrieve  │
@@ -74,7 +77,7 @@ DBxCarta. The semantic layer is never polluted by the tool's own records.
 The catalogs under evaluation are the source of truth and DBxCarta only reads
 them. For a medallion layout each layer is its own catalog. The finance-genie
 example uses `graph-enriched-finance-silver` and `-gold`.
-`DBXCARTA_CATALOG` names a single anchor catalog used for preflight, verify, and
+`DBXCARTA_CATALOG` names a single anchor catalog used for preflight and
 ops provisioning; `DBXCARTA_CATALOGS` lists every catalog folded into one
 semantic layer, where each entry is `catalog` or `catalog:layer` and the
 optional `:layer` suffix records which medallion tier each table came from. The build reads
@@ -121,13 +124,22 @@ catalog and nothing else.
 
 ## Packages and layer responsibilities
 
-DBxCarta is five packages over a shared, Spark-free core, in three tiers. The
-product builds and serves the semantic layer; operator tooling runs it on
-Databricks; the evaluation and demo tier proves and showcases it. The siblings
-each depend on core but never on one another. The README carries the plain-English
-summary; this section is the precise component breakdown each layer owns.
+DBxCarta is four packages over a shared, Spark-free core, in two tiers, plus the
+external neocarta connector wheel it pulls for ingest. Operator tooling stages
+the neocarta wheel and runs it on Databricks; the evaluation and demo tier proves
+and showcases the resulting layer. The siblings each depend on core but never on
+one another. The README carries the plain-English summary; this section is the
+precise component breakdown each layer owns.
 
-**The product**
+**The ingest pipeline (external)**
+
+- The Unity Catalog ingest is the [neocarta](https://github.com/neo4j-field/neocarta)
+  connector wheel, installed with its `databricks-spark` extra and run as the
+  ingest job. It owns the extract, embed, FK-discovery, and Neo4j-write logic and
+  the graph contract. dbxcarta stages this wheel and submits it; it does not
+  carry the pipeline source.
+
+**Operator tooling and foundation**
 
 - **Core** owns identifier and path quoting, the single `catalog:layer` parsing
   rule (`resolve_catalogs`), workspace and secret access, the SQL warehouse
@@ -136,15 +148,10 @@ summary; this section is the precise component breakdown each layer owns.
   SQL builders. It pulls in only the Databricks SDK, never Spark, Neo4j, or the
   job runner. The boundaries are enforced by
   `tests/boundary/test_import_boundaries.py`.
-- **Spark** owns the concrete Unity Catalog ingest implementation, the graph
-  contract, verification, the Databricks validators, and the `dbxcarta` /
-  `dbxcarta-ingest` entrypoints.
-
-**Operator tooling**
-
-- **Submit** builds the wheels, uploads them, and submits the spark, client, and
-  materialize jobs. It is the only layer that depends on `databricks-job-runner`,
-  runs on the operator's machine, and is never installed on the cluster.
+- **Submit** stages the neocarta ingest wheel, builds and uploads the client and
+  materialize wheels, and submits the jobs. It is the only layer that depends on
+  `databricks-job-runner`, runs on the operator's machine under the `dbxcarta`
+  command, and is never installed on the cluster.
 
 **Evaluation & demo**
 
@@ -157,32 +164,34 @@ summary; this section is the precise component breakdown each layer owns.
 
 ## Building the layer
 
-The build path is server-side and runs in Spark. `dbxcarta-spark` reads Unity
-Catalog metadata across the resolved catalogs, builds graph-shaped DataFrames,
-adds embeddings through `ai_query`, samples values, discovers foreign keys
-through declared constraints and metadata inference, and writes the
-semantic layer to Neo4j behind a fail-closed boundary, then records its run
-summary in the ops catalog. The pipeline internals are documented in
-[`pipeline.md`](pipeline.md); the rules that constrain it, including why rule
-logic is native Spark and never a Python UDF, are in
-[`best-practices.md`](best-practices.md); how foreign keys are discovered and
-scored, and the trade-offs the inference deliberately makes, are in
-[`../explanation/fk-discovery.md`](../explanation/fk-discovery.md) and
-[`design-decisions.md`](design-decisions.md). One current limitation: post-write
-verify keys off the single anchor catalog, so in a multi-catalog build the other
-catalogs are written but not independently verified.
+The build path is server-side and runs in Spark, but the pipeline is the
+neocarta connector, not dbxcarta code. dbxcarta stages the neocarta wheel and
+submits it as the ingest job; neocarta reads Unity Catalog metadata across the
+resolved catalogs, builds graph-shaped DataFrames, embeds them, discovers foreign
+keys through declared constraints and metadata inference, and writes the semantic
+layer to Neo4j behind a fail-closed boundary. The pipeline internals and the
+graph contract are documented in neocarta (see [`pipeline.md`](pipeline.md) for
+where they live); the project rules that still constrain how dbxcarta runs and
+tunes that job are in [`best-practices.md`](best-practices.md); how foreign keys
+are discovered and scored, and the trade-offs the inference deliberately makes,
+are in [`../explanation/fk-discovery.md`](../explanation/fk-discovery.md) and
+[`design-decisions.md`](design-decisions.md).
 
-Three architectural choices shape that path. It is a **single submission**: one
-installed wheel entrypoint drives extract, embed, sample, FK discovery, and the
-Neo4j write as one Databricks Job, with scope controlled by per-label embedding
-flags rather than by separate jobs. It is **materialize-once**: enriched node
-DataFrames are written to a Delta staging table between transform and load, so
-the failure-rate aggregation and the Neo4j write both read the staged rows
-without re-invoking `ai_query`, and each row is embedded exactly once per run.
-And the write boundary is **fail-closed**: a partial graph is a wrong graph, so a
-failed run leaves no half-written layer rather than a silently incomplete one.
-The operational tuning these choices imply, Neo4j connector partitioning and
-batch size, preflight grant checks, secret handling, and run observability, is in
+dbxcarta runs neocarta's **inline embedding** mode: the ingest job embeds nodes
+in-cluster with a native `ai_query()` call against a Databricks serving endpoint,
+so a single job produces a fully embedded graph and the only operator follow-up
+is `materialize`. There is no separate post-ingest embedding step. The
+decoupled, external embedding path (re-embedding a graph without re-running the
+job) is deferred; it is sketched in Phase 7 of the alignment plan.
+
+Two architectural choices shape that path. It is a **single submission**: one
+installed wheel entrypoint drives extract, embed, FK discovery, and the Neo4j
+write as one Databricks Job, with scope controlled by per-label embedding flags
+rather than by separate jobs. And the write boundary is **fail-closed**: a
+partial graph is a wrong graph, so a failed run leaves no half-written layer
+rather than a silently incomplete one. The operational tuning these choices
+imply, Neo4j connector partitioning and batch size, preflight grant checks,
+secret handling, and run observability, is in
 [`best-practices.md`](best-practices.md).
 
 ### How we validate
@@ -204,10 +213,21 @@ everything" strawman into a real competitor for the same budget.
 
 The harness caches generation so iterating on retrieval and prompts does not pay
 model latency every run, hashing the prompts so an unchanged re-run reuses prior
-responses and any change forces fresh generation. The cache table layout, the
-`_input_hash` rules, the `DBXCARTA_CLIENT_REFRESH` override, and the Delta
-retention stance are reference detail in
-[`public-api.md`](public-api.md#client-evaluation-harness).
+responses and any change forces fresh generation. The cache mechanics are below.
+
+#### Client evaluation harness: cache mechanics
+
+Each arm generates SQL for all questions in one batched `ai_query` pass,
+materialized to a `client_staging_<arm>` Delta table in the ops catalog that
+doubles as the cache. A write stamps an `_input_hash` over the ordered endpoint,
+arm, and question prompts; an unchanged re-run reads the prior responses and skips
+inference, while any change to a prompt, the retrieved context, the question set,
+or the endpoint name forces fresh generation. `DBXCARTA_CLIENT_REFRESH=true`
+covers the one case the hash cannot see, a model swap behind a stable endpoint
+name. The tables use stable names and overwrite mode, so logical size stays at one
+run's worth of rows per arm; Delta retains tombstoned files until a `VACUUM`, and
+at evaluation scale that is a deliberate non-decision rather than a missing
+retention policy.
 
 The scores are only trustworthy if the grader is. When a generated query is
 correct but the harness grades it wrong, the fix is the grader, never a prompt
@@ -225,8 +245,7 @@ build, and nothing the client does works until that build has run. The
 fail-closed write boundary makes the layer a clean rebuild rather than a live
 mirror, which is correct when the layer's value is fidelity to a published
 catalog and wrong for a system that needs the index to track schema changes in
-real time. The single-anchor verify limitation means a multi-catalog build
-trusts that the non-anchor catalogs wrote correctly.
+real time.
 
 The trajectory the architecture is built for is the layer getting richer.
 Declared keys give the first edges; metadata inference adds the ones

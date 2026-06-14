@@ -138,18 +138,20 @@ Leave `DBXCARTA_SCHEMAS` blank to include all schemas in the catalog (including
 `dbxcarta_test_external`). Cross-schema FK edges (sales→hr, sales→inventory)
 only appear in Neo4j when **both** the source and target schemas are in scope.
 
-Upload the demo questions file and build the semantic layer:
+Upload the demo questions file and build the semantic layer. `publish-wheels`
+stages the prebuilt neocarta ingest wheel and builds the client and materialize
+wheels; `submit-entrypoint ingest` runs the neocarta connector's ingest job:
 
 ```bash
-uv run dbxcarta-submit publish-wheels
-uv run dbxcarta-submit upload --data tests/fixtures
-uv run dbxcarta-submit submit-entrypoint ingest
+uv run dbxcarta publish-wheels
+uv run dbxcarta upload --data tests/fixtures
+uv run dbxcarta submit-entrypoint ingest
 ```
 
 Then run the graph_rag demo client:
 
 ```bash
-uv run dbxcarta-submit submit-entrypoint client
+uv run dbxcarta submit-entrypoint client
 ```
 
 ### Demo questions
@@ -165,27 +167,19 @@ uv run dbxcarta-submit submit-entrypoint client
 
 ---
 
-## Verifying a Run
+## Expected graph from this fixture
 
-Pipeline self-verification lives in `dbxcarta.spark.verify` and is exposed
-through the `dbxcarta` CLI from `dbxcarta-spark`.
-After a successful run, point at the run summary in your UC Volume to
-re-run every structural invariant (node counts, FK accounting, HAS_VALUE
-shape, value-id format, run-summary parity):
-
-```bash
-uv run dbxcarta verify                    # most recent status='success' summary
-uv run dbxcarta verify --run-id <run_id>  # a specific run
-```
-
-Expected counts on the four-schema fixture (`dbxcarta_test_sales`,
-`dbxcarta_test_inventory`, `dbxcarta_test_hr`, `dbxcarta_test_events`):
+The pipeline that writes the graph is the neocarta connector; dbxcarta retired
+its own `verify` command in the cutover (neocarta dropped the post-run
+self-check during its migration). On the four-schema fixture
+(`dbxcarta_test_sales`, `dbxcarta_test_inventory`, `dbxcarta_test_hr`,
+`dbxcarta_test_events`) a correct ingest produces:
 
 - 16 declared FKs / 16 resolved / 17 column-pair REFERENCES edges
   (1 composite contributes 2 column-pair rows)
 
-The `scripts/run_autotest.py` harness runs this end-to-end (DDL + INSERT +
-ingest + verify diff) against a live workspace.
+The `scripts/run_autotest.py` harness drives the end-to-end flow (DDL + INSERT +
+ingest) against a live workspace and asserts the run summary thresholds.
 
 ---
 

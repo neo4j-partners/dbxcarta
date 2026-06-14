@@ -1,12 +1,9 @@
-"""Readiness check and question upload for dbxcarta integrations.
+"""Readiness check for dbxcarta integrations.
 
-Both operations are driven entirely by the per-example
-``examples/<name>/dbxcarta-overlay.env`` the CLI has already loaded plus the
-example's bundled ``questions.json``; there is no per-example Python object to
-publish. :func:`check_readiness` reads the catalog list from the environment,
-and :func:`upload_questions` reads the destination from the environment and
-takes the questions file as an argument. The CLI (``dbxcarta ready`` /
-``dbxcarta upload-questions``) calls these directly.
+The check is driven entirely by the per-example
+``examples/<name>/dbxcarta-overlay.env`` the CLI has already loaded; there is no
+per-example Python object to publish. :func:`check_readiness` reads the catalog
+list from the environment. The CLI (``dbxcarta ready``) calls it directly.
 """
 
 from __future__ import annotations
@@ -17,11 +14,8 @@ from typing import TYPE_CHECKING
 
 from dbxcarta.core.catalogs import resolve_catalogs
 from dbxcarta.core.identifiers import quote_identifier
-from dbxcarta.core.volume_io import load_json_file, upload_file_to_volume
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from databricks.sdk import WorkspaceClient
 
 
@@ -109,21 +103,6 @@ def check_readiness(ws: WorkspaceClient, warehouse_id: str) -> ReadinessReport:
     )
 
 
-def upload_questions(ws: WorkspaceClient, questions_file: Path) -> None:
-    """Validate and upload *questions_file* to the env-configured destination."""
-    dest = os.environ.get("DBXCARTA_CLIENT_QUESTIONS", "")
-    if not dest:
-        raise RuntimeError(
-            "DBXCARTA_CLIENT_QUESTIONS is not set; cannot determine upload destination."
-        )
-    if not dest.startswith("/Volumes/") or not dest.endswith(".json"):
-        raise ValueError(
-            f"DBXCARTA_CLIENT_QUESTIONS must be a /Volumes/... .json path, got {dest!r}"
-        )
-    _validate_questions_file(questions_file)
-    upload_file_to_volume(ws, questions_file, dest)
-
-
 def _has_data_schema(
     ws: WorkspaceClient,
     warehouse_id: str,
@@ -153,28 +132,3 @@ def _fetch_schema_names(
     )
     rows = getattr(getattr(response, "result", None), "data_array", None) or []
     return [row[0] for row in rows if row]
-
-
-def _validate_questions_file(path: Path) -> None:
-    """Validate a questions file before upload.
-
-    A light structural check with the stdlib only, so the operator tooling stays
-    free of a client dependency (the cross-layer import boundary forbids it). The
-    file must be a non-empty JSON array whose entries each carry a non-empty
-    question_id and question. The client package validates the full Question
-    model when it loads the uploaded file at query time.
-    """
-    if not path.is_file():
-        raise FileNotFoundError(f"questions file not found at {path}; generate it first")
-    questions = load_json_file(path, label="questions file")
-    if not isinstance(questions, list) or not questions:
-        raise ValueError(f"questions file must be a non-empty JSON array: {path}")
-    for item in questions:
-        if not isinstance(item, dict):
-            # ValueError is the deliberate, uniform error contract for an
-            # invalid questions file (not a programmer type error).
-            raise ValueError(f"each question must be a JSON object: {path}")  # noqa: TRY004
-        for field in ("question_id", "question"):
-            value = item.get(field)
-            if not isinstance(value, str) or not value.strip():
-                raise ValueError(f"each question needs a non-empty {field!r}: {path}")

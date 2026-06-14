@@ -2,15 +2,10 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import pytest
 from databricks_job_runner import BootstrapConfig, ClassicCluster, Serverless
 from databricks_job_runner.errors import RunnerError
 from dbxcarta.submit import cli
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 class _RunnerStub:
@@ -91,7 +86,7 @@ def test_is_serverless_compute_discriminates_real_compute_types() -> None:
 def test_help_lists_all_dbxcarta_commands(capsys: pytest.CaptureFixture[str]) -> None:
     # dbxcarta's own commands are intercepted before the runner sees them, so
     # they are invisible unless help advertises them. Guard that all appear,
-    # including the ready/upload-questions helpers moved off the old Spark CLI.
+    # including the ready helper moved off the old Spark CLI.
     cli._print_help()
 
     out = capsys.readouterr().out
@@ -100,7 +95,6 @@ def test_help_lists_all_dbxcarta_commands(capsys: pytest.CaptureFixture[str]) ->
     assert "bootstrap" in out
     assert "teardown" in out
     assert "ready" in out
-    assert "upload-questions" in out
 
 
 def test_publish_wheels_rejects_unknown_args() -> None:
@@ -210,38 +204,3 @@ def test_teardown_dry_run_lists_every_target(
     err = capsys.readouterr().err
     assert "catalog schemapile_lakehouse" in err
     assert "schema dbxcarta-catalog.schemapile_ops" in err
-
-
-# upload-questions moved here from the retired dbxcarta-spark CLI; these guard
-# the questions-file resolution it depends on (override vs. beside-the-overlay).
-
-
-def test_resolve_questions_file_uses_explicit_override(tmp_path: Path) -> None:
-    path = tmp_path / "custom.json"
-    path.write_text("[]")
-    assert cli._resolve_questions_file(str(path)) == path
-
-
-def test_resolve_questions_file_defaults_beside_overlay(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    overlay = tmp_path / "dbxcarta-overlay.env"
-    overlay.write_text("")
-    questions = tmp_path / "questions.json"
-    questions.write_text("[]")
-    monkeypatch.setattr(
-        cli.sys, "argv", ["dbxcarta", "upload-questions", "--env-file", str(overlay)]
-    )
-    assert cli._resolve_questions_file("") == questions
-
-
-def test_resolve_questions_file_errors_without_override_or_overlay(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(cli.sys, "argv", ["dbxcarta", "upload-questions"])
-    monkeypatch.delenv("DBXCARTA_ENV_FILE", raising=False)
-    assert cli._resolve_questions_file("") is None
-
-
-def test_resolve_questions_file_errors_when_missing(tmp_path: Path) -> None:
-    assert cli._resolve_questions_file(str(tmp_path / "nope.json")) is None
