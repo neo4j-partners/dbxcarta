@@ -26,6 +26,7 @@ jobs:
             tests: tests/client
           - layer: submit
             package: dbxcarta-submit
+            extra_package: dbxcarta-core
             tests: tests/submit
           - layer: boundary
             package: dbxcarta-client

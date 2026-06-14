@@ -192,12 +192,14 @@ automatically and imports cleanly, with no separate core install.
 ### Phase 4: Add the neocarta finance-genie example
 
 - Add `examples/databricks/submit_finance_genie.py` to the neocarta repo as a `uv` script.
-  Its only inline dependency is `dbxcarta-submit`: the script does not import neocarta, it
-  builds the connector wheel with `uv build` against the repo and submits it, and the
-  cluster installs neocarta from the staged wheel. Declaring `neocarta[databricks-spark]`
+  Its only inline dependency is `dbxcarta-submit`: the script does not import neocarta and
+  the cluster installs neocarta from the staged wheel. Declaring `neocarta[databricks-spark]`
   would needlessly install pyspark locally, so it is left out.
-- The script builds the neocarta wheel, sets `DBXCARTA_ENV_FILE` to its sibling config,
-  then calls `submit_neocarta_ingest(wheel)`.
+- The script consumes a prebuilt connector wheel rather than building one: building belongs
+  to the connector, so the script points at `neocarta/connectors/databricks/README.md`
+  ("Build a wheel from source") and uses the newest `dist/neocarta-*.whl` (or an explicit
+  path argument). It sets `DBXCARTA_ENV_FILE` to its sibling config, then calls
+  `submit_neocarta_ingest(wheel)`.
 - Ship a committed, secret-free `submit_finance_genie.env.sample` beside it. It is
   self-contained: it carries both the Databricks infra values (normally a dbxcarta base
   `.env`) and the finance-genie `NEOCARTA_DATABRICKS_*` ingest contract, so the example
