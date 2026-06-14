@@ -58,8 +58,11 @@ def test_overlay_pins_known_keys() -> None:
     assert env["DBXCARTA_CLIENT_QUESTIONS"] == "examples/finance-genie/questions.json"
     # The layer is folded into the catalog lists; the separate map is gone.
     assert "DBXCARTA_LAYER_MAP" not in env
-    # The old spark-ingest keys are retired now the ingest runs the neocarta wheel.
-    assert "DBXCARTA_SCHEMAS" not in env
+    # Schema scope is kept explicit to narrow graph_rag retrieval, mirroring the
+    # neocarta ingest key (NEOCARTA_DATABRICKS_SCHEMAS) so the two cannot drift.
+    assert env["DBXCARTA_SCHEMAS"] == "graph-enriched-schema"
+    # The remaining old spark-ingest keys are retired now the ingest runs the
+    # neocarta wheel.
     assert "DBXCARTA_SUMMARY_TABLE" not in env
     assert "DBXCARTA_INCLUDE_EMBEDDINGS_VALUES" not in env
     # The operator/client catalog key stays on its dbxcarta name.
