@@ -1,9 +1,10 @@
 """Fixtures for tests/integration/.
 
-This conftest holds the live `ws`, `neo4j_driver`, and `run_summary` fixtures
-used by `test_semantic_search.py`. These tests assume a completed DBxCarta
-run and live Databricks/Neo4j credentials, so local unit-test runs should not
-collect them unless integration tests are explicitly requested.
+This conftest holds the live `ws` and `neo4j_driver` fixtures used by
+`test_semantic_search.py`. These tests assume a completed ingest run (now
+produced by the neocarta connector) and live Databricks/Neo4j credentials, so
+local unit-test runs should not collect them unless integration tests are
+explicitly requested.
 """
 
 from __future__ import annotations
@@ -55,18 +56,3 @@ def neo4j_driver(ws) -> Iterator:
     )
     yield driver
     driver.close()
-
-
-@pytest.fixture(scope="session")
-def run_summary(ws) -> dict:
-    """Load the most recent successful run-summary JSON from the UC Volume."""
-    from dbxcarta.spark.ingest.summary_io import LoadSummaryError, load_summary_from_volume
-
-    volume_path = os.environ["DBXCARTA_SUMMARY_VOLUME"]
-    try:
-        summary = load_summary_from_volume(ws, volume_path)
-    except LoadSummaryError as e:
-        pytest.skip(f"Could not load run summary: {e}")
-    if summary is None:
-        pytest.skip("No dbxcarta run summary found — run the job first")
-    return summary

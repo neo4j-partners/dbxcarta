@@ -13,7 +13,6 @@ dependencies = [
     "dbxcarta-finance-genie-example",
     "dbxcarta-materialize",
     "dbxcarta-schemapile-example",
-    "dbxcarta-spark",
     "dbxcarta-submit",
 ]
 
@@ -42,7 +41,6 @@ default-groups = ["test", "ci"]
 dbxcarta-client = { workspace = true }
 dbxcarta-core = { workspace = true }
 dbxcarta-materialize = { workspace = true }
-dbxcarta-spark = { workspace = true }
 dbxcarta-submit = { workspace = true }
 dbxcarta-dense-schema-example = { workspace = true }
 dbxcarta-finance-genie-example = { workspace = true }
@@ -53,7 +51,6 @@ members = [
     "packages/dbxcarta-client",
     "packages/dbxcarta-core",
     "packages/dbxcarta-materialize",
-    "packages/dbxcarta-spark",
     "packages/dbxcarta-submit",
     "examples/dense-schema",
     "examples/finance-genie",

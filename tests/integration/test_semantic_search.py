@@ -20,11 +20,10 @@ pytestmark = pytest.mark.live
 _TOP_K = 10
 _SAMPLE = 5
 _MIN_SELF_SIMILARITY = 0.99
-
-
-def _tables_enabled(run_summary: dict) -> bool:
-    flags = run_summary.get("embedding_flags") or {}
-    return bool(flags.get("Table"))
+# The inline ingest embeds against this endpoint (overlays pin
+# NEOCARTA_DATABRICKS_EMBEDDING_ENDPOINT to it). The run summary that used to
+# carry the model name is the connector's now, so the endpoint is named here.
+_EMBEDDING_ENDPOINT = "databricks-gte-large-en"
 
 
 def _embed_texts(ws, endpoint: str, texts: list[str]) -> list[list[float]]:
@@ -46,26 +45,22 @@ def _embed_texts(ws, endpoint: str, texts: list[str]) -> list[list[float]]:
     return [item["embedding"] for item in data]
 
 
-def test_embedding_endpoint_returns_correct_dimension(neo4j_driver, ws, run_summary) -> None:
+def test_embedding_endpoint_returns_correct_dimension(neo4j_driver, ws) -> None:
     """The live endpoint returns a vector whose length matches the index dimension."""
-    if not _tables_enabled(run_summary):
-        pytest.skip("Table embeddings not enabled in the latest run")
-
-    endpoint = run_summary.get("embedding_model", "databricks-gte-large-en")
-
     with neo4j_driver.session() as session:
         row = session.run(
             "SHOW VECTOR INDEXES YIELD name, options WHERE name = 'table_embedding'"
         ).single()
-    assert row is not None, "Vector index 'table_embedding' not found"
+    if row is None:
+        pytest.skip("Vector index 'table_embedding' not found — Table embeddings not loaded")
     expected_dim = row["options"]["indexConfig"]["vector.dimensions"]
 
-    vecs = _embed_texts(ws, endpoint, ["tables related to customer orders"])
+    vecs = _embed_texts(ws, _EMBEDDING_ENDPOINT, ["tables related to customer orders"])
     assert len(vecs) == 1
     assert len(vecs[0]) == expected_dim
 
 
-def test_table_semantic_self_ranking(neo4j_driver, run_summary) -> None:
+def test_table_semantic_self_ranking(neo4j_driver) -> None:
     """Querying with a Table's own stored vector must recover that node.
 
     The graph no longer stores `embedding_text`; it stores only the vector.
@@ -76,9 +71,6 @@ def test_table_semantic_self_ranking(neo4j_driver, run_summary) -> None:
     rather than rank, so it passes on a 3-table fixture as well as a
     million-row catalog.
     """
-    if not _tables_enabled(run_summary):
-        pytest.skip("Table embeddings not enabled in the latest run")
-
     with neo4j_driver.session() as session:
         rows = list(
             session.run(
@@ -109,16 +101,13 @@ def test_table_semantic_self_ranking(neo4j_driver, run_summary) -> None:
             )
 
 
-def test_graph_expansion_from_vector_search(neo4j_driver, run_summary) -> None:
+def test_graph_expansion_from_vector_search(neo4j_driver) -> None:
     """A vector search result expands into a non-empty column subgraph.
 
     Uses a stored Table vector to find top-k Tables, then traverses
     HAS_COLUMN for the top result. This verifies that the vector index and
     relationship expansion still produce structured schema context.
     """
-    if not _tables_enabled(run_summary):
-        pytest.skip("Table embeddings not enabled in the latest run")
-
     with neo4j_driver.session() as session:
         probe = session.run(
             "MATCH (n:Table) WHERE n.embedding IS NOT NULL "

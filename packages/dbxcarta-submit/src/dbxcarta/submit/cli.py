@@ -41,11 +41,17 @@ _ENTRYPOINT_CONSOLE_SCRIPT: dict[str, str] = {
 # Packages the Databricks Runtime provides on the cluster and that the
 # curated closures below must never reinstall. ``pyspark``/``py4j`` are
 # the cluster runtime itself; ``databricks-sdk`` is DBR-managed and
-# reinstalling it would shadow the platform SDK and drag in a heavy auth
-# subtree. ``pydantic``/``pydantic-core`` are deliberately NOT excluded:
-# the ingest and client code require pydantic v2 and the DBR-bundled
-# version is not guaranteed to match.
-_DBR_PROVIDED_PACKAGES: frozenset[str] = frozenset({"pyspark", "py4j", "databricks-sdk"})
+# reinstalling it would shadow the platform SDK (the connector reaches it
+# via the cluster-injected ``databricks.sdk.runtime.dbutils``) and drag in
+# a heavy auth subtree; ``pandas``/``numpy`` are DBR-shipped binaries that
+# the ingest path imports and uses (see the ingest closure note below), and
+# reinstalling them with --no-deps risks version skew and a numpy C-ABI
+# mismatch that breaks compiled extensions. ``pydantic``/``pydantic-core``
+# are deliberately NOT excluded: the ingest and client code require pydantic
+# v2 and the DBR-bundled version is not guaranteed to match.
+_DBR_PROVIDED_PACKAGES: frozenset[str] = frozenset(
+    {"pyspark", "py4j", "databricks-sdk", "pandas", "numpy"}
+)
 
 # Fully pinned dependency closures installed by the runner bootstrap into
 # the shared driver environment with ``--no-deps``. These are curated
@@ -59,16 +65,19 @@ _DBR_PROVIDED_PACKAGES: frozenset[str] = frozenset({"pyspark", "py4j", "databric
 # Databricks ingest path is neo4j + pydantic/pydantic-settings (the env-var
 # settings boundary) + python-dotenv, plus their transitives. Deliberately
 # absent:
-#   - databricks-job-runner: the old dbxcarta-spark entry point called the
+#   - databricks-job-runner: the old dbxcarta Spark ingest entry point called the
 #     runner's inject_params(); neocarta's run_ingest folds the KEY=VALUE argv
 #     into os.environ itself (_inject_cli_params), so the runner is not imported
 #     at runtime on this path.
-#   - pyspark / databricks-sdk: DBR-provided (see _DBR_PROVIDED_PACKAGES). The
-#     connector reaches the SDK only via databricks.sdk.runtime.dbutils, which
-#     is the cluster-injected runtime; pinning a copy would shadow it.
-#   - pandas: not imported anywhere on the neocarta databricks-connector path
-#     (only its BigQuery/Dataplex/CSV connectors use pandas), so it is not on
-#     this closure even though it is in neocarta's base dependencies.
+#   - pyspark / databricks-sdk / pandas / numpy: DBR-provided (see
+#     _DBR_PROVIDED_PACKAGES). databricks-sdk is reached at runtime via the
+#     cluster-injected databricks.sdk.runtime.dbutils (the on-cluster Neo4j
+#     secret fetch). pandas and its numpy ARE imported and used on the ingest
+#     path (neocarta.data_model.rdbms.core does `from pandas import isna`), so
+#     they must be present at runtime; the Databricks Runtime supplies them, and
+#     pinning a copy with --no-deps would shadow the runtime build (numpy is a
+#     C-ABI risk). As with pyspark, the requirement is on the runtime, not the
+#     closure: the target DBR must ship a compatible pandas/numpy.
 _INGEST_PINNED_CLOSURE: tuple[str, ...] = (
     "neo4j==6.1.0",
     "pytz==2026.1.post1",
@@ -173,9 +182,14 @@ class _RunnerKwargs(TypedDict):
 
 _RUNNER_KWARGS: _RunnerKwargs = {
     "run_name_prefix": "dbxcarta",
-    "wheel_package": "dbxcarta-spark",
+    # The shared runner serves generic pass-through commands and uploads; the
+    # ingest/client/materialize bootstraps override wheel_package per entrypoint
+    # (see _ENTRYPOINT_WHEEL_PACKAGE). This default only names the wheel the
+    # runner's own build/publish path would touch, so it points at a surviving
+    # dbxcarta distribution rather than the removed dbxcarta-spark package.
+    "wheel_package": "dbxcarta-client",
     "scripts_dir": "scripts",
-    "cli_command": "uv run dbxcarta-submit",
+    "cli_command": "uv run dbxcarta",
     "secret_keys": ["NEO4J_URI", "NEO4J_USERNAME", "NEO4J_PASSWORD"],
 }
 
@@ -206,29 +220,32 @@ def _ingest_runner() -> Runner:
 
 
 def main() -> None:
-    """Entry point for the operator submission CLI.
+    """Entry point for the operator CLI.
 
-    dbxcarta owns five first-class commands; every other command is passed
+    dbxcarta owns seven first-class commands; every other command is passed
     through to ``databricks-job-runner`` (submit, validate, logs, clean,
     upload, download, catalog, schema, volume).
 
-    - `dbxcarta-submit submit-entrypoint {ingest|client}` submits the wheel
+    - `dbxcarta submit-entrypoint {ingest|client}` submits the wheel
       entrypoint.
-    - `dbxcarta-submit materialize` stages the committed blueprint to the ops
+    - `dbxcarta materialize` stages the committed blueprint to the ops
       Volume and submits the materialize wheel entrypoint as a serverless job.
-    - `dbxcarta-submit publish-wheels` publishes the stable per-package
+    - `dbxcarta publish-wheels` publishes the stable per-package
       wheels and ships the bootstrap script.
-    - `dbxcarta-submit bootstrap` creates the data catalog the selected overlay
+    - `dbxcarta bootstrap` creates the data catalog the selected overlay
       names in `DBXCARTA_CATALOG`, plus the ops catalog, schema, and volume it
       names in `DATABRICKS_VOLUME_PATH`.
-    - `dbxcarta-submit teardown` drops the catalog and/or schema targets the
+    - `dbxcarta teardown` drops the catalog and/or schema targets the
       selected overlay names in `DBXCARTA_TEARDOWN_TARGET` (comma-separated).
+    - `dbxcarta ready` reports whether each ingested catalog holds a data schema.
+    - `dbxcarta upload-questions [--questions PATH]` uploads the example's
+      questions file (default: `questions.json` beside the `--env-file` overlay).
     """
     overlay = select_overlay_path()
     runner.env_file = overlay
     if overlay is not None:
         # Path only, never resolved values, so no secret reaches logs.
-        print(f"dbxcarta-submit: active env overlay: {overlay}", file=sys.stderr)
+        print(f"dbxcarta: active env overlay: {overlay}", file=sys.stderr)
 
     argv = sys.argv[1:]
     if argv[:1] == ["submit-entrypoint"]:
@@ -241,6 +258,10 @@ def main() -> None:
         sys.exit(_handle_bootstrap(argv[1:]))
     if argv[:1] == ["teardown"]:
         sys.exit(_handle_teardown(argv[1:]))
+    if argv[:1] == ["ready"]:
+        sys.exit(_handle_ready(argv[1:]))
+    if argv[:1] == ["upload-questions"]:
+        sys.exit(_handle_upload_questions(argv[1:]))
     if not argv or argv[0] in ("-h", "--help"):
         _print_help()
         sys.exit(0 if argv else 2)
@@ -252,13 +273,13 @@ def main() -> None:
 def _print_help() -> None:
     """Summarize the dbxcarta commands, then the runner's own help.
 
-    dbxcarta owns ``submit-entrypoint``, ``publish-wheels``, ``bootstrap``, and
-    ``teardown``; every other command is the runner's. Delegating to the
-    runner's ``--help`` keeps that list authoritative instead of duplicating
-    (and drifting from) it.
+    dbxcarta owns ``submit-entrypoint``, ``materialize``, ``publish-wheels``,
+    ``bootstrap``, ``teardown``, ``ready``, and ``upload-questions``; every
+    other command is the runner's. Delegating to the runner's ``--help`` keeps
+    that list authoritative instead of duplicating (and drifting from) it.
     """
     print(
-        "usage: dbxcarta-submit <command> [options]\n"
+        "usage: dbxcarta <command> [options]\n"
         "\n"
         "dbxcarta operator commands:\n"
         "  submit-entrypoint {ingest|client}   Submit a wheel entrypoint as a Databricks job.\n"
@@ -272,6 +293,10 @@ def _print_help() -> None:
         "                                      idempotent.\n"
         "  teardown                            Drop the catalog/schema targets named by the overlay's\n"
         "                                      DBXCARTA_TEARDOWN_TARGET (needs --yes-i-mean-it).\n"
+        "  ready                               Report whether each ingested catalog holds a data\n"
+        "                                      schema.\n"
+        "  upload-questions [--questions PATH]  Upload the example's questions file (default:\n"
+        "                                      questions.json beside the --env-file overlay).\n"
         "\n"
         "Commands passed through to databricks-job-runner:"
     )
@@ -410,7 +435,7 @@ def _handle_publish_wheels(argv: list[str]) -> int:
     load_env_files(files)
 
     parser = argparse.ArgumentParser(
-        prog="dbxcarta-submit publish-wheels",
+        prog="dbxcarta publish-wheels",
         description=(
             "Stage the prebuilt neocarta ingest wheel and build+publish the "
             "dbxcarta client and materialize wheels to the fixed Volume path, "
@@ -498,7 +523,7 @@ def _handle_bootstrap(argv: list[str]) -> int:
     load_env_files(files)
 
     parser = argparse.ArgumentParser(
-        prog="dbxcarta-submit bootstrap",
+        prog="dbxcarta bootstrap",
         description=(
             "Create the data catalog (DBXCARTA_CATALOG) and the ops catalog, "
             "schema, and volume (DATABRICKS_VOLUME_PATH). Idempotent; safe to "
@@ -593,7 +618,7 @@ def _handle_teardown(argv: list[str]) -> int:
     load_env_files(files)
 
     parser = argparse.ArgumentParser(
-        prog="dbxcarta-submit teardown",
+        prog="dbxcarta teardown",
         description=(
             "Drop the catalog or schema named by the overlay's "
             "DBXCARTA_TEARDOWN_TARGET. Requires --yes-i-mean-it; destructive."
@@ -656,12 +681,107 @@ def _handle_teardown(argv: list[str]) -> int:
     return 0
 
 
+def _handle_ready(argv: list[str]) -> int:
+    """Report whether each ingested catalog holds a data schema.
+
+    Moved here from the retired ``dbxcarta-spark`` CLI: the readiness logic
+    already lives in ``dbxcarta.core.readiness``, so this is the thin handler
+    over it. Runs locally against the SQL warehouse; no Neo4j or cluster.
+    """
+    import argparse
+
+    from dbxcarta.core.env import EnvFileError, load_env_files, resolve_env_files
+
+    try:
+        files, cleaned_argv = resolve_env_files(argv)
+    except EnvFileError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    load_env_files(files)
+
+    parser = argparse.ArgumentParser(prog="dbxcarta ready")
+    parser.add_argument("--warehouse-id", default="")
+    parser.add_argument("--strict-optional", action="store_true")
+    args = parser.parse_args(cleaned_argv)
+
+    from dbxcarta.core.readiness import check_readiness
+    from dbxcarta.core.workspace import build_workspace_client
+
+    warehouse_id = args.warehouse_id or os.environ.get("DATABRICKS_WAREHOUSE_ID", "")
+    if not warehouse_id:
+        print("error: DATABRICKS_WAREHOUSE_ID is required for ready", file=sys.stderr)
+        return 2
+    report = check_readiness(build_workspace_client(), warehouse_id)
+    print(report.format(strict_optional=args.strict_optional))
+    return 0 if report.ok(strict_optional=args.strict_optional) else 1
+
+
+def _handle_upload_questions(argv: list[str]) -> int:
+    """Upload the example's questions file to the ops Volume.
+
+    Moved here from the retired ``dbxcarta-spark`` CLI; the upload logic lives
+    in ``dbxcarta.core.readiness``. Runs locally against the SQL warehouse.
+    """
+    import argparse
+
+    from dbxcarta.core.env import EnvFileError, load_env_files, resolve_env_files
+
+    try:
+        files, cleaned_argv = resolve_env_files(argv)
+    except EnvFileError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    load_env_files(files)
+
+    parser = argparse.ArgumentParser(prog="dbxcarta upload-questions")
+    parser.add_argument(
+        "--questions",
+        default="",
+        help="Path to questions.json (default: beside the --env-file overlay).",
+    )
+    args = parser.parse_args(cleaned_argv)
+
+    from dbxcarta.core.readiness import upload_questions
+    from dbxcarta.core.workspace import build_workspace_client
+
+    questions_file = _resolve_questions_file(args.questions)
+    if questions_file is None:
+        return 2
+    upload_questions(build_workspace_client(), questions_file)
+    return 0
+
+
+def _resolve_questions_file(override: str) -> Path | None:
+    """Resolve the questions file from ``--questions`` or beside the overlay.
+
+    Without ``--questions``, the file is ``questions.json`` in the same
+    directory as the selected ``--env-file`` overlay. Returns ``None`` after
+    printing an error when no path can be resolved or the file is missing.
+    """
+    if override:
+        path = Path(override)
+    else:
+        overlay = select_overlay_path()
+        if overlay is None:
+            print(
+                "error: no --questions given and no --env-file overlay selected"
+                " to locate questions.json",
+                file=sys.stderr,
+            )
+            return None
+        path = overlay.parent / "questions.json"
+    if not path.is_file():
+        print(f"error: questions file not found at {path}", file=sys.stderr)
+        return None
+    return path
+
+
 def _handle_submit_entrypoint(argv: list[str]) -> int:
     import argparse
 
     from databricks_job_runner.errors import RunnerError
 
-    parser = argparse.ArgumentParser(prog="dbxcarta-submit submit-entrypoint")
+    parser = argparse.ArgumentParser(prog="dbxcarta submit-entrypoint")
     parser.add_argument("entrypoint", choices=("ingest", "client"))
     parser.add_argument("--compute", choices=("cluster", "serverless"), default=None)
     parser.add_argument("--no-wait", action="store_true")
@@ -688,7 +808,7 @@ def _handle_materialize(argv: list[str], overlay: Path | None) -> int:
     entrypoint as a standalone serverless Spark job. The local blueprint is
     ``--blueprint`` when given, else the single ``*.json`` under the selected
     overlay's sibling ``blueprint/`` directory. The data catalog must already
-    exist (run ``dbxcarta-submit bootstrap`` first).
+    exist (run ``dbxcarta bootstrap`` first).
     """
     import argparse
 
@@ -710,7 +830,7 @@ def _handle_materialize(argv: list[str], overlay: Path | None) -> int:
     load_env_files(files)
 
     parser = argparse.ArgumentParser(
-        prog="dbxcarta-submit materialize",
+        prog="dbxcarta materialize",
         description=(
             "Stage the committed blueprint to the ops Volume and submit the "
             "materialize entrypoint as a serverless Spark job."

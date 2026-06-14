@@ -28,7 +28,7 @@ build-backend = "uv_build"
 # with namespace packaging, so the cluster wheel can physically carry
 # ``dbxcarta/core`` alongside ``dbxcarta/materialize``. The runner bootstrap
 # installs this single application wheel with ``--no-deps`` and has no slot for a
-# separate core wheel, so ``dbxcarta-submit publish-wheels`` copies the core
+# separate core wheel, so ``dbxcarta publish-wheels`` copies the core
 # source in before building (see ``_core_bundled_into``). A normal build, with
 # no core copied in, produces exactly today's ``dbxcarta/materialize`` contents.
 [tool.uv.build-backend]

@@ -192,13 +192,13 @@ Next steps
 
 2. Upload the package and demo questions, then build the Neo4j semantic layer:
 
-   uv run dbxcarta-submit publish-wheels
-   uv run dbxcarta-submit upload --data tests/fixtures
-   uv run dbxcarta-submit submit-entrypoint ingest
+   uv run dbxcarta publish-wheels
+   uv run dbxcarta upload --data tests/fixtures
+   uv run dbxcarta submit-entrypoint ingest
 
 3. After ingest succeeds, run the graph_rag demo client:
 
-   uv run dbxcarta-submit submit-entrypoint client
+   uv run dbxcarta submit-entrypoint client
 
    The question set exercises cross-schema joins (sales->inventory, sales->hr),
    self-referential FKs (hr.employees.manager_id), the composite FK path

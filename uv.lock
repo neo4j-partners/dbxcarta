@@ -14,7 +14,6 @@ members = [
     "dbxcarta-finance-genie-example",
     "dbxcarta-materialize",
     "dbxcarta-schemapile-example",
-    "dbxcarta-spark",
     "dbxcarta-submit",
     "dbxcarta-workspace",
 ]
@@ -558,38 +557,6 @@ requires-dist = [
 provides-extras = ["test"]
 
 [[package]]
-name = "dbxcarta-spark"
-version = "1.1.0"
-source = { editable = "packages/dbxcarta-spark" }
-dependencies = [
-    { name = "databricks-sdk" },
-    { name = "dbxcarta-core" },
-    { name = "neo4j" },
-    { name = "pydantic" },
-    { name = "pydantic-settings" },
-    { name = "pyspark" },
-    { name = "python-dotenv" },
-]
-
-[package.optional-dependencies]
-test = [
-    { name = "pytest" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "databricks-sdk", specifier = ">=0.40" },
-    { name = "dbxcarta-core", editable = "packages/dbxcarta-core" },
-    { name = "neo4j", specifier = ">=5.0" },
-    { name = "pydantic", specifier = ">=2" },
-    { name = "pydantic-settings", specifier = ">=2" },
-    { name = "pyspark", specifier = ">=3.5" },
-    { name = "pytest", marker = "extra == 'test'" },
-    { name = "python-dotenv" },
-]
-provides-extras = ["test"]
-
-[[package]]
 name = "dbxcarta-submit"
 version = "1.0.0"
 source = { editable = "packages/dbxcarta-submit" }
@@ -622,7 +589,6 @@ dependencies = [
     { name = "dbxcarta-finance-genie-example" },
     { name = "dbxcarta-materialize" },
     { name = "dbxcarta-schemapile-example" },
-    { name = "dbxcarta-spark" },
     { name = "dbxcarta-submit" },
 ]
 
@@ -647,7 +613,6 @@ requires-dist = [
     { name = "dbxcarta-finance-genie-example", editable = "examples/finance-genie" },
     { name = "dbxcarta-materialize", editable = "packages/dbxcarta-materialize" },
     { name = "dbxcarta-schemapile-example", editable = "examples/schemapile" },
-    { name = "dbxcarta-spark", editable = "packages/dbxcarta-spark" },
     { name = "dbxcarta-submit", editable = "packages/dbxcarta-submit" },
 ]
 

@@ -158,8 +158,8 @@ def _fetch_schema_names(
 def _validate_questions_file(path: Path) -> None:
     """Validate a questions file before upload.
 
-    A light structural check with the stdlib only, so dbxcarta-spark stays free
-    of a client dependency (the cross-layer import boundary forbids it). The
+    A light structural check with the stdlib only, so the operator tooling stays
+    free of a client dependency (the cross-layer import boundary forbids it). The
     file must be a non-empty JSON array whose entries each carry a non-empty
     question_id and question. The client package validates the full Question
     model when it loads the uploaded file at query time.

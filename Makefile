@@ -28,21 +28,21 @@
 # and already uploads the cluster bootstrap script, so no separate
 # `upload --all` is needed.
 define e2e_ingest
-	DBXCARTA_ENV_FILE=$(1) uv run dbxcarta-submit bootstrap
-	DBXCARTA_ENV_FILE=$(1) uv run dbxcarta-submit publish-wheels
-	DBXCARTA_ENV_FILE=$(1) uv run dbxcarta-submit submit-entrypoint ingest
+	DBXCARTA_ENV_FILE=$(1) uv run dbxcarta bootstrap
+	DBXCARTA_ENV_FILE=$(1) uv run dbxcarta publish-wheels
+	DBXCARTA_ENV_FILE=$(1) uv run dbxcarta submit-entrypoint ingest
 endef
 
 # Phase 2: submit the client evaluation. $(1) is the overlay path.
 define e2e_client
-	DBXCARTA_ENV_FILE=$(1) uv run dbxcarta-submit submit-entrypoint client
+	DBXCARTA_ENV_FILE=$(1) uv run dbxcarta submit-entrypoint client
 endef
 
 # Teardown: drop this example's DBXCARTA_TEARDOWN_TARGET. $(1) is the overlay
 # path. Never chained into ingest; run by hand. Requires --yes-i-mean-it, or it
 # only prints what it would drop.
 define e2e_teardown
-	DBXCARTA_ENV_FILE=$(1) uv run dbxcarta-submit teardown --yes-i-mean-it
+	DBXCARTA_ENV_FILE=$(1) uv run dbxcarta teardown --yes-i-mean-it
 endef
 
 # Fast lane: the default unit/integration-free suite. Runs `tests` with

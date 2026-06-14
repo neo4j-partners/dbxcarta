@@ -1,7 +1,7 @@
 """Shared, Spark-free foundation for the dbxcarta layers.
 
-``dbxcarta-core`` sits underneath ``dbxcarta-spark``, ``dbxcarta-client``, and
-``dbxcarta-submit``. It holds the helpers all three need and pulls in only the
+``dbxcarta-core`` sits underneath ``dbxcarta-client``, ``dbxcarta-materialize``,
+and ``dbxcarta-submit``. It holds the helpers they need and pulls in only the
 Databricks SDK, never Spark: identifier and path helpers (:mod:`identifiers`),
 the catalog-list rule (:mod:`catalogs`), workspace/secret access
 (:mod:`workspace`), the SQL warehouse runner (:mod:`executor`), the readiness

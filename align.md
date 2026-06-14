@@ -59,6 +59,20 @@ Make the operator tool stage and run the neocarta wheel from a local folder, whi
 
 **Phase 1 is done when:** the operator tool stages the local neocarta wheel onto a Volume and submits an ingest job that runs against a test catalog and Neo4j, end to end. The old Spark package has not been touched yet.
 
+**Status: Complete (code) — live end-to-end submit deferred to Phase 6 (needs a Spark 4 cluster + Neo4j).**
+
+The operator tool now stages the prebuilt neocarta wheel and submits the ingest job against it; the old Spark package is untouched, as the phase requires. What was done:
+
+- The ingest entry points at the neocarta connector (wheel package `neocarta`, console script `neocarta-databricks-ingest`). `publish-wheels` copies the prebuilt neocarta wheel from a local build folder onto the Volume instead of building the old Spark wheel; core is only copied into the client/materialize wheels.
+- All three overlays carry neocarta's full `NEOCARTA_DATABRICKS_*` inline-embedding contract and keep only the `DBXCARTA_*`/`DATABRICKS_*` keys that surviving operator/client/runner code still reads. The retired spark-ingest keys are gone.
+- The pinned ingest closure is neocarta's tested runtime closure for this path. It omits `pyspark`, `databricks-sdk`, `pandas`, and `numpy` because the Databricks Runtime provides them; pinning a copy under `--no-deps` would shadow the runtime build (and risk a numpy C-ABI mismatch). The matching requirement falls on the runtime: a Spark 4 DBR shipping compatible pandas/numpy.
+
+Two carry-forward items for later phases:
+- **Maven coordinate** is still `..._for_spark_3` (the existing check was kept per the plan). It must be bumped to the Spark 4 connector JAR before the live submit passes preflight — do this at Phase 6.
+- **`test_overlay` repoint** (a Phase 2 item) is blocked until neocarta is on a package index; for now the test validates the overlay's `NEOCARTA_DATABRICKS_*` contract structurally instead of importing neocarta's settings.
+
+Validation: full default suite green (611 passed, 1 skipped), mypy and ruff clean.
+
 ## Phase 2: Move the operator commands, rename, and delete the Spark package
 
 Rescue the operator-facing commands and the command name, then remove the package and every workspace wiring that points at it, in one cutover.
@@ -71,11 +85,26 @@ Rescue the operator-facing commands and the command name, then remove the packag
 - Regenerate the project lock file so the package and its build artifacts are gone from it.
 - Fix every caller that imports from the old Spark package, not just one. There are four outside the package:
   - `scripts/run_autotest.py` imports `dbxcarta.spark.contract.generate_id`. Repoint it at neocarta's contract equivalent, or inline the small id-generation logic if neocarta does not expose it on a stable path.
-  - `tests/examples/finance-genie/test_overlay.py` imports `dbxcarta.spark.settings.SparkIngestSettings`. Repoint it at neocarta's `SparkIngestSettings` and update its field-name and prefix assertions; this test now proves the overlay's `NEOCARTA_DATABRICKS_*` keys load into neocarta's settings.
+  - `tests/examples/finance-genie/test_overlay.py` imported `dbxcarta.spark.settings.SparkIngestSettings`. **Done by substitution in Phase 1, full repoint deferred (acceptable).** The literal repoint at neocarta's `SparkIngestSettings` is blocked: neocarta is not on a package index, and adding its local path as a test dependency would break CI. Phase 1 already removed the `dbxcarta.spark` import and the test now validates the overlay's `NEOCARTA_DATABRICKS_*` contract structurally, which satisfies the intent of this item. The remaining work — importing neocarta's settings to prove the keys parse — rides along with the index publish in "What is deliberately left for later"; this is an accepted drift, not a gap.
   - `tests/integration/conftest.py` imports `dbxcarta.spark.ingest.summary_io` (`load_summary_from_volume`). This checks finished pipeline output, which is now neocarta's job, so drop it along with the retired `verify` check.
   - `tests/boundary/test_import_boundaries.py` asserts on `import dbxcarta.spark`. Update or remove that expectation, since the namespace no longer exists here.
 
 **Phase 2 is done when:** `dbxcarta ready` and `dbxcarta upload-questions` work, the project builds and installs with no reference to the old package, and the old pipeline command is gone.
+
+**Status: Complete.**
+
+What was done:
+- `ready` and `upload-questions` moved from the deleted Spark CLI into the operator tool (`dbxcarta.submit.cli`), wired into its dispatch and help. `verify` was retired, not moved (it checked pipeline output, now neocarta's job). Its `_build_neo4j_driver` helper went with it.
+- The operator command was renamed from `dbxcarta-submit` to `dbxcarta` (the name the deleted pipeline command owned). The distribution stays named `dbxcarta-submit`; only the console script changed, plus every invocation (Makefile, scripts, help/prog strings, doc-comments). `dbxcarta --help` resolves and lists all seven commands; the old `dbxcarta-ingest` console script is gone.
+- The whole `packages/dbxcarta-spark` folder was deleted, along with its workspace member/source/dependency entries and the regenerated lock (`uv lock` removed `dbxcarta-spark`). The shared runner's default `wheel_package` was repointed off the deleted package to a surviving wheel (`dbxcarta-client`).
+- The four external callers were fixed: `run_autotest.py` inlines the tiny id rule (the deleted `generate_id`) and calls the renamed command; `tests/integration/conftest.py` dropped the `run_summary` fixture (the pipeline-output loader); `tests/boundary/test_import_boundaries.py` dropped every `dbxcarta.spark`/`dbxcarta-spark` expectation; `test_overlay.py` was already decoupled in Phase 1.
+
+Deviation (in scope, completing the deletion):
+- The plan enumerated "four callers outside the package," but the package's own test suite, `tests/spark/` (34 files), imports `dbxcarta.spark` throughout and had to be deleted with the package — leaving it would have made the default suite red. Phase 4 still removes the CI step that ran "the Spark package's tests," confirming these are that suite. Coverage worth keeping was ported: the `_resolve_questions_file` tests moved into `tests/submit/test_cli.py`, and the live `test_semantic_search.py` was decoupled from the removed summary fixture (its real assertions are about the embedded-graph contract neocarta still produces) rather than deleted.
+
+Deferred to later phases (per plan): the `.github/` workflows still naming `dbxcarta-spark` (Phase 4) and the `docs/` references (Phase 5). The remaining `dbxcarta.spark`/`dbxcarta-spark` text in source is intentional provenance comments, not live imports.
+
+Validation: full default suite green (433 passed, 3 deselected — the ~178 `tests/spark/` tests went with the package), `uv sync`/`uv lock` clean, mypy clean on `dbxcarta.submit`, ruff clean, `dbxcarta` command resolves and the old commands are gone.
 
 ## Phase 3: Turn the client into local Python and shrink the submit tooling
 

@@ -74,7 +74,7 @@ def run_materialize(
 
     With no arguments this is the Databricks wheel entrypoint: settings load from
     the environment and the active Spark session resolves lazily. The data
-    catalog is assumed to exist (``dbxcarta-submit bootstrap`` creates it).
+    catalog is assumed to exist (``dbxcarta bootstrap`` creates it).
 
     Schemas are processed one at a time and the summary is updated after each, so
     a failure partway through still records the schemas and tally that actually

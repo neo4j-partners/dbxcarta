@@ -66,7 +66,7 @@ def _preflight(ws: WorkspaceClient, settings: ClientSettings) -> None:
         if not questions_path.exists():
             raise RuntimeError(
                 f"Questions file not found: {source}\n"
-                "Upload it with: dbxcarta-submit upload --data examples/client/questions/"
+                "Upload it with: dbxcarta upload --data examples/client/questions/"
             )
 
     active_arms = settings.arms

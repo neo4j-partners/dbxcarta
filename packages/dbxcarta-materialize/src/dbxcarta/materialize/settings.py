@@ -28,7 +28,7 @@ class MaterializeSettings(BaseSettings):
     the ops Volume (the submit path uploads it there); the job reads it from
     there. The summary sinks and the blueprint path are all derived from
     ``databricks_volume_path`` when unset, the same rule the host-side tools use.
-    The data catalog itself is created by ``dbxcarta-submit bootstrap`` before
+    The data catalog itself is created by ``dbxcarta bootstrap`` before
     this job runs, so the job assumes it exists.
     """
 

@@ -184,7 +184,7 @@ def run_ingest() -> dict:
     ws = _make_ws()
 
     print("  Publishing wheels...")
-    r = _run(["uv", "run", "dbxcarta-submit", "publish-wheels"])
+    r = _run(["uv", "run", "dbxcarta", "publish-wheels"])
     if r.returncode != 0:
         return {"status": "fail", "error": "wheel publish failed"}
 
@@ -193,7 +193,7 @@ def run_ingest() -> dict:
     print("  Submitting pipeline run...")
     schemas_val = ",".join(FIXTURE_SCHEMAS)
     r = _run(
-        ["uv", "run", "dbxcarta-submit", "submit-entrypoint", "ingest"],
+        ["uv", "run", "dbxcarta", "submit-entrypoint", "ingest"],
         env_overrides={"DBXCARTA_SCHEMAS": schemas_val},
     )
     if r.returncode != 0:
@@ -288,10 +288,10 @@ def run_assertions(run_summary: dict) -> dict:
 # REFERENCES edge count can drift apart silently without a direct comparison.
 #
 # The fixture (tests/fixtures/setup_test_catalog.sql) is the authoritative
-# source for *declared* FKs. The pipeline also produces *inferred* FK edges
-# via `dbxcarta.spark.ingest.fk.metadata` (column-comment hints) and optionally
-# `dbxcarta.spark.ingest.fk.semantic`; replicating that logic here would just duplicate
-# the pipeline. So this step asserts only what the fixture pins down (the
+# source for *declared* FKs. The neocarta connector also produces *inferred* FK
+# edges (column-comment hints and optional semantic inference); replicating that
+# logic here would just duplicate the pipeline. So this step asserts only what
+# the fixture pins down (the
 # declared bucket) and reports the inferred bucket informationally so a
 # regression in inference is visible without being asserted against a
 # hand-curated list. Bucketing keys off the `r.source` property each
@@ -307,18 +307,27 @@ _FK_RE = re.compile(
 )
 
 
+def _generate_id(*parts: str) -> str:
+    """Return a normalized dot-separated node id.
+
+    Inlined from the removed ``dbxcarta.spark.contract.generate_id`` (the Spark
+    pipeline now lives in neocarta). Must match the connector's id rule:
+    lowercase each part, replace spaces and hyphens with underscores, join with
+    dots.
+    """
+    return ".".join(p.lower().replace(" ", "_").replace("-", "_") for p in parts)
+
+
 def _parse_fixture_fks(catalog: str) -> set[tuple[str, str]]:
     """Parse `tests/fixtures/setup_test_catalog.sql` and return the canonical
     set of *declared* `(src_id, dst_id)` REFERENCES edges, normalized via
-    `generate_id`.
+    `_generate_id`.
     """
-    from dbxcarta.spark.contract import generate_id
-
     fixture_sql = (PROJECT_ROOT / "tests" / "fixtures" / "setup_test_catalog.sql").read_text()
     out: set[tuple[str, str]] = set()
     for m in _FK_RE.finditer(fixture_sql):
-        src_id = generate_id(catalog, m["src_schema"], m["src_table"], m["src_col"])
-        dst_id = generate_id(catalog, m["dst_schema"], m["dst_table"], m["dst_col"])
+        src_id = _generate_id(catalog, m["src_schema"], m["src_table"], m["src_col"])
+        dst_id = _generate_id(catalog, m["dst_schema"], m["dst_table"], m["dst_col"])
         out.add((src_id, dst_id))
     return out
 
