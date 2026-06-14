@@ -5,8 +5,8 @@ the graph expansion path. The graph contract stores only `embedding`, not the
 source `embedding_text`, so self-ranking probes query with stored vectors.
 
 Requires:
-  - DBXCARTA_INCLUDE_EMBEDDINGS_TABLES=true in the most recent run — Table
-    nodes must carry `embedding` vectors for the vector-index probes below.
+  - NEOCARTA_DATABRICKS_INCLUDE_EMBEDDINGS_TABLES=true in the most recent run.
+    Table nodes must carry `embedding` vectors for the vector-index probes below.
   - A Databricks workspace reachable with the current SDK auth configuration.
 """
 

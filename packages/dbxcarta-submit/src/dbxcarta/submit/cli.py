@@ -78,7 +78,7 @@ _DBR_PROVIDED_PACKAGES: frozenset[str] = frozenset(
 #     C-ABI risk). As with pyspark, the requirement is on the runtime, not the
 #     closure: the target DBR must ship a compatible pandas/numpy.
 _INGEST_PINNED_CLOSURE: tuple[str, ...] = (
-    "neo4j==6.1.0",
+    "neo4j==6.2.0",
     "pytz==2026.1.post1",
     "pydantic==2.13.3",
     "pydantic-core==2.46.3",
@@ -133,7 +133,7 @@ _ENTRYPOINT_SMOKE_IMPORTS: dict[str, tuple[str, ...]] = {
 
 # The Neo4j Spark Connector stays a pinned JVM cluster library (pip
 # cannot install it). Only the ingest path probes and asserts it.
-_NEO4J_MAVEN_COORDINATES = "org.neo4j:neo4j-connector-apache-spark_2.13:5.3.10_for_spark_3"
+_NEO4J_MAVEN_COORDINATES = "org.neo4j:neo4j-connector-apache-spark_2.13:5.4.3_for_spark_3"
 _INGEST_JVM_PROBE_CLASS = "org.neo4j.spark.DataSource"
 
 _ENTRYPOINT_JVM_PROBE_CLASS: dict[str, str | None] = {

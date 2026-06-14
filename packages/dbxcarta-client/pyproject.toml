@@ -17,7 +17,7 @@ dependencies = [
 [project.optional-dependencies]
 # Graph retrieval and the Neo4j schema dump. The base install covers question
 # loading, SQL parsing, and result-set comparison and does not need Neo4j.
-graph = ["neo4j>=5.0"]
+graph = ["neo4j>=6.2.0"]
 test = ["pytest"]
 
 [project.scripts]

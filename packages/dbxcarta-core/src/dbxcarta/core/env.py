@@ -143,6 +143,39 @@ def load_env_files(files: list[Path]) -> None:
         load_dotenv(env_file, override=False)
 
 
+# The per-integration Neo4j secrets cannot live in the committed, secret-free
+# overlay, so off-cluster the client resolves them from the overlay's sibling
+# standalone ``.env`` (the same file ``setup_secrets.sh`` provisions the secret
+# scope from). Only these keys are taken from that file; the rest of it is a
+# separate standalone config with its own catalog/volume that must not layer.
+_OVERLAY_SECRET_KEYS = ("NEO4J_URI", "NEO4J_USERNAME", "NEO4J_PASSWORD")
+
+
+def load_overlay_secrets(overlay: Path | None) -> None:
+    """Load the per-integration ``NEO4J_*`` secrets from the overlay's sibling.
+
+    The committed overlay is secret-free, so off-cluster the client reads the
+    Neo4j credentials from the standalone ``examples/<name>/.env`` beside it.
+    Only the ``NEO4J_*`` keys are taken; the rest of that file is a separate
+    standalone config (its own catalog and volume) and must not layer in.
+    ``setdefault`` keeps a real exported env var winning, matching
+    :func:`load_env_files`. A ``None`` overlay or a missing sibling is a silent
+    no-op, and on the cluster (no overlay path) it never runs — jobs read the
+    secret scope instead.
+    """
+    if overlay is None:
+        return
+    sibling = overlay.parent / _BASE_ENV_FILE.name
+    if not sibling.is_file():
+        return
+    from dotenv import dotenv_values
+
+    values = dotenv_values(sibling)
+    for key in _OVERLAY_SECRET_KEYS:
+        if value := values.get(key):
+            os.environ.setdefault(key, value)
+
+
 def inject_params() -> None:
     """Parse KEY=VALUE argv parameters into os.environ.
 

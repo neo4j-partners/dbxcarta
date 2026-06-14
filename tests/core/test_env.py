@@ -173,6 +173,71 @@ def test_load_missing_file_is_silent_noop(tmp_path) -> None:
     assert _LAYER_KEY not in os.environ
 
 
+def _write_sibling_env(overlay_dir: Path, **values: str) -> Path:
+    """Write a standalone ``.env`` beside an overlay and return the overlay path."""
+    body = "".join(f"{key}={value}\n" for key, value in values.items())
+    (overlay_dir / ".env").write_text(body, encoding="utf-8")
+    return overlay_dir / "dbxcarta-overlay.env"
+
+
+def _clear_neo4j_env() -> None:
+    for key in _bootstrap._OVERLAY_SECRET_KEYS:
+        os.environ.pop(key, None)
+
+
+def test_load_overlay_secrets_reads_only_neo4j_keys(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only NEO4J_* is taken from the sibling; other standalone keys never layer."""
+    overlay = _write_sibling_env(
+        tmp_path,
+        NEO4J_URI="neo4j+s://example",
+        NEO4J_USERNAME="neo4j",
+        NEO4J_PASSWORD="secret",
+        DBXCARTA_CATALOG="standalone-catalog",
+    )
+    _clear_neo4j_env()
+    monkeypatch.delenv("DBXCARTA_CATALOG", raising=False)
+    try:
+        _bootstrap.load_overlay_secrets(overlay)
+
+        assert os.environ["NEO4J_URI"] == "neo4j+s://example"
+        assert os.environ["NEO4J_USERNAME"] == "neo4j"
+        assert os.environ["NEO4J_PASSWORD"] == "secret"
+        # The sibling's own catalog must not leak into the dbxcarta environment.
+        assert "DBXCARTA_CATALOG" not in os.environ
+    finally:
+        _clear_neo4j_env()
+
+
+def test_load_overlay_secrets_existing_env_wins(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A real exported NEO4J_* value wins over the sibling (setdefault)."""
+    overlay = _write_sibling_env(tmp_path, NEO4J_URI="neo4j+s://from-file")
+    _clear_neo4j_env()
+    monkeypatch.setenv("NEO4J_URI", "neo4j+s://from-process")
+    try:
+        _bootstrap.load_overlay_secrets(overlay)
+        assert os.environ["NEO4J_URI"] == "neo4j+s://from-process"
+    finally:
+        _clear_neo4j_env()
+
+
+def test_load_overlay_secrets_none_overlay_is_noop() -> None:
+    _clear_neo4j_env()
+    _bootstrap.load_overlay_secrets(None)
+    assert "NEO4J_URI" not in os.environ
+
+
+def test_load_overlay_secrets_missing_sibling_is_noop(tmp_path) -> None:
+    """An overlay with no sibling .env is a silent no-op."""
+    overlay = tmp_path / "dbxcarta-overlay.env"
+    _clear_neo4j_env()
+    _bootstrap.load_overlay_secrets(overlay)
+    assert "NEO4J_URI" not in os.environ
+
+
 def test_read_required_warehouse_id_prefers_and_strips_override(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

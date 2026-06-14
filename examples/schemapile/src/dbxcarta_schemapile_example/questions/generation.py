@@ -35,7 +35,8 @@ from dbxcarta.core.questions import GeneratedPair, ValidationOutcome
 from dbxcarta.core.sql_safety import sql_targets_only_catalog
 from dbxcarta.core.workspace import build_workspace_client
 
-from dbxcarta_schemapile_example.config import SchemaPileConfig, load_config
+from dbxcarta_schemapile_example.config import DEFAULT_DOTENV
+from dbxcarta_schemapile_example.questions.config import QuestionConfig, load_question_config
 from dbxcarta_schemapile_example.utils import load_dotenv_file
 
 if TYPE_CHECKING:
@@ -59,7 +60,7 @@ def main() -> int:
     parser.add_argument(
         "--dotenv",
         type=Path,
-        default=Path(__file__).resolve().parents[2] / ".env",
+        default=DEFAULT_DOTENV,
         help="Path to the .env file to load (default: example directory .env)",
     )
     parser.add_argument(
@@ -95,7 +96,7 @@ def main() -> int:
     args = parser.parse_args()
 
     load_dotenv_file(args.dotenv)
-    config = load_config()
+    config = load_question_config()
 
     if not config.candidate_cache.is_file():
         raise FileNotFoundError(
@@ -154,7 +155,7 @@ def main() -> int:
 
 def _generate_all(
     ws: WorkspaceClient,
-    config: SchemaPileConfig,
+    config: QuestionConfig,
     schemas: list[dict[str, Any]],
     cache_dir: Path,
 ) -> list[GeneratedPair]:
@@ -186,7 +187,7 @@ def _generate_all(
     return pairs
 
 
-def _cache_path(cache_dir: Path, uc_schema: str, config: SchemaPileConfig) -> Path:
+def _cache_path(cache_dir: Path, uc_schema: str, config: QuestionConfig) -> Path:
     sig = hashlib.sha256(
         json.dumps(
             {
@@ -204,7 +205,7 @@ def _cache_path(cache_dir: Path, uc_schema: str, config: SchemaPileConfig) -> Pa
 
 def _call_model(
     ws: WorkspaceClient,
-    config: SchemaPileConfig,
+    config: QuestionConfig,
     entry: dict[str, Any],
 ) -> list[dict[str, Any]]:
     from databricks.sdk.service.serving import ChatMessage, ChatMessageRole
@@ -235,7 +236,7 @@ _SYSTEM_PROMPT = textwrap.dedent("""\
 """)
 
 
-def _build_prompt(entry: dict[str, Any], config: SchemaPileConfig) -> str:
+def _build_prompt(entry: dict[str, Any], config: QuestionConfig) -> str:
     schema_catalog = config.catalog
     uc_schema = entry["uc_schema"]
     tables = entry.get("tables") or []

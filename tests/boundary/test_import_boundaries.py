@@ -59,7 +59,7 @@ def _requirement_names(distribution: str) -> set[str]:
     """Return the bare package names from a distribution's Requires-Dist.
 
     Each requirement string carries version specifiers, extras, and
-    environment markers (e.g. ``"neo4j>=5.0 ; extra == 'graph'"``); only
+    environment markers (e.g. ``"neo4j>=6.2.0 ; extra == 'graph'"``); only
     the leading name token identifies the dependency.
     """
     requires = metadata.requires(distribution) or []

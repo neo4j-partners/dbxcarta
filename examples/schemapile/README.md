@@ -68,10 +68,15 @@ examples/schemapile/
 ├── .env.sample
 ├── src/dbxcarta_schemapile_example/
 │   ├── __init__.py
-│   ├── config.py                # one-shot .env parser
-│   ├── slice_runner.py          # shells out to upstream slice.py
-│   ├── candidate_selector.py    # slice JSON -> candidate-table JSON (blueprint)
-│   └── question_generator.py    # LLM + SQL validation -> questions.json
+│   ├── config.py                # shared .env primitives + cache-path defaults
+│   ├── utils.py                 # dotenv loader
+│   ├── dataset/                 # host-only stage (no Databricks credentials)
+│   │   ├── config.py            #   SliceConfig + CandidateConfig
+│   │   ├── slicing.py           #   shells out to upstream slice.py
+│   │   └── candidates.py        #   slice JSON -> candidate-table JSON (blueprint)
+│   └── questions/               # Databricks-connected stage
+│       ├── config.py            #   QuestionConfig
+│       └── generation.py        #   LLM + SQL validation -> questions.json
 ├── blueprint/                   # committed candidate JSON + attribution
 ├── scripts/                     # one-off utilities, see scripts/README.md
 │   └── dump_question_context.py # Neo4j -> docs/schemapile/questions-schema.md

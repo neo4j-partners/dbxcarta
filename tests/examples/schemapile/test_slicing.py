@@ -3,8 +3,8 @@ from __future__ import annotations
 import json
 
 import pytest
-from dbxcarta_schemapile_example.config import SchemaPileConfig
-from dbxcarta_schemapile_example.slice_runner import (
+from dbxcarta_schemapile_example.dataset.config import SliceConfig
+from dbxcarta_schemapile_example.dataset.slicing import (
     _cache_is_current,
     _params_fingerprint,
     _params_sidecar,
@@ -12,7 +12,7 @@ from dbxcarta_schemapile_example.slice_runner import (
 )
 
 
-def _make_config(tmp_path, **overrides) -> SchemaPileConfig:
+def _make_config(tmp_path, **overrides) -> SliceConfig:
     repo = tmp_path / "schemapile-repo"
     repo.mkdir(exist_ok=True)
     (repo / "slice.py").write_text("# upstream slice.py placeholder")
@@ -29,20 +29,9 @@ def _make_config(tmp_path, **overrides) -> SchemaPileConfig:
         "require_self_contained": True,
         "require_data": False,
         "slice_cache": tmp_path / "cache" / "slice.json",
-        "candidate_cache": tmp_path / "cache" / "candidates.json",
-        "candidate_min_tables": 2,
-        "candidate_max_tables": 20,
-        "candidate_min_fk_edges": 1,
-        "candidate_require_data": False,
-        "candidate_limit": 10,
-        "catalog": "schemapile_lakehouse",
-        "volume_path": "/Volumes/dbxcarta-catalog/schemapile_ops/dbxcarta-ops",
-        "question_model": "model",
-        "questions_per_schema": 6,
-        "question_temperature": 0.2,
     }
     defaults.update(overrides)
-    return SchemaPileConfig(**defaults)
+    return SliceConfig(**defaults)
 
 
 def test_preflight_ok(tmp_path):
@@ -52,7 +41,7 @@ def test_preflight_ok(tmp_path):
 
 def test_preflight_missing_repo(tmp_path):
     config = _make_config(tmp_path)
-    config = SchemaPileConfig(**{**config.__dict__, "repo": tmp_path / "missing"})
+    config = SliceConfig(**{**config.__dict__, "repo": tmp_path / "missing"})
     with pytest.raises(FileNotFoundError) as exc:
         preflight(config)
     assert "https://github.com/amsterdata/schemapile" in str(exc.value)

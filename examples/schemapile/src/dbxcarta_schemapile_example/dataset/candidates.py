@@ -17,7 +17,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
-from dbxcarta_schemapile_example.config import SchemaPileConfig, load_config
+from dbxcarta_schemapile_example.config import DEFAULT_DOTENV
+from dbxcarta_schemapile_example.dataset.config import CandidateConfig, load_candidate_config
 from dbxcarta_schemapile_example.utils import load_dotenv_file
 
 CANDIDATE_FORMAT_VERSION = 2
@@ -88,12 +89,12 @@ def main() -> int:
     parser.add_argument(
         "--dotenv",
         type=Path,
-        default=Path(__file__).resolve().parents[2] / ".env",
+        default=DEFAULT_DOTENV,
         help="Path to the .env file to load before reading variables (default: example directory .env)",
     )
     args = parser.parse_args()
     load_dotenv_file(args.dotenv)
-    config = load_config()
+    config = load_candidate_config()
 
     if not config.slice_cache.is_file():
         raise FileNotFoundError(
@@ -126,7 +127,7 @@ def main() -> int:
 
 def select_candidates(
     slice_data: dict[str, Any],
-    config: SchemaPileConfig,
+    config: CandidateConfig,
 ) -> list[CandidateSchema]:
     """Apply filter + rank + cap to the slice and return chosen candidates.
 
@@ -165,7 +166,7 @@ def select_candidates(
     return candidates
 
 
-def _passes_filters(tables: tuple[TableSpec, ...], config: SchemaPileConfig) -> bool:
+def _passes_filters(tables: tuple[TableSpec, ...], config: CandidateConfig) -> bool:
     if not tables:
         return False
     if len(tables) < config.candidate_min_tables:

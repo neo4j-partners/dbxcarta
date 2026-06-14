@@ -2,25 +2,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from dbxcarta_schemapile_example.candidate_selector import (
+from dbxcarta_schemapile_example.dataset.candidates import (
     _sanitize_schema_name,
     select_candidates,
 )
-from dbxcarta_schemapile_example.config import SchemaPileConfig
+from dbxcarta_schemapile_example.dataset.config import CandidateConfig
 
 
-def _config() -> SchemaPileConfig:
-    return SchemaPileConfig(
-        repo=Path("/tmp/schemapile"),
-        input_filename="schemapile-perm.json",
-        target_tables=1000,
-        strategy="random",
-        seed=42,
-        min_tables=2,
-        max_tables=100,
-        min_fk_edges=1,
-        require_self_contained=True,
-        require_data=False,
+def _config() -> CandidateConfig:
+    return CandidateConfig(
         slice_cache=Path("/tmp/slice.json"),
         candidate_cache=Path("/tmp/candidates.json"),
         candidate_min_tables=2,
@@ -28,11 +18,6 @@ def _config() -> SchemaPileConfig:
         candidate_min_fk_edges=1,
         candidate_require_data=False,
         candidate_limit=10,
-        catalog="schemapile_lakehouse",
-        volume_path="/Volumes/dbxcarta-catalog/schemapile_ops/dbxcarta-ops",
-        question_model="databricks-meta-llama-3-3-70b-instruct",
-        questions_per_schema=6,
-        question_temperature=0.2,
     )
 
 
@@ -56,7 +41,7 @@ def _entry(tables):
 
 
 def test_extract_rows_position_alignment():
-    from dbxcarta_schemapile_example.candidate_selector import _extract_rows
+    from dbxcarta_schemapile_example.dataset.candidates import _extract_rows
 
     columns = {
         "id": {"TYPE": "INT", "VALUES": [1, 2, 3]},
@@ -67,7 +52,7 @@ def test_extract_rows_position_alignment():
 
 
 def test_extract_rows_misaligned_returns_empty():
-    from dbxcarta_schemapile_example.candidate_selector import _extract_rows
+    from dbxcarta_schemapile_example.dataset.candidates import _extract_rows
 
     columns = {
         "id": {"TYPE": "INT", "VALUES": [1, 2, 3]},
@@ -79,7 +64,7 @@ def test_extract_rows_misaligned_returns_empty():
 def test_extract_rows_pads_missing_values_with_null():
     """Columns without VALUES contribute NULL; only VALUES-having columns
     must share a length."""
-    from dbxcarta_schemapile_example.candidate_selector import _extract_rows
+    from dbxcarta_schemapile_example.dataset.candidates import _extract_rows
 
     columns = {
         "id": {"TYPE": "INT"},
@@ -89,7 +74,7 @@ def test_extract_rows_pads_missing_values_with_null():
 
 
 def test_extract_rows_no_values_anywhere_returns_empty():
-    from dbxcarta_schemapile_example.candidate_selector import _extract_rows
+    from dbxcarta_schemapile_example.dataset.candidates import _extract_rows
 
     columns = {
         "id": {"TYPE": "INT"},

@@ -15,7 +15,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-from dbxcarta_schemapile_example.config import SchemaPileConfig, load_config
+from dbxcarta_schemapile_example.config import DEFAULT_DOTENV
+from dbxcarta_schemapile_example.dataset.config import SliceConfig, load_slice_config
 from dbxcarta_schemapile_example.utils import load_dotenv_file
 
 _UPSTREAM_REPO_URL = "https://github.com/amsterdata/schemapile"
@@ -34,13 +35,13 @@ def main() -> int:
     parser.add_argument(
         "--dotenv",
         type=Path,
-        default=Path(__file__).resolve().parents[2] / ".env",
+        default=DEFAULT_DOTENV,
         help="Path to the .env file to load before reading variables (default: example directory .env)",
     )
     args = parser.parse_args()
 
     load_dotenv_file(args.dotenv)
-    config = load_config()
+    config = load_slice_config()
     preflight(config)
 
     if not args.force and _cache_is_current(config):
@@ -53,7 +54,7 @@ def main() -> int:
     return _run_slice(config)
 
 
-def preflight(config: SchemaPileConfig) -> None:
+def preflight(config: SliceConfig) -> None:
     """Reject unusable configurations before any work happens."""
     if not config.repo.is_dir():
         raise FileNotFoundError(
@@ -76,7 +77,7 @@ def preflight(config: SchemaPileConfig) -> None:
         )
 
 
-def _cache_is_current(config: SchemaPileConfig) -> bool:
+def _cache_is_current(config: SliceConfig) -> bool:
     """True when the existing cache JSON was produced with the same params."""
     cache = config.slice_cache
     sidecar = _params_sidecar(cache)
@@ -89,7 +90,7 @@ def _cache_is_current(config: SchemaPileConfig) -> bool:
     return bool(recorded == _params_fingerprint(config))
 
 
-def _params_fingerprint(config: SchemaPileConfig) -> dict[str, object]:
+def _params_fingerprint(config: SliceConfig) -> dict[str, object]:
     """Stable subset of config that determines slice output identity."""
     return {
         "input": str(config.input_path),
@@ -109,7 +110,7 @@ def _params_sidecar(cache: Path) -> Path:
     return cache.with_suffix(cache.suffix + ".params.json")
 
 
-def _run_slice(config: SchemaPileConfig) -> int:
+def _run_slice(config: SliceConfig) -> int:
     config.slice_cache.parent.mkdir(parents=True, exist_ok=True)
     sidecar = _params_sidecar(config.slice_cache)
     args = [

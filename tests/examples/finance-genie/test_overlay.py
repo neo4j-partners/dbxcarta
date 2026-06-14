@@ -39,12 +39,20 @@ def test_overlay_carries_neocarta_ingest_contract() -> None:
     for label in ("TABLES", "COLUMNS", "SCHEMAS", "DATABASES"):
         assert env[f"NEOCARTA_DATABRICKS_INCLUDE_EMBEDDINGS_{label}"] == "true"
     assert env["NEOCARTA_DATABRICKS_EMBEDDING_STAGING_VOLUME"].startswith("/Volumes/")
+    # Value sampling is pinned explicitly rather than left on neocarta's defaults.
+    assert env["NEOCARTA_DATABRICKS_INCLUDE_VALUES"] == "true"
+    assert env["NEOCARTA_DATABRICKS_SAMPLE_LIMIT"] == "10"
+    assert env["NEOCARTA_DATABRICKS_SAMPLE_CARDINALITY_THRESHOLD"] == "50"
 
 
 def test_overlay_pins_known_keys() -> None:
     env = _overlay_env()
     assert env["DBXCARTA_INJECT_CRITERIA"] == "false"
     assert env["DBXCARTA_CLIENT_ARMS"] == "no_context,schema_dump,graph_rag"
+    # The client's query-time embed endpoint is pinned to match the ingest
+    # endpoint, so graph_rag embeds with the model that built the graph.
+    assert env["DBXCARTA_EMBEDDING_ENDPOINT"] == "databricks-gte-large-en"
+    assert env["NEOCARTA_DATABRICKS_EMBEDDING_ENDPOINT"] == "databricks-gte-large-en"
     # The client runs locally, so the questions path is the committed local
     # file at the example root, not a /Volumes path.
     assert env["DBXCARTA_CLIENT_QUESTIONS"] == "examples/finance-genie/questions.json"

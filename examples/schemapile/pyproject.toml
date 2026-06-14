@@ -16,9 +16,9 @@ dependencies = [
 test = ["pytest"]
 
 [project.scripts]
-dbxcarta-schemapile-slice = "dbxcarta_schemapile_example.slice_runner:main"
-dbxcarta-schemapile-select = "dbxcarta_schemapile_example.candidate_selector:main"
-dbxcarta-schemapile-generate-questions = "dbxcarta_schemapile_example.question_generator:main"
+dbxcarta-schemapile-slice = "dbxcarta_schemapile_example.dataset.slicing:main"
+dbxcarta-schemapile-select = "dbxcarta_schemapile_example.dataset.candidates:main"
+dbxcarta-schemapile-generate-questions = "dbxcarta_schemapile_example.questions.generation:main"
 
 [build-system]
 requires = ["uv_build>=0.11.0,<0.12.0"]
