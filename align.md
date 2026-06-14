@@ -16,13 +16,11 @@ After this work, the only Spark in dbxcarta is the job-submit tooling that launc
 
 ## Key design decisions
 
-- **No compatibility wrappers.** When code moves or a name changes, the old form is deleted and every caller points at the new one in the same change. No aliases, no "old name still works" fallbacks.
-- **No legacy migration paths.** The project does not support the old layout and the new layout at the same time. There is no transition window.
-- **Complete hard cutover.** Each phase fully replaces what it touches. After a phase lands, the old shape is gone, not deprecated.
 - **One operator command.** The surviving command is named `dbxcarta`. The old pipeline command owned that name; when the pipeline package is deleted, the operator tool takes the name over. There is one command, not two.
 - **Local wheel now, index later.** The wheel source is a single setting. It points at neocarta's local build folder today and at a package index plus a version later. The swap is one setting and nothing else.
 - **Repoint before delete.** The ingest path is pointed at the neocarta wheel and proven to run before the old package is removed, so the pipeline is never broken in the middle.
 - **Spark only where it is required.** The job-submit tooling and `materialize` stay on Spark because they have to be. The client moves off Spark to plain local Python, since its only Spark use was reading and writing a couple of tables.
+- **Embeddings are generated inline, in the ingest job.** dbxcarta runs neocarta's inline embedding mode: the ingest job embeds nodes in-cluster with a native `ai_query()` call against a Databricks serving endpoint, so a single job produces a fully embedded graph and the only operator follow-up is `materialize`. This is why the pinned ingest closure carries no external embedding provider, no openai and no litellm. External embedding mode, where a separate `neocarta databricks embed` step adds vectors after ingest, is deliberately deferred to Phase 7.
 
 ## What stays and what goes (in plain words)
 
@@ -47,10 +45,16 @@ Make the operator tool stage and run the neocarta wheel from a local folder, whi
 - Build the neocarta wheel on this machine from the neocarta project at `/Users/ryanknight/projects/neo4j-field/neocarta`, so there is a wheel file in neocarta's build folder to point at.
 - Add a setting in the operator tool for where the neocarta wheel comes from. For now this is the local build folder path. Later it becomes a package index plus a version number, and only this one setting changes.
 - Change the publish step so that, for the ingest job, it copies the prebuilt neocarta wheel onto the Unity Catalog Volume instead of building the old Spark wheel.
+- Before committing to that publish-step change, confirm where the build-from-source logic actually lives. The fetch-instead-of-build swap targets the `databricks_job_runner` `publish_wheel_stable` / `find_latest_wheel` seam, which today builds from `project_dir/dist`. That logic sits in the installed `databricks_job_runner` package, not in this repo. Verify the repoint can be driven entirely from the `dbxcarta-submit` caller (`_handle_publish_wheels`); if the seam is not exposed there, the `databricks_job_runner` package itself needs a change, which widens this phase. Resolve this early so it does not surface mid-implementation.
 - Stop copying the shared core code into the ingest wheel. The neocarta wheel already carries everything it needs as normal modules.
-- Point the cluster ingest entry point at the neocarta connector's ingest entry point, `neocarta.connectors.databricks.run:run_ingest` in the root `neocarta` wheel, installed with its `databricks-spark` extra (`pyspark` + `pydantic-settings`).
-- Rename the ingest-relevant overlay keys to neocarta's env-var contract so the wheel reads them directly with no translation step. neocarta's settings use the `NEOCARTA_DATABRICKS_` prefix and ignore unknown env vars, so the operator-only and client-only keys stay on their `DBXCARTA_*`/`DATABRICKS_*` names and are harmlessly forwarded. Rename catalog, catalogs, schemas, summary-volume, the four embedding-include flags, and the secret scope; add `NEOCARTA_DATABRICKS_SECRET_SCOPE` alongside the existing `DATABRICKS_SECRET_SCOPE` that operator tooling still reads. Drop the two overlay keys neocarta has no field for: the embeddings-values flag and the summary-table name.
-- Set the fixed list of pinned dependencies for the ingest job to neocarta's tested closure for this path: the `neocarta` wheel, `pydantic`, `pydantic-settings`, `pandas`, `neo4j`, `databricks-sdk`, and `python-dotenv`. The cluster supplies `pyspark`. None of the BigQuery, Dataplex, litellm, openai, sqlglot, torch, or mlflow dependencies are on the ingest path, so they are not pinned. Note the version jumps neocarta carries: `neo4j` 5 to 6 and `pyspark` 3.5 to 4.1, which require a recent DBR and a Spark 4 build of the Neo4j Spark Connector JAR.
+- Point the cluster ingest entry point at the neocarta connector's ingest entry point, `neocarta.connectors.databricks.run:run_ingest` in the root `neocarta` wheel, installed with its `databricks-spark` extra (`pyspark`).
+- Rename the ingest-relevant overlay keys to neocarta's env-var contract so the wheel reads them directly with no translation step. neocarta's settings use the `NEOCARTA_DATABRICKS_` prefix and ignore unknown env vars, so the operator-only and client-only keys stay on their `DBXCARTA_*`/`DATABRICKS_*` names and are harmlessly forwarded.
+  - **Carry across, renamed:** catalog, catalogs, schemas, the four embedding-include flags (tables, columns, schemas, databases), and the secret scope. Add `NEOCARTA_DATABRICKS_SECRET_SCOPE` alongside the existing `DATABRICKS_SECRET_SCOPE` that operator tooling still reads.
+  - **Add for inline mode (new keys, not in the old overlay):** because dbxcarta runs inline embeddings, the overlay must also set the inline tuning settings neocarta requires: `NEOCARTA_DATABRICKS_EMBEDDING_ENDPOINT`, `NEOCARTA_DATABRICKS_EMBEDDING_DIMENSION`, `NEOCARTA_DATABRICKS_EMBEDDING_BATCH_TABLES`, and `NEOCARTA_DATABRICKS_EMBEDDING_FAILURE_MAX`. Critically, set `NEOCARTA_DATABRICKS_EMBEDDING_STAGING_VOLUME` to a `/Volumes/<cat>/<schema>/<vol>/<subdir>` subpath: neocarta validates this as required whenever any inline flag is on (it replaces the old summary-volume-derived staging path, which neocarta dropped), so an inline run with it unset fails at settings load.
+  - **Replaces the old summary-volume key:** the single `summary-volume` overlay key no longer maps to one neocarta field. neocarta split it into the required `EMBEDDING_STAGING_VOLUME` above and an optional `NEOCARTA_DATABRICKS_SUMMARY_VOLUME`. Set the optional `SUMMARY_VOLUME` to a Volume subpath so each detached cluster ingest run writes a durable `summary_<run_id>.json` report; without it the run summary lives only in memory on the cluster and is lost when the job ends. (Recommended on, since dbxcarta is the operator tooling that needs the run outcome of a detached job.)
+  - **Drop entirely:** the embeddings-values flag (neocarta removed Value embedding) and the summary-table name (neocarta has no field for it).
+- Set the fixed list of pinned dependencies for the ingest job to neocarta's tested closure for this path: the `neocarta` wheel, `pydantic`, `pydantic-settings`, `pandas`, `neo4j`, `databricks-sdk`, and `python-dotenv`. None of the BigQuery, Dataplex, litellm, openai, sqlglot, torch, or mlflow dependencies are on the inline ingest path, so they are not pinned.
+- Leave `pyspark` out of the pinned closure on purpose. The classic cluster's Databricks Runtime supplies `pyspark`, and pip-installing a second copy over the `--no-deps` bootstrap risks version skew with the runtime's Spark JVM and jars. neocarta pins `pyspark` in its `databricks-spark` extra only for local wheel-install reproducibility; that pin is for off-cluster testing, not for the cluster job. The requirement that follows is on the runtime, not the closure: the job must target a Spark 4 DBR (to match neocarta's `pyspark` 3.5 to 4.1 jump) with a Spark 4 build of the Neo4j Spark Connector JAR attached, and `neo4j` 6 on the driver side (neocarta's `neo4j` 5 to 6 jump).
 - Keep the existing cluster check for the Neo4j Spark Connector. It is a Java library attached to the cluster, not a Python dependency.
 
 **Phase 1 is done when:** the operator tool stages the local neocarta wheel onto a Volume and submits an ingest job that runs against a test catalog and Neo4j, end to end. The old Spark package has not been touched yet.
@@ -104,6 +108,7 @@ Rewrite the docs so they describe the new shape: the pipeline lives in neocarta,
 
 - Update the project readme so it describes dbxcarta as the operator tooling that pulls and runs the neocarta connector, not as the home of the Spark pipeline.
 - Update the architecture doc so the diagram and text show the pipeline coming from the neocarta wheel and the client running locally.
+- State in the readme and architecture doc that dbxcarta runs neocarta's inline embedding mode, so the ingest job emits a fully embedded graph and the only operator follow-up is `materialize`. Point at Phase 7 for the deferred external embedding path.
 - Delete the public interface doc. It only maps the old pipeline module names, which no longer exist here. There is nothing left to map.
 - Update the release doc to remove the steps that build and version the old Spark wheel.
 - Update the simulate-publish doc to stage the neocarta wheel instead of building the old Spark wheel.
@@ -124,6 +129,17 @@ Prove the whole thing works on a local machine, with neocarta still unpublished.
 - Do one project-wide search for the old package name, the old import path, and any retired command, across code, workflows, and docs, and confirm it is clean. This is the one sweep for the whole change.
 
 **Phase 6 is done when:** the ingest job runs end to end off the local neocarta wheel, the client runs locally, all tests and linters pass, and the old package leaves no trace.
+
+## Phase 7: External embedding mode (later)
+
+Add the second, decoupled embedding path so the graph can also be embedded or re-embedded after ingest, without re-running the Spark job. This is deferred because inline mode already produces a fully embedded graph; this phase is only needed when embeddings must be decoupled from ingest, or must use the same external embedding provider the rest of neocarta uses.
+
+- Install `neocarta[cli]` on the operator machine. This is a separate install from the cluster's `neocarta[databricks-spark]` wheel and pulls in the CLI dependencies (click, rich, pydantic-settings) plus the enrichment embedding path.
+- Configure an embedding provider for the enrichment layer, for example OpenAI `text-embedding-3-small`, which the inline pinned closure deliberately omits. This provider config and its secret live with the operator tooling, not in the committed overlay.
+- Run `neocarta databricks embed` as the post-ingest enrichment step. It reads Database/Schema/Table/Column nodes from Neo4j, calls the embedding model, and writes vectors back, all in-process with no cluster. Flags: `--embedding-model`, `--embedding-dimensions`, `--dry-run`, `--json`.
+- Document the consistency rule that matters once two modes exist: inline and external use different models at different dimensions (inline `databricks-gte-large-en` at 1024, external OpenAI `text-embedding-3-small`), and a graph cannot mix modes without rebuilding the vector index, since the index is fixed at one dimension. Pick one mode per graph, or point inline at the OpenAI external-model endpoint (registered with `scripts/setup-openai-endpoint.py`, copied into this repo) so both modes produce the same vectors.
+
+**Phase 7 is done when:** an operator can run `neocarta databricks embed` from `neocarta[cli]` against an ingested graph and add vectors with no cluster, and the docs describe both the inline path (dbxcarta's default) and the external path, plus the rule against mixing them on one graph.
 
 ---
 
