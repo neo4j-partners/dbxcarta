@@ -19,9 +19,8 @@ import argparse
 import sys
 from pathlib import Path
 
-from neo4j import GraphDatabase
-
 from dbxcarta.core.env import load_env_files
+from neo4j import GraphDatabase
 
 # Layer the three config files this script's ClientSettings reads, anchored to
 # the example dir so the load is independent of the working directory: the

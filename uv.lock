@@ -531,11 +531,10 @@ provides-extras = ["test"]
 
 [[package]]
 name = "dbxcarta-submit"
-version = "1.0.0"
+version = "1.1.0"
 source = { editable = "packages/dbxcarta-submit" }
 dependencies = [
     { name = "databricks-job-runner" },
-    { name = "dbxcarta-core" },
 ]
 
 [package.optional-dependencies]
@@ -546,7 +545,6 @@ test = [
 [package.metadata]
 requires-dist = [
     { name = "databricks-job-runner", specifier = "==0.6.2" },
-    { name = "dbxcarta-core", editable = "packages/dbxcarta-core" },
     { name = "pytest", marker = "extra == 'test'" },
 ]
 provides-extras = ["test"]
