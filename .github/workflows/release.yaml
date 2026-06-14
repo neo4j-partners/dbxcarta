@@ -32,6 +32,7 @@ jobs:
           version=$(uv version --short)
           uv version --package dbxcarta-core "$version" --frozen
           uv version --package dbxcarta-client "$version" --frozen
+          uv version --package dbxcarta-submit "$version" --frozen
           uv version --package dbxcarta-dense-schema-example "$version" --frozen
           uv version --package dbxcarta-schemapile-example "$version" --frozen
           uv lock
