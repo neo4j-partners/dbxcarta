@@ -152,7 +152,7 @@ docs/proposals/
 docker-tests/.env
 
 # Transient core source copied into the entrypoint packages by
-# `dbxcarta-submit publish-wheels` so each cluster wheel carries dbxcarta/core.
+# `dbxcarta publish-wheels` so each cluster wheel carries dbxcarta/core.
 # The context manager removes these after the build; ignored so an interrupted
 # publish run cannot leave a duplicate core source to be committed by mistake.
 packages/dbxcarta-client/src/dbxcarta/core/

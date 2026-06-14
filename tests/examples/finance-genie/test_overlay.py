@@ -23,7 +23,7 @@ def test_overlay_carries_neocarta_ingest_contract() -> None:
     """The overlay feeds neocarta's ingest wheel through NEOCARTA_DATABRICKS_* keys.
 
     The connector ships as a staged wheel rather than a dbxcarta dependency, so
-    its SparkIngestSettings is not importable here. This asserts the committed
+    its settings class is not importable here. This asserts the committed
     overlay carries neocarta's env contract with the expected raw values; the
     connector's own tests cover parsing those values into settings.
     """

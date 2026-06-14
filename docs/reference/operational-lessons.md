@@ -13,4 +13,4 @@ What this means in practice:
 Guidance:
 
 - Do not run `teardown` against a data catalog on a Default-Storage account unless you are prepared to recreate that catalog in the UI. Prefer clearing schema and table contents over dropping the catalog itself.
-- Follow-up worth making: give `bootstrap` a managed-location or default-storage create path so that teardown plus bootstrap is genuinely round-trippable, matching the Phase 1 intent recorded in `planner.md`.
+- Follow-up worth making: give `bootstrap` a managed-location or default-storage create path so that teardown plus bootstrap is genuinely round-trippable.

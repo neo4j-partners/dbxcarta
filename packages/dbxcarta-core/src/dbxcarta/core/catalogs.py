@@ -1,9 +1,10 @@
-"""The catalog-list policy rule shared by the ingest and query layers.
+"""The catalog-list policy rule shared across the dbxcarta query and operator layers.
 
 ``resolve_catalogs`` is the single source of truth for "which catalogs does
-this run touch". Both ``SparkIngestSettings`` and ``ClientSettings`` resolve
-their catalog set through it, so the ingest side and the query side can never
-disagree about the ``catalog:layer`` list form.
+this run touch". ``ClientSettings`` and the operator readiness check resolve
+their catalog set through it, so every dbxcarta-side consumer agrees on the
+``catalog:layer`` list form. The neocarta ingest connector owns the equivalent
+rule on its side.
 """
 
 from __future__ import annotations

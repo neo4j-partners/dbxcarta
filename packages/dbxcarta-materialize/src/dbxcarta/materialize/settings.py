@@ -1,10 +1,9 @@
 """Environment-backed configuration for the materialize Spark job.
 
-Pydantic is used here — the env-var trust boundary — mirroring
-``SparkIngestSettings``. The ops-side paths (summary sinks and the staged
-blueprint) all derive from the one ``DATABRICKS_VOLUME_PATH`` base through the
-shared :func:`derive_ops_config`, so this job reads the same compact base the
-host-side submit path stages the blueprint under.
+Pydantic is used here — the env-var trust boundary. The ops-side paths (summary
+sinks and the staged blueprint) all derive from the one ``DATABRICKS_VOLUME_PATH``
+base through the shared :func:`derive_ops_config`, so this job reads the same
+compact base the host-side submit path stages the blueprint under.
 """
 
 from __future__ import annotations

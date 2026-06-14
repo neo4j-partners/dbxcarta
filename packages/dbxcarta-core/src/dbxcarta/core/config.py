@@ -1,5 +1,5 @@
-"""Single owner of the rule mapping the ops volume root to where runs and
-questions live.
+"""Single owner of the rule mapping the ops volume root to where run outputs
+and the staged blueprint live.
 
 The ops-side config values are not independent: they are one base path with a
 tail. ``DATABRICKS_VOLUME_PATH`` (``/Volumes/<ops_catalog>/<ops_schema>/<vol>``)
@@ -24,7 +24,7 @@ from dbxcarta.core.identifiers import parse_volume_path
 # ``candidates_<n>.json``, schemapile ``candidates_random_1000.json``), so it is
 # an argument with a generic default rather than a hardcoded constant. The
 # materialize submit path stages the committed blueprint to this Volume path and
-# the materialize Spark job reads it from there, the way client questions are.
+# the materialize Spark job reads it from there.
 DEFAULT_BLUEPRINT_FILENAME = "blueprint.json"
 
 # Fixed tails appended to the one base. Kept as constants so the two test

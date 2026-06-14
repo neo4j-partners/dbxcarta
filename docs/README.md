@@ -51,9 +51,7 @@ Conceptual background and the rationale for the project.
 
 In-progress design work. These describe intended or partially landed changes, not the settled current system. The `proposals/` directory is gitignored local working notes, so these files may not be present in a fresh checkout.
 
-- [proposals/separate-v2.md](proposals/separate-v2.md) and its [phased plan](proposals/separate-v2-plan.md): separating the four example stages of blueprint, materialize, ingest, and client, with the plan tracking per-phase status.
 - [proposals/fix-embeddings.md](proposals/fix-embeddings.md): diagnosis and proposed fix for weak `graph_rag` retrieval on comment-less, multi-schema data.
-- [proposals/fix-layering.md](proposals/fix-layering.md): cleanup of duplicated env and config helpers across examples.
 
 ## Semantics
 
