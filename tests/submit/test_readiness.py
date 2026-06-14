@@ -1,13 +1,13 @@
-"""Tests for the shared readiness check.
+"""Tests for the submit readiness check.
 
 The readiness rule and the relabeled report are exercised here once rather than
-per example, because every example drives them through the same core function.
+per example, because every example drives them through the same function.
 """
 
 from __future__ import annotations
 
 import pytest
-from dbxcarta.core.readiness import (
+from dbxcarta.submit.readiness import (
     ReadinessReport,
     check_readiness,
 )

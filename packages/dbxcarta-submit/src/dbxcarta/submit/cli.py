@@ -656,7 +656,7 @@ def _handle_teardown(argv: list[str]) -> int:
 def _handle_ready(argv: list[str]) -> int:
     """Report whether each ingested catalog holds a data schema.
 
-    The readiness logic lives in ``dbxcarta.core.readiness``, so this is the
+    The readiness logic lives in ``dbxcarta.submit.readiness``, so this is the
     thin handler over it. Runs locally against the SQL warehouse; no Neo4j or
     cluster.
     """
@@ -676,7 +676,7 @@ def _handle_ready(argv: list[str]) -> int:
     parser.add_argument("--strict-optional", action="store_true")
     args = parser.parse_args(cleaned_argv)
 
-    from dbxcarta.core.readiness import check_readiness
+    from dbxcarta.submit.readiness import check_readiness
     from dbxcarta.core.workspace import build_workspace_client
 
     warehouse_id = args.warehouse_id or os.environ.get("DATABRICKS_WAREHOUSE_ID", "")
