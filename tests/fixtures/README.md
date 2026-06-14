@@ -148,10 +148,11 @@ uv run dbxcarta upload --data tests/fixtures
 uv run dbxcarta submit-entrypoint ingest
 ```
 
-Then run the graph_rag demo client:
+Then run the graph_rag demo client locally (it reads the bundled questions.json
+directly, no cluster):
 
 ```bash
-uv run dbxcarta submit-entrypoint client
+uv run dbxcarta-client
 ```
 
 ### Demo questions

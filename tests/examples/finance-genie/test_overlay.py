@@ -45,7 +45,9 @@ def test_overlay_pins_known_keys() -> None:
     env = _overlay_env()
     assert env["DBXCARTA_INJECT_CRITERIA"] == "false"
     assert env["DBXCARTA_CLIENT_ARMS"] == "no_context,schema_dump,graph_rag"
-    assert env["DBXCARTA_CLIENT_QUESTIONS"].endswith("/dbxcarta/questions.json")
+    # The client runs locally, so the questions path is the committed local
+    # file at the example root, not a /Volumes path.
+    assert env["DBXCARTA_CLIENT_QUESTIONS"] == "examples/finance-genie/questions.json"
     # The layer is folded into the catalog lists; the separate map is gone.
     assert "DBXCARTA_LAYER_MAP" not in env
     # The old spark-ingest keys are retired now the ingest runs the neocarta wheel.

@@ -19,8 +19,6 @@ _BASE_SETTINGS: dict[str, str] = {
     "dbxcarta_catalog": "finance",
     "databricks_warehouse_id": "wh-123",
     "databricks_secret_scope": "dbxcarta-neo4j-finance",
-    "dbxcarta_summary_volume": "/Volumes/finance/default/vol/summaries",
-    "dbxcarta_summary_table": "finance.default.summary",
     "databricks_volume_path": "/Volumes/finance/default/vol",
     "dbxcarta_chat_endpoint": "chat-endpoint",
 }

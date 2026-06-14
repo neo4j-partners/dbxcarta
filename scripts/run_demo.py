@@ -190,15 +190,16 @@ Next steps
    DBXCARTA_CLIENT_QUESTIONS={questions}
    DBXCARTA_CLIENT_ARMS=graph_rag
 
-2. Upload the package and demo questions, then build the Neo4j semantic layer:
+2. Upload the package and demo data, then build the Neo4j semantic layer:
 
    uv run dbxcarta publish-wheels
    uv run dbxcarta upload --data tests/fixtures
    uv run dbxcarta submit-entrypoint ingest
 
-3. After ingest succeeds, run the graph_rag demo client:
+3. After ingest succeeds, run the graph_rag demo client locally (it reads the
+   bundled questions.json directly, no cluster):
 
-   uv run dbxcarta submit-entrypoint client
+   uv run dbxcarta-client
 
    The question set exercises cross-schema joins (sales->inventory, sales->hr),
    self-referential FKs (hr.employees.manager_id), the composite FK path

@@ -29,12 +29,13 @@ requires = ["uv_build>=0.11.0,<0.12.0"]
 build-backend = "uv_build"
 
 # module-name is the whole ``dbxcarta`` namespace (not just ``dbxcarta.client``)
-# with namespace packaging, so the cluster wheel can physically carry
-# ``dbxcarta/core`` alongside ``dbxcarta/client``. The runner bootstrap installs
-# this single application wheel with ``--no-deps`` and has no slot for a
-# separate core wheel, so ``dbxcarta publish-wheels`` copies the core
-# source in before building (see ``_core_bundled_into``). A normal build, with
-# no core copied in, produces exactly today's ``dbxcarta/client`` contents.
+# with namespace packaging, so a published ``dbxcarta-client`` and a published
+# ``dbxcarta-core`` can coexist as namespace packages from separate
+# distributions (``pip install dbxcarta-client`` resolves core as a normal
+# dependency). The client is no longer a cluster entry point and is no longer
+# core-bundled by ``dbxcarta publish-wheels`` (that step now builds only
+# ``dbxcarta-materialize``); a normal build produces exactly today's
+# ``dbxcarta/client`` contents.
 [tool.uv.build-backend]
 module-name = "dbxcarta"
 namespace = true

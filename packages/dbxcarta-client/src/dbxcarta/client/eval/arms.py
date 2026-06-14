@@ -292,7 +292,6 @@ def _run_graph_rag_arm(
             qid = q.question_id
             context = contexts[qid]
             bundle = context.bundle
-            context_text = context.context_text
             questions_with_prompts.append({"question_id": qid, "prompt": context.prompt})
 
             final_col_ids = [c.column_id for c in bundle.columns if c.column_id]
@@ -303,22 +302,14 @@ def _run_graph_rag_arm(
                 bundle.tbl_seed_scores,
             )
             trace = RetrievalTrace(
-                run_id=summary.run_id,
-                question_id=qid,
-                question=q.question,
                 target_schema=q.schema_,
                 col_seed_ids=bundle.col_seed_ids,
-                col_seed_scores=bundle.col_seed_scores,
                 tbl_seed_ids=bundle.tbl_seed_ids,
-                tbl_seed_scores=bundle.tbl_seed_scores,
                 schema_scores=sch_scores,
                 chosen_schemas=(
                     bundle.selected_schemas or chosen_schemas_from_columns(bundle.columns)
                 ),
-                expansion_tbl_ids=bundle.expansion_tbl_ids,
                 final_col_ids=final_col_ids,
-                rendered_context=context_text,
-                reference_sql=q.reference_sql,
             )
             compute_retrieval_metrics(trace)
             traces[qid] = trace
@@ -341,8 +332,6 @@ def _run_graph_rag_arm(
         trace = traces[qid]
 
         if not parse_ok:
-            trace.generated_sql = raw_sql
-            trace.execution_error = ai_error or "response did not contain valid SQL"
             summary.add_result(
                 question_id=qid,
                 question=q.question,
@@ -362,12 +351,6 @@ def _run_graph_rag_arm(
         if cleaned_sql is None:
             raise RuntimeError("parser reported success but produced no SQL")
         graded = _execute_and_grade(ws, settings, cleaned_sql, q.reference_sql, qid, ref_cache)
-
-        trace.generated_sql = cleaned_sql
-        trace.parsed = True
-        trace.executed = graded.executed
-        trace.correct = graded.correct
-        trace.execution_error = graded.error
 
         summary.add_result(
             question_id=qid,

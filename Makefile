@@ -33,9 +33,12 @@ define e2e_ingest
 	DBXCARTA_ENV_FILE=$(1) uv run dbxcarta submit-entrypoint ingest
 endef
 
-# Phase 2: submit the client evaluation. $(1) is the overlay path.
+# Phase 2: run the client evaluation locally. $(1) is the overlay path. The
+# client is no longer a cluster entry point: dbxcarta-client loads the overlay
+# (DBXCARTA_ENV_FILE) and the base .env itself, reads the local questions file,
+# calls the serving endpoints directly, and prints a truncated report.
 define e2e_client
-	DBXCARTA_ENV_FILE=$(1) uv run dbxcarta submit-entrypoint client
+	DBXCARTA_ENV_FILE=$(1) uv run dbxcarta-client
 endef
 
 # Teardown: drop this example's DBXCARTA_TEARDOWN_TARGET. $(1) is the overlay

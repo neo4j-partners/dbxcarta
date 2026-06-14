@@ -4,11 +4,14 @@ Reads each committed ``dbxcarta-overlay.env`` and asserts the core resolver
 reproduces the values that overlay spells out today, character for character.
 This is the safety net the Phase 6 flip is checked against: when the derivable
 vars are deleted from the overlays, ``derive_ops_config`` must still yield the
-exact strings that were removed.
+exact strings that were removed. ``DBXCARTA_CLIENT_QUESTIONS`` is no longer one
+of these: the client runs locally, so the overlay carries a repo-relative path
+rather than a value derived from the ops Volume. The derivation itself is still
+covered directly in ``test_ops_config.py``.
 
-The drift this guards is silent: a wrong trailing slash, a missing ``/dbxcarta/``
-segment, or the wrong filename would read or write the wrong location rather
-than fail, so the assertions are exact-equality, not shape checks.
+The drift this guards is silent: a wrong trailing slash or a missing
+``/dbxcarta/`` segment would read or write the wrong location rather than fail,
+so the assertions are exact-equality, not shape checks.
 """
 
 from __future__ import annotations
@@ -45,13 +48,11 @@ def _overlay(example: str) -> dict[str, str]:
 def test_resolver_reproduces_committed_overlay(example: str) -> None:
     env = _overlay(example)
     volume_path = env["DATABRICKS_VOLUME_PATH"]
-    questions_filename = env["DBXCARTA_CLIENT_QUESTIONS"].rsplit("/", 1)[-1]
 
-    cfg = derive_ops_config(volume_path, questions_filename=questions_filename)
+    cfg = derive_ops_config(volume_path)
 
     assert cfg.summary_volume == env["DBXCARTA_SUMMARY_VOLUME"]
     assert cfg.summary_table == _GOLDEN_SUMMARY_TABLE[example]
-    assert cfg.client_questions == env["DBXCARTA_CLIENT_QUESTIONS"]
 
 
 @pytest.mark.parametrize("example", _OVERLAYS)

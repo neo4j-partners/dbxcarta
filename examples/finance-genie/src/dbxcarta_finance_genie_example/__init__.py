@@ -2,6 +2,6 @@
 
 Per-example dbxcarta config lives in the committed dbxcarta-overlay.env beside
 the example, and the bundled questions.json is its only per-example data. The
-shared CLI (`dbxcarta ready` / `dbxcarta upload-questions`) operates on those
+shared CLI (`dbxcarta ready`) and the local `dbxcarta-client` read those
 directly, so this package no longer publishes a preset object.
 """

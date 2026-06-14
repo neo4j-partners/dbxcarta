@@ -60,22 +60,22 @@ def test_submit_ingest_builds_bootstrap_with_probe_and_closure(
     assert kwargs["run_name_suffix"] == "ingest"
 
 
-def test_submit_client_uses_shared_runner_without_probe(
+def test_submit_materialize_uses_shared_runner_without_probe(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     stub = _RunnerStub(ClassicCluster(cluster_id="c-1"))
     monkeypatch.setattr(cli, "runner", stub)
     monkeypatch.setattr(
-        cli, "_ingest_runner", lambda: pytest.fail("client must not use ingest runner")
+        cli, "_ingest_runner", lambda: pytest.fail("materialize must not use ingest runner")
     )
 
-    cli._submit_bootstrap_entrypoint("client", compute_mode=None, no_wait=True)
+    cli._submit_bootstrap_entrypoint("materialize", compute_mode=None, no_wait=True)
 
     bootstrap, _ = stub.submitted[0]
-    assert bootstrap.wheel_package == "dbxcarta-client"
-    assert bootstrap.console_script == "dbxcarta-client"
+    assert bootstrap.wheel_package == "dbxcarta-materialize"
+    assert bootstrap.console_script == "dbxcarta-materialize"
     assert bootstrap.jvm_probe_class is None
-    assert bootstrap.pinned_closure == list(cli._CLIENT_PINNED_CLOSURE)
+    assert bootstrap.pinned_closure == list(cli._MATERIALIZE_PINNED_CLOSURE)
 
 
 def test_is_serverless_compute_discriminates_real_compute_types() -> None:

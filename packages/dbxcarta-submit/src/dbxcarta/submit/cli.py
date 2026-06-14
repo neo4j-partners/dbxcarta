@@ -24,17 +24,16 @@ if TYPE_CHECKING:
 # Ingest now runs neocarta's Databricks connector: the wheel is the neocarta
 # distribution (staged from a local build, see _handle_publish_wheels) and the
 # bootstrap resolves its ingest entry by the console-script name neocarta
-# registers, `neocarta-databricks-ingest` -> run_ingest. client and materialize
-# are still dbxcarta's own wheels.
+# registers, `neocarta-databricks-ingest` -> run_ingest. materialize is still
+# dbxcarta's own wheel. The client is no longer here: it runs locally and is no
+# longer a cluster entry point.
 _ENTRYPOINT_WHEEL_PACKAGE: dict[str, str] = {
     "ingest": "neocarta",
-    "client": "dbxcarta-client",
     "materialize": "dbxcarta-materialize",
 }
 
 _ENTRYPOINT_CONSOLE_SCRIPT: dict[str, str] = {
     "ingest": "neocarta-databricks-ingest",
-    "client": "dbxcarta-client",
     "materialize": "dbxcarta-materialize",
 }
 
@@ -47,7 +46,7 @@ _ENTRYPOINT_CONSOLE_SCRIPT: dict[str, str] = {
 # the ingest path imports and uses (see the ingest closure note below), and
 # reinstalling them with --no-deps risks version skew and a numpy C-ABI
 # mismatch that breaks compiled extensions. ``pydantic``/``pydantic-core``
-# are deliberately NOT excluded: the ingest and client code require pydantic
+# are deliberately NOT excluded: the ingest and materialize code require pydantic
 # v2 and the DBR-bundled version is not guaranteed to match.
 _DBR_PROVIDED_PACKAGES: frozenset[str] = frozenset(
     {"pyspark", "py4j", "databricks-sdk", "pandas", "numpy"}
@@ -90,20 +89,8 @@ _INGEST_PINNED_CLOSURE: tuple[str, ...] = (
     "typing-inspection==0.4.2",
 )
 
-_CLIENT_PINNED_CLOSURE: tuple[str, ...] = (
-    "neo4j==6.1.0",
-    "pytz==2026.1.post1",
-    "pydantic==2.13.3",
-    "pydantic-core==2.46.3",
-    "pydantic-settings==2.14.0",
-    "python-dotenv==1.2.2",
-    "annotated-types==0.7.0",
-    "typing-extensions==4.15.0",
-    "typing-inspection==0.4.2",
-)
-
 # Materialize needs neither Neo4j nor the job runner: it only builds DDL strings
-# (core) and runs them with spark.sql. Its closure is the client one with neo4j
+# (core) and runs them with spark.sql. Its closure is the ingest one with neo4j
 # (and neo4j's pytz dependency) dropped — just pydantic v2 and its transitives,
 # the config-boundary surface MaterializeSettings reads through.
 _MATERIALIZE_PINNED_CLOSURE: tuple[str, ...] = (
@@ -118,7 +105,6 @@ _MATERIALIZE_PINNED_CLOSURE: tuple[str, ...] = (
 
 _ENTRYPOINT_PINNED_CLOSURE: dict[str, tuple[str, ...]] = {
     "ingest": _INGEST_PINNED_CLOSURE,
-    "client": _CLIENT_PINNED_CLOSURE,
     "materialize": _MATERIALIZE_PINNED_CLOSURE,
 }
 
@@ -138,12 +124,6 @@ _ENTRYPOINT_SMOKE_IMPORTS: dict[str, tuple[str, ...]] = {
         "pydantic_settings",
         "dotenv",
     ),
-    "client": (
-        "neo4j",
-        "pydantic",
-        "pydantic_core",
-        "pydantic_settings",
-    ),
     "materialize": (
         "pydantic",
         "pydantic_core",
@@ -158,7 +138,6 @@ _INGEST_JVM_PROBE_CLASS = "org.neo4j.spark.DataSource"
 
 _ENTRYPOINT_JVM_PROBE_CLASS: dict[str, str | None] = {
     "ingest": _INGEST_JVM_PROBE_CLASS,
-    "client": None,
     "materialize": None,
 }
 
@@ -183,18 +162,19 @@ class _RunnerKwargs(TypedDict):
 _RUNNER_KWARGS: _RunnerKwargs = {
     "run_name_prefix": "dbxcarta",
     # The shared runner serves generic pass-through commands and uploads; the
-    # ingest/client/materialize bootstraps override wheel_package per entrypoint
+    # ingest/materialize bootstraps override wheel_package per entrypoint
     # (see _ENTRYPOINT_WHEEL_PACKAGE). This default only names the wheel the
-    # runner's own build/publish path would touch, so it points at a surviving
-    # dbxcarta distribution rather than the removed dbxcarta-spark package.
-    "wheel_package": "dbxcarta-client",
+    # runner's own build/publish path would touch, so it points at the
+    # materialize distribution the tool still builds rather than the removed
+    # dbxcarta-spark package.
+    "wheel_package": "dbxcarta-materialize",
     "scripts_dir": "scripts",
     "cli_command": "uv run dbxcarta",
     "secret_keys": ["NEO4J_URI", "NEO4J_USERNAME", "NEO4J_PASSWORD"],
 }
 
-# Shared runner for generic pass-through commands, the client path, and
-# uploads. No preflights: client and generic commands do not need the
+# Shared runner for generic pass-through commands, the materialize submission,
+# and uploads. No preflights: materialize and generic commands do not need the
 # Neo4j connector.
 runner = Runner(**_RUNNER_KWARGS)
 
@@ -203,7 +183,7 @@ def _ingest_runner() -> Runner:
     """Runner scoped to the ingest submission with the connector preflight.
 
     The maven preflight is wired here rather than on the shared runner so
-    submit/validate of the client and generic pass-through paths, which
+    submit/validate of the materialize and generic pass-through paths, which
     do not use the Neo4j connector, are not gated on it. The check is
     assert-only: it never installs or uninstalls a library.
     """
@@ -226,7 +206,7 @@ def main() -> None:
     through to ``databricks-job-runner`` (submit, validate, logs, clean,
     upload, download, catalog, schema, volume).
 
-    - `dbxcarta submit-entrypoint {ingest|client}` submits the wheel
+    - `dbxcarta submit-entrypoint ingest` submits the ingest wheel
       entrypoint.
     - `dbxcarta materialize` stages the committed blueprint to the ops
       Volume and submits the materialize wheel entrypoint as a serverless job.
@@ -278,7 +258,7 @@ def _print_help() -> None:
         "usage: dbxcarta <command> [options]\n"
         "\n"
         "dbxcarta operator commands:\n"
-        "  submit-entrypoint {ingest|client}   Submit a wheel entrypoint as a Databricks job.\n"
+        "  submit-entrypoint ingest            Submit the ingest wheel entrypoint as a job.\n"
         "  materialize                         Stage the committed blueprint to the ops Volume\n"
         "                                      and submit the materialize entrypoint (serverless).\n"
         "  publish-wheels                      Publish the ingest, client, and materialize wheels\n"
@@ -298,15 +278,14 @@ def _print_help() -> None:
         runner.main(["--help"])
 
 
-# The dbxcarta entrypoint wheels the runner installs with --no-deps. Each must
+# The dbxcarta entrypoint wheel the runner installs with --no-deps. It must
 # physically carry ``dbxcarta/core`` because the bootstrap installs a single
 # application wheel by name and has no slot for a separate core wheel. The
 # ingest wheel is no longer here: it is the neocarta connector wheel, which
-# carries its own modules and never needs dbxcarta/core bundled in.
-_CORE_BUNDLE_PACKAGES: tuple[str, ...] = (
-    "dbxcarta-client",
-    "dbxcarta-materialize",
-)
+# carries its own modules and never needs dbxcarta/core bundled in. The client
+# wheel is no longer here either: the client runs locally and is no longer a
+# cluster entry point, so only materialize is built and core-bundled.
+_CORE_BUNDLE_PACKAGES: tuple[str, ...] = ("dbxcarta-materialize",)
 
 
 @contextlib.contextmanager
@@ -315,11 +294,11 @@ def _core_bundled_into(project_dir: Path) -> Iterator[None]:
 
     The runner bootstrap installs one application wheel by name with
     ``--no-deps`` and cannot resolve or pull a separate ``dbxcarta-core``
-    wheel, so the core modules must ride inside the spark and client wheels.
+    wheel, so the core modules must ride inside the materialize wheel.
     The source stays single in ``dbxcarta-core``: this copies ``dbxcarta/core``
     into each entrypoint package's ``src/dbxcarta`` only for the duration of the
-    build, then removes it so the working tree is left unchanged. Both
-    entrypoint build backends set ``module-name = "dbxcarta"`` with
+    build, then removes it so the working tree is left unchanged. The
+    materialize build backend sets ``module-name = "dbxcarta"`` with
     ``namespace = true``, so the copied ``core`` package is packaged alongside
     the entrypoint's own modules.
     """
@@ -432,7 +411,7 @@ def _handle_publish_wheels(argv: list[str]) -> int:
         prog="dbxcarta publish-wheels",
         description=(
             "Stage the prebuilt neocarta ingest wheel and build+publish the "
-            "dbxcarta client and materialize wheels to the fixed Volume path, "
+            "dbxcarta materialize wheel to the fixed Volume path, "
             "then ship the runner bootstrap script."
         ),
     )
@@ -462,8 +441,8 @@ def _handle_publish_wheels(argv: list[str]) -> int:
         # so there is no core bundling and no _assert_wheel_bundles_core here.
         _publish_prebuilt_wheel(runner.ws, runner.wheel_volume_dir, source_dir, neocarta_package)
 
-        # Build+publish the dbxcarta entrypoint wheels (client, materialize),
-        # bundling dbxcarta/core into each so the --no-deps bootstrap install
+        # Build+publish the dbxcarta entrypoint wheel (materialize),
+        # bundling dbxcarta/core into it so the --no-deps bootstrap install
         # carries it. `upload_all` then ships the runner bootstrap script the
         # SparkPythonTask runs.
         with _core_bundled_into(runner.project_dir):
@@ -711,12 +690,19 @@ def _handle_ready(argv: list[str]) -> int:
 
 
 def _handle_submit_entrypoint(argv: list[str]) -> int:
+    """Submit the ingest wheel entrypoint as a Databricks job.
+
+    Ingest is the only cluster entry point left: the client runs locally and
+    materialize has its own ``dbxcarta materialize`` command. The ``ingest``
+    token is still required so the documented ``submit-entrypoint ingest``
+    invocation keeps working, but it is the only valid choice now.
+    """
     import argparse
 
     from databricks_job_runner.errors import RunnerError
 
     parser = argparse.ArgumentParser(prog="dbxcarta submit-entrypoint")
-    parser.add_argument("entrypoint", choices=("ingest", "client"))
+    parser.add_argument("entrypoint", choices=("ingest",))
     parser.add_argument("--compute", choices=("cluster", "serverless"), default=None)
     parser.add_argument("--no-wait", action="store_true")
     args = parser.parse_args(argv)
@@ -890,7 +876,7 @@ def _submit_bootstrap_entrypoint(
         raise RunnerError(f"unknown wheel entrypoint {name!r}")
 
     # Ingest is gated on the Neo4j connector via the dedicated runner's
-    # maven preflight; the client and generic paths do not need it.
+    # maven preflight; the materialize and generic paths do not need it.
     submit_runner = _ingest_runner() if name == "ingest" else runner
 
     # Runner._compute is private but is the only accessor for the resolved

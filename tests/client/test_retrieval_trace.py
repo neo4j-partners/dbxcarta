@@ -142,18 +142,11 @@ def test_chosen_schemas_empty() -> None:
 
 def _trace(target_schema: str | None, **kwargs) -> RetrievalTrace:
     defaults = {
-        "run_id": "r1",
-        "question_id": "q1",
-        "question": "test?",
         "col_seed_ids": [],
-        "col_seed_scores": [],
         "tbl_seed_ids": [],
-        "tbl_seed_scores": [],
         "schema_scores": {},
         "chosen_schemas": [],
-        "expansion_tbl_ids": [],
         "final_col_ids": [],
-        "rendered_context": "",
     }
     defaults.update(kwargs)
     return RetrievalTrace(target_schema=target_schema, **defaults)

@@ -20,8 +20,8 @@ def _package_names(closure: tuple[str, ...]) -> set[str]:
 
 @pytest.mark.parametrize(
     "closure",
-    [cli._INGEST_PINNED_CLOSURE, cli._CLIENT_PINNED_CLOSURE],
-    ids=["ingest", "client"],
+    [cli._INGEST_PINNED_CLOSURE, cli._MATERIALIZE_PINNED_CLOSURE],
+    ids=["ingest", "materialize"],
 )
 def test_closure_excludes_dbr_provided_packages(closure: tuple[str, ...]) -> None:
     names = _package_names(closure)
@@ -35,6 +35,6 @@ def test_closure_excludes_dbr_provided_packages(closure: tuple[str, ...]) -> Non
 
 
 def test_closures_are_fully_pinned() -> None:
-    for closure in (cli._INGEST_PINNED_CLOSURE, cli._CLIENT_PINNED_CLOSURE):
+    for closure in (cli._INGEST_PINNED_CLOSURE, cli._MATERIALIZE_PINNED_CLOSURE):
         for spec in closure:
             assert "==" in spec, f"closure entry not exact-pinned: {spec!r}"

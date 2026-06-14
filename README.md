@@ -120,7 +120,7 @@ pull the `neocarta` wheel, and run them with the `dbxcarta` command (provided by
 *Foundation & operator tooling*
 
 - **Core** is the shared bottom layer every dbxcarta package builds on. It provides the common building blocks for naming and paths, reading config and secrets, running SQL, and loading settings. It depends only on the Databricks SDK, never Spark, Neo4j, or the job runner. The boundaries are enforced by `tests/boundary/test_import_boundaries.py`.
-- **Submit** is the `dbxcarta` command you run on your own machine to stage the neocarta ingest wheel, build and upload the client and materialize wheels, and submit Databricks jobs. It also provides the `ready` and `upload-questions` operator helpers. It is the only layer that touches the job runner, and it never runs on the cluster.
+- **Submit** is the `dbxcarta` command you run on your own machine to stage the neocarta ingest wheel, build and upload the client and materialize wheels, and submit Databricks jobs. It also provides the `ready` operator helper. It is the only layer that touches the job runner, and it never runs on the cluster.
 
 *Evaluation & demo*
 
@@ -263,16 +263,17 @@ Python object:
 1. **`dbxcarta-overlay.env`:** the committed, secret-free set of environment variables needed to run dbxcarta against that project or schema. Select it with `--env-file` (or `DBXCARTA_ENV_FILE`) and it layers over the base `.env`.
 2. **`questions.json`:** the bundled demo question set, kept beside the overlay at the example root.
 
-The operational CLI reads both directly. `dbxcarta ready` resolves the catalog
-list from the loaded overlay and confirms each ingested catalog holds a data
-schema. `dbxcarta upload-questions` pushes the example's `questions.json` to the
-UC Volume named by `DBXCARTA_CLIENT_QUESTIONS`, defaulting to the file beside the
-selected overlay. The readiness and upload logic live in `dbxcarta.core.readiness`.
+The operator CLI and the local client read both directly. `dbxcarta ready`
+resolves the catalog list from the loaded overlay and confirms each ingested
+catalog holds a data schema; its logic lives in `dbxcarta.core.readiness`. The
+client runs locally and opens `questions.json` straight off local disk at the
+path `DBXCARTA_CLIENT_QUESTIONS` names (by default the file beside the overlay).
+There is no upload step; nothing stages the questions to a Volume anymore.
 
 | Command | Purpose |
 |---------|---------|
 | `dbxcarta ready` | Checks that each ingested catalog holds a data schema |
-| `dbxcarta upload-questions` | Uploads the example's demo question set to the configured UC Volume |
+| `dbxcarta-client` | Runs the Text2SQL evaluation locally against the bundled `questions.json` |
 
 ### Available examples
 
@@ -286,7 +287,7 @@ for their standalone data-generation tooling.
 [**Follow the Finance Genie Quick Start →**](examples/finance-genie/README.md#quick-start)
 
 - **Layout:** two-catalog medallion. Finance Genie writes curated business tables to silver and graph-enriched features to gold, named `graph-enriched-finance-silver` and `-gold`.
-- **Graph:** dbxcarta folds both catalogs into one Neo4j semantic layer via `DBXCARTA_CATALOGS`, tagging each table's tier from the `:layer` suffix on each entry.
+- **Graph:** the ingest folds both catalogs into one Neo4j semantic layer via `NEOCARTA_DATABRICKS_CATALOGS`, tagging each table's tier from the `:layer` suffix on each entry.
 - **Ops catalog:** run summaries and the generation cache land in a separate `dbxcarta-catalog`.
 
 #### SchemaPile
@@ -294,7 +295,7 @@ for their standalone data-generation tooling.
 [**Follow the SchemaPile Quick Start →**](examples/schemapile/README.md#quick-start)
 
 - **Source:** a reproducible slice of [SchemaPile](https://github.com/amsterdata/schemapile) materialized as Delta tables in a dedicated catalog.
-- **Schema list:** `schemapile_lakehouse` is a dedicated, data-only catalog, so a blank `DBXCARTA_SCHEMAS` auto-discovers the materialized schemas.
+- **Schema list:** `schemapile_lakehouse` is a dedicated, data-only catalog, so a blank `NEOCARTA_DATABRICKS_SCHEMAS` auto-discovers the materialized schemas.
 - **Questions:** a SQL-validated question set is generated.
 - **Overlay:** `examples/schemapile/dbxcarta-overlay.env`.
 
@@ -323,9 +324,10 @@ picks it up.
    uv run dbxcarta ready
    ```
 
-3. Upload the example's demo question set to the configured UC Volume:
+3. After the ingest job has built the graph, run the client evaluation locally
+   (it reads the bundled `questions.json` directly and needs no cluster):
    ```bash
-   uv run dbxcarta upload-questions
+   uv run dbxcarta-client
    ```
 
 **Generated examples** (schemapile, dense-schema) follow the identical steps;
@@ -359,7 +361,7 @@ Open `.env` and replace the placeholders. Keep the demo defaults already organiz
 - Table and column embeddings enabled
 - Values enabled
 - `DBXCARTA_CLIENT_ARMS=graph_rag`
-- `DBXCARTA_CLIENT_QUESTIONS` pointing at the UC Volume copy of `demo_questions.json`
+- `DBXCARTA_CLIENT_QUESTIONS` pointing at a local `demo_questions.json`
 
 Use an existing UC catalog, schema, and volume, or create them if your principal has permission:
 
@@ -409,23 +411,20 @@ The ingest run should finish with `status=success`. It:
 
 ### 4. Run the demo client
 
-The demo client:
+The demo client runs locally (no cluster). For each question it:
 
-- Embeds each question
+- Embeds the question
 - Retrieves context from the Neo4j semantic layer
 - Asks the configured chat endpoint for SQL
 - Executes the SQL on the warehouse
-- Writes a client run summary
+- Prints a truncated per-arm summary
 
 ```bash
-uv run dbxcarta submit-entrypoint client
+uv run dbxcarta-client
 ```
 
-Check the job output for per-arm `executed` and `non_empty` rates:
-
-```bash
-uv run dbxcarta logs <run_id>
-```
+The run prints per-arm `executed` and `non_empty` rates straight to your
+terminal.
 
 ### 5. Verify and clean up
 
@@ -559,7 +558,7 @@ Stages the prebuilt neocarta ingest wheel from its local build folder, builds th
 
 **`submit <script>`**
 
-The script name is relative to `scripts/`. Scripts named `run_dbxcarta*` auto-attach the latest uploaded wheel. All non-Databricks `.env` variables are forwarded to the job.
+The script name is relative to `scripts/`. All non-Databricks `.env` variables are forwarded to the job. Wheel entrypoints (the neocarta ingest connector and the client) are not submitted this way: use `submit-entrypoint {ingest|client}`, which attaches the staged wheel and runs its entrypoint.
 
 Supply-chain note: `publish-wheels` currently combines version bumping, building, and UC Volume upload. For reviewed releases, prefer a CI-built wheel and provenance manifest as the artifact of record. A future hardening step should make Databricks submission select a wheel by explicit version or hash instead of by latest local wheel mtime.
 

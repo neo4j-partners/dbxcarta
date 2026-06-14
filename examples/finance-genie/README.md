@@ -30,10 +30,10 @@ uv run dbxcarta bootstrap
 
 # Provision the Neo4j secret scope
 ./setup_secrets.sh --profile aws-partner-rk
-
-# Upload the demo question set to the ops volume
-uv run dbxcarta upload-questions
 ```
+
+The demo question set ships as `questions.json` beside the overlay and the
+client reads it locally, so there is no question-upload step.
 
 With setup in place, run the two make targets from the repo root. The `-ingest`
 target rebuilds the wheels from current source and builds the semantic layer, so
@@ -42,7 +42,7 @@ run it first and let it finish, then run `-client`:
 ```bash
 # Rebuild the wheels from source, submit ingest, build the semantic layer
 make e2e-finance-genie-ingest
-# Submit the client evaluation once ingest finishes
+# Run the client evaluation locally once ingest finishes
 make e2e-finance-genie-client
 ```
 
@@ -140,8 +140,9 @@ per-example Python object to publish. The two operational commands are:
 - `dbxcarta ready` prints a `ReadinessReport` describing whether each ingested
   catalog holds a data schema in Unity Catalog. The catalog list comes from the
   loaded overlay.
-- `dbxcarta upload-questions` uploads `questions.json`, the file beside the
-  selected overlay, to the path named by `DBXCARTA_CLIENT_QUESTIONS`.
+- `dbxcarta-client` runs the Text2SQL evaluation locally, reading `questions.json`
+  straight off local disk. It opens the file beside the selected overlay, at the
+  path named by `DBXCARTA_CLIENT_QUESTIONS`. There is no upload step.
 
 ## Template guidance for a new application package
 
@@ -152,10 +153,9 @@ To build your own application package, copy this layout and change:
    `dbxcarta-overlay.env`, the single source of truth for per-example config.
 3. The `questions.json` fixture, if you want a demo question set.
 
-No Python wiring is needed for the CLI: `dbxcarta ready` and `dbxcarta
-upload-questions` read the selected overlay and the adjacent `questions.json`
-directly, so a new application package can be just an overlay and a questions
-file. The `src/` package is only for standalone tooling like the local demo.
+No Python wiring is needed for the CLI: `dbxcarta ready` and `dbxcarta-client`
+read the selected overlay and the adjacent `questions.json` directly, so a new
+application package can be just an overlay and a questions file. The `src/` package is only for standalone tooling like the local demo.
 
 ## Responsibility Boundary
 
@@ -194,7 +194,7 @@ ingest first, then the client evaluation once ingest finishes:
 ```bash
 # Rebuild the wheels from source, submit ingest, build the semantic layer
 make e2e-finance-genie-ingest
-# Submit the client evaluation once ingest finishes
+# Run the client evaluation locally once ingest finishes
 make e2e-finance-genie-client
 ```
 
@@ -323,16 +323,12 @@ dbxcarta jobs read Neo4j credentials from the Databricks secret scope:
 ./setup_secrets.sh --profile aws-partner-rk
 ```
 
-### 7. Upload the question set
+### 7. Questions: read locally, no upload
 
-```bash
-# Upload questions.json to the path named by DBXCARTA_CLIENT_QUESTIONS
-uv run dbxcarta upload-questions
-```
-
-This uploads the package's `questions.json` to the path named by
-`DBXCARTA_CLIENT_QUESTIONS` (typically
-`/Volumes/.../graph-enriched-volume/dbxcarta/questions.json`).
+The client runs locally and reads the bundled `questions.json` straight off local
+disk at the path named by `DBXCARTA_CLIENT_QUESTIONS` (by default the file beside
+the overlay), so there is no upload step. Just confirm the path resolves to your
+questions file.
 
 ### 8. Build and upload dbxcarta artifacts
 
@@ -365,9 +361,13 @@ the run built the semantic layer.
 
 ### 10. Run the client evaluation
 
+The client runs locally, with no cluster. It reads the bundled `questions.json`
+directly, calls the serving endpoints and Neo4j, and prints a truncated per-arm
+summary.
+
 ```bash
-# Submit the client evaluation job
-uv run dbxcarta submit-entrypoint client
+# Run the client evaluation locally
+uv run dbxcarta-client
 ```
 
 ### 11. Run the local CLI demo
@@ -411,5 +411,5 @@ with declared foreign-key constraints. The overlay disables criteria
 injection because Finance Genie inferred relationships do not carry literal
 join-predicate strings.
 
-For a cheaper first validation run, override the embedding flags in `.env` and
-start with `DBXCARTA_INCLUDE_EMBEDDINGS_TABLES=true` only.
+For a cheaper first validation run, override the embedding flags in the overlay
+and start with `NEOCARTA_DATABRICKS_INCLUDE_EMBEDDINGS_TABLES=true` only.

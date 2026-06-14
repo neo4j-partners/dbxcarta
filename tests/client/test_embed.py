@@ -93,7 +93,6 @@ def _settings() -> SimpleNamespace:
         dbxcarta_chat_endpoint="chat",
         databricks_warehouse_id="warehouse",
         dbxcarta_client_timeout_sec=30,
-        dbxcarta_summary_table="cat.s.run_summary",
         dbxcarta_client_refresh=False,
     )
 

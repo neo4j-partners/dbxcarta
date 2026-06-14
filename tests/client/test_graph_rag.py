@@ -28,8 +28,6 @@ def _settings() -> ClientSettings:
         databricks_secret_scope="dbxcarta-neo4j-test",
         dbxcarta_catalog="main",
         dbxcarta_schemas="s1",
-        dbxcarta_summary_volume="/Volumes/cat/schema/vol/runs",
-        dbxcarta_summary_table="cat.schema.table",
         databricks_warehouse_id="abc",
         databricks_volume_path="/Volumes/cat/schema/vol",
     )

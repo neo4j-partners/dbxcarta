@@ -34,10 +34,12 @@ cd <consumer>/dbxcarta
 
 Then edit, in order of importance:
 
-1. **`dbxcarta-overlay.env`** (the single source of dbxcarta config): set
-   `DBXCARTA_CATALOG`, `DBXCARTA_SCHEMAS`, `DATABRICKS_VOLUME_PATH`, the two
-   `DBXCARTA_SUMMARY_*` paths, `DBXCARTA_CLIENT_QUESTIONS`, and
-   `DATABRICKS_SECRET_SCOPE` to your catalog and scope. Keep it secret-free.
+1. **`dbxcarta-overlay.env`** (the single source of dbxcarta config): set the
+   `DBXCARTA_*` operator and client keys (catalog, `DATABRICKS_VOLUME_PATH`,
+   `DBXCARTA_SUMMARY_VOLUME`, `DBXCARTA_CLIENT_QUESTIONS`, `DATABRICKS_SECRET_SCOPE`)
+   and the `NEOCARTA_DATABRICKS_*` ingest contract (catalog, schema list,
+   embedding flags) to your catalog and scope. The full key list is in Part 3
+   below. Keep it secret-free.
 2. **`.env`** (copy from `.env.sample`): your `DATABRICKS_PROFILE`,
    `DATABRICKS_WAREHOUSE_ID`, `DATABRICKS_CLUSTER_ID`, and the `NEO4J_*` values
    for local tooling. This file also carries its own copy of the catalog values
@@ -66,12 +68,12 @@ A consumer subproject has four moving parts:
 - **An overlay env file**: `dbxcarta-overlay.env`, a committed, secret-free file
   that names the catalog, schema, volume, and feature flags for this data source.
   It is the single source of truth for the integration's dbxcarta config.
-- **A consumer-owned Databricks Asset Bundle**: a `databricks.yml` with two
-  `python_wheel_task` jobs that run the neocarta connector's
-  `neocarta-databricks-ingest` entry point and the `dbxcarta-client` entry point
-  on a cluster. This replaces `dbxcarta-submit`, which is operator-only,
-  unpublished, and rebuilds wheels from the dbxcarta source tree a consumer does
-  not have.
+- **A consumer-owned Databricks Asset Bundle**: a `databricks.yml` with one
+  `python_wheel_task` job that runs the neocarta connector's
+  `neocarta-databricks-ingest` entry point on a cluster. (The client is no longer
+  a cluster job: it runs locally as `dbxcarta-client`.) This replaces
+  `dbxcarta-submit`, which is operator-only, unpublished, and rebuilds wheels from
+  the dbxcarta source tree a consumer does not have.
 - **The data itself in Unity Catalog**: tables an upstream process already owns
   and populates. A consumer points at existing data. There is no blueprint and
   no materialize step.
@@ -79,14 +81,15 @@ A consumer subproject has four moving parts:
 The dbxcarta pipeline reads Unity Catalog metadata, builds a Neo4j semantic layer
 with embeddings and inferred foreign keys, then runs a Text2SQL evaluation
 against it. Your job when adding a data source is to point that pipeline at your
-tables, give it a question set, and run the two jobs from your bundle.
+tables, give it a question set, run the ingest job from your bundle, then run the
+client locally.
 
 ## How dbxcarta reaches your project
 
 A consumer pins these by version:
 
-- `dbxcarta-core`: the foundation. The readiness check and question upload, the
-  env loader, and the job entry-point plumbing.
+- `dbxcarta-core`: the foundation. The readiness check, the env loader, and the
+  job entry-point plumbing.
 - `dbxcarta-client[graph]`: the Text2SQL evaluation harness, the `dbxcarta-client`
   entry point, and the Neo4j driver via the `[graph]` extra.
 - `neocarta[databricks-spark]`: the ingest pipeline. It reads Unity Catalog,
@@ -106,10 +109,11 @@ published case. Only where uv looks for the wheels changes. See
 ## Concepts in one minute
 
 - **Operational commands**: `dbxcarta ready` confirms your catalog holds data,
-  and `dbxcarta upload-questions` pushes your `questions.json` to the ops volume.
-  Both run locally and read the selected overlay plus the adjacent
-  `questions.json` directly. There is no per-integration Python object to publish.
-  The cluster jobs never call them; config lives in the overlay.
+  and the local `dbxcarta-client` runs the Text2SQL evaluation, reading your
+  `questions.json` straight off local disk. Both run locally and read the
+  selected overlay plus the adjacent `questions.json` directly. There is no
+  per-integration Python object to publish, and no step that stages questions to
+  a volume. The ingest job never calls them; config lives in the overlay.
 - **Overlay**: `dbxcarta-overlay.env`. Committed, secret-free, per-integration.
   Selected with `DBXCARTA_ENV_FILE` or `--env-file`. It holds the operator/client
   `DBXCARTA_*` values and the `NEOCARTA_DATABRICKS_*` ingest contract: catalog,
@@ -128,7 +132,7 @@ published case. Only where uv looks for the wheels changes. See
 - **Vendored wheels**: `dbxcarta-dist/`, a committed directory of the dbxcarta
   wheels and the neocarta connector wheel plus a committed `uv.toml` find-links.
   It is the simulated index until those projects are on PyPI, reached both by
-  local `uv sync` and by the cluster jobs.
+  local `uv sync` and by the cluster ingest job.
 - **Secret scope**: a Databricks secret scope holding `NEO4J_URI`,
   `NEO4J_USERNAME`, and `NEO4J_PASSWORD`. The neocarta ingest entry point reads
   these from the scope itself on the cluster, given the
@@ -154,7 +158,7 @@ Its files are the reference for every step below.
 ```
 <consumer>/dbxcarta/
 ├── pyproject.toml              # pinned dbxcarta deps, no source overrides
-├── databricks.yml              # ingest + client jobs (consumer-owned DAB, config-free)
+├── databricks.yml              # ingest job (consumer-owned DAB, config-free)
 ├── dbxcarta-overlay.env        # committed, secret-free dbxcarta config (single source)
 ├── .env.sample                 # standalone local-demo config (copy to .env)
 ├── setup_secrets.sh            # provision the Neo4j secret scope from the overlay + .env
@@ -186,10 +190,10 @@ Then change the following:
   ```
 
 - **No Python wiring** is needed for the operational commands. `dbxcarta ready`
-  and `dbxcarta upload-questions` read the selected overlay and the adjacent
-  `questions.json` directly, so the readiness and upload behavior come from
-  `dbxcarta-core` with nothing to implement per integration. The `src/` package
-  exists only when you ship standalone tooling like the local demo.
+  and the local `dbxcarta-client` read the selected overlay and the adjacent
+  `questions.json` directly, so the readiness check comes from `dbxcarta-core`
+  with nothing to implement per integration. The `src/` package exists only when
+  you ship standalone tooling like the local demo.
 
 - **`questions.json`**: your demo question set. Each item is an object with a
   non-empty `question_id` and `question`. Add `reference_sql` for any question
@@ -277,8 +281,8 @@ Operator and client keys:
 - `DBXCARTA_CATALOG`: the catalog readiness and provisioning anchor on.
 - `DATABRICKS_VOLUME_PATH`: the ops volume root, in exact
   `/Volumes/<catalog>/<schema>/<volume>` form.
-- `DBXCARTA_CLIENT_QUESTIONS`: the volume path your `questions.json` is uploaded
-  to.
+- `DBXCARTA_CLIENT_QUESTIONS`: the local path the client reads `questions.json`
+  from (defaults to the file beside the overlay).
 - `DBXCARTA_CLIENT_ARMS`: the evaluation arms to run, for example
   `no_context,schema_dump,graph_rag`.
 
@@ -319,18 +323,17 @@ jobs do not, since they read secrets from the scope.
 
 ## What each stage needs
 
-The pipeline has two cluster jobs (ingest, then eval) plus local helpers. They do
-not share prerequisites, so it helps to see what each one actually requires before
-running anything. The `dbxcarta ready` and `dbxcarta upload-questions` commands
-are local CLI steps, not stages the jobs enforce.
+The pipeline has one cluster job (ingest) plus local steps (readiness, then the
+client evaluation). They do not share prerequisites, so it helps to see what each
+one actually requires before running anything. The `dbxcarta ready` check and the
+`dbxcarta-client` evaluation are local steps, not stages the ingest job enforces.
 
 | Stage | Where it runs | What it needs | What it produces |
 |-------|---------------|---------------|------------------|
 | Setup | local | `uv sync` (vendored wheels), the secret scope provisioned, `.env` filled in | a working consumer |
 | Readiness (optional) | local CLI | the warehouse, and `DBXCARTA_CATALOG` from the overlay | confirmation the catalog holds a data schema |
 | Ingest job | cluster | catalog and schema, the ops volume, the warehouse, the secret scope, the embedding endpoint and flags, the classic cluster with the Neo4j Maven connector | the fully embedded Neo4j semantic layer, and a `summary_<run_id>.json` report on the volume |
-| Upload questions | local CLI | `questions.json` and `DBXCARTA_CLIENT_QUESTIONS` from the overlay | `questions.json` on the ops volume |
-| Eval (client) job | cluster | the semantic layer the ingest built, the chat endpoint, the embedding endpoint, and `questions.json` already on the volume | per-arm Text2SQL metrics |
+| Eval (client) | local | the semantic layer the ingest built, the chat endpoint, the embedding endpoint, and the local `questions.json` | per-arm Text2SQL metrics printed to your terminal |
 | Local demo | local | `.env`, and for `ask` the built semantic layer; it reads the bundled `questions.json` from the package, not the volume | one answered question locally |
 
 Two points the table makes explicit:
@@ -338,9 +341,10 @@ Two points the table makes explicit:
 - **Readiness is an optional preflight, not an ingest gate.** The ingest job never
   calls `dbxcarta ready`. Skip readiness and ingest still runs; it only tells you
   in advance whether the catalog has data.
-- **Uploading questions is a prerequisite of the eval job, not of ingest.** The
-  client job reads `questions.json` from the volume, so upload it before that job.
-  Ingest ignores `questions.json` entirely.
+- **The client reads `questions.json` locally, and ingest ignores it.** The client
+  runs on your machine and opens the bundled `questions.json` directly, so there
+  is no upload step and nothing stages questions to a volume. Ingest never reads
+  `questions.json`.
 
 ## Part 4: Provision and run
 
@@ -370,36 +374,32 @@ Run these from the consumer subproject. Every step is idempotent.
    uv run dbxcarta ready --env-file dbxcarta-overlay.env
    ```
 
-4. **Upload the question set.** Pushes `questions.json` to
-   `DBXCARTA_CLIENT_QUESTIONS` on the volume. This is a prerequisite of the eval
-   job, which reads questions from that path. It is not needed for ingest, so you
-   can do it any time before the client job.
+4. **Deploy and run ingest, then run the client locally.** The vendored wheels
+   ship to the cluster as `whl:` libraries, so there is no separate wheel-publish
+   step. `run_jobs.py` reads the overlay, deploys, and runs the ingest job,
+   forwarding the overlay plus the warehouse as run-time parameters. The client is
+   no longer a cluster job: once ingest finishes, run it locally with
+   `dbxcarta-client`, which reads the overlay and the local `questions.json`
+   itself and needs no cluster.
 
    ```bash
-   uv run dbxcarta upload-questions --env-file dbxcarta-overlay.env
-   ```
-
-5. **Deploy and run the bundle.** The vendored wheels ship to the cluster as
-   `whl:` libraries, so there is no separate wheel-publish step. `run_jobs.py` is
-   the supported path: it reads the overlay, deploys, then runs ingest, then the
-   client after ingest finishes (each `bundle run` blocks), forwarding the overlay
-   plus the warehouse to each job as run-time parameters.
-
-   ```bash
+   # Deploy and run the ingest job on the cluster
    uv run scripts/run_jobs.py \
      --cluster-id <cluster-id> --warehouse-id <warehouse-id>
+
+   # After ingest finishes, run the client evaluation locally
+   DBXCARTA_ENV_FILE=dbxcarta-overlay.env uv run dbxcarta-client
    ```
 
-   Add `--target prod`, `--no-deploy` to reuse the last deployment, or
-   `--no-client` to stop after ingest. Running `databricks bundle` by hand works
-   too, but because `databricks.yml` carries no config you must forward the
-   overlay pairs and the warehouse after `--` on each run; a bare run fails loud
-   rather than using stale values.
+   Add `--target prod` or `--no-deploy` to reuse the last deployment. Running
+   `databricks bundle` by hand works too, but because `databricks.yml` carries no
+   config you must forward the overlay pairs and the warehouse after `--` on the
+   ingest run; a bare run fails loud rather than using stale values.
 
 The ingest job runs the neocarta connector's `neocarta-databricks-ingest` entry
 point: it reads Unity Catalog metadata, embeds inline, and writes the fully
-embedded Neo4j semantic graph. The client job runs `dbxcarta-client`: it
-benchmarks `questions.json` across the configured arms.
+embedded Neo4j semantic graph. The client then runs locally as `dbxcarta-client`:
+it benchmarks `questions.json` across the configured arms with no cluster.
 
 ## Part 5: Test and verify
 
@@ -413,8 +413,8 @@ benchmarks `questions.json` across the configured arms.
   uv run python -m <consumer>_dbxcarta.local_demo ask --question-id fg_q01 --show-context
   ```
 
-- **Read the client scores.** The client job reports per-arm metrics (attempted,
-  parsed, executed, non_empty, exec_rate, correct_rate) in its job output. The
+- **Read the client scores.** The local client prints per-arm metrics (attempted,
+  parsed, executed, non_empty, exec_rate, correct_rate) to your terminal. The
   result you are checking for is `graph_rag` matching or beating `schema_dump` on
   `correct_rate`. The `no_context` arm is the zero-context baseline floor. The
   three arms are a progression, not three attempts at one task.
@@ -426,10 +426,11 @@ benchmarks `questions.json` across the configured arms.
   uv run pytest
   ```
 
-The local demo and the non-live tests run with only `uv sync`. The ingest and
-client jobs additionally require the upstream catalog populated, the secret scope
-provisioned, and a preprovisioned cluster and warehouse. They cannot complete end
-to end until those are in place.
+The local demo and the non-live tests run with only `uv sync`. The ingest job
+additionally requires the upstream catalog populated, the secret scope
+provisioned, and a preprovisioned cluster and warehouse; the local client run
+needs the built semantic layer and the chat and embedding endpoints. They cannot
+complete end to end until those are in place.
 
 ## Who does what
 
@@ -457,9 +458,9 @@ consumer subproject; only refreshing the vendored wheels reaches into dbxcarta.
       `NEOCARTA_DATABRICKS_*` ingest contract (catalog, schemas, embedding flags +
       endpoint, staging and summary volumes, secret scope). No secrets in it.
 - [ ] `.env` copied from `.env.sample` and filled in for local tooling.
-- [ ] Secret scope provisioned, readiness passes, questions uploaded.
-- [ ] `databricks.yml` deployed; ingest job run, then the client job.
-- [ ] Client scores read from the job output; local demo and non-live tests pass.
+- [ ] Secret scope provisioned, readiness passes.
+- [ ] `databricks.yml` deployed; ingest job run, then `dbxcarta-client` run locally.
+- [ ] Client scores read from the terminal; local demo and non-live tests pass.
 
 ## Where to read more
 

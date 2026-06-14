@@ -44,8 +44,8 @@ the tool's own exhaust.
    │  graph-enriched-finance-gold     :gold                             │
    │     information_schema  +  sampled values        read-only         │
    └───────────────────────────────────────────────────────────────────┘
-            │ extract metadata across DBXCARTA_CATALOGS
-            │ layer = the :layer suffix on each DBXCARTA_CATALOGS entry
+            │ extract metadata across NEOCARTA_DATABRICKS_CATALOGS
+            │ layer = the :layer suffix on each NEOCARTA_DATABRICKS_CATALOGS entry
             ▼
    ┌──────────────────────────┐        ┌──────────────────────────────┐
    │   neocarta connector     │        │  NEO4J  (the semantic layer)  │
@@ -78,9 +78,11 @@ The catalogs under evaluation are the source of truth and DBxCarta only reads
 them. For a medallion layout each layer is its own catalog. The finance-genie
 example uses `graph-enriched-finance-silver` and `-gold`.
 `DBXCARTA_CATALOG` names a single anchor catalog used for preflight and
-ops provisioning; `DBXCARTA_CATALOGS` lists every catalog folded into one
-semantic layer, where each entry is `catalog` or `catalog:layer` and the
-optional `:layer` suffix records which medallion tier each table came from. The build reads
+ops provisioning. The overlay's catalog list — `DBXCARTA_CATALOGS` for the
+operator and readiness, mirrored to `NEOCARTA_DATABRICKS_CATALOGS` for the
+ingest — lists every catalog folded into one semantic layer, where each entry is
+`catalog` or `catalog:layer` and the optional `:layer` suffix records which
+medallion tier each table came from. The build reads
 `information_schema` and a bounded sample of values and writes nothing here, so
 the meaning the layer encodes stays anchored to what the data team published.
 
@@ -143,8 +145,8 @@ precise component breakdown each layer owns.
 
 - **Core** owns identifier and path quoting, the single `catalog:layer` parsing
   rule (`resolve_catalogs`), workspace and secret access, the SQL warehouse
-  runner, the readiness check and question upload (`check_readiness`,
-  `upload_questions`), the `.env` overlay loader, and the pure table-materialize
+  runner, the readiness check (`check_readiness`), the `.env` overlay loader,
+  and the pure table-materialize
   SQL builders. It pulls in only the Databricks SDK, never Spark, Neo4j, or the
   job runner. The boundaries are enforced by
   `tests/boundary/test_import_boundaries.py`.

@@ -54,25 +54,23 @@ def chosen_schemas_from_columns(
 
 @dataclass
 class RetrievalTrace:
-    run_id: str
-    question_id: str
-    question: str
+    """Per-question retrieval-metrics record for the graph_rag arm.
+
+    Carries only what the arm consumes: ``target_schema``, ``schema_scores``,
+    ``chosen_schemas``, and ``final_col_ids`` are the inputs
+    ``compute_retrieval_metrics`` reads; ``col_seed_ids``/``tbl_seed_ids`` are
+    the seed lists the arm reports as ``context_ids``; and the three metric
+    fields are the computed outputs. The earlier per-question generation and
+    execution fields were dropped with the ``client_retrieval`` Delta sink that
+    once consumed them.
+    """
+
     target_schema: str | None
     col_seed_ids: list[str]
-    col_seed_scores: list[float]
     tbl_seed_ids: list[str]
-    tbl_seed_scores: list[float]
     schema_scores: dict[str, float]
     chosen_schemas: list[str]
-    expansion_tbl_ids: list[str]
     final_col_ids: list[str]
-    rendered_context: str
-    generated_sql: str | None = None
-    reference_sql: str | None = None
-    parsed: bool = False
-    executed: bool = False
-    correct: bool = False
-    execution_error: str | None = None
     top1_schema_match: bool | None = None
     schema_in_context: bool | None = None
     context_purity: float | None = None

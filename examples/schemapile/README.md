@@ -40,13 +40,15 @@ cd ../..
 
 # Select the SchemaPile overlay for every command below. No schema list to
 # copy: schemapile_lakehouse is a dedicated, data-only catalog, so the ingest
-# auto-discovers the materialized schemas from a blank DBXCARTA_SCHEMAS.
+# auto-discovers the materialized schemas from a blank NEOCARTA_DATABRICKS_SCHEMAS.
 export DBXCARTA_ENV_FILE=examples/schemapile/dbxcarta-overlay.env
 
-# Confirm the schemas materialized, then upload the generated question set.
+# Confirm the schemas materialized.
 uv run dbxcarta ready
-uv run dbxcarta upload-questions
 ```
+
+The generated question set ships as `questions.json` beside the overlay and the
+client reads it locally, so there is no question-upload step.
 
 With setup in place, run the two make targets from the repo root. The `-ingest`
 target rebuilds the wheels from current source and builds the semantic layer, so
@@ -218,8 +220,8 @@ recorded as Delta table properties on every table so the trace from a UC
 table to its schemapile origin is always one query away.
 
 No schema list is emitted. `schemapile_lakehouse` is a dedicated,
-data-only catalog, so the dbxcarta run auto-discovers every materialized
-schema from a blank `DBXCARTA_SCHEMAS` in the overlay.
+data-only catalog, so the ingest run auto-discovers every materialized
+schema from a blank `NEOCARTA_DATABRICKS_SCHEMAS` in the overlay.
 
 ### 8. Generate and validate the question set
 
@@ -245,7 +247,7 @@ base, holding Databricks infra and Neo4j secrets, never edited per
 integration. This directory's committed, secret-free
 `dbxcarta-overlay.env` is the SchemaPile overlay, holding dbxcarta-scoped
 values only. Selecting it is one variable, no root `.env` edit. There is
-no schema list to copy: `DBXCARTA_SCHEMAS` ships blank because
+no schema list to copy: `NEOCARTA_DATABRICKS_SCHEMAS` ships blank because
 `schemapile_lakehouse` is data-only and auto-discovered. Export
 `DBXCARTA_ENV_FILE` once and run the standard flow from the repo root.
 The `dbxcarta` subcommands read the overlay from the environment
@@ -259,17 +261,14 @@ export DBXCARTA_ENV_FILE=examples/schemapile/dbxcarta-overlay.env
 # Confirm the upstream schemas are materialized.
 uv run dbxcarta ready
 
-# Upload the generated question set to the example volume.
-uv run dbxcarta upload-questions
-
 # Build and submit the ingest job. publish-wheels rebuilds the wheels and
 # ships the bootstrap script (it calls upload_all internally), so no
 # separate `upload --all` step is needed.
 uv run dbxcarta publish-wheels
 uv run dbxcarta submit-entrypoint ingest
 
-# Run the client evaluation arms.
-uv run dbxcarta submit-entrypoint client
+# Run the client evaluation arms locally (reads the bundled questions.json).
+uv run dbxcarta-client
 ```
 
 For the wheel-rebuild-and-submit half of this step on every code change,
@@ -295,8 +294,8 @@ full list. The current entry:
 
 This example is built in phases that build on top of each other:
 
-1. **Phase 0 (dbxcarta core)**. Multi-schema `DBXCARTA_SCHEMAS` is supported
-   end to end; FK inference is restricted to within-schema pairs.
+1. **Phase 0 (dbxcarta core)**. Multi-schema `NEOCARTA_DATABRICKS_SCHEMAS` is
+   supported end to end; FK inference is restricted to within-schema pairs.
 2. **Phase 1 (questions)**. The candidate JSON is the single source of
    truth shared with the materializer and the question generator.
 3. **Phase 2 (slice runner)**. Host-only; depends only on the upstream

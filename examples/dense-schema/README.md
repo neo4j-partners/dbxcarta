@@ -33,9 +33,10 @@ uv run dbxcarta materialize --env-file examples/dense-schema/dbxcarta-overlay.en
 export DBXCARTA_ENV_FILE=examples/dense-schema/dbxcarta-overlay.env
 # Confirm the dense_500 schema and its tables are materialized
 uv run dbxcarta ready
-# Upload the matching question set to the ops volume
-uv run dbxcarta upload-questions
 ```
+
+The matching question set ships as `questions.json` beside the overlay and the
+client reads it locally, so there is no question-upload step.
 
 With setup in place, run the two make targets from the repo root. The `-ingest`
 target rebuilds the wheels from current source and builds the semantic layer, so
@@ -144,12 +145,10 @@ Then run the normal dbxcarta operational CLI against the selected overlay:
 ```bash
 # Confirm the dense_500 schema and its tables are materialized
 uv run dbxcarta ready
-# Upload the question set to the ops volume
-uv run dbxcarta upload-questions
 # Submit the ingest job to build the semantic layer
 uv run dbxcarta submit-entrypoint ingest
-# Submit the client evaluation job
-uv run dbxcarta submit-entrypoint client
+# Run the client evaluation locally (reads the bundled questions.json, no cluster)
+uv run dbxcarta-client
 ```
 
 Synthetic blueprint generation and question generation stay inside this example.

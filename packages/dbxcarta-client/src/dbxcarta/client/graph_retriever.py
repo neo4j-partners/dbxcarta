@@ -129,10 +129,11 @@ _JOIN_COLUMN_IDS_CYPHER = (
 def _normalize_id_part(name: str) -> str:
     """Normalize one identifier part to the form ingest stores in node ids.
 
-    Mirrors ``dbxcarta.spark.contract.generate_id``: lowercase, then spaces
-    and hyphens to underscores. Node ids are normalized this way while the
-    ``.name`` property keeps the true Unity Catalog name, so any comparison
-    against an id-derived part must normalize the configured name first.
+    Mirrors the id normalization the ingest connector applies when it builds
+    node ids: lowercase, then spaces and hyphens to underscores. Node ids are
+    normalized this way while the ``.name`` property keeps the true Unity
+    Catalog name, so any comparison against an id-derived part must normalize
+    the configured name first.
     """
     return name.lower().replace(" ", "_").replace("-", "_")
 

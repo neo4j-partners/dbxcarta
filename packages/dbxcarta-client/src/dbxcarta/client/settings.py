@@ -1,13 +1,10 @@
 from __future__ import annotations
 
 from dbxcarta.core.catalogs import resolve_catalogs
-from dbxcarta.core.config import derive_ops_config
 from dbxcarta.core.identifiers import (
     parse_volume_path,
-    split_qualified_name,
     validate_identifier,
     validate_serving_endpoint_name,
-    validate_uc_volume_subpath,
 )
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -30,11 +27,6 @@ class ClientSettings(BaseSettings):
     # (dbxcarta-neo4j-<example>). No default, so a run without a selected overlay
     # fails at config load instead of silently reading an unprovisioned scope.
     databricks_secret_scope: str
-    # Derivable from databricks_volume_path when blank (see _resolve_defaults).
-    # The overlays still set them today; derivation only fires once Phase 6
-    # removes them, so leaving them blank stays behavior-neutral until then.
-    dbxcarta_summary_volume: str = ""
-    dbxcarta_summary_table: str = ""
     databricks_volume_path: str
 
     # Client-specific — generation
@@ -43,13 +35,16 @@ class ClientSettings(BaseSettings):
     dbxcarta_embed_endpoint: str = ""  # defaults to dbxcarta_embedding_endpoint
 
     # Client-specific — runtime
-    dbxcarta_client_questions: str = ""  # derived: {volume_path}/dbxcarta/questions.json
+    # Local path to the questions JSON the client reads directly. The client
+    # runs locally, so this is a required repo-relative (or absolute) file path,
+    # set by the example overlay; a blank value fails preflight loudly.
+    dbxcarta_client_questions: str = ""
     # 0 = run the full question set; set to a small N (e.g. 5) to evaluate only
     # the first N questions as a quick post-ingest smoke check.
     dbxcarta_client_max_questions: int = 0
     dbxcarta_client_arms: str = "no_context,schema_dump,graph_rag"
     dbxcarta_client_top_k: int = 5
-    # Force re-inference even when a matching cached staging table exists.
+    # Force re-inference even when a matching local cache file exists.
     # The cache keys on (endpoint, arm, ordered question prompts); set this
     # when the endpoint's underlying model changed but the prompts did not.
     dbxcarta_client_refresh: bool = False
@@ -92,23 +87,6 @@ class ClientSettings(BaseSettings):
             resolve_catalogs("", v)
         return v
 
-    @field_validator("dbxcarta_summary_table")
-    @classmethod
-    def _validate_summary_table(cls, v: str) -> str:
-        # Blank is derived from databricks_volume_path in _resolve_defaults; the
-        # derived value is well-formed by construction, so only validate input.
-        if not v.strip():
-            return ""
-        split_qualified_name(v, expected_parts=3, label="summary table")
-        return v
-
-    @field_validator("dbxcarta_summary_volume")
-    @classmethod
-    def _validate_summary_volume(cls, v: str) -> str:
-        if not v.strip():
-            return ""
-        return validate_uc_volume_subpath(v, label="DBXCARTA_SUMMARY_VOLUME")
-
     @field_validator("databricks_volume_path")
     @classmethod
     def _validate_volume_root(cls, v: str) -> str:
@@ -130,24 +108,11 @@ class ClientSettings(BaseSettings):
 
     @model_validator(mode="after")
     def _resolve_defaults(self) -> ClientSettings:
+        # The embed endpoint defaults to the embedding endpoint. The client runs
+        # locally and persists nothing remote, so there are no ops-Volume sinks
+        # to derive here: the questions path is a local file set by the overlay.
         if not self.dbxcarta_embed_endpoint:
             self.dbxcarta_embed_endpoint = self.dbxcarta_embedding_endpoint
-        # The ops-side values are one base path with a tail; the shared core
-        # resolver is the single owner of that rule. Mirrors
-        # ``SparkIngestSettings._resolve_summary_sinks``, except that
-        # databricks_volume_path is required (and already validated non-blank)
-        # here, so deriving is always safe and needs no missing-base guard.
-        if not (
-            self.dbxcarta_summary_volume
-            and self.dbxcarta_summary_table
-            and self.dbxcarta_client_questions
-        ):
-            derived = derive_ops_config(self.databricks_volume_path)
-            self.dbxcarta_summary_volume = self.dbxcarta_summary_volume or derived.summary_volume
-            self.dbxcarta_summary_table = self.dbxcarta_summary_table or derived.summary_table
-            self.dbxcarta_client_questions = (
-                self.dbxcarta_client_questions or derived.client_questions
-            )
         return self
 
     @property
