@@ -7,8 +7,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from dbxcarta.core.config import derive_ops_config
-
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
@@ -42,7 +40,6 @@ class DenseSchemaConfig:
     # DATABRICKS_VOLUME_PATH fails loudly rather than routing ops into the data
     # catalog.
     volume_path: str
-    questions_path: str
     question_model: str
     questions_target: int
     questions_per_batch: int
@@ -70,14 +67,6 @@ def load_config(env: Mapping[str, str] | None = None) -> DenseSchemaConfig:
             e.get("DENSE_CANDIDATE_CACHE") or _BLUEPRINT_DIR / f"candidates_{table_count}.json"
         ),
         volume_path=volume_path,
-        # Single core rule for "given the ops volume root, where questions
-        # live"; dense's example-specific filename is the one parameter. The
-        # derived path is computed only when the var is unset, so a malformed
-        # volume_path is not validated on the explicit-value path.
-        questions_path=e.get("DBXCARTA_CLIENT_QUESTIONS")
-        or derive_ops_config(
-            volume_path, questions_filename="dense_questions.json"
-        ).client_questions,
         question_model=e.get(
             "DENSE_QUESTION_MODEL",
             "databricks-meta-llama-3-3-70b-instruct",

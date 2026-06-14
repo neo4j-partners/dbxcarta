@@ -8,7 +8,7 @@ This directory contains the canonical test and demo schema for dbxcarta.
 |---|---|
 | `setup_test_catalog.sql` | SQL DDL — creates all schemas, tables, PKs, FKs |
 | `insert_test_data.sql` | DML — inserts 15–25 FK-respecting rows per table |
-| `demo_questions.json` | Six sample questions for the graph_rag demo |
+| `questions.json` | Six sample questions for the graph_rag demo |
 
 ---
 
@@ -138,18 +138,17 @@ Leave `DBXCARTA_SCHEMAS` blank to include all schemas in the catalog (including
 `dbxcarta_test_external`). Cross-schema FK edges (sales→hr, sales→inventory)
 only appear in Neo4j when **both** the source and target schemas are in scope.
 
-Upload the demo questions file and build the semantic layer. `publish-wheels`
-stages the prebuilt neocarta ingest wheel and builds the client and materialize
-wheels; `submit-entrypoint ingest` runs the neocarta connector's ingest job:
+Build the semantic layer. `publish-wheels` stages the prebuilt neocarta ingest
+wheel and builds the client and materialize wheels; `submit-entrypoint ingest`
+runs the neocarta connector's ingest job:
 
 ```bash
 uv run dbxcarta publish-wheels
-uv run dbxcarta upload --data tests/fixtures
 uv run dbxcarta submit-entrypoint ingest
 ```
 
-Then run the graph_rag demo client locally (it reads the bundled questions.json
-directly, no cluster):
+Then run the graph_rag demo client locally. It reads the local questions file
+(`tests/fixtures/questions.json`) directly, no cluster:
 
 ```bash
 uv run dbxcarta-client

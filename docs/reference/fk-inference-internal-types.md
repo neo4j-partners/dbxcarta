@@ -3,10 +3,8 @@
 The typed dataclass layer between Spark DataFrames and the FK discovery
 pipeline, and the boundary-conversion points it documented, moved to
 [neocarta](https://github.com/neo4j-field/neocarta) with the rest of the ingest
-pipeline. dbxcarta no longer carries those modules
-(`dbxcarta.spark.ingest.fk.*`, the `ColumnMeta` / `ConstraintRow` / `FKEdge`
-dataclasses, the run-summary counter types), so it no longer documents their
-internal types.
+pipeline. dbxcarta no longer carries those modules (the FK dataclass layer and
+the run-summary counter types), so it no longer documents their internal types.
 
 In neocarta the FK discovery and its typed layer live under
 `neocarta/connectors/databricks/`, with the contract enums in

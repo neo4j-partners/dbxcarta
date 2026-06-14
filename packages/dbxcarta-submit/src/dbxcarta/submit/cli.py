@@ -165,8 +165,7 @@ _RUNNER_KWARGS: _RunnerKwargs = {
     # ingest/materialize bootstraps override wheel_package per entrypoint
     # (see _ENTRYPOINT_WHEEL_PACKAGE). This default only names the wheel the
     # runner's own build/publish path would touch, so it points at the
-    # materialize distribution the tool still builds rather than the removed
-    # dbxcarta-spark package.
+    # materialize distribution the tool builds.
     "wheel_package": "dbxcarta-materialize",
     "scripts_dir": "scripts",
     "cli_command": "uv run dbxcarta",
@@ -657,9 +656,9 @@ def _handle_teardown(argv: list[str]) -> int:
 def _handle_ready(argv: list[str]) -> int:
     """Report whether each ingested catalog holds a data schema.
 
-    Moved here from the retired ``dbxcarta-spark`` CLI: the readiness logic
-    already lives in ``dbxcarta.core.readiness``, so this is the thin handler
-    over it. Runs locally against the SQL warehouse; no Neo4j or cluster.
+    The readiness logic lives in ``dbxcarta.core.readiness``, so this is the
+    thin handler over it. Runs locally against the SQL warehouse; no Neo4j or
+    cluster.
     """
     import argparse
 

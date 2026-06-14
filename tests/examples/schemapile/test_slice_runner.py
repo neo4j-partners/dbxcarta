@@ -37,7 +37,6 @@ def _make_config(tmp_path, **overrides) -> SchemaPileConfig:
         "candidate_limit": 10,
         "catalog": "schemapile_lakehouse",
         "volume_path": "/Volumes/dbxcarta-catalog/schemapile_ops/dbxcarta-ops",
-        "questions_path": "/Volumes/dbxcarta-catalog/schemapile_ops/dbxcarta-ops/dbxcarta/questions.json",
         "question_model": "model",
         "questions_per_schema": 6,
         "question_temperature": 0.2,

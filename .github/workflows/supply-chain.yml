@@ -18,12 +18,8 @@ jobs:
       matrix:
         include:
           - layer: core
-            package: dbxcarta-spark
+            package: dbxcarta-core
             tests: tests/core
-          - layer: spark
-            package: dbxcarta-spark
-            extra_package: dbxcarta-client
-            tests: tests/spark
           - layer: client
             package: dbxcarta-client
             extras: graph
@@ -32,20 +28,17 @@ jobs:
             package: dbxcarta-submit
             tests: tests/submit
           - layer: boundary
-            package: dbxcarta-spark
-            extra_package: dbxcarta-client dbxcarta-materialize
+            package: dbxcarta-client
+            extra_package: dbxcarta-materialize
             tests: tests/boundary
           - layer: finance-genie
             package: dbxcarta-finance-genie-example
-            extra_package: dbxcarta-spark
             tests: tests/examples/finance-genie
           - layer: schemapile
             package: dbxcarta-schemapile-example
-            extra_package: dbxcarta-spark
             tests: tests/examples/schemapile
           - layer: dense-schema
             package: dbxcarta-dense-schema-example
-            extra_package: dbxcarta-spark
             tests: tests/examples/dense-schema
     steps:
       - name: Check out repository
@@ -119,7 +112,7 @@ jobs:
         run: uv run pytest
 
       - name: Type check
-        run: uv run mypy -p dbxcarta.core -p dbxcarta.spark -p dbxcarta.client -p dbxcarta.submit -p dbxcarta.materialize
+        run: uv run mypy -p dbxcarta.core -p dbxcarta.client -p dbxcarta.submit -p dbxcarta.materialize
 
       - name: Lint
         run: uv run ruff check .

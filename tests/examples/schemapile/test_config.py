@@ -65,10 +65,6 @@ def test_volume_path_uses_env_ops_path(tmp_path):
         )
     )
     assert cfg.volume_path == "/Volumes/dbxcarta-catalog/schemapile_ops/dbxcarta-ops"
-    # questions_path defaults under the ops volume, not the data catalog.
-    assert cfg.questions_path == (
-        "/Volumes/dbxcarta-catalog/schemapile_ops/dbxcarta-ops/dbxcarta/questions.json"
-    )
 
 
 def test_volume_path_requires_env_ops_path(tmp_path):

@@ -30,7 +30,6 @@ def _config() -> SchemaPileConfig:
         candidate_limit=10,
         catalog="schemapile_lakehouse",
         volume_path="/Volumes/dbxcarta-catalog/schemapile_ops/dbxcarta-ops",
-        questions_path="/Volumes/dbxcarta-catalog/schemapile_ops/dbxcarta-ops/dbxcarta/questions.json",
         question_model="databricks-meta-llama-3-3-70b-instruct",
         questions_per_schema=6,
         question_temperature=0.2,

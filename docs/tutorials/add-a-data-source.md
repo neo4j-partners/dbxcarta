@@ -469,7 +469,6 @@ consumer subproject; only refreshing the vendored wheels reaches into dbxcarta.
   and its `dbxcarta/README.md`.
 - `docs/reference/simulate-publish.md`: how a consumer resolves dbxcarta from
   vendored wheels until PyPI, and how to flip to PyPI.
-- `docs/proposals/published.md`: the published-library consumer design.
 - `docs/reference/architecture.md`: the package responsibilities and how the
   pieces fit, including the client cache mechanics.
 - `docs/reference/pipeline.md`: where the ingest pipeline now lives (the neocarta

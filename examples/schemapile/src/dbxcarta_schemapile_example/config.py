@@ -12,8 +12,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from dbxcarta.core.config import derive_ops_config
-
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
@@ -66,7 +64,6 @@ class SchemaPileConfig:
     # DATABRICKS_VOLUME_PATH fails loudly rather than routing ops into the data
     # catalog.
     volume_path: str
-    questions_path: str
     question_model: str
     questions_per_schema: int
     question_temperature: float
@@ -134,11 +131,6 @@ def load_config(env: Mapping[str, str] | None = None) -> SchemaPileConfig:
         candidate_limit=int(e.get("SCHEMAPILE_CANDIDATE_LIMIT", "20")),
         catalog=catalog,
         volume_path=volume_path,
-        # Single core rule for "given the ops volume root, where questions
-        # live". Derived only when the var is unset, so a malformed volume_path
-        # is not validated on the explicit-value path.
-        questions_path=e.get("DBXCARTA_CLIENT_QUESTIONS")
-        or derive_ops_config(volume_path).client_questions,
         question_model=e.get(
             "SCHEMAPILE_QUESTION_MODEL",
             "databricks-meta-llama-3-3-70b-instruct",

@@ -2,7 +2,7 @@
 -- DBxCarta test catalog — minimal row fixtures
 --
 -- Inserts 15–25 FK-respecting rows per table so the sample_values pipeline
--- produces Value nodes and the demo queries (demo_questions.json) return
+-- produces Value nodes and the demo queries (questions.json) return
 -- meaningful results.
 --
 -- Prerequisite: setup_test_catalog.sql must have been run first.

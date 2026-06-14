@@ -27,16 +27,16 @@ jobs:
           python-version-file: .python-version
 
       - name: Build wheels and sdists
-        # Core, client, and spark are the published distributions. client and
-        # spark both depend on dbxcarta-core, and a normal build of either carries
-        # only its own module (not a bundled core), so core must ship to PyPI for a
-        # clean install to resolve. Example packages (dense-schema, finance-genie,
-        # schemapile) and the operator-local submit/materialize packages are
-        # workspace members but are not published.
+        # Core and client are the published distributions. client depends on
+        # dbxcarta-core, and a normal build carries only its own module (not a
+        # bundled core), so core must ship to PyPI for a clean install to resolve.
+        # The ingest pipeline is no longer published here: it moved to neocarta
+        # and ships as the neocarta connector wheel. Example packages
+        # (dense-schema, finance-genie, schemapile) and the operator-local
+        # submit/materialize packages are workspace members but are not published.
         run: |
           uv build --package dbxcarta-core
           uv build --package dbxcarta-client
-          uv build --package dbxcarta-spark
 
       - name: Attest build provenance
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2

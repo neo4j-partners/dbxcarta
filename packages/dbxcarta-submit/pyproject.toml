@@ -14,8 +14,7 @@ dependencies = [
 [project.optional-dependencies]
 test = ["pytest"]
 
-# The operator command takes the `dbxcarta` name the deleted dbxcarta-spark
-# pipeline command used to own. The distribution stays named dbxcarta-submit.
+# The console command is `dbxcarta`; the distribution stays named dbxcarta-submit.
 [project.scripts]
 dbxcarta = "dbxcarta.submit.cli:main"
 

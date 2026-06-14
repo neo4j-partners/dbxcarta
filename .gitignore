@@ -155,6 +155,5 @@ docker-tests/.env
 # `dbxcarta-submit publish-wheels` so each cluster wheel carries dbxcarta/core.
 # The context manager removes these after the build; ignored so an interrupted
 # publish run cannot leave a duplicate core source to be committed by mistake.
-packages/dbxcarta-spark/src/dbxcarta/core/
 packages/dbxcarta-client/src/dbxcarta/core/
 packages/dbxcarta-materialize/src/dbxcarta/core/

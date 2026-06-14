@@ -10,11 +10,14 @@ from __future__ import annotations
 
 import os
 import sys
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from dbxcarta.client.eval import entrypoint
 from dbxcarta.core import env as _env
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 _OVERLAY_KEY = "DBXCARTA_TEST_ENTRYPOINT_KEY"
 

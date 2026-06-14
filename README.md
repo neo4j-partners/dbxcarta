@@ -246,11 +246,10 @@ The cache layout and refresh controls, and the validation rationale, are in
 [`docs/reference/architecture.md`](docs/reference/architecture.md#how-we-validate).
 
 In the quickstart the client runs the `graph_rag` arm against
-`tests/fixtures/demo_questions.json` after that file is uploaded to
-`DATABRICKS_VOLUME_PATH`. The question set exercises cross-schema joins,
-self-referential FKs, composite FK paths, and intra-schema event analytics. For
-your own catalog, upload a replacement questions JSON file and point
-`DBXCARTA_CLIENT_QUESTIONS` at it.
+`tests/fixtures/questions.json`, a local file the client reads directly. The
+question set exercises cross-schema joins, self-referential FKs, composite FK
+paths, and intra-schema event analytics. For your own catalog, point
+`DBXCARTA_CLIENT_QUESTIONS` at a replacement local questions JSON file.
 
 ## Examples
 
@@ -361,7 +360,7 @@ Open `.env` and replace the placeholders. Keep the demo defaults already organiz
 - Table and column embeddings enabled
 - Values enabled
 - `DBXCARTA_CLIENT_ARMS=graph_rag`
-- `DBXCARTA_CLIENT_QUESTIONS` pointing at a local `demo_questions.json`
+- `DBXCARTA_CLIENT_QUESTIONS` pointing at the local `tests/fixtures/questions.json`
 
 Use an existing UC catalog, schema, and volume, or create them if your principal has permission:
 
@@ -394,13 +393,11 @@ uv run python scripts/run_demo.py
 
 ### 3. Build the semantic layer
 
-Stage the neocarta ingest wheel and the local wheels, upload the demo questions
-file to the configured UC Volume, then submit the neocarta connector's ingest
-entrypoint.
+Stage the neocarta ingest wheel and the local wheels, then submit the neocarta
+connector's ingest entrypoint.
 
 ```bash
 uv run dbxcarta publish-wheels
-uv run dbxcarta upload --data tests/fixtures
 uv run dbxcarta submit-entrypoint ingest
 ```
 

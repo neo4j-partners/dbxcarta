@@ -310,10 +310,9 @@ _FK_RE = re.compile(
 def _generate_id(*parts: str) -> str:
     """Return a normalized dot-separated node id.
 
-    Inlined from the removed ``dbxcarta.spark.contract.generate_id`` (the Spark
-    pipeline now lives in neocarta). Must match the connector's id rule:
-    lowercase each part, replace spaces and hyphens with underscores, join with
-    dots.
+    Must match the neocarta connector's id rule (the ingest pipeline owns node
+    identity): lowercase each part, replace spaces and hyphens with
+    underscores, join with dots.
     """
     return ".".join(p.lower().replace(" ", "_").replace("-", "_") for p in parts)
 

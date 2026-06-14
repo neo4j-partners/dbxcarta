@@ -140,7 +140,6 @@ def test_question_cache_dir_defaults_to_table_count():
         seed=42,
         candidate_cache=Path(".cache/candidates_1000.json"),
         volume_path="/Volumes/dbxcarta-catalog/dense-ops/dbxcarta-ops",
-        questions_path="/Volumes/example/questions.json",
         question_model="databricks-meta-llama-3-3-70b-instruct",
         questions_target=60,
         questions_per_batch=3,

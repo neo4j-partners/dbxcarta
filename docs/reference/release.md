@@ -22,11 +22,6 @@ Not published: `dbxcarta-submit` and `dbxcarta-materialize` (operator-local), an
 `dense-schema`, `finance-genie`, and `schemapile` example packages (workspace members for
 local dev and CI only).
 
-> **Workflow status.** The `release.yaml` and `publish.yaml` workflows still name the
-> removed `dbxcarta-spark` package; updating them is deferred until neocarta publishes its
-> wheel (the alignment plan's Phase 4). The package set below is the target this doc
-> describes, not yet the literal workflow contents.
-
 ## The two workflows
 
 | Workflow | File | Trigger | Job |

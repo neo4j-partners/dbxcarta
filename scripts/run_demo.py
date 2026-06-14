@@ -19,7 +19,7 @@ Optional env vars (overridden by the corresponding CLI flags):
 After setup, run the full demo via the dbxcarta CLI with:
     DBXCARTA_CATALOG=<catalog>
     DBXCARTA_SCHEMAS=dbxcarta_test_sales,dbxcarta_test_inventory,dbxcarta_test_hr,dbxcarta_test_events
-    DBXCARTA_CLIENT_QUESTIONS=/Volumes/<catalog>/<schema>/<volume>/demo_questions.json
+    DBXCARTA_CLIENT_QUESTIONS=tests/fixtures/questions.json
     DBXCARTA_CLIENT_ARMS=graph_rag
 """
 
@@ -173,13 +173,8 @@ def _teardown(
         print(f"\nDone. {total} schema(s) removed.")
 
 
-def _print_next_steps(catalog: str, volume_path: str) -> None:
+def _print_next_steps(catalog: str) -> None:
     schemas = ",".join(_DEMO_SCHEMAS)
-    questions = (
-        f"{volume_path.rstrip('/')}/demo_questions.json"
-        if volume_path
-        else "/Volumes/<catalog>/<schema>/<volume>/demo_questions.json"
-    )
     print(f"""
 Next steps
 ----------
@@ -187,17 +182,16 @@ Next steps
 
    DBXCARTA_CATALOG={catalog}
    DBXCARTA_SCHEMAS={schemas}
-   DBXCARTA_CLIENT_QUESTIONS={questions}
+   DBXCARTA_CLIENT_QUESTIONS=tests/fixtures/questions.json
    DBXCARTA_CLIENT_ARMS=graph_rag
 
-2. Upload the package and demo data, then build the Neo4j semantic layer:
+2. Build the wheels and the Neo4j semantic layer:
 
    uv run dbxcarta publish-wheels
-   uv run dbxcarta upload --data tests/fixtures
    uv run dbxcarta submit-entrypoint ingest
 
-3. After ingest succeeds, run the graph_rag demo client locally (it reads the
-   bundled questions.json directly, no cluster):
+3. After ingest succeeds, run the graph_rag demo client locally. It reads the
+   local questions file (tests/fixtures/questions.json) directly, no cluster:
 
    uv run dbxcarta-client
 
@@ -246,7 +240,7 @@ def main() -> None:
     else:
         _setup(ws, warehouse_id, args.catalog, args.volume_path)
         _insert_data(ws, warehouse_id, args.catalog, args.volume_path)
-        _print_next_steps(args.catalog, args.volume_path)
+        _print_next_steps(args.catalog)
 
 
 if __name__ == "__main__":
