@@ -1,5 +1,7 @@
 # Aligning dbxcarta with neocarta: remove the Spark pipeline, pull the connector wheel
 
+> **Hard cutover. No migration, no legacy compatibility, no downstream consumers.** There is no transition window and no support for the old and new layouts at once. When something moves or is deleted, every caller is repointed or removed in the same change. Nothing outside this repo depends on the removed package, so nothing is preserved for compatibility. Each phase fully replaces what it touches; after it lands, the old shape is gone, not deprecated.
+
 ## Goal
 
 The Spark ingest pipeline moved to neocarta. It now lives there as the `neocarta` connector wheel with a `databricks-spark` extra. This project, dbxcarta, should stop carrying its own copy of that pipeline and instead pull the neocarta wheel and run it.
@@ -46,8 +48,9 @@ Make the operator tool stage and run the neocarta wheel from a local folder, whi
 - Add a setting in the operator tool for where the neocarta wheel comes from. For now this is the local build folder path. Later it becomes a package index plus a version number, and only this one setting changes.
 - Change the publish step so that, for the ingest job, it copies the prebuilt neocarta wheel onto the Unity Catalog Volume instead of building the old Spark wheel.
 - Stop copying the shared core code into the ingest wheel. The neocarta wheel already carries everything it needs as normal modules.
-- Point the cluster ingest entry point at the neocarta connector's ingest entry point, not the old Spark one.
-- Set the fixed list of pinned dependencies for the ingest job to the list neocarta was tested against. Copy neocarta's pinned set rather than inventing a new one.
+- Point the cluster ingest entry point at the neocarta connector's ingest entry point, `neocarta.connectors.databricks.run:run_ingest` in the root `neocarta` wheel, installed with its `databricks-spark` extra (`pyspark` + `pydantic-settings`).
+- Rename the ingest-relevant overlay keys to neocarta's env-var contract so the wheel reads them directly with no translation step. neocarta's settings use the `NEOCARTA_DATABRICKS_` prefix and ignore unknown env vars, so the operator-only and client-only keys stay on their `DBXCARTA_*`/`DATABRICKS_*` names and are harmlessly forwarded. Rename catalog, catalogs, schemas, summary-volume, the four embedding-include flags, and the secret scope; add `NEOCARTA_DATABRICKS_SECRET_SCOPE` alongside the existing `DATABRICKS_SECRET_SCOPE` that operator tooling still reads. Drop the two overlay keys neocarta has no field for: the embeddings-values flag and the summary-table name.
+- Set the fixed list of pinned dependencies for the ingest job to neocarta's tested closure for this path: the `neocarta` wheel, `pydantic`, `pydantic-settings`, `pandas`, `neo4j`, `databricks-sdk`, and `python-dotenv`. The cluster supplies `pyspark`. None of the BigQuery, Dataplex, litellm, openai, sqlglot, torch, or mlflow dependencies are on the ingest path, so they are not pinned. Note the version jumps neocarta carries: `neo4j` 5 to 6 and `pyspark` 3.5 to 4.1, which require a recent DBR and a Spark 4 build of the Neo4j Spark Connector JAR.
 - Keep the existing cluster check for the Neo4j Spark Connector. It is a Java library attached to the cluster, not a Python dependency.
 
 **Phase 1 is done when:** the operator tool stages the local neocarta wheel onto a Volume and submits an ingest job that runs against a test catalog and Neo4j, end to end. The old Spark package has not been touched yet.
@@ -62,7 +65,11 @@ Rescue the operator-facing commands and the command name, then remove the packag
 - Delete the whole `dbxcarta-spark` package folder.
 - Remove it from the project's list of workspace members, the dependency list, and the workspace source entry that pointed at it.
 - Regenerate the project lock file so the package and its build artifacts are gone from it.
-- Fix the one helper script that imports from the old Spark package. Point it at the new home of that code, or drop the part that is no longer needed.
+- Fix every caller that imports from the old Spark package, not just one. There are four outside the package:
+  - `scripts/run_autotest.py` imports `dbxcarta.spark.contract.generate_id`. Repoint it at neocarta's contract equivalent, or inline the small id-generation logic if neocarta does not expose it on a stable path.
+  - `tests/examples/finance-genie/test_overlay.py` imports `dbxcarta.spark.settings.SparkIngestSettings`. Repoint it at neocarta's `SparkIngestSettings` and update its field-name and prefix assertions; this test now proves the overlay's `NEOCARTA_DATABRICKS_*` keys load into neocarta's settings.
+  - `tests/integration/conftest.py` imports `dbxcarta.spark.ingest.summary_io` (`load_summary_from_volume`). This checks finished pipeline output, which is now neocarta's job, so drop it along with the retired `verify` check.
+  - `tests/boundary/test_import_boundaries.py` asserts on `import dbxcarta.spark`. Update or remove that expectation, since the namespace no longer exists here.
 
 **Phase 2 is done when:** `dbxcarta ready` and `dbxcarta upload-questions` work, the project builds and installs with no reference to the old package, and the old pipeline command is gone.
 
