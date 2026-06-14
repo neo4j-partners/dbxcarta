@@ -58,10 +58,11 @@ names. The rename is the only reason to touch `databricks.yml` at all.
 
 A consumer subproject has four moving parts:
 
-- **A consumer Python package**: a small standalone package (for example
-  `<consumer>/dbxcarta/`) whose `pyproject.toml` pins dbxcarta by version with no
-  `[tool.uv.sources]`. It exposes a `preset` object, ships a `questions.json`,
-  and carries a read-only local demo CLI.
+- **A consumer subproject**: a small folder (for example `<consumer>/dbxcarta/`)
+  that ships a `dbxcarta-overlay.env` and a `questions.json`. It may also be a
+  Python package, whose `pyproject.toml` pins dbxcarta by version with no
+  `[tool.uv.sources]`, when it carries a read-only local demo CLI or other
+  standalone tooling.
 - **An overlay env file**: `dbxcarta-overlay.env`, a committed, secret-free file
   that names the catalog, schema, volume, and feature flags for this data source.
   It is the single source of truth for the integration's dbxcarta config.
@@ -83,8 +84,8 @@ tables, give it a question set, and run the two jobs from your bundle.
 
 dbxcarta publishes three packages a consumer pins by version:
 
-- `dbxcarta-core`: the foundation. `StandardPreset`, the env loader, and the job
-  entry-point plumbing.
+- `dbxcarta-core`: the foundation. The readiness check and question upload, the
+  env loader, and the job entry-point plumbing.
 - `dbxcarta-spark`: `SparkIngestSettings`, `run_dbxcarta`, and the `dbxcarta` and
   `dbxcarta-ingest` console entry points.
 - `dbxcarta-client[graph]`: the Text2SQL evaluation harness, the `dbxcarta-client`
@@ -99,13 +100,11 @@ mechanism, and "Vendored wheels" below for the consumer-side steps.
 
 ## Concepts in one minute
 
-- **Preset**: the `StandardPreset` object your package exposes. `StandardPreset`
-  itself is implemented in `dbxcarta-core`, so your `preset.py` only supplies the
-  `questions.json` path; the behavior is inherited from the library. It provides
-  two hooks: `readiness()` to confirm your catalog holds data, and
-  `upload_questions()` to push your `questions.json` to the ops volume. Both run
-  locally through the `dbxcarta preset` CLI only. The cluster jobs never call the
-  preset, so it carries no config; config lives in the overlay.
+- **Operational commands**: `dbxcarta ready` confirms your catalog holds data,
+  and `dbxcarta upload-questions` pushes your `questions.json` to the ops volume.
+  Both run locally and read the selected overlay plus the adjacent
+  `questions.json` directly. There is no per-integration Python object to publish.
+  The cluster jobs never call them; config lives in the overlay.
 - **Overlay**: `dbxcarta-overlay.env`. Committed, secret-free, per-integration.
   Selected with `DBXCARTA_ENV_FILE` or `--env-file`. It holds dbxcarta-scoped
   values only: catalog, schema, volume, summary table, embedding flags, client
@@ -157,8 +156,7 @@ Its files are the reference for every step below.
 ├── scripts/refresh_dbxcarta_dist.sh  # maintainer: refresh dbxcarta-dist
 ├── scripts/run_jobs.py         # deploy + run ingest then client
 ├── src/<consumer>_dbxcarta/
-│   ├── __init__.py             # re-exports `preset`
-│   ├── preset.py               # StandardPreset(questions_file=...)
+│   ├── __init__.py             # package marker
 │   └── local_demo.py           # read-only local CLI
 └── tests/                      # non-live tests
 ```
@@ -179,24 +177,12 @@ Then change the following:
   ]
   ```
 
-- **`preset.py`** stays a one-liner. It constructs the shared `StandardPreset`
-  with the bundled question file:
+- **No Python wiring** is needed for the operational commands. `dbxcarta ready`
+  and `dbxcarta upload-questions` read the selected overlay and the adjacent
+  `questions.json` directly, so the readiness and upload behavior come from
+  `dbxcarta-core` with nothing to implement per integration. The `src/` package
+  exists only when you ship standalone tooling like the local demo.
 
-  ```python
-  from pathlib import Path
-  from dbxcarta.core.presets import StandardPreset
-
-  preset = StandardPreset(questions_file=Path(__file__).resolve().parents[2] / "questions.json")
-
-  __all__ = ["preset"]
-  ```
-
-  `StandardPreset` is defined in `dbxcarta-core`, so `readiness()` and
-  `upload_questions()` come with the library. Your `preset.py` only points it at
-  your `questions.json`. There is nothing to implement here, and nothing about
-  the preset is required by the ingest job.
-
-- **`__init__.py`** re-exports `preset`.
 - **`questions.json`**: your demo question set. Each item is an object with a
   non-empty `question_id` and `question`. Add `reference_sql` for any question
   you want graded for correctness, targeting your actual catalog and schema:
@@ -307,8 +293,8 @@ jobs do not, since they read secrets from the scope.
 
 The pipeline has two cluster jobs (ingest, then eval) plus local helpers. They do
 not share prerequisites, so it helps to see what each one actually requires before
-running anything. The preset hooks (`readiness`, `upload_questions`) are local CLI
-steps, not stages the jobs enforce.
+running anything. The `dbxcarta ready` and `dbxcarta upload-questions` commands
+are local CLI steps, not stages the jobs enforce.
 
 | Stage | Where it runs | What it needs | What it produces |
 |-------|---------------|---------------|------------------|
@@ -322,8 +308,8 @@ steps, not stages the jobs enforce.
 Two points the table makes explicit:
 
 - **Readiness is an optional preflight, not an ingest gate.** The ingest job never
-  calls the preset. Skip readiness and ingest still runs; it only tells you in
-  advance whether the catalog has data.
+  calls `dbxcarta ready`. Skip readiness and ingest still runs; it only tells you
+  in advance whether the catalog has data.
 - **Uploading questions is a prerequisite of the eval job, not of ingest.** The
   client job reads `questions.json` from the volume, so upload it before that job.
   Ingest ignores `questions.json` entirely.
@@ -353,8 +339,7 @@ Run these from the consumer subproject. Every step is idempotent.
    preflight for your own confidence; the ingest job does not require it.
 
    ```bash
-   uv run dbxcarta preset <consumer>_dbxcarta:preset --check-ready \
-     --env-file dbxcarta-overlay.env
+   uv run dbxcarta ready --env-file dbxcarta-overlay.env
    ```
 
 4. **Upload the question set.** Pushes `questions.json` to
@@ -363,8 +348,7 @@ Run these from the consumer subproject. Every step is idempotent.
    can do it any time before the client job.
 
    ```bash
-   uv run dbxcarta preset <consumer>_dbxcarta:preset --upload-questions \
-     --env-file dbxcarta-overlay.env
+   uv run dbxcarta upload-questions --env-file dbxcarta-overlay.env
    ```
 
 5. **Deploy and run the bundle.** The vendored wheels ship to the cluster as
@@ -437,9 +421,8 @@ consumer subproject; only refreshing the vendored wheels reaches into dbxcarta.
       folder.
 - [ ] `pyproject.toml` pins `dbxcarta-core`, `dbxcarta-spark`, and
       `dbxcarta-client[graph]` by version, with no `[tool.uv.sources]`.
-- [ ] `preset.py` constructs `StandardPreset` with the bundled `questions.json`.
-- [ ] `questions.json` written, with `reference_sql` targeting your catalog on
-      the gradable questions.
+- [ ] `questions.json` written beside the overlay, with `reference_sql` targeting
+      your catalog on the gradable questions.
 - [ ] Vendored wheels committed in `dbxcarta-dist/`, with `uv.toml` find-links and
       a committed `uv.lock`.
 - [ ] `dbxcarta-overlay.env` set with catalog, schema, volume, summary table,

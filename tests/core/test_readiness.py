@@ -1,8 +1,8 @@
-"""Tests for the shared StandardPreset and ReadinessReport.
+"""Tests for the shared readiness check and question upload.
 
-StandardPreset is the one preset every example uses, so the readiness rule, the
-relabeled report, the questions-file validation, and the upload destination
-check are exercised here once rather than per example.
+The readiness rule, the relabeled report, the questions-file validation, and
+the upload destination check are exercised here once rather than per example,
+because every example drives them through the same core functions.
 """
 
 from __future__ import annotations
@@ -10,13 +10,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from dbxcarta.core.presets import (
-    Preset,
-    QuestionsUploadable,
-    ReadinessCheckable,
+from dbxcarta.core.readiness import (
     ReadinessReport,
-    StandardPreset,
     _validate_questions_file,
+    check_readiness,
+    upload_questions,
 )
 
 
@@ -45,23 +43,6 @@ class _FakeWorkspaceClient:
         self.statement_execution = _FakeStatementExecution(schemas_by_catalog)
 
 
-# questions_file is never opened by the readiness, protocol, or dest-validation
-# tests below: readiness ignores it, and the dest check raises before any read.
-# _validate_questions_file is exercised directly with tmp_path fixtures.
-_QUESTIONS_PLACEHOLDER = Path("questions.json")
-
-
-def _preset() -> StandardPreset:
-    return StandardPreset(questions_file=_QUESTIONS_PLACEHOLDER)
-
-
-def test_standard_preset_satisfies_protocols() -> None:
-    preset = _preset()
-    assert isinstance(preset, Preset)
-    assert isinstance(preset, ReadinessCheckable)
-    assert isinstance(preset, QuestionsUploadable)
-
-
 # --- Readiness rule: a catalog needs a schema beyond information_schema/default
 
 
@@ -71,7 +52,7 @@ def test_readiness_not_ready_with_only_auto_schemas(
     monkeypatch.setenv("DBXCARTA_CATALOG", "cat")
     monkeypatch.delenv("DBXCARTA_CATALOGS", raising=False)
     ws = _FakeWorkspaceClient({"cat": ["information_schema", "default"]})
-    report = _preset().readiness(ws=ws, warehouse_id="wh")  # type: ignore[arg-type]
+    report = check_readiness(ws=ws, warehouse_id="wh")  # type: ignore[arg-type]
     assert not report.ok()
     assert report.missing_required == ("cat",)
     assert report.present == ()
@@ -83,7 +64,7 @@ def test_readiness_ready_with_one_data_schema(
     monkeypatch.setenv("DBXCARTA_CATALOG", "cat")
     monkeypatch.delenv("DBXCARTA_CATALOGS", raising=False)
     ws = _FakeWorkspaceClient({"cat": ["information_schema", "default", "sales"]})
-    report = _preset().readiness(ws=ws, warehouse_id="wh")  # type: ignore[arg-type]
+    report = check_readiness(ws=ws, warehouse_id="wh")  # type: ignore[arg-type]
     assert report.ok()
     assert report.present == ("cat",)
     assert report.catalog == "cat"
@@ -101,7 +82,7 @@ def test_readiness_checks_every_catalog_in_the_list(
             "gold": ["information_schema", "default"],  # nothing materialized
         }
     )
-    report = _preset().readiness(ws=ws, warehouse_id="wh")  # type: ignore[arg-type]
+    report = check_readiness(ws=ws, warehouse_id="wh")  # type: ignore[arg-type]
     assert report.present == ("silver",)
     assert report.missing_required == ("gold",)
     assert report.catalog == "silver,gold"
@@ -115,7 +96,7 @@ def test_readiness_fails_loud_without_catalog(
     monkeypatch.delenv("DBXCARTA_CATALOGS", raising=False)
     ws = _FakeWorkspaceClient({})
     with pytest.raises(RuntimeError, match="DBXCARTA_CATALOG is not set"):
-        _preset().readiness(ws=ws, warehouse_id="wh")  # type: ignore[arg-type]
+        check_readiness(ws=ws, warehouse_id="wh")  # type: ignore[arg-type]
 
 
 # --- ReadinessReport.format relabel ------------------------------------------
@@ -183,7 +164,7 @@ def test_validate_questions_file_rejects_missing_file(tmp_path: Path) -> None:
 def test_upload_requires_destination(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("DBXCARTA_CLIENT_QUESTIONS", raising=False)
     with pytest.raises(RuntimeError, match="DBXCARTA_CLIENT_QUESTIONS"):
-        _preset().upload_questions(ws=None)  # type: ignore[arg-type]
+        upload_questions(ws=None, questions_file=Path("questions.json"))  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize(
@@ -195,4 +176,4 @@ def test_upload_rejects_non_volumes_json_destination(
 ) -> None:
     monkeypatch.setenv("DBXCARTA_CLIENT_QUESTIONS", dest)
     with pytest.raises(ValueError, match="/Volumes/"):
-        _preset().upload_questions(ws=None)  # type: ignore[arg-type]
+        upload_questions(ws=None, questions_file=Path("questions.json"))  # type: ignore[arg-type]

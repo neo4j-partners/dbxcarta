@@ -2,9 +2,9 @@
 
 This directory is a standalone Python package, `dbxcarta-finance-genie-example`,
 that shows how an outside application can use dbxcarta without copying runner
-scripts. Its primary job is to own Finance Genie configuration. The CLI preset
-is a convenience wrapper around that configuration, not a requirement for using
-dbxcarta as a library.
+scripts. Its primary job is to own Finance Genie configuration. That
+configuration is the committed `dbxcarta-overlay.env` plus the bundled
+`questions.json`; the dbxcarta CLI reads both directly.
 
 ## Quick Start
 
@@ -16,14 +16,14 @@ explains a step in more detail.
 ```bash
 # Install dbxcarta into the workspace virtualenv
 uv sync
-# Install this example preset in editable mode
+# Install this example package in editable mode
 uv pip install -e examples/finance-genie/
 
 # Select the Finance Genie overlay for every dbxcarta command
 export DBXCARTA_ENV_FILE=examples/finance-genie/dbxcarta-overlay.env
 
 # Confirm each ingested catalog holds a data schema; section 2 creates them
-uv run dbxcarta preset dbxcarta_finance_genie_example:preset --check-ready
+uv run dbxcarta ready
 
 # Provision the ops plane: catalog, finance_genie_ops schema, dbxcarta-ops volume
 uv run dbxcarta-submit bootstrap
@@ -32,7 +32,7 @@ uv run dbxcarta-submit bootstrap
 ./setup_secrets.sh --profile aws-partner-rk
 
 # Upload the demo question set to the ops volume
-uv run dbxcarta preset dbxcarta_finance_genie_example:preset --upload-questions
+uv run dbxcarta upload-questions
 ```
 
 With setup in place, run the two make targets from the repo root. The `-ingest`
@@ -110,11 +110,10 @@ examples/finance-genie/
 ├── .env.sample                                            # standalone local-demo config reference
 ├── questions.json                                         # demo question fixture
 ├── src/dbxcarta_finance_genie_example/
-│   ├── __init__.py                                        # re-exports `preset`
-│   ├── preset.py                                          # module-level `preset` (shared StandardPreset)
+│   ├── __init__.py                                        # package marker
 │   └── local_demo.py                                      # optional read-only local CLI
 └── ../../../tests/examples/finance-genie/
-    ├── test_preset.py
+    ├── test_overlay.py
     └── test_local_demo.py
 ```
 
@@ -141,14 +140,14 @@ load_env_files(files)  # overlay over base .env; process env still wins
 run_dbxcarta(settings=SparkIngestSettings())
 ```
 
-The preset is the shared `StandardPreset` instance, `preset`, exposed at
-`dbxcarta_finance_genie_example:preset`. It carries no env config (that lives
-in the overlay); it provides the optional operational hooks the CLI uses:
+The CLI reads the overlay and the bundled `questions.json` directly. There is no
+per-example Python object to publish. The two operational commands are:
 
-- `readiness(ws, warehouse_id)` returns a `ReadinessReport` describing whether
-  each ingested catalog holds a data schema in Unity Catalog.
-- `upload_questions(ws)` uploads `questions.json` to the path named by
-  `DBXCARTA_CLIENT_QUESTIONS`.
+- `dbxcarta ready` prints a `ReadinessReport` describing whether each ingested
+  catalog holds a data schema in Unity Catalog. The catalog list comes from the
+  loaded overlay.
+- `dbxcarta upload-questions` uploads `questions.json`, the file beside the
+  selected overlay, to the path named by `DBXCARTA_CLIENT_QUESTIONS`.
 
 ## Template guidance for a new application package
 
@@ -159,10 +158,10 @@ To build your own application package, copy this layout and change:
    `dbxcarta-overlay.env`, the single source of truth for per-example config.
 3. The `questions.json` fixture, if you want a demo question set.
 
-`preset.py` is the same one-liner in every example: it constructs the shared
-`StandardPreset` with the bundled `questions.json`. Expose it at an import path
-like `mycorp_dbxcarta_preset:preset`, and the CLI resolves it for
-`--check-ready` and `--upload-questions`.
+No Python wiring is needed for the CLI: `dbxcarta ready` and `dbxcarta
+upload-questions` read the selected overlay and the adjacent `questions.json`
+directly, so a new application package can be just an overlay and a questions
+file. The `src/` package is only for standalone tooling like the local demo.
 
 ## Responsibility Boundary
 
@@ -176,7 +175,7 @@ Finance Genie (upstream project) owns:
   `gold_account_similarity_pairs`, `gold_fraud_ring_communities`.
 - Genie Spaces and demo validation.
 
-dbxcarta (via this preset) owns:
+dbxcarta (via this example's overlay) owns:
 
 - Unity Catalog metadata extraction from `information_schema`.
 - Table, column, value, schema, and database embeddings.
@@ -191,7 +190,7 @@ recreates it with the current schema.
 
 ## Quick iterate loop (testing dbxcarta changes)
 
-Once the one-time prerequisites are in place (steps 1–8 below: preset
+Once the one-time prerequisites are in place (steps 1–8 below: example package
 installed, ops plane bootstrapped, secrets refreshed, questions uploaded,
 upstream UC tables present), the pipeline runs in two make targets from the
 repo root —
@@ -220,12 +219,12 @@ commands the target wraps.
 
 Run these commands from the dbxcarta repo unless a step says otherwise.
 
-### 1. Install dbxcarta and the example preset
+### 1. Install dbxcarta and the example package
 
 ```bash
 # Install dbxcarta into the workspace virtualenv
 uv sync
-# Install this example preset in editable mode
+# Install this example package in editable mode
 uv pip install -e examples/finance-genie/
 ```
 
@@ -285,7 +284,7 @@ data schema beyond the auto-created `information_schema` and `default`:
 
 ```bash
 # Confirm each ingested catalog holds at least one data schema
-uv run dbxcarta preset dbxcarta_finance_genie_example:preset --check-ready
+uv run dbxcarta ready
 ```
 
 It does not check individual tables; the upstream project owns and validates
@@ -333,7 +332,7 @@ dbxcarta jobs read Neo4j credentials from the Databricks secret scope:
 
 ```bash
 # Upload questions.json to the path named by DBXCARTA_CLIENT_QUESTIONS
-uv run dbxcarta preset dbxcarta_finance_genie_example:preset --upload-questions
+uv run dbxcarta upload-questions
 ```
 
 This uploads the package's `questions.json` to the path named by
@@ -410,13 +409,13 @@ uv run --directory examples/finance-genie python -m dbxcarta_finance_genie_examp
 
 The local demo allows only `SELECT`, `WITH`, and `EXPLAIN` statements.
 
-## Preset Defaults
+## Overlay Defaults
 
-The preset targets the full `graph-enriched-schema` and enables every
+The overlay targets the full `graph-enriched-schema` and enables every
 embedding label (tables, columns, values, schemas, databases) for graph-RAG
 retrieval. dbxcarta recovers join paths from Finance Genie column names and
-comments via metadata FK inference (the Finance Genie tables are not created
-with declared foreign-key constraints). The preset disables criteria
+comments via metadata FK inference. The Finance Genie tables are not created
+with declared foreign-key constraints. The overlay disables criteria
 injection because Finance Genie inferred relationships do not carry literal
 join-predicate strings.
 

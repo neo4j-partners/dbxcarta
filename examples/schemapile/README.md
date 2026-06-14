@@ -42,8 +42,8 @@ cd ../..
 export DBXCARTA_ENV_FILE=examples/schemapile/dbxcarta-overlay.env
 
 # Confirm the schemas materialized, then upload the generated question set.
-uv run dbxcarta preset dbxcarta_schemapile_example:preset --check-ready
-uv run dbxcarta preset dbxcarta_schemapile_example:preset --upload-questions
+uv run dbxcarta ready
+uv run dbxcarta upload-questions
 ```
 
 With setup in place, run the two make targets from the repo root. The `-ingest`
@@ -64,7 +64,6 @@ examples/schemapile/
 ├── .env.sample
 ├── src/dbxcarta_schemapile_example/
 │   ├── __init__.py
-│   ├── preset.py                # module-level `preset` (shared StandardPreset)
 │   ├── config.py                # one-shot .env parser
 │   ├── slice_runner.py          # shells out to upstream slice.py
 │   ├── candidate_selector.py    # slice JSON -> candidate-table JSON (blueprint)
@@ -255,11 +254,11 @@ that selects it:
 # Select the SchemaPile overlay once for every command below.
 export DBXCARTA_ENV_FILE=examples/schemapile/dbxcarta-overlay.env
 
-# Confirm the preset resolves and the upstream schemas are materialized.
-uv run dbxcarta preset dbxcarta_schemapile_example:preset --check-ready
+# Confirm the upstream schemas are materialized.
+uv run dbxcarta ready
 
 # Upload the generated question set to the example volume.
-uv run dbxcarta preset dbxcarta_schemapile_example:preset --upload-questions
+uv run dbxcarta upload-questions
 
 # Build and submit the ingest job. publish-wheels rebuilds the wheels and
 # ships the bootstrap script (it calls upload_all internally), so no
@@ -305,7 +304,7 @@ This example is built in phases that build on top of each other:
 5. **Phase 4 (materialize)**. The shared serverless `dbxcarta-materialize`
    job, configured per example through the overlay: stages the committed
    blueprint and writes Delta tables.
-6. **Phase 5 (package wiring)**. This package; exposes the preset.
+6. **Phase 5 (package wiring)**. This package; ships the overlay and questions.
 7. **Phase 6 (end-to-end run)**. Runs the assembled example against a live
    workspace and compares evaluation arms.
 

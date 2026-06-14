@@ -1,7 +1,7 @@
 """Shared UC Volume I/O helpers used across the stages.
 
 The summary emitters (ingest, client, materialize) all write a JSON file under a
-UC Volume FUSE path, and the host-side tools (preset question upload, materialize
+UC Volume FUSE path, and the host-side tools (question upload, materialize
 blueprint staging) all push a local file to a Volume through the Files API. Both
 patterns were copy-pasted per stage; this module is their single home so the
 managed-prefix depth rule and the upload contract live in one place.

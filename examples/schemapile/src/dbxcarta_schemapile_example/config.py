@@ -1,8 +1,8 @@
 """Load SchemaPile example configuration from environment.
 
 Centralizes the `.env` reads so every entrypoint (slice runner, candidate
-selector, materializer, question generator, preset) sees the same values
-and validation errors fail loudly at one place.
+selector, materializer, question generator) sees the same values and
+validation errors fail loudly at one place.
 """
 
 from __future__ import annotations

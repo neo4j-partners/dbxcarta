@@ -127,8 +127,8 @@ the pins you test with are the pins you ship.
 ## What this does and does not prove
 
 Proven offline and on: the consumer's pins resolve, dbxcarta installs from the vendored
-`dbxcarta-dist`, and `import dbxcarta.core / .spark / .client` plus the bundled preset
-all work. This validates the published-library packaging end to end.
+`dbxcarta-dist`, and `import dbxcarta.core / .spark / .client` plus the bundled
+`questions.json` all work. This validates the published-library packaging end to end.
 
 Not covered: the GitHub Actions OIDC handshake with PyPI. That is exercised only by a
 real (Test)PyPI publish and is out of scope here by design.
@@ -139,7 +139,7 @@ real (Test)PyPI publish and is out of scope here by design.
 cd graph-on-databricks/finance-genie/dbxcarta
 uv sync                       # dbxcarta-{core,client,spark}==1.1.0 from ./dbxcarta-dist
 uv run python -c "import dbxcarta.core, dbxcarta.spark, dbxcarta.client; \
-  from finance_genie_dbxcarta import preset; print(preset.questions_file.exists())"
+  from pathlib import Path; print(Path('questions.json').exists())"
 ```
 
 The lock records each dbxcarta package with `source = { registry = "dbxcarta-dist" }`, a

@@ -20,7 +20,7 @@ A reading path from why the project exists to how it is built:
 
 Step-by-step guides for common tasks.
 
-- [tutorials/add-a-data-source.md](tutorials/add-a-data-source.md): add a new integration end to end, covering the preset, the overlay, getting data into Unity Catalog, ingest, and how to test and verify it.
+- [tutorials/add-a-data-source.md](tutorials/add-a-data-source.md): add a new integration end to end, covering the overlay, getting data into Unity Catalog, ingest, and how to test and verify it.
 
 ## Reference
 

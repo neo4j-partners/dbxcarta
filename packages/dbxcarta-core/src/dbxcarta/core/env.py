@@ -114,7 +114,7 @@ def select_overlay_path(argv: list[str] | None = None) -> Path | None:
     Pure selection for the stderr banner and runner construction: it
     does not strip argv, load files, or check existence. Existence is
     enforced downstream by :func:`resolve_env_files` (the
-    ``verify``/``preset`` loader) and by the runner's ``from_env_file``
+    ``verify``/``ready``/``upload-questions`` loader) and by the runner's ``from_env_file``
     (the submit path), so a nonexistent overlay is still a hard error
     wherever it is actually consumed. A malformed ``--env-file`` is
     swallowed here so the consuming path raises the clean error.

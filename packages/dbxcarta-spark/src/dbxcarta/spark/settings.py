@@ -41,7 +41,7 @@ class SparkIngestSettings(BaseSettings):
     dbxcarta_catalog: str
     # Comma-separated list of catalogs to ingest into one graph. Blank means
     # "ingest only dbxcarta_catalog" — the historical single-catalog behavior,
-    # so every existing preset is unaffected. When set, every listed catalog is
+    # so every existing overlay is unaffected. When set, every listed catalog is
     # extracted into the same Neo4j graph with one Database node each.
     #
     # KNOWN LIMITATION (tracked): the ops/summary/verify path still keys off

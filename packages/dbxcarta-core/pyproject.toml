@@ -1,7 +1,7 @@
 [project]
 name = "dbxcarta-core"
 version = "1.1.0"
-description = "Shared, Spark-free helpers for the dbxcarta layers (identifiers, catalogs, workspace, executor, presets, env)"
+description = "Shared, Spark-free helpers for the dbxcarta layers (identifiers, catalogs, workspace, executor, readiness, env)"
 authors = [
     { name = "Ryan Knight" },
 ]

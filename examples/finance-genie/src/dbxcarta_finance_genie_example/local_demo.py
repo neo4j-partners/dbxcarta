@@ -21,7 +21,7 @@ from dbxcarta.core.workspace import build_workspace_client
 from dotenv import load_dotenv
 
 # The bundled questions.json and the standalone .env both live at the example
-# root, two levels up from this module, the same place the dbxcarta preset reads
+# root, two levels up from this module, the same place the dbxcarta CLI reads
 # questions.json from. parents[2] resolves to examples/finance-genie/
 # (local_demo.py -> dbxcarta_finance_genie_example -> src -> finance-genie).
 _EXAMPLE_ROOT = Path(__file__).resolve().parents[2]

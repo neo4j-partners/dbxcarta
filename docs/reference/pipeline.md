@@ -385,6 +385,58 @@ The summary records useful facts:
 - How many embeddings were attempted and succeeded.
 - Whether verification passed.
 
+## The SQL Warehouse: A Side Door
+
+The Spark job does not run on the SQL warehouse, and it does not use the
+warehouse for any of its real work. Extract, transform, embeddings, value
+sampling, foreign-key discovery, and the Neo4j write all run on Spark
+compute. The warehouse is a side door used only for small metadata jobs
+around the pipeline.
+
+DBxCarta reaches the warehouse through the Databricks SQL Statement Execution
+API, not through JDBC or a Spark SQL connector. It sends one SQL statement and
+waits for the result.
+
+```text
++------------------+     statement      +------------------+
+| DBxCarta         | -----------------> | SQL warehouse    |
+| (Databricks SDK) | <----------------- | runs the SQL     |
++------------------+      result        +------------------+
+```
+
+The warehouse is used in three places, and none of them move bulk data:
+
+- **Bootstrap.** Before the job, quick DDL creates the catalog, schema, and
+  Volume if they are missing. After a teardown run, it drops them.
+- **Readiness and preflight.** A `SELECT 1` confirms the warehouse is
+  reachable. The `dbxcarta ready` command confirms each target catalog holds a
+  data schema before ingest begins.
+- **Verify.** In Step 8, the verify step samples a few rows from
+  `information_schema.columns` through the warehouse and checks that the
+  matching Neo4j nodes got the expected id and data type.
+
+```text
+                 +------------------+
+   bootstrap --> |                  |
+   readiness --> |  SQL warehouse   |
+     verify  --> |                  |
+                 +------------------+
+                  small SQL only
+                  (DDL + samples)
+```
+
+`DATABRICKS_WAREHOUSE_ID` (env var, or the `--warehouse-id` flag) configures
+which warehouse to use. It is **optional for ingest** but **required for
+bootstrap and verify**. When it is not set, the verify step skips the
+catalog-vs-graph check and records a `catalog.no_warehouse` note instead of
+failing.
+
+Why keep this separate from Spark? The SQL runner lives in `dbxcarta-core`
+and pulls in only the Databricks SDK, never Spark or Neo4j. Any package can
+call it to run a quick statement, while the heavy data movement stays on
+Spark where Catalyst can optimize it. The warehouse only ever sees small
+samples and DDL, never a catalog-scale read.
+
 ## Key Design Principles
 
 These are the rules that keep the graph clean. They were learned the hard

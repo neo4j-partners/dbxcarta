@@ -131,13 +131,14 @@ summary; this section is the precise component breakdown each layer owns.
 
 - **Core** owns identifier and path quoting, the single `catalog:layer` parsing
   rule (`resolve_catalogs`), workspace and secret access, the SQL warehouse
-  runner, the preset capability protocols and `StandardPreset`, the `.env`
-  overlay loader, and the pure table-materialize SQL builders. It pulls in only
-  the Databricks SDK, never Spark, Neo4j, or the job runner. The boundaries are
-  enforced by `tests/boundary/test_import_boundaries.py`.
+  runner, the readiness check and question upload (`check_readiness`,
+  `upload_questions`), the `.env` overlay loader, and the pure table-materialize
+  SQL builders. It pulls in only the Databricks SDK, never Spark, Neo4j, or the
+  job runner. The boundaries are enforced by
+  `tests/boundary/test_import_boundaries.py`.
 - **Spark** owns the concrete Unity Catalog ingest implementation, the graph
-  contract, verification, the Databricks validators, the preset capability
-  protocols, and the `dbxcarta` / `dbxcarta-ingest` entrypoints.
+  contract, verification, the Databricks validators, and the `dbxcarta` /
+  `dbxcarta-ingest` entrypoints.
 
 **Operator tooling**
 

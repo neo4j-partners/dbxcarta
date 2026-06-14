@@ -2,8 +2,8 @@
 
 External projects depend on the distribution that matches the capability they use. The public surfaces are:
 
-- **Core:** identifier and path helpers, the `catalog:layer` rule (`resolve_catalogs`), workspace/secret access, the SQL warehouse runner, the preset protocols and `StandardPreset`, the `.env` overlay loader, and the materialize SQL builders
-- **Spark:** `SparkIngestSettings`, `run_dbxcarta`, graph contract enums and constants, Databricks identifier/path validators, preset loading, `verify_run`, and the `dbxcarta` / `dbxcarta-ingest` wheel entrypoints
+- **Core:** identifier and path helpers, the `catalog:layer` rule (`resolve_catalogs`), workspace/secret access, the SQL warehouse runner, the readiness check and question upload (`check_readiness`, `upload_questions`), the `.env` overlay loader, and the materialize SQL builders
+- **Spark:** `SparkIngestSettings`, `run_dbxcarta`, graph contract enums and constants, Databricks identifier/path validators, `verify_run`, and the `dbxcarta` / `dbxcarta-ingest` wheel entrypoints
 - **Client:** retrieval primitives, SQL parsing and read-only guards, result comparison, `ClientSettings`, and the `dbxcarta.client.eval` harness
 - **Materialize:** the `dbxcarta-materialize` wheel entrypoint, the serverless Spark shell that runs core's materialize SQL builders
 
@@ -31,7 +31,7 @@ This repository uses a clean boundary cutover. Old top-level imports are deleted
 | `dbxcarta.client.client` | `dbxcarta.client.eval.run` |
 | `dbxcarta.entrypoints.ingest` | `dbxcarta.spark.entrypoint` |
 | `dbxcarta.entrypoints.client` | `dbxcarta.client.eval.entrypoint` |
-| `dbxcarta.presets` module file | `dbxcarta.core.presets` (protocols + `StandardPreset`) and `dbxcarta.spark.loader` (loader) |
+| `dbxcarta.presets` module file | `dbxcarta.core.readiness` (`check_readiness`, `upload_questions`); the preset object and `dbxcarta.spark.loader` are removed |
 
 ## Client evaluation harness
 

@@ -9,7 +9,7 @@ that one base so no consumer hand-writes (and drifts) a value another consumer
 also spells out.
 
 Derivation is pure, non-secret string work, so the same function serves both
-the host-side tools (bootstrap, teardown, presets) and the cluster-side
+the host-side tools (bootstrap, teardown, readiness) and the cluster-side
 Settings: the cluster derives from the compact base itself rather than relying
 on a pre-expanded parameter set. Core stays Spark- and SDK-free; the only
 dependency is :mod:`dbxcarta.core.identifiers`.

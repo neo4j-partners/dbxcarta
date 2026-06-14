@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING
 from dbxcarta.core.env import select_overlay_path
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from databricks.sdk import WorkspaceClient
     from dbxcarta.spark.settings import SparkIngestSettings
     from neo4j import Driver
@@ -15,8 +17,9 @@ def main() -> None:
     """Entry point for the dbxcarta domain commands.
 
     - `dbxcarta verify [--run-id RUN_ID]` runs graph and catalog verification.
-    - `dbxcarta preset <import-path> {--check-ready|--upload-questions}`
-      resolves the given preset and runs the requested action.
+    - `dbxcarta ready` reports whether each ingested catalog holds a data schema.
+    - `dbxcarta upload-questions [--questions PATH]` uploads the example's
+      questions file (default: `questions.json` beside the `--env-file` overlay).
 
     Job submission and wheel upload moved to the separate `dbxcarta-submit`
     command. This package no longer depends on databricks-job-runner.
@@ -29,13 +32,15 @@ def main() -> None:
     command = sys.argv[1:2]
     if command == ["verify"]:
         sys.exit(_handle_verify(sys.argv[2:]))
-    if command == ["preset"]:
-        sys.exit(_handle_preset(sys.argv[2:]))
+    if command == ["ready"]:
+        sys.exit(_handle_ready(sys.argv[2:]))
+    if command == ["upload-questions"]:
+        sys.exit(_handle_upload_questions(sys.argv[2:]))
 
     if command:
         print(f"error: unknown command {command[0]!r}", file=sys.stderr)
     print(
-        "usage: dbxcarta {verify|preset} ...\n"
+        "usage: dbxcarta {verify|ready|upload-questions} ...\n"
         "  Job submission and upload moved to the `dbxcarta-submit` command.",
         file=sys.stderr,
     )
@@ -112,64 +117,81 @@ def _handle_verify(argv: list[str]) -> int:
     return 0 if report.ok else 1
 
 
-def _handle_preset(argv: list[str]) -> int:
+def _handle_ready(argv: list[str]) -> int:
     import argparse
     import os
 
     cleaned, code = _load_env(argv)
     if cleaned is None:
         return code
-    argv = cleaned
 
-    parser = argparse.ArgumentParser(prog="dbxcarta preset")
-    parser.add_argument("spec", help="Preset import spec in 'package.module:attr' form.")
-    actions = parser.add_mutually_exclusive_group(required=True)
-    actions.add_argument("--check-ready", action="store_true")
-    actions.add_argument("--upload-questions", action="store_true")
+    parser = argparse.ArgumentParser(prog="dbxcarta ready")
     parser.add_argument("--warehouse-id", default="")
     parser.add_argument("--strict-optional", action="store_true")
-    args = parser.parse_args(argv)
+    args = parser.parse_args(cleaned)
 
-    from dbxcarta.core.presets import (
-        QuestionsUploadable,
-        ReadinessCheckable,
-    )
-    from dbxcarta.spark.loader import load_preset
+    from dbxcarta.core.readiness import check_readiness
 
-    try:
-        preset = load_preset(args.spec)
-    except (ValueError, ImportError, AttributeError, TypeError) as exc:
-        print(f"error: {exc}", file=sys.stderr)
+    warehouse_id = args.warehouse_id or os.environ.get("DATABRICKS_WAREHOUSE_ID", "")
+    if not warehouse_id:
+        print("error: DATABRICKS_WAREHOUSE_ID is required for ready", file=sys.stderr)
         return 2
+    report = check_readiness(_build_workspace_client(), warehouse_id)
+    print(report.format(strict_optional=args.strict_optional))
+    return 0 if report.ok(strict_optional=args.strict_optional) else 1
 
-    if args.check_ready:
-        if not isinstance(preset, ReadinessCheckable):
-            print(f"error: preset {args.spec!r} does not implement readiness()", file=sys.stderr)
-            return 2
-        warehouse_id = args.warehouse_id or os.environ.get("DATABRICKS_WAREHOUSE_ID", "")
-        if not warehouse_id:
-            print("error: DATABRICKS_WAREHOUSE_ID is required for --check-ready", file=sys.stderr)
-            return 2
-        ws = _build_workspace_client()
-        report = preset.readiness(ws, warehouse_id)
-        print(report.format(strict_optional=args.strict_optional))
-        return 0 if report.ok(strict_optional=args.strict_optional) else 1
 
-    if args.upload_questions:
-        if not isinstance(preset, QuestionsUploadable):
+def _handle_upload_questions(argv: list[str]) -> int:
+    import argparse
+
+    cleaned, code = _load_env(argv)
+    if cleaned is None:
+        return code
+
+    parser = argparse.ArgumentParser(prog="dbxcarta upload-questions")
+    parser.add_argument(
+        "--questions",
+        default="",
+        help="Path to questions.json (default: beside the --env-file overlay).",
+    )
+    args = parser.parse_args(cleaned)
+
+    from dbxcarta.core.readiness import upload_questions
+
+    questions_file = _resolve_questions_file(args.questions)
+    if questions_file is None:
+        return 2
+    upload_questions(_build_workspace_client(), questions_file)
+    return 0
+
+
+def _resolve_questions_file(override: str) -> Path | None:
+    """Resolve the questions file from ``--questions`` or beside the overlay.
+
+    Without ``--questions``, the file is ``questions.json`` in the same
+    directory as the selected ``--env-file`` overlay. Returns ``None`` after
+    printing an error when no path can be resolved or the file is missing.
+    """
+    from pathlib import Path
+
+    from dbxcarta.core.env import select_overlay_path
+
+    if override:
+        path = Path(override)
+    else:
+        overlay = select_overlay_path()
+        if overlay is None:
             print(
-                f"error: preset {args.spec!r} does not implement upload_questions()",
+                "error: no --questions given and no --env-file overlay selected"
+                " to locate questions.json",
                 file=sys.stderr,
             )
-            return 2
-        ws = _build_workspace_client()
-        preset.upload_questions(ws)
-        return 0
-
-    # Unreachable: the actions group is mutually exclusive and required,
-    # so exactly one branch above returns. Kept to satisfy the int return
-    # contract, since mypy cannot prove the argparse group is exhaustive.
-    return 2
+            return None
+        path = overlay.parent / "questions.json"
+    if not path.is_file():
+        print(f"error: questions file not found at {path}", file=sys.stderr)
+        return None
+    return path
 
 
 def _build_workspace_client() -> WorkspaceClient:

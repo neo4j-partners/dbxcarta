@@ -31,9 +31,9 @@ uv run dbxcarta-submit materialize --env-file examples/dense-schema/dbxcarta-ove
 # Point every dbxcarta command at the dense-schema overlay
 export DBXCARTA_ENV_FILE=examples/dense-schema/dbxcarta-overlay.env
 # Confirm the dense_500 schema and its tables are materialized
-uv run dbxcarta preset dbxcarta_dense_schema_example:preset --check-ready
+uv run dbxcarta ready
 # Upload the matching question set to the ops volume
-uv run dbxcarta preset dbxcarta_dense_schema_example:preset --upload-questions
+uv run dbxcarta upload-questions
 ```
 
 With setup in place, run the two make targets from the repo root. The `-ingest`
@@ -58,7 +58,6 @@ examples/dense-schema/
 ├── blueprint/                  # committed candidate JSON (dense_500)
 └── src/dbxcarta_dense_schema_example/
     ├── generator.py
-    ├── preset.py
     └── question_generator.py
 ```
 
@@ -139,13 +138,13 @@ the other examples:
 uv run dbxcarta-submit teardown --env-file examples/dense-schema/dbxcarta-overlay.env --yes-i-mean-it
 ```
 
-Then use the preset with the normal dbxcarta operational CLI:
+Then run the normal dbxcarta operational CLI against the selected overlay:
 
 ```bash
 # Confirm the dense_500 schema and its tables are materialized
-uv run dbxcarta preset dbxcarta_dense_schema_example:preset --check-ready
+uv run dbxcarta ready
 # Upload the question set to the ops volume
-uv run dbxcarta preset dbxcarta_dense_schema_example:preset --upload-questions
+uv run dbxcarta upload-questions
 # Submit the ingest job to build the semantic layer
 uv run dbxcarta-submit submit-entrypoint ingest
 # Submit the client evaluation job

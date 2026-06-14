@@ -1,22 +1,19 @@
-"""Preset protocols and the shared StandardPreset for dbxcarta integrations.
+"""Readiness check and question upload for dbxcarta integrations.
 
-A preset is a Python object a downstream example publishes in its own package
-and passes (by import path) to the operational dbxcarta CLI. Per-example
-dbxcarta config lives in the committed ``examples/<name>/dbxcarta-overlay.env``,
-not in the preset; the preset exists only to provide the optional capabilities
-below (readiness checks, question upload) without making the Spark package
-depend on the client package.
-
-Every example uses the one concrete :class:`StandardPreset`, constructed with
-its bundled ``questions.json``. The readiness rule and the upload behavior are
-identical across examples, so they live here once.
+Both operations are driven entirely by the per-example
+``examples/<name>/dbxcarta-overlay.env`` the CLI has already loaded plus the
+example's bundled ``questions.json``; there is no per-example Python object to
+publish. :func:`check_readiness` reads the catalog list from the environment,
+and :func:`upload_questions` reads the destination from the environment and
+takes the questions file as an argument. The CLI (``dbxcarta ready`` /
+``dbxcarta upload-questions``) calls these directly.
 """
 
 from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING
 
 from dbxcarta.core.catalogs import resolve_catalogs
 from dbxcarta.core.identifiers import quote_identifier
@@ -33,19 +30,9 @@ if TYPE_CHECKING:
 _NON_DATA_SCHEMAS = frozenset({"information_schema", "default"})
 
 
-@runtime_checkable
-class Preset(Protocol):
-    """Marker protocol for a dbxcarta preset.
-
-    There is no required method: a preset's behavior comes from the optional
-    capability protocols below (:class:`ReadinessCheckable`,
-    :class:`QuestionsUploadable`).
-    """
-
-
 @dataclass(frozen=True)
 class ReadinessReport:
-    """Result of a preset's readiness check.
+    """Result of a readiness check.
 
     ``present`` and ``missing_required`` hold catalog names: a catalog is
     present when it holds a data schema and missing when it does not.
@@ -90,77 +77,51 @@ class ReadinessReport:
         return "\n".join(lines)
 
 
-@runtime_checkable
-class ReadinessCheckable(Protocol):
-    """Optional capability: a preset can report on the UC data it expects."""
+def check_readiness(ws: WorkspaceClient, warehouse_id: str) -> ReadinessReport:
+    """Report whether each ingested catalog holds a data schema.
 
-    def readiness(self, ws: WorkspaceClient, warehouse_id: str) -> ReadinessReport: ...
-
-
-@runtime_checkable
-class QuestionsUploadable(Protocol):
-    """Optional capability: a preset can ship and upload a demo question set."""
-
-    def upload_questions(self, ws: WorkspaceClient) -> None: ...
-
-
-@dataclass(frozen=True)
-class StandardPreset:
-    """The one preset every dbxcarta example uses.
-
-    Behavior only: the per-example dbxcarta config lives in the committed
-    dbxcarta-overlay.env, and the per-example data is the bundled questions
-    file. Readiness and upload read the catalog list and destination from the
-    environment the CLI has already loaded, so the preset holds no catalog,
-    schema, or table config that could drift from the overlay.
+    Resolves the catalog list from DBXCARTA_CATALOG and DBXCARTA_CATALOGS
+    through the same parser the pipeline uses, then checks each catalog for a
+    schema other than the UC-auto-created information_schema and default. A
+    catalog holding only those two has nothing materialized and is not ready.
+    Fails loud when DBXCARTA_CATALOG is unset, the same way an ingest run would.
     """
-
-    questions_file: Path
-
-    def readiness(self, ws: WorkspaceClient, warehouse_id: str) -> ReadinessReport:
-        """Report whether each ingested catalog holds a data schema.
-
-        Resolves the catalog list from DBXCARTA_CATALOG and DBXCARTA_CATALOGS
-        through the same parser the pipeline uses, then checks each catalog for
-        a schema other than the UC-auto-created information_schema and default.
-        A catalog holding only those two has nothing materialized and is not
-        ready. Fails loud when DBXCARTA_CATALOG is unset, the same way an ingest
-        run would.
-        """
-        catalog = os.environ.get("DBXCARTA_CATALOG", "").strip()
-        if not catalog:
-            raise RuntimeError(
-                "DBXCARTA_CATALOG is not set; cannot resolve the catalogs to"
-                " check. Select an integration overlay with --env-file."
-            )
-        catalogs = resolve_catalogs(catalog, os.environ.get("DBXCARTA_CATALOGS", ""))
-        present: list[str] = []
-        missing: list[str] = []
-        for cat in catalogs:
-            if _has_data_schema(ws, warehouse_id, cat):
-                present.append(cat)
-            else:
-                missing.append(cat)
-        return ReadinessReport(
-            catalog=",".join(catalogs),
-            schema="",
-            present=tuple(present),
-            missing_required=tuple(missing),
-            missing_optional=(),
+    catalog = os.environ.get("DBXCARTA_CATALOG", "").strip()
+    if not catalog:
+        raise RuntimeError(
+            "DBXCARTA_CATALOG is not set; cannot resolve the catalogs to"
+            " check. Select an integration overlay with --env-file."
         )
+    catalogs = resolve_catalogs(catalog, os.environ.get("DBXCARTA_CATALOGS", ""))
+    present: list[str] = []
+    missing: list[str] = []
+    for cat in catalogs:
+        if _has_data_schema(ws, warehouse_id, cat):
+            present.append(cat)
+        else:
+            missing.append(cat)
+    return ReadinessReport(
+        catalog=",".join(catalogs),
+        schema="",
+        present=tuple(present),
+        missing_required=tuple(missing),
+        missing_optional=(),
+    )
 
-    def upload_questions(self, ws: WorkspaceClient) -> None:
-        dest = os.environ.get("DBXCARTA_CLIENT_QUESTIONS", "")
-        if not dest:
-            raise RuntimeError(
-                "DBXCARTA_CLIENT_QUESTIONS is not set; cannot determine upload destination."
-            )
-        if not dest.startswith("/Volumes/") or not dest.endswith(".json"):
-            raise ValueError(
-                f"DBXCARTA_CLIENT_QUESTIONS must be a /Volumes/... .json path, got {dest!r}"
-            )
-        _validate_questions_file(self.questions_file)
-        upload_file_to_volume(ws, self.questions_file, dest)
+
+def upload_questions(ws: WorkspaceClient, questions_file: Path) -> None:
+    """Validate and upload *questions_file* to the env-configured destination."""
+    dest = os.environ.get("DBXCARTA_CLIENT_QUESTIONS", "")
+    if not dest:
+        raise RuntimeError(
+            "DBXCARTA_CLIENT_QUESTIONS is not set; cannot determine upload destination."
+        )
+    if not dest.startswith("/Volumes/") or not dest.endswith(".json"):
+        raise ValueError(
+            f"DBXCARTA_CLIENT_QUESTIONS must be a /Volumes/... .json path, got {dest!r}"
+        )
+    _validate_questions_file(questions_file)
+    upload_file_to_volume(ws, questions_file, dest)
 
 
 def _has_data_schema(
