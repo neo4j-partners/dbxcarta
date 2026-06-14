@@ -1,13 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
 
-from dbxcarta.spark.settings import SparkIngestSettings
 from dotenv import dotenv_values
-
-if TYPE_CHECKING:
-    import pytest
 
 # The committed overlay is the single source of per-example dbxcarta config.
 _OVERLAY = (
@@ -15,38 +10,49 @@ _OVERLAY = (
 )
 
 
+def _overlay_env() -> dict[str, str]:
+    return {k: v for k, v in dotenv_values(_OVERLAY).items() if v is not None}
+
+
 def test_questions_file_bundled_at_example_root() -> None:
     questions = _OVERLAY.parent / "questions.json"
     assert questions.is_file()
 
 
-def test_overlay_builds_valid_settings(monkeypatch: pytest.MonkeyPatch) -> None:
-    for key, value in dotenv_values(_OVERLAY).items():
-        if value is not None:
-            monkeypatch.setenv(key, value)
-    settings = SparkIngestSettings()
-    assert settings.databricks_secret_scope == "dbxcarta-neo4j-finance-genie"
-    assert settings.dbxcarta_catalog == "graph-enriched-finance-silver"
-    assert settings.dbxcarta_schemas == "graph-enriched-schema"
-    # The layer rides on the DBXCARTA_CATALOGS entries; resolved_catalogs()
-    # strips the suffix and layer_map() reads it from the same list.
-    assert settings.resolved_catalogs() == [
-        "graph-enriched-finance-silver",
-        "graph-enriched-finance-gold",
-    ]
-    assert settings.layer_map() == {
-        "graph-enriched-finance-silver": "silver",
-        "graph-enriched-finance-gold": "gold",
-    }
+def test_overlay_carries_neocarta_ingest_contract() -> None:
+    """The overlay feeds neocarta's ingest wheel through NEOCARTA_DATABRICKS_* keys.
+
+    The connector ships as a staged wheel rather than a dbxcarta dependency, so
+    its SparkIngestSettings is not importable here. This asserts the committed
+    overlay carries neocarta's env contract with the expected raw values; the
+    connector's own tests cover parsing those values into settings.
+    """
+    env = _overlay_env()
+    assert env["NEOCARTA_DATABRICKS_SECRET_SCOPE"] == "dbxcarta-neo4j-finance-genie"
+    assert env["NEOCARTA_DATABRICKS_CATALOG"] == "graph-enriched-finance-silver"
+    # Each entry is catalog or catalog:layer; the layer rides on the catalog list.
+    assert env["NEOCARTA_DATABRICKS_CATALOGS"] == (
+        "graph-enriched-finance-silver:silver,graph-enriched-finance-gold:gold"
+    )
+    assert env["NEOCARTA_DATABRICKS_SCHEMAS"] == "graph-enriched-schema"
+    # Inline embedding mode: every per-label flag on, with a required staging volume.
+    for label in ("TABLES", "COLUMNS", "SCHEMAS", "DATABASES"):
+        assert env[f"NEOCARTA_DATABRICKS_INCLUDE_EMBEDDINGS_{label}"] == "true"
+    assert env["NEOCARTA_DATABRICKS_EMBEDDING_STAGING_VOLUME"].startswith("/Volumes/")
 
 
 def test_overlay_pins_known_keys() -> None:
-    env = dotenv_values(_OVERLAY)
+    env = _overlay_env()
     assert env["DBXCARTA_INJECT_CRITERIA"] == "false"
     assert env["DBXCARTA_CLIENT_ARMS"] == "no_context,schema_dump,graph_rag"
     assert env["DBXCARTA_CLIENT_QUESTIONS"].endswith("/dbxcarta/questions.json")
-    # The layer is folded into DBXCARTA_CATALOGS; the separate map is gone.
+    # The layer is folded into the catalog lists; the separate map is gone.
     assert "DBXCARTA_LAYER_MAP" not in env
+    # The old spark-ingest keys are retired now the ingest runs the neocarta wheel.
+    assert "DBXCARTA_SCHEMAS" not in env
+    assert "DBXCARTA_SUMMARY_TABLE" not in env
+    assert "DBXCARTA_INCLUDE_EMBEDDINGS_VALUES" not in env
+    # The operator/client catalog key stays on its dbxcarta name.
     assert env["DBXCARTA_CATALOGS"] == (
         "graph-enriched-finance-silver:silver,graph-enriched-finance-gold:gold"
     )

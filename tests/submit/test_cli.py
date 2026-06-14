@@ -50,11 +50,13 @@ def test_submit_ingest_builds_bootstrap_with_probe_and_closure(
 
     assert len(stub.submitted) == 1
     bootstrap, kwargs = stub.submitted[0]
-    assert bootstrap.wheel_package == "dbxcarta-spark"
-    assert bootstrap.console_script == "dbxcarta-ingest"
+    # Ingest now runs the neocarta connector wheel, resolved by neocarta's own
+    # console-script name; the stable Volume filename follows the package name.
+    assert bootstrap.wheel_package == "neocarta"
+    assert bootstrap.console_script == "neocarta-databricks-ingest"
     assert bootstrap.jvm_probe_class == cli._INGEST_JVM_PROBE_CLASS
     assert bootstrap.pinned_closure == list(cli._INGEST_PINNED_CLOSURE)
-    assert bootstrap.wheel_volume_path.endswith("dbxcarta_spark-stable.whl")
+    assert bootstrap.wheel_volume_path.endswith("neocarta-stable.whl")
     assert kwargs["run_name_suffix"] == "ingest"
 
 

@@ -22,6 +22,17 @@ from dotenv import dotenv_values
 _EXAMPLES_DIR = Path(__file__).resolve().parents[2] / "examples"
 _OVERLAYS = ["dense-schema", "schemapile", "finance-genie"]
 
+# Frozen golden run-summary table per example. This value is no longer spelled
+# out in the overlays (neocarta has no summary-table field, so the key was
+# retired); the core resolver derives it, and these are the exact strings the
+# overlays held before the key was removed. Pinned here, char for char, so a
+# drift in derive_ops_config still fails loudly.
+_GOLDEN_SUMMARY_TABLE = {
+    "dense-schema": "dbxcarta-catalog.dense-ops.dbxcarta_run_summary",
+    "schemapile": "dbxcarta-catalog.schemapile_ops.dbxcarta_run_summary",
+    "finance-genie": "dbxcarta-catalog.finance_genie_ops.dbxcarta_run_summary",
+}
+
 
 def _overlay(example: str) -> dict[str, str]:
     path = _EXAMPLES_DIR / example / "dbxcarta-overlay.env"
@@ -39,7 +50,7 @@ def test_resolver_reproduces_committed_overlay(example: str) -> None:
     cfg = derive_ops_config(volume_path, questions_filename=questions_filename)
 
     assert cfg.summary_volume == env["DBXCARTA_SUMMARY_VOLUME"]
-    assert cfg.summary_table == env["DBXCARTA_SUMMARY_TABLE"]
+    assert cfg.summary_table == _GOLDEN_SUMMARY_TABLE[example]
     assert cfg.client_questions == env["DBXCARTA_CLIENT_QUESTIONS"]
 
 

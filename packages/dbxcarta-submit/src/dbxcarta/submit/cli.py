@@ -19,14 +19,21 @@ from dbxcarta.core.env import select_overlay_path
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+    from databricks.sdk import WorkspaceClient
+
+# Ingest now runs neocarta's Databricks connector: the wheel is the neocarta
+# distribution (staged from a local build, see _handle_publish_wheels) and the
+# bootstrap resolves its ingest entry by the console-script name neocarta
+# registers, `neocarta-databricks-ingest` -> run_ingest. client and materialize
+# are still dbxcarta's own wheels.
 _ENTRYPOINT_WHEEL_PACKAGE: dict[str, str] = {
-    "ingest": "dbxcarta-spark",
+    "ingest": "neocarta",
     "client": "dbxcarta-client",
     "materialize": "dbxcarta-materialize",
 }
 
 _ENTRYPOINT_CONSOLE_SCRIPT: dict[str, str] = {
-    "ingest": "dbxcarta-ingest",
+    "ingest": "neocarta-databricks-ingest",
     "client": "dbxcarta-client",
     "materialize": "dbxcarta-materialize",
 }
@@ -48,8 +55,21 @@ _DBR_PROVIDED_PACKAGES: frozenset[str] = frozenset({"pyspark", "py4j", "databric
 # above. The cluster Python/platform must have matching binary wheels
 # (notably ``pydantic-core``); that is validated on the warm cluster in
 # Phase V3.
+# Ingest runs the neocarta connector wheel. Its tested runtime closure on the
+# Databricks ingest path is neo4j + pydantic/pydantic-settings (the env-var
+# settings boundary) + python-dotenv, plus their transitives. Deliberately
+# absent:
+#   - databricks-job-runner: the old dbxcarta-spark entry point called the
+#     runner's inject_params(); neocarta's run_ingest folds the KEY=VALUE argv
+#     into os.environ itself (_inject_cli_params), so the runner is not imported
+#     at runtime on this path.
+#   - pyspark / databricks-sdk: DBR-provided (see _DBR_PROVIDED_PACKAGES). The
+#     connector reaches the SDK only via databricks.sdk.runtime.dbutils, which
+#     is the cluster-injected runtime; pinning a copy would shadow it.
+#   - pandas: not imported anywhere on the neocarta databricks-connector path
+#     (only its BigQuery/Dataplex/CSV connectors use pandas), so it is not on
+#     this closure even though it is in neocarta's base dependencies.
 _INGEST_PINNED_CLOSURE: tuple[str, ...] = (
-    "databricks-job-runner==0.6.2",
     "neo4j==6.1.0",
     "pytz==2026.1.post1",
     "pydantic==2.13.3",
@@ -103,7 +123,6 @@ _ENTRYPOINT_PINNED_CLOSURE: dict[str, tuple[str, ...]] = {
 # at build time instead (see ``_assert_wheel_bundles_core``).
 _ENTRYPOINT_SMOKE_IMPORTS: dict[str, tuple[str, ...]] = {
     "ingest": (
-        "databricks_job_runner",
         "neo4j",
         "pydantic",
         "pydantic_core",
@@ -260,11 +279,12 @@ def _print_help() -> None:
         runner.main(["--help"])
 
 
-# The entrypoint wheels the runner installs with --no-deps. Each must
+# The dbxcarta entrypoint wheels the runner installs with --no-deps. Each must
 # physically carry ``dbxcarta/core`` because the bootstrap installs a single
-# application wheel by name and has no slot for a separate core wheel.
+# application wheel by name and has no slot for a separate core wheel. The
+# ingest wheel is no longer here: it is the neocarta connector wheel, which
+# carries its own modules and never needs dbxcarta/core bundled in.
 _CORE_BUNDLE_PACKAGES: tuple[str, ...] = (
-    "dbxcarta-spark",
     "dbxcarta-client",
     "dbxcarta-materialize",
 )
@@ -332,32 +352,103 @@ def _assert_wheel_bundles_core(wheel_path: Path) -> None:
         )
 
 
+def _publish_prebuilt_wheel(
+    ws: WorkspaceClient,
+    wheel_volume_dir: str,
+    source_dir: Path,
+    wheel_package: str,
+) -> str:
+    """Copy a prebuilt wheel from a local folder onto the fixed Volume path.
+
+    Unlike ``publish_wheel_stable`` (which builds from this project's ``dist/``),
+    the neocarta connector wheel is built in its own project, so the operator
+    points ``NEOCARTA_WHEEL_SOURCE`` at neocarta's local build folder and this
+    copies the newest matching wheel to ``{volume}/{stable_wheel_name(pkg)}``
+    with a plain overwrite PUT — the same fixed destination the bootstrap
+    resolves, so no version lookup is needed. When neocarta later publishes to a
+    package index, only the source setting changes; this seam stays put.
+    """
+    from databricks.sdk.errors import ResourceAlreadyExists
+    from databricks_job_runner._paths import ensure_volumes_prefix
+    from databricks_job_runner.errors import RunnerError
+    from databricks_job_runner.upload import find_latest_wheel, stable_wheel_name
+
+    whl = find_latest_wheel(source_dir, wheel_package)
+    if whl is None:
+        raise RunnerError(
+            f"no {wheel_package} wheel found in {source_dir}; build it first "
+            "(uv build --wheel in the neocarta project) and point "
+            "NEOCARTA_WHEEL_SOURCE at its dist/ folder"
+        )
+
+    volume_path = ensure_volumes_prefix(wheel_volume_dir)
+    dest = f"{volume_path}/{stable_wheel_name(wheel_package)}"
+    with contextlib.suppress(ResourceAlreadyExists):
+        ws.files.create_directory(volume_path)
+
+    print(f"Uploading: {whl.name} -> {dest}")
+    with whl.open("rb") as fh:
+        ws.files.upload(file_path=dest, contents=fh, overwrite=True)
+    print("  Done.")
+    return dest
+
+
 def _handle_publish_wheels(argv: list[str]) -> int:
     import argparse
 
     from databricks_job_runner.errors import RunnerError
     from databricks_job_runner.upload import find_latest_wheel, publish_wheel_stable
+    from dbxcarta.core.env import EnvFileError, load_env_files, resolve_env_files
+
+    # Load base .env + overlay so NEOCARTA_WHEEL_SOURCE (a local operator
+    # setting, machine-specific, never forwarded to the cluster) resolves.
+    try:
+        files, cleaned_argv = resolve_env_files(argv)
+    except EnvFileError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    load_env_files(files)
 
     parser = argparse.ArgumentParser(
         prog="dbxcarta-submit publish-wheels",
         description=(
-            "Publish a stable wheel for each submit-entrypoint package "
-            "(ingest and client) to the fixed Volume path, then ship the "
-            "runner bootstrap script."
+            "Stage the prebuilt neocarta ingest wheel and build+publish the "
+            "dbxcarta client and materialize wheels to the fixed Volume path, "
+            "then ship the runner bootstrap script."
         ),
     )
-    parser.parse_args(argv)  # no arguments; errors on anything extra
+    parser.parse_args(cleaned_argv)  # no arguments; errors on anything extra
 
-    # Publish a stable wheel for every submit-entrypoint package so both
-    # `submit-entrypoint ingest` and `submit-entrypoint client` resolve
-    # their wheel from the fixed Volume path. `upload_all` then ships the
-    # runner bootstrap script the SparkPythonTask runs.
+    # The ingest wheel is the neocarta connector wheel, built in neocarta's own
+    # project. NEOCARTA_WHEEL_SOURCE points at that local build folder for now;
+    # later it becomes a package index plus a version and only this setting
+    # changes.
+    neocarta_package = _ENTRYPOINT_WHEEL_PACKAGE["ingest"]
+    source_value = os.environ.get("NEOCARTA_WHEEL_SOURCE", "").strip()
+    if not source_value:
+        print(
+            "error: NEOCARTA_WHEEL_SOURCE is not set; point it at the neocarta "
+            "project's local wheel build folder (its dist/). Set it in the base "
+            ".env or export it before running.",
+            file=sys.stderr,
+        )
+        return 2
+    source_dir = Path(source_value).expanduser()
+    if not source_dir.is_dir():
+        print(f"error: NEOCARTA_WHEEL_SOURCE {source_dir} is not a directory.", file=sys.stderr)
+        return 2
+
     try:
-        # Bundle the core source into each entrypoint package so the built
-        # wheels physically carry dbxcarta/core; the runner bootstrap installs
-        # them with --no-deps and cannot pull a separate core wheel.
+        # Stage neocarta's prebuilt connector wheel. It carries its own modules,
+        # so there is no core bundling and no _assert_wheel_bundles_core here.
+        _publish_prebuilt_wheel(runner.ws, runner.wheel_volume_dir, source_dir, neocarta_package)
+
+        # Build+publish the dbxcarta entrypoint wheels (client, materialize),
+        # bundling dbxcarta/core into each so the --no-deps bootstrap install
+        # carries it. `upload_all` then ships the runner bootstrap script the
+        # SparkPythonTask runs.
         with _core_bundled_into(runner.project_dir):
-            for wheel_package in dict.fromkeys(_ENTRYPOINT_WHEEL_PACKAGE.values()):
+            for wheel_package in _CORE_BUNDLE_PACKAGES:
                 publish_wheel_stable(
                     runner.ws,
                     runner.project_dir,
