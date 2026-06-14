@@ -42,8 +42,8 @@ Then edit, in order of importance:
    below. Keep it secret-free.
 2. **`.env`** (copy from `.env.sample`): your `DATABRICKS_PROFILE`,
    `DATABRICKS_WAREHOUSE_ID`, `DATABRICKS_CLUSTER_ID`, and the `NEO4J_*` values
-   for local tooling. This file also carries its own copy of the catalog values
-   for the local demo, so match them to the overlay.
+   for the local client. Catalog and feature config come from the overlay, not
+   here, so this file carries no catalog copy.
 3. **`questions.json`**: your question set, with `reference_sql` retargeted to
    your catalog on the gradable questions.
 
@@ -61,10 +61,10 @@ names. The rename is the only reason to touch `databricks.yml` at all.
 A consumer subproject has four moving parts:
 
 - **A consumer subproject**: a small folder (for example `<consumer>/dbxcarta/`)
-  that ships a `dbxcarta-overlay.env` and a `questions.json`. It may also be a
-  Python package, whose `pyproject.toml` pins dbxcarta by version with no
-  `[tool.uv.sources]`, when it carries a read-only local demo CLI or other
-  standalone tooling.
+  that ships a `dbxcarta-overlay.env`, a secret-only `.env`, and a
+  `questions.json`. It may also be a Python package, whose `pyproject.toml` pins
+  dbxcarta by version with no `[tool.uv.sources]`, when it carries its own
+  standalone tooling or tests.
 - **An overlay env file**: `dbxcarta-overlay.env`, a committed, secret-free file
   that names the catalog, schema, volume, and feature flags for this data source.
   It is the single source of truth for the integration's dbxcarta config.
@@ -160,16 +160,13 @@ Its files are the reference for every step below.
 ├── pyproject.toml              # pinned dbxcarta deps, no source overrides
 ├── databricks.yml              # ingest job (consumer-owned DAB, config-free)
 ├── dbxcarta-overlay.env        # committed, secret-free dbxcarta config (single source)
-├── .env.sample                 # standalone local-demo config (copy to .env)
+├── .env.sample                 # secret-only NEO4J_* template (copy to .env)
 ├── setup_secrets.sh            # provision the Neo4j secret scope from the overlay + .env
 ├── questions.json              # eval fixture for your tables
 ├── uv.toml                     # committed find-links to ./dbxcarta-dist
 ├── dbxcarta-dist/              # vendored dbxcarta wheels (committed)
 ├── scripts/refresh_dbxcarta_dist.sh  # maintainer: refresh dbxcarta-dist
 ├── scripts/run_jobs.py         # deploy + run ingest then client
-├── src/<consumer>_dbxcarta/
-│   ├── __init__.py             # package marker
-│   └── local_demo.py           # read-only local CLI
 └── tests/                      # non-live tests
 ```
 
@@ -189,11 +186,11 @@ Then change the following:
   ]
   ```
 
-- **No Python wiring** is needed for the operational commands. `dbxcarta ready`
-  and the local `dbxcarta-client` read the selected overlay and the adjacent
-  `questions.json` directly, so the readiness check comes from `dbxcarta-core`
-  with nothing to implement per integration. The `src/` package exists only when
-  you ship standalone tooling like the local demo.
+- **No Python wiring** is needed. `dbxcarta ready` and the local
+  `dbxcarta-client` read the selected overlay and the adjacent `questions.json`
+  directly, so the readiness check and the evaluation come from the published
+  dbxcarta packages with nothing to implement per integration. An integration is
+  just an overlay, a secret-only `.env`, and a questions file.
 
 - **`questions.json`**: your demo question set. Each item is an object with a
   non-empty `question_id` and `question`. Add `reference_sql` for any question
@@ -210,9 +207,10 @@ Then change the following:
   ]
   ```
 
-- **`local_demo.py`**: the read-only CLI. It answers one question with graph
-  context locally, with no Databricks job, and allows only `SELECT`, `WITH`, and
-  `EXPLAIN`. Keep its consumer-root anchor pointed at your `questions.json`.
+- **Interactive exploration**: there is no separate demo CLI to ship. To answer
+  a single question with graph context locally, run `dbxcarta-client` against a
+  `questions.json` containing just that question; it generates and executes the
+  SQL and prints the result with no Databricks job.
 
 ### Vendored wheels
 
@@ -403,14 +401,14 @@ it benchmarks `questions.json` across the configured arms with no cluster.
 
 ## Part 5: Test and verify
 
-- **Run the local demo.** It needs the standalone `.env` and a built semantic
-  layer for the `ask` subcommand, but `questions` and a read-only `sql` query
-  work against the catalog alone.
+- **Run the client locally.** Once the semantic layer is built, `dbxcarta-client`
+  benchmarks your `questions.json` across the configured arms with no cluster. It
+  reads the overlay and base `.env`, plus the `NEO4J_*` keys from the standalone
+  `.env`. To explore a single question interactively, point it at a one-question
+  `questions.json`.
 
   ```bash
-  uv run python -m <consumer>_dbxcarta.local_demo questions
-  uv run python -m <consumer>_dbxcarta.local_demo preflight
-  uv run python -m <consumer>_dbxcarta.local_demo ask --question-id fg_q01 --show-context
+  DBXCARTA_ENV_FILE=<consumer>/dbxcarta/dbxcarta-overlay.env uv run dbxcarta-client
   ```
 
 - **Read the client scores.** The local client prints per-arm metrics (attempted,
@@ -426,7 +424,7 @@ it benchmarks `questions.json` across the configured arms with no cluster.
   uv run pytest
   ```
 
-The local demo and the non-live tests run with only `uv sync`. The ingest job
+The non-live tests run with only `uv sync`. The ingest job
 additionally requires the upstream catalog populated, the secret scope
 provisioned, and a preprovisioned cluster and warehouse; the local client run
 needs the built semantic layer and the chat and embedding endpoints. They cannot

@@ -1,10 +1,11 @@
 # dbxcarta Finance Genie Example
 
-This directory is a standalone Python package, `dbxcarta-finance-genie-example`,
-that shows how an outside application can use dbxcarta without copying runner
-scripts. Its primary job is to own Finance Genie configuration. That
-configuration is the committed `dbxcarta-overlay.env` plus the bundled
-`questions.json`; the dbxcarta CLI reads both directly.
+This directory shows how an outside application configures dbxcarta without
+copying runner scripts or shipping any Python. Its whole job is to own Finance
+Genie configuration: the committed, secret-free `dbxcarta-overlay.env` plus the
+bundled `questions.json`, both read directly by the dbxcarta CLI, and a
+secret-only `.env` holding this integration's `NEO4J_*` credentials. There is no
+example package to build or install.
 
 ## Quick Start
 
@@ -16,8 +17,6 @@ explains a step in more detail.
 ```bash
 # Install dbxcarta into the workspace virtualenv
 uv sync
-# Install this example package in editable mode
-uv pip install -e examples/finance-genie/
 
 # Select the Finance Genie overlay for every dbxcarta command
 export DBXCARTA_ENV_FILE=examples/finance-genie/dbxcarta-overlay.env
@@ -104,27 +103,19 @@ for you to read. The same numbers, plus per-question detail, are persisted two w
 
 ```
 examples/finance-genie/
-├── pyproject.toml                                         # standalone package
 ├── README.md                                              # this file
 ├── dbxcarta-overlay.env                                   # per-example dbxcarta config (single source of truth)
-├── .env.sample                                            # standalone local-demo config reference
+├── .env / .env.sample                                     # secret-only NEO4J_* for this integration
 ├── questions.json                                         # demo question fixture
-├── src/dbxcarta_finance_genie_example/
-│   ├── __init__.py                                        # package marker
-│   └── local_demo.py                                      # optional read-only local CLI
 └── ../../../tests/examples/finance-genie/
-    ├── test_overlay.py
-    └── test_local_demo.py
+    └── test_overlay.py                                    # asserts the committed overlay is well-formed
 ```
 
-The package declares dbxcarta as a normal pip dependency in `pyproject.toml`.
-Inside this repo, `uv` resolves it to the editable parent through
-`[tool.uv.sources]`; from outside, you would pin it like
-`dependencies = ["dbxcarta-core", "dbxcarta-client[graph]"]` and pip would fetch
-those distributions from your wheel index. The ingest connector itself
-(`neocarta[databricks-spark]`) is not a local dependency: the submit step stages
-its wheel onto the cluster. There is nothing privileged about the example's
-relationship to the dbxcarta workspace.
+The example ships no Python: the dbxcarta CLI and the local `dbxcarta-client`
+read the overlay and the adjacent `questions.json` directly. The ingest
+connector itself (`neocarta[databricks-spark]`) is staged onto the cluster by
+the submit step, not installed here. There is nothing privileged about the
+example's relationship to the dbxcarta workspace.
 
 The Finance Genie per-example config lives in the committed
 `examples/finance-genie/dbxcarta-overlay.env` (the single source of truth). The
@@ -144,18 +135,18 @@ per-example Python object to publish. The two operational commands are:
   straight off local disk. It opens the file beside the selected overlay, at the
   path named by `DBXCARTA_CLIENT_QUESTIONS`. There is no upload step.
 
-## Template guidance for a new application package
+## Template guidance for a new integration
 
-To build your own application package, copy this layout and change:
+To configure your own integration, copy this layout and change:
 
-1. The package name in `pyproject.toml` and the src folder name.
-2. The catalog list (and any `:layer` suffixes) and dbxcarta features in
+1. The catalog list (and any `:layer` suffixes) and dbxcarta features in
    `dbxcarta-overlay.env`, the single source of truth for per-example config.
+2. The `NEO4J_*` values in `.env` (copied from `.env.sample`).
 3. The `questions.json` fixture, if you want a demo question set.
 
-No Python wiring is needed for the CLI: `dbxcarta ready` and `dbxcarta-client`
-read the selected overlay and the adjacent `questions.json` directly, so a new
-application package can be just an overlay and a questions file. The `src/` package is only for standalone tooling like the local demo.
+No Python wiring is needed: `dbxcarta ready` and `dbxcarta-client` read the
+selected overlay and the adjacent `questions.json` directly, so an integration
+is just an overlay, a secret-only `.env`, and a questions file.
 
 ## Responsibility Boundary
 
@@ -185,10 +176,9 @@ schema.
 
 ## Quick iterate loop (testing dbxcarta changes)
 
-Once the one-time prerequisites are in place (steps 1–8 below: example package
-installed, ops plane bootstrapped, secrets refreshed, questions uploaded,
-upstream UC tables present), the pipeline runs in two make targets from the
-repo root —
+Once the one-time prerequisites are in place (the setup steps below: ops plane
+bootstrapped, secrets refreshed, upstream UC tables present), the pipeline runs
+in two make targets from the repo root —
 ingest first, then the client evaluation once ingest finishes:
 
 ```bash
@@ -203,9 +193,10 @@ submits `ingest`; the `-client` target submits `client`, so it reflects
 local edits to the dbxcarta packages on every run. The targets set
 `DBXCARTA_ENV_FILE` to this directory's
 `dbxcarta-overlay.env` inline on each command, so they pick up the right
-dbxcarta config no matter what shell you run them from. They do **not** use
-this directory's standalone `./.env` (that file is only for the local
-demo in section 11). `make help` lists the targets for every example.
+dbxcarta config no matter what shell you run them from. The `-client` target
+additionally reads only the `NEO4J_*` keys from this directory's `./.env`, since
+the committed overlay is secret-free. `make help` lists the targets for every
+example.
 
 The sections below are the full first-time setup and the individual
 commands the target wraps.
@@ -214,13 +205,11 @@ commands the target wraps.
 
 Run these commands from the dbxcarta repo unless a step says otherwise.
 
-### 1. Install dbxcarta and the example package
+### 1. Install dbxcarta
 
 ```bash
 # Install dbxcarta into the workspace virtualenv
 uv sync
-# Install this example package in editable mode
-uv pip install -e examples/finance-genie/
 ```
 
 ### 2. Prepare Finance Genie
@@ -249,11 +238,11 @@ validation.
 ### 3. Configure dbxcarta
 
 dbxcarta loads config in two layers. The repo-root `.env` is the shared
-**base**: Databricks infra and the Neo4j secrets, never edited per
-integration. This directory's committed, secret-free
-`dbxcarta-overlay.env` is the Finance Genie **overlay**: only the
+**base**: Databricks infra and the shared serving endpoints, never edited per
+integration and holding no `NEO4J_*` secrets. This directory's committed,
+secret-free `dbxcarta-overlay.env` is the Finance Genie **overlay**: only the
 dbxcarta-scoped values (medallion catalogs, schemas, volume, summary,
-sample/embedding flags, client arms). Select it by exporting
+sample/embedding flags, client arms, secret-scope name). Select it by exporting
 `DBXCARTA_ENV_FILE` once. No root `.env` edit, ever:
 
 ```bash
@@ -268,9 +257,11 @@ only the base `.env` loads, exactly as before.
 This overlay is the single source of truth for the example's dbxcarta config;
 edit it directly to change catalogs, schemas, flags, or the secret scope.
 
-This file (`dbxcarta-overlay.env`) is the dbxcarta CLI overlay only. It
-is distinct from `./.env` / `./.env.sample`, which are the self-contained
-config for the standalone local demo (section 11) and never layer.
+This file (`dbxcarta-overlay.env`) holds only non-secret config. The adjacent
+`./.env` / `./.env.sample` hold only this integration's `NEO4J_*` secrets:
+`setup_secrets.sh` reads them to provision the secret scope for on-cluster jobs,
+and off-cluster the `dbxcarta-client` reads only those `NEO4J_*` keys from `.env`
+(see [section 6](#6-refresh-neo4j-secrets)).
 
 ### 4. Check readiness
 
@@ -316,12 +307,18 @@ uv run dbxcarta teardown --yes-i-mean-it
 
 ### 6. Refresh Neo4j secrets
 
-dbxcarta jobs read Neo4j credentials from the Databricks secret scope:
+This integration's `NEO4J_*` credentials live in this directory's `.env` (copy
+`.env.sample` and fill it in). On-cluster ingest jobs read them from a Databricks
+secret scope; `setup_secrets.sh` provisions that scope from `.env`:
 
 ```bash
 # Provision the Databricks secret scope with Neo4j credentials
 ./setup_secrets.sh --profile aws-partner-rk
 ```
+
+Off-cluster, the local `dbxcarta-client` reads only the `NEO4J_*` keys from the
+same `.env` directly, so there is one source of truth for this integration's
+Neo4j connection.
 
 ### 7. Questions: read locally, no upload
 
@@ -370,36 +367,10 @@ summary.
 uv run dbxcarta-client
 ```
 
-### 11. Run the local CLI demo
-
-After the semantic layer is built, use the local read-only CLI in this
-package to demonstrate the flow without submitting another Databricks job.
-
-The local demo loads its own `.env` from this directory and never inherits
-the parent dbxcarta repo's `.env`. Copy the sample and fill in your
-workspace, warehouse, chat endpoint, and Neo4j credentials:
-
-```bash
-# Copy the local demo env template, which never inherits the parent repo .env
-cp examples/finance-genie/.env.sample examples/finance-genie/.env
-# then edit examples/finance-genie/.env
-```
-
-Then run any of the demo subcommands from anywhere (they resolve `.env`
-relative to the package, not the current working directory):
-
-```bash
-# Check connectivity and config before running the demo
-uv run --directory examples/finance-genie python -m dbxcarta_finance_genie_example.local_demo preflight
-# List the demo question set
-uv run --directory examples/finance-genie python -m dbxcarta_finance_genie_example.local_demo questions
-# Answer one question and show the retrieved graph context
-uv run --directory examples/finance-genie python -m dbxcarta_finance_genie_example.local_demo ask --question-id fg_q01 --show-context
-# Run an ad-hoc read-only SQL query against a base table
-uv run --directory examples/finance-genie python -m dbxcarta_finance_genie_example.local_demo sql "SELECT COUNT(*) FROM \`graph-enriched-lakehouse\`.\`graph-enriched-schema\`.accounts"
-```
-
-The local demo allows only `SELECT`, `WITH`, and `EXPLAIN` statements.
+The client loads the overlay and the base `.env`, then reads only the `NEO4J_*`
+keys from this directory's `.env` for the Neo4j connection. For an interactive,
+single-question exploration of the same graph, run `dbxcarta-client` against a
+`questions.json` containing just the question you want.
 
 ## Overlay Defaults
 

@@ -14,41 +14,77 @@ its wheel onto the cluster.
 
 ## Quick Start
 
-The full flow from a clean checkout to a scored client run. The first block is
-one-time setup; the two make targets are the loop you repeat on every change.
-Each numbered section under [Setup flow](#setup-flow) explains a step in more
-detail. Fetch the upstream `schemapile-perm.json` artifact first; see
-[section 2](#2-get-the-upstream-schemapile-data).
+The full flow from a clean checkout to a scored client run. Sections 1 through 7
+are one-time setup; the two make targets in section 8 are the loop you repeat on
+every change. Each numbered section under [Setup flow](#setup-flow) explains a
+step in more detail. Fetch the upstream `schemapile-perm.json` artifact first;
+see [section 2](#2-get-the-upstream-schemapile-data).
+
+### 1. Install dbxcarta and this example
 
 ```bash
-# Install dbxcarta and this example
 uv sync
 uv pip install -e examples/schemapile/
+```
 
-# Build the slice through to a question set. These steps read
-# examples/schemapile/.env, so run them from that directory.
+### 2. Configure the example .env
+
+The host-only build steps (sections 3 through 6) read
+`examples/schemapile/.env`, so run them from that directory.
+
+```bash
 cd examples/schemapile
-cp .env.sample .env                             # edit SCHEMAPILE_REPO, profile, warehouse, catalog
-uv run dbxcarta bootstrap --env-file dbxcarta-overlay.env     # ops catalog + volume + data catalog
-# Run the upstream slice.py with the .env parameters; writes the cached slice JSON (idempotent on its params sidecar).
+cp .env.sample .env   # edit SCHEMAPILE_REPO, profile, warehouse, catalog
+```
+
+### 3. Bootstrap the ops catalog, volume, and data catalog
+
+```bash
+uv run dbxcarta bootstrap --env-file dbxcarta-overlay.env
+```
+
+### 4. Produce the SchemaPile slice
+
+Runs the upstream `slice.py` with the `.env` parameters and writes the cached
+slice JSON. Idempotent on its params sidecar.
+
+```bash
 uv run dbxcarta-schemapile-slice
-# Filter, rank, and cap the slice into the committed candidate-table JSON read by materialize and question generation.
+```
+
+### 5. Pick the candidate set
+
+Filters, ranks, and caps the slice into the committed candidate-table JSON read
+by materialize and question generation.
+
+```bash
 uv run dbxcarta-schemapile-select
+```
+
+### 6. Materialize the slice and generate the question set
+
+```bash
 uv run dbxcarta materialize --env-file dbxcarta-overlay.env   # stage blueprint, run serverless job
 uv run dbxcarta-schemapile-generate-questions
 cd ../..
-
-# Select the SchemaPile overlay for every command below. No schema list to
-# copy: schemapile_lakehouse is a dedicated, data-only catalog, so the ingest
-# auto-discovers the materialized schemas from a blank NEOCARTA_DATABRICKS_SCHEMAS.
-export DBXCARTA_ENV_FILE=examples/schemapile/dbxcarta-overlay.env
-
-# Confirm the schemas materialized.
-uv run dbxcarta ready
 ```
 
 The generated question set ships as `questions.json` beside the overlay and the
 client reads it locally, so there is no question-upload step.
+
+### 7. Select the overlay and confirm the schemas materialized
+
+Select the SchemaPile overlay for every dbxcarta command. There is no schema
+list to copy: `schemapile_lakehouse` is a dedicated, data-only catalog, so the
+ingest auto-discovers the materialized schemas from a blank
+`NEOCARTA_DATABRICKS_SCHEMAS`.
+
+```bash
+export DBXCARTA_ENV_FILE=examples/schemapile/dbxcarta-overlay.env
+uv run dbxcarta ready
+```
+
+### 8. Run the iterate loop
 
 With setup in place, run the two make targets from the repo root. The `-ingest`
 target rebuilds the wheels from current source and builds the semantic layer, so

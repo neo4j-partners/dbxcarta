@@ -31,9 +31,6 @@ jobs:
             package: dbxcarta-client
             extra_package: dbxcarta-materialize
             tests: tests/boundary
-          - layer: finance-genie
-            package: dbxcarta-finance-genie-example
-            tests: tests/examples/finance-genie
           - layer: schemapile
             package: dbxcarta-schemapile-example
             tests: tests/examples/schemapile

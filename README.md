@@ -2,17 +2,30 @@
 
 *Inspired by [neocarta](https://github.com/neo4j-field/neocarta).*
 
+## Quick start
+
+New here? Pick an example and follow its README end to end:
+
+- **[Finance Genie](examples/finance-genie/README.md#quick-start)**: two-catalog medallion demo with curated finance tables enriched into gold.
+- **[SchemaPile](examples/schemapile/README.md#quick-start)**: a reproducible [SchemaPile](https://github.com/amsterdata/schemapile) slice materialized as Delta tables in a dedicated catalog.
+- **[Dense schema](examples/dense-schema/README.md#quick-start)**: a synthetic 500 or 1000 table schema that stress-tests schema-context retrieval.
+
+To map your own catalog instead of a demo, follow [Quickstart: demo catalog](#quickstart-demo-catalog).
+
 ## Overview
 
 Unity Catalog publishes tables, columns, and declared constraints but not
 meaning: which tables sit near a question, which relationships exist beyond
 declared foreign keys, which medallion layer holds the trustworthy version of an
 entity. dbxcarta builds a semantic layer over Unity Catalog in Neo4j that turns
-that flat metadata into a graph a question can traverse, where similarity is an
-embedding distance, a relationship is a confidence-scored edge, and every table
-carries its medallion layer. Text2SQL agents, MCP tools, and schema-aware RAG
-pipelines query the graph at runtime to retrieve the slice they need before
-generating SQL.
+that flat metadata into a graph a question can traverse:
+
+- **Similarity** is an embedding distance.
+- **A relationship** is a confidence-scored edge.
+- **Every table** carries its medallion layer.
+
+Text2SQL agents, MCP tools, and schema-aware RAG pipelines query the graph at
+runtime to retrieve the slice they need before generating SQL.
 
 ```
 ┌──────────────────────┐   ┌───────────────┐   ┌──────────────────────┐   ┌──────────────────────┐   ┌──────────────────────┐   ┌───────────────┐
@@ -23,40 +36,22 @@ generating SQL.
 └──────────────────────┘   └───────────────┘   └──────────────────────┘   └──────────────────────┘   └──────────────────────┘   └───────────────┘
 ```
 
-The leftmost stage applies only to the bundled examples: `dbxcarta-materialize`
-seeds their demo tables into Unity Catalog from a committed blueprint. Against
-your own catalog the tables already exist, so the flow starts at Unity Catalog
-and `dbxcarta-materialize` is not used.
-
-The ingest pipeline that builds the semantic layer is the
-[neocarta](https://github.com/neo4j-field/neocarta) connector wheel; dbxcarta no
-longer carries its own copy. dbxcarta is the operator tooling and evaluation
-around it: `dbxcarta-submit` (the `dbxcarta` command) stages the neocarta wheel
-and deploys it as a Databricks job, and `dbxcarta-client`, `dbxcarta-materialize`,
-and the bundled `examples/` evaluate and demonstrate the resulting layer. To map
-your own catalog you pull the neocarta wheel and run it with `dbxcarta`.
-
-The semantic-layer thesis, the three storage planes (data, semantic layer, ops),
-and the validation model are documented in
-[`docs/reference/architecture.md`](docs/reference/architecture.md), the
-canonical architecture reference.
-
-For the full documentation map and a suggested reading order, see
-[`docs/README.md`](docs/README.md). For why a graph layer earns its place over
-Unity Catalog alone, see
-[`docs/explanation/why-semantic.md`](docs/explanation/why-semantic.md).
+- **Leftmost stage (examples only):** `dbxcarta-materialize` seeds the bundled examples' demo tables into Unity Catalog from a committed blueprint. Against your own catalog the tables already exist, so the flow starts at Unity Catalog and materialize is not used.
+- **Ingest pipeline:** the [neocarta](https://github.com/neo4j-field/neocarta) connector wheel builds the semantic layer; dbxcarta no longer carries its own copy. dbxcarta is the operator tooling and evaluation around it: `dbxcarta-submit` (the `dbxcarta` command) stages the neocarta wheel and deploys it as a Databricks job, while `dbxcarta-client`, `dbxcarta-materialize`, and the bundled `examples/` evaluate and demonstrate the result. To map your own catalog you pull the neocarta wheel and run it with `dbxcarta`.
+- **Further reading:** [`docs/reference/architecture.md`](docs/reference/architecture.md) is the canonical architecture reference for the semantic-layer thesis, the three storage planes, and the validation model. [`docs/README.md`](docs/README.md) is the full documentation map and reading order. [`docs/explanation/why-semantic.md`](docs/explanation/why-semantic.md) covers why a graph layer earns its place over Unity Catalog alone.
 
 ## Packages
 
 dbxcarta is four packages over a shared, Spark-free core, plus the external
-neocarta connector wheel it pulls for ingest. The ingest pipeline is the neocarta
-connector: it reads Unity Catalog and writes the semantic layer. `dbxcarta-core`
-is the foundation, and `dbxcarta-submit` is the operator-local CLI (the
-`dbxcarta` command) that stages the neocarta wheel, builds and uploads the local
-wheels, and submits the jobs. `dbxcarta-client`, `dbxcarta-materialize`, and the
-bundled `examples/` are the evaluation and demo tier that proves and showcases
-the layer. The siblings each depend on core but never on one another, and there
-is no top-level `dbxcarta` import surface, so library consumers import the layer
+neocarta connector wheel it pulls for ingest:
+
+- **neocarta (external):** the ingest pipeline. Reads Unity Catalog and writes the semantic layer.
+- **`dbxcarta-core`:** the foundation every other package builds on.
+- **`dbxcarta-submit`:** the operator-local CLI (the `dbxcarta` command) that stages the neocarta wheel, builds and uploads the local wheels, and submits the jobs.
+- **`dbxcarta-client`, `dbxcarta-materialize`, `examples/`:** the evaluation and demo tier that proves and showcases the layer.
+
+The siblings each depend on core but never on one another, and there is no
+top-level `dbxcarta` import surface, so library consumers import only the layer
 they need.
 
 ```
@@ -188,15 +183,12 @@ NEOCARTA_DATABRICKS_SUMMARY_VOLUME=/Volumes/analytics/ops/dbxcarta/summaries
 NEOCARTA_DATABRICKS_SECRET_SCOPE=dbxcarta-neo4j-analytics
 ```
 
-`NEOCARTA_DATABRICKS_CATALOG` is the single anchor catalog used for preflight and
-provisioning. `NEOCARTA_DATABRICKS_CATALOGS` lists every catalog folded into one
-graph and is the default model: a build normally spans several catalogs. A
-single-catalog build remains supported; leave `CATALOGS` blank and it falls back
-to the anchor. Each entry is `catalog` or `catalog:layer`; the optional `:layer`
-suffix sets the `Table.layer` property. Because dbxcarta runs inline embeddings,
-`EMBEDDING_STAGING_VOLUME` is required whenever any include-embeddings flag is on;
-`SUMMARY_VOLUME` is where each detached run writes its `summary_<run_id>.json`
-report. The full overlay contract is documented per example in
+- **`NEOCARTA_DATABRICKS_CATALOG`:** the single anchor catalog used for preflight and provisioning.
+- **`NEOCARTA_DATABRICKS_CATALOGS`:** every catalog folded into one graph, the default model since a build normally spans several. Each entry is `catalog` or `catalog:layer`, where the optional `:layer` suffix sets the `Table.layer` property. A single-catalog build remains supported: leave `CATALOGS` blank and it falls back to the anchor.
+- **`EMBEDDING_STAGING_VOLUME`:** required whenever any include-embeddings flag is on, because dbxcarta runs inline embeddings.
+- **`SUMMARY_VOLUME`:** where each detached run writes its `summary_<run_id>.json` report.
+
+The full overlay contract is documented per example in
 `examples/<name>/dbxcarta-overlay.env`.
 
 The operator forwards these `KEY=VALUE` pairs to the cluster as job parameters,

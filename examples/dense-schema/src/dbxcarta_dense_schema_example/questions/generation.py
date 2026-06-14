@@ -28,7 +28,8 @@ from dbxcarta.core.questions import GeneratedPair, ValidationOutcome
 from dbxcarta.core.sql_safety import sql_targets_only_catalog
 from dbxcarta.core.workspace import build_workspace_client
 
-from dbxcarta_dense_schema_example.config import DenseSchemaConfig, load_config
+from dbxcarta_dense_schema_example.config import DEFAULT_DOTENV
+from dbxcarta_dense_schema_example.questions.config import QuestionConfig, load_question_config
 from dbxcarta_dense_schema_example.utils import load_dotenv_file
 
 if TYPE_CHECKING:
@@ -48,7 +49,7 @@ _PROMPT_VERSION = 2
 
 def main() -> int:
     parser = argparse.ArgumentParser(prog="dbxcarta-dense-generate-questions")
-    parser.add_argument("--dotenv", type=Path, default=Path(__file__).resolve().parents[2] / ".env")
+    parser.add_argument("--dotenv", type=Path, default=DEFAULT_DOTENV)
     parser.add_argument("--output", type=Path, default=Path("questions.json"))
     parser.add_argument(
         "--cache-dir",
@@ -65,7 +66,7 @@ def main() -> int:
     args = parser.parse_args()
 
     load_dotenv_file(args.dotenv)
-    config = load_config()
+    config = load_question_config()
 
     if not config.candidate_cache.is_file():
         raise FileNotFoundError(
@@ -110,13 +111,13 @@ def main() -> int:
     return 0
 
 
-def _default_cache_dir(config: DenseSchemaConfig) -> Path:
+def _default_cache_dir(config: QuestionConfig) -> Path:
     return Path(f".cache/questions_{config.table_count}")
 
 
 def _generate_all(
     ws: WorkspaceClient,
-    config: DenseSchemaConfig,
+    config: QuestionConfig,
     schema_entry: dict[str, Any],
     cache_dir: Path,
 ) -> list[GeneratedPair]:
@@ -213,7 +214,7 @@ def _expand_subgraph(
     return list(visited)
 
 
-def _cache_key(subgraph_names: list[str], config: DenseSchemaConfig, batch_idx: int) -> str:
+def _cache_key(subgraph_names: list[str], config: QuestionConfig, batch_idx: int) -> str:
     sig = json.dumps(
         {
             "tables": sorted(subgraph_names),
@@ -230,7 +231,7 @@ def _cache_key(subgraph_names: list[str], config: DenseSchemaConfig, batch_idx: 
 
 def _call_model(
     ws: WorkspaceClient,
-    config: DenseSchemaConfig,
+    config: QuestionConfig,
     schema_entry: dict[str, Any],
     subgraph_tables: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
@@ -283,7 +284,7 @@ _SYSTEM_PROMPT = textwrap.dedent("""\
 def _build_prompt(
     schema_entry: dict[str, Any],
     tables: list[dict[str, Any]],
-    config: DenseSchemaConfig,
+    config: QuestionConfig,
 ) -> str:
     catalog = config.catalog
     uc_schema = schema_entry.get("uc_schema", "")

@@ -59,8 +59,14 @@ examples/dense-schema/
 ├── questions.json
 ├── blueprint/                  # committed candidate JSON (dense_500)
 └── src/dbxcarta_dense_schema_example/
-    ├── generator.py
-    └── question_generator.py
+    ├── __init__.py
+    ├── config.py               # shared .env primitives + cache-path default
+    ├── utils.py                # dotenv loader
+    ├── dataset/                # host-only stage (no Databricks credentials)
+    │   └── candidates.py       #   synthetic schema -> candidate JSON (blueprint)
+    └── questions/              # Databricks-connected stage
+        ├── config.py           #   QuestionConfig
+        └── generation.py       #   LLM + SQL validation -> questions.json
 ```
 
 ## Quick iterate loop (testing dbxcarta changes)

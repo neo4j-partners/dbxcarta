@@ -1,84 +1,46 @@
-"""Load DenseSchema example configuration from environment."""
+"""Shared configuration primitives for the dense-schema example stages.
+
+The example builds its evaluation fixture in two stages:
+
+- ``dataset`` (host-only): the synthetic blueprint generator. It runs on a
+  laptop with no Databricks credentials and reads no ``.env`` — its parameters
+  come from CLI flags, so it owns no config object.
+- ``questions`` (Databricks-connected): generation + SQL validation. It needs a
+  workspace and owns ``QuestionConfig`` in ``questions/config.py``.
+
+The helpers here are the `.env` parsing primitives the question loader builds
+on, plus the cache-path default that resolves against the committed blueprint
+directory regardless of the working directory.
+"""
 
 from __future__ import annotations
 
-import os
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-_PROJECT_CATALOGS_BLOCKLIST: frozenset[str] = frozenset(
-    {
-        "graph-enriched-lakehouse",
-        "dbxcarta-catalog",
-        "main",
-        "hive_metastore",
-        "samples",
-        "system",
-    }
-)
+# The committed candidate blueprint lives under the example directory, not in
+# .cache, so cache-path defaults resolve against the package location rather
+# than the current working directory.
+_EXAMPLE_DIR = Path(__file__).resolve().parents[2]
+_BLUEPRINT_DIR = _EXAMPLE_DIR / "blueprint"
 
-# The blueprint is committed under the example dir, not generated into .cache,
-# so the default resolves against the package location rather than the cwd.
-_BLUEPRINT_DIR = Path(__file__).resolve().parents[2] / "blueprint"
+# Default `.env` an entrypoint loads before reading variables.
+DEFAULT_DOTENV = _EXAMPLE_DIR / ".env"
 
 
-@dataclass(frozen=True)
-class DenseSchemaConfig:
-    catalog: str
-    table_count: int
-    uc_schema: str
-    seed: int
-    candidate_cache: Path
-    # Ops volume path, sourced verbatim from DATABRICKS_VOLUME_PATH. The ops
-    # plane lives in its own catalog (dbxcarta-catalog.dense-ops), separate from
-    # the data catalog this config materializes tables into, so data discovery
-    # never sweeps it in. There is no in-catalog derivation: a missing
-    # DATABRICKS_VOLUME_PATH fails loudly rather than routing ops into the data
-    # catalog.
-    volume_path: str
-    question_model: str
-    questions_target: int
-    questions_per_batch: int
-    question_temperature: float
-
-
-def load_config(env: Mapping[str, str] | None = None) -> DenseSchemaConfig:
-    e = env if env is not None else os.environ
-    catalog = _required(e, "DBXCARTA_CATALOG")
-    if catalog.casefold() in _PROJECT_CATALOGS_BLOCKLIST:
-        raise ValueError(f"DBXCARTA_CATALOG={catalog!r} collides with a known project catalog")
-    table_count = int(e.get("DENSE_TABLE_COUNT", "500"))
-    uc_schema = e.get("DENSE_SCHEMA_NAME", f"dense_{table_count}")
-    # The ops plane is separate from the data catalog. DATABRICKS_VOLUME_PATH
-    # (the overlay/.env points it at the ops catalog) is required: there is no
-    # in-catalog fallback, so a missing value fails loudly instead of silently
-    # routing ops into the data-only catalog.
-    volume_path = _required(e, "DATABRICKS_VOLUME_PATH")
-    return DenseSchemaConfig(
-        catalog=catalog,
-        table_count=table_count,
-        uc_schema=uc_schema,
-        seed=int(e.get("DENSE_SEED", "42")),
-        candidate_cache=Path(
-            e.get("DENSE_CANDIDATE_CACHE") or _BLUEPRINT_DIR / f"candidates_{table_count}.json"
-        ),
-        volume_path=volume_path,
-        question_model=e.get(
-            "DENSE_QUESTION_MODEL",
-            "databricks-meta-llama-3-3-70b-instruct",
-        ),
-        questions_target=int(e.get("DENSE_QUESTIONS_TARGET", "60")),
-        questions_per_batch=int(e.get("DENSE_QUESTIONS_PER_BATCH", "3")),
-        question_temperature=float(e.get("DENSE_QUESTION_TEMPERATURE", "0.2")),
-    )
-
-
-def _required(env: Mapping[str, str], key: str) -> str:
-    val = env.get(key, "").strip()
-    if not val:
+def require_env(env: Mapping[str, str], key: str) -> str:
+    """Return a non-empty env value, or raise naming the variable to fix."""
+    value = env.get(key, "").strip()
+    if not value:
         raise ValueError(f"{key} is not set; check examples/dense-schema/.env")
-    return val
+    return value
+
+
+def candidate_cache_path(env: Mapping[str, str], table_count: int) -> Path:
+    """Path to the committed candidate blueprint (read by question generation)."""
+    return Path(
+        env.get("DENSE_CANDIDATE_CACHE") or _BLUEPRINT_DIR / f"candidates_{table_count}.json"
+    )
