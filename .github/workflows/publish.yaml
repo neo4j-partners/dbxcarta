@@ -26,27 +26,18 @@ jobs:
         with:
           python-version-file: .python-version
 
-      - name: Build wheels and sdists
-        # Core and client are published distributions. client depends on
-        # dbxcarta-core, and a normal build carries only its own module (not a
-        # bundled core), so core must ship to PyPI for a clean install to resolve.
-        # The ingest pipeline is no longer published here: it moved to neocarta
-        # and ships as the neocarta connector wheel. Example packages
-        # (dense-schema, schemapile) and the operator-local materialize package
-        # are workspace members but are not published.
-        run: |
-          uv build --package dbxcarta-core
-          uv build --package dbxcarta-client
-
       - name: Build the self-contained dbxcarta-submit wheel
-        # submit is published too, but it imports a subset of dbxcarta.core and
-        # its release wheel declares no dbxcarta-core dependency, so it must
-        # physically bundle those core modules. A plain
+        # dbxcarta-submit is the only published distribution. It imports a subset
+        # of dbxcarta.core and its release wheel declares no dbxcarta-core
+        # dependency, so it must physically bundle those core modules. A plain
         # `uv build --package dbxcarta-submit` would NOT bundle them; the
         # dedicated script copies the curated subset in, builds, and verifies the
         # wheel carries dbxcarta/core. Wheel-only on purpose: an sdist could not
-        # carry core, which lives in a sibling package. The wheel lands in dist/
-        # and flows through the attest, upload, and publish steps below.
+        # carry core, which lives in a sibling package. dbxcarta-core and
+        # dbxcarta-client stay in the workspace but are not published; the ingest
+        # pipeline moved to neocarta and ships as the neocarta connector wheel.
+        # The wheel lands in dist/ and flows through the attest, upload, and
+        # publish steps below.
         run: python scripts/build_submit_wheel.py
 
       - name: Attest build provenance
@@ -66,7 +57,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: pypi
-      url: https://pypi.org/p/dbxcarta
+      url: https://pypi.org/p/dbxcarta-submit
     permissions:
       id-token: write
     steps:
