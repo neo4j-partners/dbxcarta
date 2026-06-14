@@ -191,15 +191,24 @@ automatically and imports cleanly, with no separate core install.
 
 ### Phase 4: Add the neocarta finance-genie example
 
-- Add `examples/databricks/submit_finance_genie.py` to the neocarta repo as a `uv` script
-  with inline dependency metadata listing `neocarta[databricks-spark]` and
-  `dbxcarta-submit`.
-- The script: build the neocarta wheel (or point at an already-built one), then call
-  `submit_neocarta_ingest` for the finance-genie catalog and Neo4j target.
-- Ship a small `.env` (or constants block) next to it for the finance-genie catalog,
-  Volume, Neo4j, and embedding endpoint values.
+- Add `examples/databricks/submit_finance_genie.py` to the neocarta repo as a `uv` script.
+  Its only inline dependency is `dbxcarta-submit`: the script does not import neocarta, it
+  builds the connector wheel with `uv build` against the repo and submits it, and the
+  cluster installs neocarta from the staged wheel. Declaring `neocarta[databricks-spark]`
+  would needlessly install pyspark locally, so it is left out.
+- The script builds the neocarta wheel, sets `DBXCARTA_ENV_FILE` to its sibling config,
+  then calls `submit_neocarta_ingest(wheel)`.
+- Ship a committed, secret-free `submit_finance_genie.env.sample` beside it. It is
+  self-contained: it carries both the Databricks infra values (normally a dbxcarta base
+  `.env`) and the finance-genie `NEOCARTA_DATABRICKS_*` ingest contract, so the example
+  runs from the neocarta repo with no dbxcarta checkout. Confirmed safe: the runner layers
+  `env_file` over the base `.env`, so a single self-contained file supplies the runner's
+  profile/cluster/volume config. The Neo4j credentials are not in it; the cluster reads
+  them from the secret scope it names. The operator copies it to a gitignored
+  `submit_finance_genie.env`.
 - Add a short README section explaining the prerequisites: a classic cluster, the Neo4j
-  Spark Connector attached, a reachable Neo4j, and a built neocarta wheel.
+  Spark Connector attached, a reachable Neo4j, a provisioned secret scope, and Databricks
+  auth.
 
 **Done when:** `uv run examples/databricks/submit_finance_genie.py` submits the
 finance-genie ingest job using `dbxcarta-submit`, with no dbxcarta repo checkout.
