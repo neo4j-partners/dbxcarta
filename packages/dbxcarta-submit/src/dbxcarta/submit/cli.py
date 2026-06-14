@@ -260,9 +260,9 @@ def _print_help() -> None:
         "  submit-entrypoint ingest            Submit the ingest wheel entrypoint as a job.\n"
         "  materialize                         Stage the committed blueprint to the ops Volume\n"
         "                                      and submit the materialize entrypoint (serverless).\n"
-        "  publish-wheels                      Publish the ingest, client, and materialize wheels\n"
-        "                                      to the stable Volume path and ship the bootstrap\n"
-        "                                      script.\n"
+        "  publish-wheels                      Stage the neocarta ingest wheel and publish the\n"
+        "                                      materialize wheel to the stable Volume path, and\n"
+        "                                      ship the bootstrap script.\n"
         "  bootstrap                           Create the data catalog (DBXCARTA_CATALOG) and the\n"
         "                                      ops catalog/schema/volume (DATABRICKS_VOLUME_PATH),\n"
         "                                      idempotent.\n"
@@ -676,8 +676,8 @@ def _handle_ready(argv: list[str]) -> int:
     parser.add_argument("--strict-optional", action="store_true")
     args = parser.parse_args(cleaned_argv)
 
-    from dbxcarta.submit.readiness import check_readiness
     from dbxcarta.core.workspace import build_workspace_client
+    from dbxcarta.submit.readiness import check_readiness
 
     warehouse_id = args.warehouse_id or os.environ.get("DATABRICKS_WAREHOUSE_ID", "")
     if not warehouse_id:
