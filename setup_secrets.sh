@@ -5,9 +5,9 @@
 # For every example the script reads the scope name from that example's
 # committed dbxcarta-overlay.env (DATABRICKS_SECRET_SCOPE, the single source of
 # truth) and writes NEO4J_URI / NEO4J_USERNAME / NEO4J_PASSWORD into it from the
-# gitignored standalone .env. Each example may target a different workspace, so
-# the scope is created with that example's own DATABRICKS_PROFILE unless
-# --profile overrides it.
+# gitignored standalone .env, which is now secrets-only. That .env no longer
+# sets DATABRICKS_PROFILE by default; the profile comes from --profile, else an
+# example .env DATABRICKS_PROFILE if present, else the repo-root base .env.
 #
 # Usage:
 #   ./setup_secrets.sh [--profile NAME] [--example NAME ...]
@@ -18,7 +18,7 @@
 #
 # Per example the script reads:
 #   dbxcarta-overlay.env  DATABRICKS_SECRET_SCOPE  required (else skipped)
-#   .env  DATABRICKS_PROFILE  optional, used when --profile is not provided
+#   profile  --profile, else example .env DATABRICKS_PROFILE, else base .env
 #   .env  NEO4J_URI           required to provision (absent => example skipped)
 #   .env  NEO4J_USERNAME      required
 #   .env  NEO4J_PASSWORD      required
@@ -196,9 +196,21 @@ for dir in "$EXAMPLES_DIR"/*/; do
     continue
   fi
 
-  profile="${PROFILE_OVERRIDE:-$(env_value DATABRICKS_PROFILE || true)}"
+  # Profile precedence: --profile override, then this example's .env, then the
+  # shared repo-root base .env (the slimmed example .env no longer sets it).
+  # env_value reads the global ENV_FILE, so switch it to the base .env for the
+  # fallback read and restore it before the NEO4J_* reads below.
+  profile="$PROFILE_OVERRIDE"
   if is_placeholder "$profile"; then
-    echo "  skip: no DATABRICKS_PROFILE in $ENV_FILE and no --profile given" >&2
+    profile="$(env_value DATABRICKS_PROFILE || true)"
+  fi
+  if is_placeholder "$profile" && [[ -f "${ROOT_DIR}/.env" ]]; then
+    ENV_FILE="${ROOT_DIR}/.env"
+    profile="$(env_value DATABRICKS_PROFILE || true)"
+    ENV_FILE="${dir}.env"
+  fi
+  if is_placeholder "$profile"; then
+    echo "  skip: no DATABRICKS_PROFILE in --profile, ${dir}.env, or ${ROOT_DIR}/.env" >&2
     continue
   fi
   export DATABRICKS_CONFIG_PROFILE="$profile"

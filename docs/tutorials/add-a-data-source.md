@@ -15,7 +15,7 @@ that subproject to a new consumer.
 
 This is the published-library path. It is different from adding an in-repo
 `examples/<name>/` integration: a consumer imports no dbxcarta source, does not
-use the operator-only `dbxcarta-submit` CLI, and does not have a sibling dbxcarta
+use the operator-only `dbxcarta` CLI, and does not have a sibling dbxcarta
 checkout. If you are adding an integration inside the dbxcarta repo itself, that
 is a different workflow and not what this guide covers.
 
@@ -71,9 +71,9 @@ A consumer subproject has four moving parts:
 - **A consumer-owned Databricks Asset Bundle**: a `databricks.yml` with one
   `python_wheel_task` job that runs the neocarta connector's
   `neocarta-databricks-ingest` entry point on a cluster. (The client is no longer
-  a cluster job: it runs locally as `dbxcarta-client`.) This replaces
-  `dbxcarta-submit`, which is operator-only, unpublished, and rebuilds wheels from
-  the dbxcarta source tree a consumer does not have.
+  a cluster job: it runs locally as `dbxcarta-client`.) This replaces the
+  `dbxcarta` operator CLI, which is operator-only, unpublished, and rebuilds
+  wheels from the dbxcarta source tree a consumer does not have.
 - **The data itself in Unity Catalog**: tables an upstream process already owns
   and populates. A consumer points at existing data. There is no blueprint and
   no materialize step.
@@ -120,10 +120,11 @@ published case. Only where uv looks for the wheels changes. See
   schemas, volume, embedding flags, client arms, and the per-integration secret
   scope (a scope name, not a secret), set as both `DATABRICKS_SECRET_SCOPE` and
   `NEOCARTA_DATABRICKS_SECRET_SCOPE`.
-- **Standalone `.env`**: the consumer's own infra and secrets for local tooling
-  (the local demo, readiness checks). It holds the Databricks profile, the
-  warehouse, the cluster ID, and, for local use, the `NEO4J_*` connection
-  values. It is gitignored. Copy it from the committed `.env.sample`.
+- **Standalone `.env`**: the consumer's own infra and secrets for the local
+  client and readiness checks. It holds the Databricks profile, the warehouse,
+  the cluster ID, and the `NEO4J_*` connection values; the client reads only the
+  `NEO4J_*` keys from it. It is gitignored. Copy it from the committed
+  `.env.sample`.
 - **Consumer DAB**: `databricks.yml`. Two jobs run the published entry points on
   a preprovisioned classic cluster. It carries no dbxcarta config: `run_jobs.py`
   forwards the overlay's `KEY=VALUE` pairs to each job at run time, so the overlay
@@ -314,10 +315,10 @@ Copy the committed template and fill in your infra and local secrets:
 cp .env.sample .env
 ```
 
-This file holds the Databricks profile, the warehouse ID, the cluster ID, and,
-for local tooling, the `NEO4J_*` values. It is gitignored and never layered into
-the overlay. Local readiness checks and the local demo read it; the cluster
-jobs do not, since they read secrets from the scope.
+This file holds the Databricks profile, the warehouse ID, the cluster ID, and
+the `NEO4J_*` values. It is gitignored and never layered into the overlay. Local
+readiness checks and the client read it (the client takes only the `NEO4J_*`
+keys); the cluster jobs do not, since they read secrets from the scope.
 
 ## What each stage needs
 
@@ -332,7 +333,6 @@ one actually requires before running anything. The `dbxcarta ready` check and th
 | Readiness (optional) | local CLI | the warehouse, and `DBXCARTA_CATALOG` from the overlay | confirmation the catalog holds a data schema |
 | Ingest job | cluster | catalog and schema, the ops volume, the warehouse, the secret scope, the embedding endpoint and flags, the classic cluster with the Neo4j Maven connector | the fully embedded Neo4j semantic layer, and a `summary_<run_id>.json` report on the volume |
 | Eval (client) | local | the semantic layer the ingest built, the chat endpoint, the embedding endpoint, and the local `questions.json` | per-arm Text2SQL metrics printed to your terminal |
-| Local demo | local | `.env`, and for `ask` the built semantic layer; it reads the bundled `questions.json` from the package, not the volume | one answered question locally |
 
 Two points the table makes explicit:
 
@@ -440,12 +440,12 @@ consumer subproject; only refreshing the vendored wheels reaches into dbxcarta.
 | (maintainer) Refresh dbxcarta wheels | **dbxcarta** + consumer | Rebuild dbxcarta wheels, then `./scripts/refresh_dbxcarta_dist.sh` and commit `dbxcarta-dist/`. New developers skip this. |
 | Populate the catalog | **upstream pipeline** | Create the data the semantic layer is built over. |
 | Provision the secret scope | **consumer** (`setup_secrets.sh`) | Put `NEO4J_*` in the per-integration scope. |
-| Resolve, configure, run, demo | **consumer subproject** | `uv sync`, the overlay, readiness, upload questions, the bundle jobs, the local demo. |
+| Resolve, configure, run | **consumer subproject** | `uv sync`, the overlay, readiness, the bundle ingest job, then `dbxcarta-client` locally. |
 
 ## Checklist for a new data source
 
-- [ ] Copied the `finance-genie/dbxcarta` layout, renamed the package and `src/`
-      folder.
+- [ ] Copied the `finance-genie/dbxcarta` layout (and, if you ship a Python
+      package, renamed it and its `src/` folder).
 - [ ] `pyproject.toml` pins `dbxcarta-core`, `dbxcarta-client[graph]`, and
       `neocarta[databricks-spark]` by version, with no `[tool.uv.sources]`.
 - [ ] `questions.json` written beside the overlay, with `reference_sql` targeting
@@ -458,7 +458,7 @@ consumer subproject; only refreshing the vendored wheels reaches into dbxcarta.
 - [ ] `.env` copied from `.env.sample` and filled in for local tooling.
 - [ ] Secret scope provisioned, readiness passes.
 - [ ] `databricks.yml` deployed; ingest job run, then `dbxcarta-client` run locally.
-- [ ] Client scores read from the terminal; local demo and non-live tests pass.
+- [ ] Client scores read from the terminal; non-live tests pass.
 
 ## Where to read more
 
@@ -469,7 +469,7 @@ consumer subproject; only refreshing the vendored wheels reaches into dbxcarta.
   vendored wheels until PyPI, and how to flip to PyPI.
 - `docs/reference/architecture.md`: the package responsibilities and how the
   pieces fit, including the client cache mechanics.
-- `docs/reference/pipeline.md`: where the ingest pipeline now lives (the neocarta
-  connector) and what dbxcarta still owns.
+- [neocarta](https://github.com/neo4j-field/neocarta): the connector that owns
+  the ingest pipeline dbxcarta stages and runs.
 - `docs/reference/best-practices.md`: the design rules the pipeline must follow.
 - `docs/proposals/env-layering.md`: the full env layering model.

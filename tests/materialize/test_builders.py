@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from dbxcarta.core.materialize import (
+from dbxcarta.materialize.builders import (
     MaterializedTable,
     MaterializeStats,
     build_create_schema_statement,
@@ -15,7 +15,6 @@ from dbxcarta.core.materialize import (
     escape_sql_string,
     read_schema_entry,
     render_sql_value,
-    sanitize_identifier,
 )
 
 # --- coerce_type ---------------------------------------------------------
@@ -68,22 +67,6 @@ def test_coerce_type_maps_vendor_aliases() -> None:
 def test_coerce_type_matches_camelcase_multiword_types() -> None:
     assert coerce_type("DoublePrecision") == ("DOUBLE", False)
     assert coerce_type("CharacterVarying") == ("STRING", False)
-
-
-# --- sanitize_identifier -------------------------------------------------
-
-
-def test_sanitize_identifier_cleans_and_lowercases() -> None:
-    assert sanitize_identifier("Order Items!") == "order_items"
-
-
-def test_sanitize_identifier_prefixes_leading_digit() -> None:
-    assert sanitize_identifier("9lives", prefix="t") == "t_9lives"
-    assert sanitize_identifier("1col", prefix="c") == "c_1col"
-
-
-def test_sanitize_identifier_empty_when_nothing_usable() -> None:
-    assert sanitize_identifier("!!!") == ""
 
 
 # --- escape / render -----------------------------------------------------

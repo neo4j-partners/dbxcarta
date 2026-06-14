@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
-from dbxcarta.core.materialize import MaterializeStats
+from dbxcarta.materialize.builders import MaterializeStats
 from dbxcarta.materialize.summary import JOB_NAME, MaterializeRunSummary
 
 if TYPE_CHECKING:

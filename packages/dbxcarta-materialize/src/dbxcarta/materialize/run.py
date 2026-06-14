@@ -3,16 +3,16 @@
 Thin coordinator. Its job is limited to:
   1. Construct Settings (fails loudly at the env-var boundary).
   2. Read the staged blueprint from the ops Volume.
-  3. Ask core for the statements, run them with ``spark.sql``, overlapping the
-     independent table creates in a bounded pool and running the foreign-key
-     pass serially after.
+  3. Ask the builders for the statements, run them with ``spark.sql``,
+     overlapping the independent table creates in a bounded pool and running the
+     foreign-key pass serially after.
   4. Emit the MaterializeRunSummary, recording progress per schema so a
      mid-run failure still reports what actually landed.
 
-Core (:mod:`dbxcarta.core.materialize`) builds every statement and stays pure;
-this module owns the ``SparkSession``, the thread pool, and the skip-on-error
-tally. The only pool runs over ``SparkSession``, a thread-safe type, so there is
-no thread-safety contract on an opaque callable.
+The pure statement builders (:mod:`dbxcarta.materialize.builders`) build every
+statement and stay pure; this module owns the ``SparkSession``, the thread pool,
+and the skip-on-error tally. The only pool runs over ``SparkSession``, a
+thread-safe type, so there is no thread-safety contract on an opaque callable.
 """
 
 from __future__ import annotations
@@ -26,7 +26,8 @@ from typing import TYPE_CHECKING, Any
 
 from dbxcarta.core.env import read_materialize_workers
 from dbxcarta.core.identifiers import quote_identifier
-from dbxcarta.core.materialize import (
+from dbxcarta.core.volume_io import load_json_file
+from dbxcarta.materialize.builders import (
     MaterializedTable,
     MaterializeStats,
     TableBuild,
@@ -35,7 +36,6 @@ from dbxcarta.core.materialize import (
     build_table,
     read_schema_entry,
 )
-from dbxcarta.core.volume_io import load_json_file
 from dbxcarta.materialize.settings import MaterializeSettings
 from dbxcarta.materialize.summary import JOB_NAME, MaterializeRunSummary
 from py4j.protocol import Py4JJavaError  # type: ignore[import-untyped]

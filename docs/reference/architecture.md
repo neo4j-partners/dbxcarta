@@ -100,7 +100,8 @@ trust it. The `layer` property under graph contract v1.1
 records each table's medallion tier, so a retriever can prefer the curated gold
 table over a rawer silver one when both could answer a question. The exact node
 labels, properties, relationship types, indexes, and the versioned contract that
-clients read are in [`../schema/SCHEMA.md`](../schema/SCHEMA.md).
+clients read are owned by [neocarta](https://github.com/neo4j-field/neocarta),
+which is authoritative for the contract.
 
 This plane is the one the client reads at query time, and it is regenerable by
 design. Because Unity Catalog is the source of truth, the semantic layer can be
@@ -172,12 +173,12 @@ submits it as the ingest job; neocarta reads Unity Catalog metadata across the
 resolved catalogs, builds graph-shaped DataFrames, embeds them, discovers foreign
 keys through declared constraints and metadata inference, and writes the semantic
 layer to Neo4j behind a fail-closed boundary. The pipeline internals and the
-graph contract are documented in neocarta (see [`pipeline.md`](pipeline.md) for
-where they live); the project rules that still constrain how dbxcarta runs and
-tunes that job are in [`best-practices.md`](best-practices.md); how foreign keys
-are discovered and scored, and the trade-offs the inference deliberately makes,
-are in [`../explanation/fk-discovery.md`](../explanation/fk-discovery.md) and
-[`design-decisions.md`](design-decisions.md).
+graph contract are documented in
+[neocarta](https://github.com/neo4j-field/neocarta); the project rules that
+still constrain how dbxcarta runs and tunes that job are in
+[`best-practices.md`](best-practices.md); how foreign keys are discovered and
+scored, and why they matter, are in
+[`../explanation/fk-discovery.md`](../explanation/fk-discovery.md).
 
 dbxcarta runs neocarta's **inline embedding** mode: the ingest job embeds nodes
 in-cluster with a native `ai_query()` call against a Databricks serving endpoint,

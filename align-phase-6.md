@@ -242,9 +242,209 @@ Write the closing summary here when the run finishes.
 
 ### finance-genie
 
-_to be filled in by the agent_
+**Run date:** 2026-06-14. Cluster `0611-162049-a2ua1i4w` (Spark 4 DBR, Neo4j
+Connector `5.4.3_for_spark_3` — versions confirmed by operator). Session live.
 
-### schemapile
+#### Section 1: setup / provisioning
+
+- **NEOCARTA_WHEEL_SOURCE** was unset (hard error, no code default). Added to
+  root `.env` → `/Users/ryanknight/projects/neo4j-field/neocarta/dist`. Staged
+  wheel `neocarta-0.6.0-py3-none-any.whl` (rebuilt 2026-06-14 00:08 against
+  `pyspark>=4.1.2`, `neo4j>=6.2.0`). Wheel-rebuild blocker already cleared.
+- `dbxcarta bootstrap` → ensured data catalog `graph-enriched-finance-silver`
+  and `dbxcarta-catalog.finance_genie_ops.dbxcarta-ops`. PASS.
+- `./setup_secrets.sh --profile aws-partner-rk --example finance-genie` →
+  scope `dbxcarta-neo4j-finance-genie` exists; wrote NEO4J_URI / NEO4J_USERNAME
+  / NEO4J_PASSWORD. (Example `.env` carries no profile, so `--profile` is
+  required.) PASS.
+- `dbxcarta ready` → scope `graph-enriched-finance-silver,graph-enriched-finance-gold`;
+  present catalogs: 2; status: **ready**. PASS.
+- `dbxcarta-embed-probe "ping" --count 150` → endpoint
+  `databricks-gte-large-en`, result OK, vectors 150, **dim 1024**. Batch path
+  exercised. PASS.
+
+#### Step 1: rebuild wheels and submit ingest
+
+- `make e2e-finance-genie-ingest` (attempt 1): bootstrap no-op; `publish-wheels`
+  staged `neocarta-0.6.0-py3-none-any.whl` → `neocarta-stable.whl` and
+  `dbxcarta_materialize-1.1.0` → `dbxcarta_materialize-stable.whl` on the Volume,
+  plus scripts. Submit started cluster `0611-162049-a2ua1i4w` (PENDING→RUNNING),
+  then **preflight failed**: Neo4j connector Maven library in PENDING install
+  state.
+- **Deviation (transient, not a real fault):** `libraries cluster-status`
+  confirmed the correct `5.4.3_for_spark_3` JAR is attached but still installing
+  ("attempted on the driver node but has not finished yet") — all libs PENDING
+  because the cluster had just booted. Waiting for the connector to reach
+  INSTALLED, then re-running `submit-entrypoint ingest` (wheels already staged).
+- Connector reached **INSTALLED** after ~30s (poll 2). Re-ran
+  `submit-entrypoint ingest`: preflight `[ok] neo4j connector`, **Run ID
+  604904203580996**, **Result: SUCCESS**. Logs show
+  `BOOTSTRAP_MANIFEST ... wheel_filename=neocarta-0.6.0 ... smoke_check="ok (5)"`
+  and `[neocarta] inline embeddings ENABLED: endpoint=databricks-gte-large-en
+  dimension=1024`. (Benign: a `01N51` warning that `REFERENCES` did not yet
+  exist when an early count query ran.) PASS.
+
+#### Step 2: confirm graph and run summary
+
+- **Graph** (queried directly with the `neo4j` driver + creds from
+  `examples/finance-genie/.env`, instance `neo4j+s://4b2239bb.databases.neo4j.io`):
+  - Nodes: Database 2, Schema 2, Table 8, Column 59, Value 44.
+  - Rels: HAS_SCHEMA 2, HAS_TABLE 8, HAS_COLUMN 59, HAS_VALUE 44.
+  - **REFERENCES: 0** — needs human sign-off. Summary shows `fk_declared: 0`,
+    so the upstream finance-genie tables declare no foreign keys; the absence is
+    the data shape, not a pipeline fault.
+- **Inline embeddings:** Database/Schema/Table/Column all carry 1024-dim vectors
+  (sample `Column.name=region` dim 1024). Summary `embedding_attempts ==
+  embedding_successes` for every label (Table 8, Column 59, Database 2,
+  Schema 2) → 100% coverage, 0 failures. Value nodes carry no vector (expected).
+  PASS — fully embedded from the one inline job.
+- **Run summary:** present on the summary Volume as **`summary_local.json`**
+  (status `success`, 19:51–19:58Z 2026-06-14; counts match Neo4j exactly).
+  Discrepancy vs plan: the file is keyed `run_id: "local"`, not
+  `summary_<run_id>.json` keyed to the Databricks run ID `604904203580996`.
+  The attached run still wrote a summary; only the filename/run_id differs from
+  the plan's stated detached-run convention. Flagged for follow-up below.
+
+#### Step 3: run client locally — **FAIL (run halted here)**
+
+- `make e2e-finance-genie-client` ran the local client (no cluster). Arm scores:
+  - `no_context`: attempted 12, parsed 12, executed 0, non_empty 0,
+    exec 0.0%, correct **0.0%**.
+  - `schema_dump`: attempted 12, parsed 12, executed 12, non_empty 12,
+    exec 100.0%, non_empty 100.0%, correct **66.7%**.
+  - `graph_rag`: attempted 0 — **crashed** before any question completed.
+- **Error (needs a fix, not transient):** the client's graph_rag arm calls
+  `db.index.vector.queryNodes('column_embedding', ...)` but no such index
+  exists. `SHOW INDEXES` confirms neocarta 0.6.0 created the vector indexes
+  under different names: `column_vector_index`, `table_vector_index`,
+  `schema_vector_index`, `database_vector_index` (all ONLINE VECTOR over the
+  `embedding` property).
+- **Contract drift between `dbxcarta-client` and the neocarta 0.6.0 wheel** —
+  three name mismatches:
+
+  | Client expects (`graph_retriever.py`) | neocarta 0.6.0 emits |
+  |---|---|
+  | vector index `column_embedding` (`_COL_INDEX`, line 24) | `column_vector_index` |
+  | vector index `table_embedding` (`_TABLE_INDEX`, line 25) | `table_vector_index` |
+  | property `c.data_type` (lines 508, 527) | `c.type` |
+  | property `c.comment` (line 509) | `c.description` |
+
+  The index-name mismatch is fatal (raises
+  `Neo.ClientError.Procedure.ProcedureCallFailed: no such vector schema index:
+  column_embedding`). The property mismatches surface as `01N52` warnings
+  (`data_type`/`comment` do not exist), return null, and silently degrade the
+  schema_dump and graph_rag context without failing.
+- The graph itself is correct and fully embedded (Step 2); only the client's
+  read-side names are stale. Note the working tree already has uncommitted edits
+  to `graph_rag.py` / `client/__init__.py` (the "inline embedding" work), so the
+  client appears to be mid-migration to the new neocarta contract and
+  `graph_retriever.py` was not updated to match.
+- **Run halted at Step 3 per the "stop on error" instruction.** Steps 4
+  (tests/linters) and 5 (cleanliness sweep) not run. No teardown (as directed).
+
+##### Fix applied (operator decision: client adapts to neocarta, neocarta unchanged)
+
+- neocarta creates the vector indexes during ingest in **inline mode only**
+  (`connectors/databricks/run.py:249` → `create_vector_indexes` →
+  `neocarta/ingest/indexes.py:37` `CREATE VECTOR INDEX {label}_vector_index`).
+  Names are derived from the label, not configurable; the client only reads
+  them. So the fix is hardcoded constants, not a threaded config key.
+- Edited `dbxcarta-client`:
+  - `graph_retriever.py`: `_COL_INDEX` `column_embedding`→`column_vector_index`,
+    `_TABLE_INDEX` `table_embedding`→`table_vector_index`; column query
+    `c.data_type`→`c.type AS data_type`, `c.comment`→`c.description AS comment`
+    (output aliases kept so downstream Python is untouched).
+  - `schema_dump.py`: same `c.type`/`c.description` property swap, aliases kept.
+- **Step 3 re-run** (`make e2e-finance-genie-client`): `status=success`, client
+  runs to completion, no crash. Arm scores:
+  - `no_context`: attempted 12, executed 0, correct **0.0%** (expected baseline).
+  - `schema_dump`: attempted 12, executed 12, non_empty 12, correct **83.3%**
+    (up from 66.7% — the type/description fix improved the prompt).
+  - `graph_rag`: attempted 12, parsed **6**, executed **0**, non_empty 0,
+    correct **0.0%**.
+- **ANOMALY for human judgment:** the fatal index error is gone and graph_rag
+  no longer crashes, but it executes 0/12 while schema_dump executes 12/12
+  against the same warehouse. graph_rag generated parseable SQL for only half
+  the questions and none executed. The blocking bug is fixed; this looks like a
+  separate context-quality / retrieval issue, not the index-name crash. Flagged,
+  not silently accepted.
+
+#### Step 4: full test suite and linters
+
+- `make test` → **415 passed** in ~3s, exit 0. PASS.
+- `uv run mypy -p dbxcarta.core -p dbxcarta.client -p dbxcarta.submit
+  -p dbxcarta.materialize` → **Success: no issues found in 41 source files**,
+  exit 0. PASS. (Bare `uv run mypy` errors with "missing target"; the four
+  `-p` flags from `.github/workflows/supply-chain.yml:106` are the real
+  invocation — plan wording "over the four packages" matches this.)
+- `uv run ruff check .` → **1 error**, `I001` import-block unsorted in
+  `examples/schemapile/scripts/dump_question_context.py:16`. **Pre-existing**
+  (committed in `c0fadd9`, not touched by this run); the two files I edited
+  (`graph_retriever.py`, `schema_dump.py`) pass ruff clean. Not auto-fixed
+  (out of scope of the requested change). Flagged for follow-up.
+
+#### Step 5: cleanliness sweep
+
+Grepped code, workflows, and docs. All surviving hits are expected:
+
+- **`dbxcarta-spark` / `dbxcarta.spark`:** zero hits in live code, pyproject,
+  workflows, Makefile. Only in planning/provenance markdown (`align.md`,
+  `align-v2.md`, `align-phase-6.md`). PASS.
+- **`upload-questions`:** zero live hits; only provenance docs (`align.md`,
+  `align-v2.md`) and this plan. PASS.
+- **`verify`:** no live `verify` command handler or invocation. Hits are
+  (a) provenance docs about the retired command, (b) generic English uses of
+  the verb ("Test and verify", "cannot verify", "--skip-verify" in the unrelated
+  openai-endpoint script), and (c) one cosmetic stale token —
+  `tests/core/test_env.py:137` uses `["verify", ...]` as a sample argv to assert
+  `select_overlay_path` returns None; any token works, "verify" is incidental.
+  Minor, non-functional. PASS.
+- **`dbxcarta-submit`:** every hit is the **distribution/package name**, which
+  intentionally stays `dbxcarta-submit` while the console command is `dbxcarta`
+  (`packages/dbxcarta-submit/pyproject.toml:17` says so explicitly), plus the
+  deferred CI workflow `.github/workflows/supply-chain.yml:28` (Phase 4 leaves
+  this until neocarta publishes) and provenance docs. No old-command invocation
+  survives. PASS.
+
+### Summary
+
+**finance-genie end-to-end run, 2026-06-14. Result: PASS with one anomaly
+flagged for human judgment.**
+
+- **Ran:** Section 1 provisioning + Steps 1–5. No teardown (as directed); the
+  graph and ops plane are left standing for inspection.
+- **Ingest (Step 1–2):** SUCCESS (run `604904203580996`). Graph fully embedded
+  inline at dim 1024 — Database 2 / Schema 2 / Table 8 / Column 59 / Value 44,
+  100% embedding success, run summary `success` on the Volume. The whole point
+  of inline mode (one job → fully embedded graph) holds.
+- **Client (Step 3):** found and fixed a real bug — `dbxcarta-client` queried
+  stale neocarta contract names (vector index `column_embedding`/`table_embedding`
+  and properties `data_type`/`comment`). Per operator decision the client was
+  adapted to neocarta 0.6.0 (`*_vector_index`, `c.type`, `c.description`);
+  neocarta unchanged. After the fix the client runs to completion; schema_dump
+  improved to 83.3% correct.
+- **Tests/lint (Step 4):** 415 tests pass, mypy clean. One **pre-existing**
+  ruff `I001` in `examples/schemapile/scripts/dump_question_context.py`,
+  unrelated to this run; not auto-fixed.
+- **Sweep (Step 5):** no live trace of the old package or retired commands.
+
+**For a human to decide / follow up:**
+
+1. **graph_rag arm scores 0%** (attempted 12, parsed 6, executed 0, correct 0)
+   while schema_dump executes 12/12. The fatal index crash is fixed, but
+   graph_rag still produces no executable SQL. Looks like a context-quality /
+   retrieval issue separate from the index-name bug. Needs investigation before
+   graph_rag can be called usable end to end.
+2. **REFERENCES (FK) edges: 0** — confirmed to be the upstream data shape
+   (`fk_declared: 0`), not a pipeline fault. Confirm finance-genie genuinely
+   declares no foreign keys.
+3. **Pre-existing ruff error** in the schemapile script (above) — fix when
+   convenient.
+4. **Plan/process nits:** `NEOCARTA_WHEEL_SOURCE` was missing from root `.env`
+   (now added); `setup_secrets.sh` lives at repo root and needs `--profile`;
+   the submit preflight false-fails on a cold cluster while libraries install
+   (polled + retried); the run summary is written as `summary_local.json`
+   (`run_id: "local"`), not the plan's `summary_<run_id>.json`.
 
 _deferred — not part of this run._
 

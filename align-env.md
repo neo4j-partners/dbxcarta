@@ -139,7 +139,7 @@ External embedding mode stays out of this work. It is Phase 7 in `align.md`. All
 What was done:
 
 - **Overlays, all three.** Added the explicit value-sampling block (`NEOCARTA_DATABRICKS_INCLUDE_VALUES=true`, `NEOCARTA_DATABRICKS_SAMPLE_LIMIT=10`, `NEOCARTA_DATABRICKS_SAMPLE_CARDINALITY_THRESHOLD=50`, matching neocarta's defaults and the examples' current behavior) and pinned the client query-time endpoint `DBXCARTA_EMBEDDING_ENDPOINT=databricks-gte-large-en` so graph_rag embeds questions with the same model that built the graph.
-- **`finance-genie/.env.sample`.** Removed `DBXCARTA_SCHEMAS`, `DBXCARTA_SUMMARY_TABLE`, the value-sampling block, the full embedding block, and the eval-client keys. Kept the standalone local-demo ops location, the chat endpoint, the Neo4j secrets, and the profile and warehouse. Updated the section header to name it as the standalone local-demo location, not an overlay.
+- **`finance-genie/.env.sample`.** Now secrets-only: it carries the `NEO4J_*` placeholders and nothing else. The standalone local demo was removed, since the eval harness reads the same bundled `questions.json` and runs those questions through its `graph_rag` arm (the Neo4j-backed path) plus the `no_context` and `schema_dump` baselines, making the demo redundant. With the demo gone, the local-demo ops location, chat endpoint, profile, and warehouse no longer belong in this file; all non-secret config lives in the committed `dbxcarta-overlay.env`.
 - **`schemapile/.env.sample`.** Removed `DBXCARTA_SCHEMAS`, `DBXCARTA_SUMMARY_TABLE`, the value-and-embedding block, the eval-client arms, and the duplicate `DATABRICKS_SECRET_SCOPE`. Kept the `SCHEMAPILE_*` pipeline params, the ops location, the profile, and the warehouse.
 - **`dense-schema/.env.sample`.** Removed the stray `DBXCARTA_SUMMARY_TABLE` and the two eval-client tuning keys. Kept the `DENSE_*` generation params and the ops location.
 - **Tests.** Strengthened `tests/examples/finance-genie/test_overlay.py` to assert the new explicit value-sampling keys and both embed-endpoint keys. Fixed a stale key name in the `tests/integration/test_semantic_search.py` docstring (`DBXCARTA_INCLUDE_EMBEDDINGS_TABLES` to `NEOCARTA_DATABRICKS_INCLUDE_EMBEDDINGS_TABLES`).
@@ -149,9 +149,9 @@ Two deviations from the plan, both made to honor the hard-cutover directive:
 - **Removed the duplicate `DATABRICKS_SECRET_SCOPE` from `schemapile/.env.sample`.** The plan said to keep the secret scope. Verification of `setup_secrets.sh` showed the scope name is read only from the committed overlay, which is the single source of truth. The copy in `.env.sample` was a dead duplicate that could drift, so it was removed.
 - **Correct test-path name.** The plan named `tests/ops/test_ops_config_golden.py`. The file is at `tests/core/test_ops_config_golden.py`. It is lenient about the overlay key set, so adding keys did not break it and it needed no edit.
 
-Open follow-up, not done (needs a decision):
+Follow-up, since resolved:
 
-- **`NEO4J_*` placeholders are missing from `dense-schema/.env.sample` and `schemapile/.env.sample`.** Only `finance-genie/.env.sample` carries them. `setup_secrets.sh` requires `NEO4J_*` in each example's standalone `.env` to provision that example's secret scope, so a reader copying these two templates has no prompt to fill them in. Adding placeholders would complete the alignment but is an addition rather than a sweep, so it was left for a separate decision.
+- **`NEO4J_*` placeholders added to `dense-schema/.env.sample` and `schemapile/.env.sample`.** Previously only `finance-genie/.env.sample` carried them, leaving a reader who copied the other two templates with no prompt to fill in the credentials that `setup_secrets.sh` requires to provision each example's secret scope. All three `.env.sample` files now carry the `NEO4J_*` placeholders, completing the alignment.
 
 Validation:
 

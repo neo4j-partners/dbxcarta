@@ -17,8 +17,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from dbxcarta.core.identifiers import quote_qualified_name
-from dbxcarta.core.materialize import MaterializeStats
 from dbxcarta.core.volume_io import ensure_volume_subdirs
+from dbxcarta.materialize.builders import MaterializeStats
 
 if TYPE_CHECKING:
     from pyspark.sql import SparkSession

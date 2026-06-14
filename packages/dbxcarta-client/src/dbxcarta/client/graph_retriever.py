@@ -21,8 +21,10 @@ if TYPE_CHECKING:
     from dbxcarta.client.settings import ClientSettings
     from neo4j import Session
 
-_COL_INDEX = "column_embedding"
-_TABLE_INDEX = "table_embedding"
+# neocarta names per-label vector indexes `{label}_vector_index` in inline mode
+# (neocarta/ingest/indexes.py). The client only reads them; neocarta creates them.
+_COL_INDEX = "column_vector_index"
+_TABLE_INDEX = "table_vector_index"
 
 _STOP_WORDS = frozenset(
     {
@@ -505,8 +507,8 @@ def _fetch_columns(session: Session, table_ids: list[str], schemas: list[str]) -
         "WHERE size($schemas) = 0 OR s.name IN $schemas "
         "RETURN db.name AS catalog_name, s.name AS schema_name, "
         "       t.name AS table_name, "
-        "       c.id AS col_id, c.name AS col_name, c.data_type AS data_type, "
-        "       c.comment AS comment, c.ordinal_position AS pos "
+        "       c.id AS col_id, c.name AS col_name, c.type AS data_type, "
+        "       c.description AS comment, c.ordinal_position AS pos "
         "ORDER BY schema_name, table_name, pos",
         tids=table_ids,
         schemas=schemas,

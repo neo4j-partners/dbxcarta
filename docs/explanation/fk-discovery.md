@@ -64,8 +64,6 @@ The pipeline runs in two phases after extracting Unity Catalog metadata.
 
 At query time, the graph retriever seeds from vector similarity search, walks FK edges above the confidence threshold, collects the parent tables of all reachable columns, fetches their full column lists and sample values, and assembles that context alongside any stored join predicates before calling the SQL-generation model.
 
-The trade-offs behind these gates, including how key-like targets are decided and the ambiguity cases the design accepts, are in [`../reference/design-decisions.md`](../reference/design-decisions.md).
-
 ---
 
 ## Relationship to the Genie Knowledge Store

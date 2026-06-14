@@ -32,8 +32,8 @@ jobs:
         # bundled core), so core must ship to PyPI for a clean install to resolve.
         # The ingest pipeline is no longer published here: it moved to neocarta
         # and ships as the neocarta connector wheel. Example packages
-        # (dense-schema, finance-genie, schemapile) and the operator-local
-        # submit/materialize packages are workspace members but are not published.
+        # (dense-schema, schemapile) and the operator-local submit/materialize
+        # packages are workspace members but are not published.
         run: |
           uv build --package dbxcarta-core
           uv build --package dbxcarta-client

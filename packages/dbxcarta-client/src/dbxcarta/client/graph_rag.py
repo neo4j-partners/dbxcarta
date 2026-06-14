@@ -1,15 +1,14 @@
 """Transport-neutral graph_rag retrieval and prompt assembly.
 
 Single source of truth for the question-to-prompt stage of the graph_rag
-arm. Both the evaluation harness (``eval/arms.py``) and the finance-genie
-local demo build context and prompt through ``build_graph_rag_context`` so
-the retrieval-and-prompt behavior cannot drift between them.
+arm. The evaluation harness (``eval/arms.py``) builds context and prompt
+through ``build_graph_rag_context``, keeping retrieval and prompt assembly in
+one place.
 
-The model call is deliberately excluded. Both the harness and the demo now
-generate SQL through a Model Serving REST call (see ``generation.py`` and
-``local_generation.py``); the harness adds a local response cache on top. The
-seam stops once the prompt is built so each caller keeps its own model
-transport and post-generation handling.
+The model call is deliberately excluded. The harness generates SQL through a
+Model Serving REST call (see ``generation.py`` and ``local_generation.py``) and
+adds a local response cache on top. The seam stops once the prompt is built so
+the caller keeps its own model transport and post-generation handling.
 """
 
 from __future__ import annotations

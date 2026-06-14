@@ -19,24 +19,46 @@ import re
 import sys
 import textwrap
 from collections import deque
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from dbxcarta.core.env import read_required_warehouse_id
-from dbxcarta.core.materialize import sanitize_identifier
-from dbxcarta.core.questions import GeneratedPair, ValidationOutcome
+from dbxcarta.core.identifiers import sanitize_identifier
 from dbxcarta.core.sql_safety import sql_targets_only_catalog
 from dbxcarta.core.workspace import build_workspace_client
 
 from dbxcarta_dense_schema_example.config import DEFAULT_DOTENV
 from dbxcarta_dense_schema_example.questions.config import QuestionConfig, load_question_config
-from dbxcarta_dense_schema_example.utils import load_dotenv_file
+from dbxcarta_dense_schema_example.utils import load_layered_env
 
 if TYPE_CHECKING:
     from databricks.sdk import WorkspaceClient
 
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class GeneratedPair:
+    """One generated (question, SQL) record tied to its source schema."""
+
+    uc_schema: str
+    source_id: str
+    shape: str
+    question: str
+    sql: str
+
+
+@dataclass
+class ValidationOutcome:
+    """Tally of a validation pass: the accepted pairs plus rejection counts."""
+
+    accepted: list[GeneratedPair]
+    errored: int = 0
+    empty: int = 0
+    trivial: int = 0
+
 
 _SHAPES = ("single_table_filter", "two_table_join", "aggregation")
 _MAX_SUBGRAPH_TABLES = 8
@@ -65,7 +87,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    load_dotenv_file(args.dotenv)
+    load_layered_env(DEFAULT_DOTENV.parent, args.dotenv)
     config = load_question_config()
 
     if not config.candidate_cache.is_file():

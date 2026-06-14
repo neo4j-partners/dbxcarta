@@ -19,14 +19,26 @@ import argparse
 import sys
 from pathlib import Path
 
-from dotenv import load_dotenv
 from neo4j import GraphDatabase
 
-# Load the standalone .env. DBXCARTA_SCHEMAS is blank for schemapile (the
-# data-only catalog is auto-discovered), and the Cypher below treats an empty
-# schema list as "all schemas", so the dump covers the whole graph.
+from dbxcarta.core.env import load_env_files
+
+# Layer the three config files this script's ClientSettings reads, anchored to
+# the example dir so the load is independent of the working directory: the
+# committed overlay (catalog, ops volume, secret scope), the repo-root base
+# .env (profile, warehouse, endpoints), and the example's own .env (NEO4J_*
+# secrets). DBXCARTA_SCHEMAS is blank for schemapile (the data-only catalog is
+# auto-discovered), and the Cypher below treats an empty schema list as "all
+# schemas", so the dump covers the whole graph. load_env_files uses
+# override=False, so a real exported env var still wins over all three.
 _EXAMPLE_DIR = Path(__file__).resolve().parent.parent
-load_dotenv(_EXAMPLE_DIR / ".env")
+load_env_files(
+    [
+        _EXAMPLE_DIR / "dbxcarta-overlay.env",
+        _EXAMPLE_DIR.parents[1] / ".env",
+        _EXAMPLE_DIR / ".env",
+    ]
+)
 
 from dbxcarta.client.neo4j_utils import neo4j_credentials  # noqa: E402
 from dbxcarta.client.schema_dump import fetch_schema_dump  # noqa: E402

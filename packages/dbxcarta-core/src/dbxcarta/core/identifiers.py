@@ -6,6 +6,7 @@ import re
 
 _IDENTIFIER_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_-]*$")
 _VOLUME_SUBPATH_PART_RE = re.compile(r"^[A-Za-z0-9._=-]+$")
+_NAME_SANITIZE_RE = re.compile(r"[^a-zA-Z0-9_]+")
 
 # Catalogs that dbxcarta tooling must never create or drop. The build and
 # teardown commands both refuse these so a typo in an overlay's volume path
@@ -27,6 +28,23 @@ def validate_identifier(value: str, *, label: str = "identifier") -> str:
     if not _IDENTIFIER_RE.match(value):
         raise ValueError(f"Invalid Databricks {label}: {value!r}")
     return value
+
+
+def sanitize_identifier(name: str, *, prefix: str = "t") -> str:
+    """Clean a name into a legal identifier.
+
+    Non-identifier runs collapse to ``_``; the result is stripped of leading
+    and trailing underscores and lowercased. A cleaned name that starts with a
+    digit is prefixed with ``f"{prefix}_"`` so it is a legal identifier. Returns
+    ``""`` when nothing usable remains. Callers pass ``prefix="t"`` for tables
+    and ``prefix="c"`` for columns.
+    """
+    cleaned = _NAME_SANITIZE_RE.sub("_", name).strip("_").lower()
+    if not cleaned:
+        return ""
+    if cleaned[0].isdigit():
+        cleaned = f"{prefix}_{cleaned}"
+    return cleaned
 
 
 def split_qualified_name(

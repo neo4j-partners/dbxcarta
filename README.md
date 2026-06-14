@@ -150,8 +150,9 @@ The pipeline writes a stable typed contract the client traverses: nodes
 `HAS_TABLE`, `HAS_COLUMN`, `HAS_VALUE`, and confidence-scored `REFERENCES` edges
 between columns. Each node carries a dotted catalog-qualified `id`, a
 `description`, and an `embedding` where applicable; `Table` nodes also carry a
-`layer` tier. neocarta owns the authoritative contract; the shape and a pointer
-to it are in [`docs/schema/SCHEMA.md`](docs/schema/SCHEMA.md).
+`layer` tier. neocarta owns the authoritative contract; the shape the client
+reads is described in
+[`docs/reference/architecture.md`](docs/reference/architecture.md).
 
 ![dbxcarta Graph Schema](docs/assets/graph-schema.png)
 
@@ -161,8 +162,8 @@ Unity Catalog metadata flows through a single Spark job run from the neocarta
 wheel: preflight checks grants and config, extract unions `information_schema`
 into DataFrames, transform shapes typed graph rows, embed calls `ai_query` per
 label inline, then the Neo4j write lands nodes and relationships and refreshes the
-vector indexes. The pipeline internals live in neocarta; see
-[`docs/reference/pipeline.md`](docs/reference/pipeline.md) for where.
+vector indexes. The pipeline internals live in the
+[neocarta](https://github.com/neo4j-field/neocarta) connector.
 
 ### Configuring the ingest job
 

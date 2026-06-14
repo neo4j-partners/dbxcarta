@@ -26,8 +26,8 @@ RETURN db.name AS catalog_name,
        s.name AS schema_name,
        t.name  AS table_name,
        c.name  AS column_name,
-       c.data_type AS data_type,
-       c.comment   AS comment,
+       c.type AS data_type,
+       c.description AS comment,
        c.ordinal_position AS pos
 ORDER BY db.name, s.name, t.name, c.ordinal_position
 """

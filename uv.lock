@@ -11,7 +11,6 @@ members = [
     "dbxcarta-client",
     "dbxcarta-core",
     "dbxcarta-dense-schema-example",
-    "dbxcarta-finance-genie-example",
     "dbxcarta-materialize",
     "dbxcarta-schemapile-example",
     "dbxcarta-submit",
@@ -475,32 +474,6 @@ requires-dist = [
 provides-extras = ["test"]
 
 [[package]]
-name = "dbxcarta-finance-genie-example"
-version = "1.1.0"
-source = { editable = "examples/finance-genie" }
-dependencies = [
-    { name = "databricks-sdk" },
-    { name = "dbxcarta-client", extra = ["graph"] },
-    { name = "dbxcarta-core" },
-    { name = "python-dotenv" },
-]
-
-[package.optional-dependencies]
-test = [
-    { name = "pytest" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "databricks-sdk", specifier = ">=0.40" },
-    { name = "dbxcarta-client", extras = ["graph"], editable = "packages/dbxcarta-client" },
-    { name = "dbxcarta-core", editable = "packages/dbxcarta-core" },
-    { name = "pytest", marker = "extra == 'test'" },
-    { name = "python-dotenv" },
-]
-provides-extras = ["test"]
-
-[[package]]
 name = "dbxcarta-materialize"
 version = "1.1.0"
 source = { editable = "packages/dbxcarta-materialize" }
@@ -586,7 +559,6 @@ dependencies = [
     { name = "dbxcarta-client" },
     { name = "dbxcarta-core" },
     { name = "dbxcarta-dense-schema-example" },
-    { name = "dbxcarta-finance-genie-example" },
     { name = "dbxcarta-materialize" },
     { name = "dbxcarta-schemapile-example" },
     { name = "dbxcarta-submit" },
@@ -610,7 +582,6 @@ requires-dist = [
     { name = "dbxcarta-client", editable = "packages/dbxcarta-client" },
     { name = "dbxcarta-core", editable = "packages/dbxcarta-core" },
     { name = "dbxcarta-dense-schema-example", editable = "examples/dense-schema" },
-    { name = "dbxcarta-finance-genie-example", editable = "examples/finance-genie" },
     { name = "dbxcarta-materialize", editable = "packages/dbxcarta-materialize" },
     { name = "dbxcarta-schemapile-example", editable = "examples/schemapile" },
     { name = "dbxcarta-submit", editable = "packages/dbxcarta-submit" },

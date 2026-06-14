@@ -10,10 +10,8 @@ A reading path from why the project exists to how it is built:
 
 1. [Root README](../README.md): what dbxcarta is, what it produces, and how to run the demo.
 2. [explanation/why-semantic.md](explanation/why-semantic.md): why build a graph layer over Unity Catalog at all.
-3. [reference/architecture.md](reference/architecture.md): the three storage planes, the package tiers, and how the layer is validated.
-4. [schema/SCHEMA.md](schema/SCHEMA.md): the Neo4j contract the client reads, owned by neocarta.
-5. [reference/pipeline.md](reference/pipeline.md): where the ingest pipeline now lives (neocarta) and what stays in dbxcarta.
-6. [reference/best-practices.md](reference/best-practices.md): the design rules that constrain the pipeline.
+3. [reference/architecture.md](reference/architecture.md): the three storage planes, the package tiers, the graph contract the client reads, and how the layer is validated.
+4. [reference/best-practices.md](reference/best-practices.md): the design rules that constrain the pipeline.
 
 ## Tutorials
 
@@ -25,11 +23,8 @@ Step-by-step guides for common tasks.
 
 Stable technical references for the current system.
 
-- [reference/architecture.md](reference/architecture.md): system design covering the storage planes, package tiers, build path, the validation model, and the client cache mechanics.
-- [reference/pipeline.md](reference/pipeline.md): where the ingest pipeline now lives (the neocarta connector) and what dbxcarta still owns.
+- [reference/architecture.md](reference/architecture.md): system design covering the storage planes, package tiers, build path, the graph contract the client reads, the validation model, and the client cache mechanics.
 - [reference/best-practices.md](reference/best-practices.md): the authoritative pipeline design rules with cited sources, spanning Spark, the Neo4j connector, and project principles.
-- [reference/design-decisions.md](reference/design-decisions.md): FK discovery trade-offs in plain terms, including key-like columns, name-match precision, and the gaps the design accepts.
-- [reference/fk-inference-internal-types.md](reference/fk-inference-internal-types.md): where the FK-inference typed layer now lives (neocarta), and what stays in dbxcarta.
 - [reference/operational-lessons.md](reference/operational-lessons.md): lessons learned from running the pipeline.
 
 ## Explanation
@@ -38,10 +33,6 @@ Conceptual background and the rationale for the project.
 
 - [explanation/why-semantic.md](explanation/why-semantic.md): the case for a Neo4j semantic layer over querying `information_schema` directly or curating a Genie space, with prior art.
 - [explanation/fk-discovery.md](explanation/fk-discovery.md): FK discovery as the core differentiator, and when to use it versus a curated Genie space.
-
-## Schema
-
-- [schema/SCHEMA.md](schema/SCHEMA.md): the graph shape the client reads, and a pointer to neocarta, which owns the authoritative contract.
 
 ## Security
 

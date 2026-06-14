@@ -178,7 +178,7 @@ Fix every automated workflow that still builds, versions, tests, or type-checks 
 
 **Phase 4 is done when:** every workflow runs clean with no step that touches the removed package.
 
-**Status: Postponed.** Deferred until neocarta publishes its updated packages to a package index; the CI workflows are not being changed in this pass. The `.github/` workflows still name `dbxcarta-spark` (build, version, test, type-check steps). `docs/reference/release.md` carries an explicit blockquote noting this lag so the release doc stays accurate while the workflows wait.
+**Status: Complete.** Every `.github/` workflow is clean of the removed package. The literal `dbxcarta-spark` build/version/test/type-check entries were already gone (`publish.yaml` builds only `dbxcarta-core` + `dbxcarta-client`; `release.yaml` bumps only the published + surviving-example packages; the `supply-chain.yml` layer matrix and mypy targets carry no spark layer). This pass removed the remaining residue: the dead "Set up Java for PySpark tests" step in the `layer-tests` job (no matrix layer runs PySpark — only the `validate` job's full `pytest` run does, via `dbxcarta-materialize`, and it keeps its Java step), and the stale `finance-genie` mention in the `publish.yaml` example-package comment (finance-genie ships no Python and is no longer a workspace member).
 
 ## Phase 5: Update the documents
 

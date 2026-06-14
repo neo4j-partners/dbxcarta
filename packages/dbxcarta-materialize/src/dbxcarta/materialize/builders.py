@@ -6,11 +6,11 @@ its supporting helpers. This module is the single home for that plumbing, and it
 is deliberately *pure*: it only builds SQL strings (and the small records the
 foreign-key pass needs). It opens nothing, spawns no threads, and runs no SQL.
 
-The imperative shell that owns a ``SparkSession`` (the ``dbxcarta-materialize``
-Spark job) asks these builders for the statements, runs them with ``spark.sql``,
-pools the independent table creates, and tallies the run. Keeping execution and
-threading out of core makes the builders trivially testable as text and leaves
-the only thread pool over a known thread-safe ``SparkSession``.
+The imperative shell in :mod:`dbxcarta.materialize.run` owns the
+``SparkSession``, asks these builders for the statements, runs them with
+``spark.sql``, pools the independent table creates, and tallies the run. Keeping
+execution and threading out of the builders makes them trivially testable as
+text and leaves the only thread pool over a known thread-safe ``SparkSession``.
 
 Example choices (the source type map and the table-property prefix) are passed
 in as arguments rather than hardcoded, so one copy serves every example.
@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
-from dbxcarta.core.identifiers import quote_identifier
+from dbxcarta.core.identifiers import quote_identifier, sanitize_identifier
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -34,12 +34,11 @@ _CONSTRAINT_NAME_LIMIT = 255
 
 _DECIMAL_RE = re.compile(r"^(?:DECIMAL|NUMERIC|NUMBER|DEC)\s*\((\d+)\s*,\s*(\d+)\)$")
 _VARCHAR_RE = re.compile(r"^(?:VARCHAR|CHAR|CHARACTER|NVARCHAR|NCHAR)\s*\(\s*\d+\s*\)$")
-_NAME_SANITIZE_RE = re.compile(r"[^a-zA-Z0-9_]+")
 
 # The one shared source-type -> Delta-type map. Both examples carried this map
-# with identical entries, so core owns it as the default. An example overrides
-# it only if its source ever needs different entries; this keeps a single map
-# today without hardcoding that the two sources must always agree.
+# with identical entries, so this module owns it as the default. An example
+# overrides it only if its source ever needs different entries; this keeps a
+# single map today without hardcoding that the two sources must always agree.
 DEFAULT_DELTA_TYPE_MAP: Mapping[str, str] = MappingProxyType(
     {
         "INT": "INT",
@@ -117,7 +116,7 @@ class MaterializeStats:
     Holds counts only. Parallelism is the shell's concern: a parallel
     materialize has each table build return its own ``MaterializeStats`` and the
     shell sums them with :meth:`__add__`, so the shape carries no shared mutable
-    state. Core fills the build-time counts (``type_fallbacks`` and the
+    state. The builders fill the build-time counts (``type_fallbacks`` and the
     ``tables_skipped`` of a build-time skip); the shell adds the runtime counts
     (``tables_created``, ``rows_inserted``, ``pk_constraints_added``,
     ``fk_constraints_added``) as each statement it runs succeeds.
@@ -174,23 +173,6 @@ def coerce_type(raw: str, type_map: Mapping[str, str] = DEFAULT_DELTA_TYPE_MAP) 
     if collapsed in despaced:
         return despaced[collapsed], False
     return "STRING", True
-
-
-def sanitize_identifier(name: str, *, prefix: str = "t") -> str:
-    """Clean a name into a legal identifier.
-
-    Non-identifier runs collapse to ``_``; the result is stripped of leading
-    and trailing underscores and lowercased. A cleaned name that starts with a
-    digit is prefixed with ``f"{prefix}_"`` so it is a legal identifier. Returns
-    ``""`` when nothing usable remains. Callers pass ``prefix="t"`` for tables
-    and ``prefix="c"`` for columns.
-    """
-    cleaned = _NAME_SANITIZE_RE.sub("_", name).strip("_").lower()
-    if not cleaned:
-        return ""
-    if cleaned[0].isdigit():
-        cleaned = f"{prefix}_{cleaned}"
-    return cleaned
 
 
 def escape_sql_string(value: str) -> str:
