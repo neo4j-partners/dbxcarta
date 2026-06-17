@@ -25,7 +25,7 @@ test = [
 # CI/supply-chain tooling, pinned so the build is reproducible and Dependabot
 # proposes version-bump PRs (CI-verified) instead of these floating via uvx.
 ci = [
-    "ruff==0.15.15",
+    "ruff==0.15.17",
     "pip-audit==2.10.0",
     "cyclonedx-bom==7.3.0",
 ]
