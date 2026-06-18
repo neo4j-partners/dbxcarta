@@ -132,12 +132,12 @@ def _normalize_id_part(name: str) -> str:
     """Normalize one identifier part to the form ingest stores in node ids.
 
     Mirrors the id normalization the ingest connector applies when it builds
-    node ids: lowercase, then spaces and hyphens to underscores. Node ids are
-    normalized this way while the ``.name`` property keeps the true Unity
-    Catalog name, so any comparison against an id-derived part must normalize
+    node ids: lowercase only, no character folding (contract 1.6). Node ids
+    are lowercased this way while the ``.name`` property keeps the true Unity
+    Catalog name, so any comparison against an id-derived part must lowercase
     the configured name first.
     """
-    return name.lower().replace(" ", "_").replace("-", "_")
+    return name.lower()
 
 
 def _resolve_true_schema_names(session: Session, normalized_parts: set[str]) -> list[str]:

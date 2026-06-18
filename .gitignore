@@ -57,6 +57,9 @@ dmypy.json
 # `*.local.env` / `*-overlay.local.env` is a transient generated artifact.
 *.local.env
 **/dbxcarta-overlay.local.env
+# Standalone-submit example: the populated config is local-only. Only its
+# .env.sample is committed; the filled-in submit_finance_genie.env never is.
+examples/standalone-submit/submit_finance_genie.env
 *.pem
 *.key
 *.crt

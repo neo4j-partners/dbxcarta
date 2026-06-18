@@ -355,10 +355,11 @@ def test_resolve_true_schema_names_reads_name_not_id() -> None:
     """The selected normalized id-part resolves to the true hyphenated name.
 
     Regression: when the schema name is hyphenated and no schema list is
-    configured, the retriever used to pass the normalized id-part
-    (graph_enriched_schema) into the `.name`-filtered fetch, which matched
-    nothing because Schema.name is graph-enriched-schema. The fix reads the
-    authoritative Schema.name and matches it via the canonical normalization.
+    configured, the retriever used to pass the normalized id-part into the
+    `.name`-filtered fetch. The fix reads the authoritative Schema.name and
+    matches it via the canonical normalization. Under contract 1.6 the id-part
+    is lowercase-only (hyphens preserved), so the selected part is
+    `graph-enriched-schema`; it must still resolve to the true name.
     """
 
     class SessionStub:
@@ -369,7 +370,7 @@ def test_resolve_true_schema_names_reads_name_not_id() -> None:
                 {"name": None},
             ]
 
-    result = _resolve_true_schema_names(SessionStub(), {"graph_enriched_schema"})
+    result = _resolve_true_schema_names(SessionStub(), {"graph-enriched-schema"})
     assert result == ["graph-enriched-schema"]
 
 
@@ -382,19 +383,20 @@ def test_resolve_true_schema_names_empty_selection_skips_query() -> None:
 
 
 def test_filter_seed_pairs_matches_hyphenated_configured_schema() -> None:
-    """Regression: a hyphenated configured schema must select normalized-id seeds.
+    """Regression: a hyphenated configured schema must select its seeds.
 
-    schema_from_node_id yields the normalized id part
-    (graph_enriched_schema); the configured name is hyphenated
-    (graph-enriched-schema). Without normalization every vector seed was
-    dropped and seed-driven expansion was dead.
+    schema_from_node_id yields the id part; under contract 1.6 the id
+    preserves hyphens, so a schema named `graph-enriched-schema` produces the
+    id part `graph-enriched-schema`. The configured name is normalized the same
+    way (lowercase only), so they match. Without that match every vector seed
+    was dropped and seed-driven expansion was dead.
     """
     pairs = [
-        ("graph_enriched_finance_silver.graph_enriched_schema.accounts.id", 0.9),
+        ("graph-enriched-finance-silver.graph-enriched-schema.accounts.id", 0.9),
         ("other_cat.other_schema.t.c", 0.5),
     ]
     assert _filter_seed_pairs_to_schemas(pairs, ["graph-enriched-schema"]) == [
-        ("graph_enriched_finance_silver.graph_enriched_schema.accounts.id", 0.9),
+        ("graph-enriched-finance-silver.graph-enriched-schema.accounts.id", 0.9),
     ]
 
 
