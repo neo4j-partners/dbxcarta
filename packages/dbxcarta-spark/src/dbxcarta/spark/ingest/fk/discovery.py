@@ -191,12 +191,10 @@ def _constraints_df(
     catalog/schema), so unioning per-catalog reads only makes per-catalog
     PKs visible.
     """
-    from functools import reduce
-
+    from dbxcarta.spark.ingest.union import balanced_union
     from pyspark.sql.functions import col
 
-    rows = reduce(
-        lambda a, b: a.unionByName(b),
+    rows = balanced_union(
         [
             spark.sql(
                 f"SELECT kcu.table_catalog, kcu.table_schema, kcu.table_name,"

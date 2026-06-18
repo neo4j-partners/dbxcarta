@@ -417,6 +417,17 @@ it benchmarks `questions.json` across the configured arms with no cluster.
   `correct_rate`. The `no_context` arm is the zero-context baseline floor. The
   three arms are a progression, not three attempts at one task.
 
+- **Verify the graph against the catalog.** After an ingest finishes,
+  `dbxcarta verify` loads the most recent successful run summary (or the run you
+  name with `--run-id`) and asserts the Neo4j node and relationship counts,
+  references, sampled values, and column ids agree with what the catalog
+  declares. It exits non-zero and prints each violation on a mismatch. These are
+  the same checks the ingest job runs at the end of every run.
+
+  ```bash
+  DBXCARTA_ENV_FILE=<consumer>/dbxcarta/dbxcarta-overlay.env uv run dbxcarta verify
+  ```
+
 - **Run the non-live tests.** They run today against the vendored wheels, with no
   live Databricks or Neo4j.
 

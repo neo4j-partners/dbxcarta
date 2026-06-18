@@ -3,12 +3,24 @@
 from __future__ import annotations
 
 import os
+import sys
 from typing import TYPE_CHECKING
 
 import pytest
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+
+# Pin the Spark worker interpreter to the one running the driver, set at import
+# (before any SparkSession is built by any fixture). Spark otherwise spawns
+# workers via the bare `python3` on PATH, which on a machine with a newer
+# system Python triggers PYTHON_VERSION_MISMATCH against the venv driver and
+# fails every job that materializes a Python partition. Setting it here — not
+# inside a single session fixture — covers every test module that builds its
+# own session (e.g. the fk_guard execution guard), regardless of which one wins
+# the race to create the first session.
+os.environ["PYSPARK_PYTHON"] = sys.executable
+os.environ["PYSPARK_DRIVER_PYTHON"] = sys.executable
 
 
 @pytest.fixture(scope="session")

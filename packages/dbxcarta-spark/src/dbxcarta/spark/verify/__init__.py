@@ -36,11 +36,12 @@ def single_value(result: Any, key: str) -> Any:
 def scoped_catalog(summary: dict[str, Any]) -> tuple[str, str]:
     """Return ``(catalog_id, id_prefix)`` for catalog-scoped verify queries.
 
-    Node ids are normalized through ``contract.generate_id`` (lowercased;
-    spaces and hyphens become underscores). Scoping predicates must use the
-    same normalized form: comparing the raw ``summary["catalog"]`` against
-    ``n.id`` means a catalog or schema name containing a hyphen or space never
-    matches, so every scoped count reads 0 even when the graph is correct.
+    Node ids are normalized through ``contract.generate_id``, which lowercases
+    each part and dot-joins (contract 1.6: no other folding — hyphens and
+    spaces are preserved). Scoping predicates must use the same normalized
+    form: comparing the raw ``summary["catalog"]`` against ``n.id`` means a
+    catalog or schema name that differs only in case never matches, so every
+    scoped count reads 0 even when the graph is correct.
     """
     from dbxcarta.spark.contract import generate_id
 
@@ -64,7 +65,7 @@ def scoped_catalogs(
     historical single-catalog callers and the direct-call unit tests), this
     falls back to the single ``summary["catalog"]`` so behavior is unchanged.
     Ids are normalized through ``contract.generate_id`` exactly as
-    ``scoped_catalog`` does, for the same hyphen/space reason.
+    ``scoped_catalog`` does, for the same case-normalization reason.
     """
     from dbxcarta.spark.contract import generate_id
 

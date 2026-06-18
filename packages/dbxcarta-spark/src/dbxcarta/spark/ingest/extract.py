@@ -67,14 +67,13 @@ def extract(
     extract counts are recorded. The returned DataFrames are already filtered
     to the requested schema scope and cached for reuse by later transforms.
     """
-    from functools import reduce
-
+    from dbxcarta.spark.ingest.union import balanced_union
     from pyspark.sql.functions import col
 
     catalogs = settings.resolved_catalogs()
 
     def _union(frames: list[DataFrame]) -> DataFrame:
-        return reduce(lambda a, b: a.unionByName(b), frames)
+        return balanced_union(frames)
 
     schemata_df = _union(
         [

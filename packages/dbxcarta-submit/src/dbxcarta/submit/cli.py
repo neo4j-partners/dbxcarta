@@ -20,6 +20,8 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
     from databricks.sdk import WorkspaceClient
+    from dbxcarta.spark.settings import SparkIngestSettings
+    from neo4j import Driver
 
 # Ingest now runs neocarta's Databricks connector: the wheel is the neocarta
 # distribution (staged from a local build, see _handle_publish_wheels) and the
@@ -217,6 +219,8 @@ def main() -> None:
     - `dbxcarta teardown` drops the catalog and/or schema targets the
       selected overlay names in `DBXCARTA_TEARDOWN_TARGET` (comma-separated).
     - `dbxcarta ready` reports whether each ingested catalog holds a data schema.
+    - `dbxcarta verify` runs graph and catalog verification against a
+      previously-loaded run (uses the dbxcarta-spark verify library).
     """
     overlay = select_overlay_path()
     runner.env_file = overlay
@@ -237,6 +241,8 @@ def main() -> None:
         sys.exit(_handle_teardown(argv[1:]))
     if argv[:1] == ["ready"]:
         sys.exit(_handle_ready(argv[1:]))
+    if argv[:1] == ["verify"]:
+        sys.exit(_handle_verify(argv[1:]))
     if not argv or argv[0] in ("-h", "--help"):
         _print_help()
         sys.exit(0 if argv else 2)
@@ -249,8 +255,8 @@ def _print_help() -> None:
     """Summarize the dbxcarta commands, then the runner's own help.
 
     dbxcarta owns ``submit-entrypoint``, ``materialize``, ``publish-wheels``,
-    ``bootstrap``, ``teardown``, and ``ready``; every other command is the
-    runner's. Delegating to the runner's ``--help`` keeps that list
+    ``bootstrap``, ``teardown``, ``ready``, and ``verify``; every other command
+    is the runner's. Delegating to the runner's ``--help`` keeps that list
     authoritative instead of duplicating (and drifting from) it.
     """
     print(
@@ -270,6 +276,8 @@ def _print_help() -> None:
         "                                      DBXCARTA_TEARDOWN_TARGET (needs --yes-i-mean-it).\n"
         "  ready                               Report whether each ingested catalog holds a data\n"
         "                                      schema.\n"
+        "  verify [--run-id RUN_ID]            Run graph and catalog verification against a\n"
+        "                                      previously-loaded run.\n"
         "\n"
         "Commands passed through to databricks-job-runner:"
     )
@@ -686,6 +694,101 @@ def _handle_ready(argv: list[str]) -> int:
     report = check_readiness(build_workspace_client(), warehouse_id)
     print(report.format(strict_optional=args.strict_optional))
     return 0 if report.ok(strict_optional=args.strict_optional) else 1
+
+
+def _handle_verify(argv: list[str]) -> int:
+    """Run graph and catalog verification against a previously-loaded run.
+
+    The verification logic is the ingest pipeline's own assertion library
+    (``dbxcarta.spark.verify``). That package is present in the in-repo
+    workspace install but is NOT bundled into submit's self-contained release
+    wheel, so the spark imports are deferred and a missing ``dbxcarta.spark``
+    surfaces as a clear operator error instead of a bare ImportError. Runs
+    locally against the SQL warehouse and Neo4j; no cluster job is submitted.
+    """
+    import argparse
+
+    from dbxcarta.core.env import EnvFileError, load_env_files, resolve_env_files
+
+    try:
+        files, cleaned_argv = resolve_env_files(argv)
+    except EnvFileError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    load_env_files(files)
+
+    parser = argparse.ArgumentParser(prog="dbxcarta verify")
+    parser.add_argument(
+        "--run-id",
+        help="Run id to verify. Defaults to the most recent status='success' summary.",
+    )
+    args = parser.parse_args(cleaned_argv)
+
+    try:
+        from dbxcarta.spark.ingest.summary_io import LoadSummaryError, load_summary_from_volume
+        from dbxcarta.spark.settings import SparkIngestSettings
+        from dbxcarta.spark.verify import verify_run
+    except ImportError as exc:
+        print(
+            "error: `dbxcarta verify` requires the dbxcarta-spark package, which is "
+            "present in the in-repo workspace install but not submit's release wheel "
+            f"({exc}).",
+            file=sys.stderr,
+        )
+        return 2
+
+    from dbxcarta.core.workspace import build_workspace_client
+
+    settings = SparkIngestSettings()
+    ws = build_workspace_client()
+    try:
+        summary = load_summary_from_volume(ws, settings.dbxcarta_summary_volume, run_id=args.run_id)
+    except LoadSummaryError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    if summary is None:
+        scope_msg = f"run_id={args.run_id!r}" if args.run_id else "most recent status='success' run"
+        print(
+            f"error: no run summary found in {settings.dbxcarta_summary_volume} for {scope_msg}.",
+            file=sys.stderr,
+        )
+        return 2
+
+    driver = _build_neo4j_driver(ws, settings)
+    try:
+        report = verify_run(
+            summary=summary,
+            neo4j_driver=driver,
+            ws=ws,
+            warehouse_id=settings.databricks_warehouse_id,
+            catalog=settings.dbxcarta_catalog,
+            catalogs=settings.resolved_catalogs(),
+            sample_limit=settings.dbxcarta_sample_limit,
+        )
+    finally:
+        driver.close()
+
+    print(report.format())
+    return 0 if report.ok else 1
+
+
+def _build_neo4j_driver(ws: WorkspaceClient, settings: SparkIngestSettings) -> Driver:
+    """Open a Neo4j driver from the secrets in the overlay's secret scope.
+
+    Mirrors the on-cluster fetch: the NEO4J_* values are never read from the
+    process env here, only from the workspace secret scope the settings name.
+    """
+    from dbxcarta.core.workspace import read_workspace_secret
+    from neo4j import GraphDatabase
+
+    scope = settings.databricks_secret_scope
+    return GraphDatabase.driver(
+        read_workspace_secret(ws, scope, "NEO4J_URI"),
+        auth=(
+            read_workspace_secret(ws, scope, "NEO4J_USERNAME"),
+            read_workspace_secret(ws, scope, "NEO4J_PASSWORD"),
+        ),
+    )
 
 
 def _handle_submit_entrypoint(argv: list[str]) -> int:

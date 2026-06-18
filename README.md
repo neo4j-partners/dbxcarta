@@ -418,6 +418,20 @@ terminal.
 
 ### 5. Verify and clean up
 
+After an ingest finishes, `dbxcarta verify` checks the built graph against the
+source catalog. It loads the most recent successful run summary (or the run you
+name with `--run-id`), then asserts the Neo4j node and relationship counts,
+references, sampled values, and column ids agree with what the catalog declares:
+
+```bash
+uv run dbxcarta verify
+uv run dbxcarta verify --run-id <run_id>
+```
+
+It exits non-zero and prints each violation when the graph and catalog disagree.
+The check logic is the ingest pipeline's own assertion library, so the same
+checks run at the end of every ingest and on demand here.
+
 Run local tests:
 
 ```bash

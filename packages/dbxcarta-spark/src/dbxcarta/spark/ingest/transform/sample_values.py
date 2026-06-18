@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 from dbxcarta.spark.contract import CONTRACT_VERSION, generate_id
 from dbxcarta.spark.ingest.contract_expr import id_expr_from_columns, value_id_expr
+from dbxcarta.spark.ingest.union import balanced_union
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -356,9 +357,11 @@ def _sample_values(
     if not dfs:
         return None
 
-    raw_df = dfs[0]
-    for df in dfs[1:]:
-        raw_df = raw_df.unionByName(df)
+    # Balanced union: one frame per (table, column-chunk) sampling query, so
+    # dfs can hold thousands of frames at the dense-catalog target. A
+    # left-folded chain would build a plan that deep; balanced_union keeps it
+    # O(log N) (best-practices Spark §7-adjacent: build a shallow plan).
+    raw_df = balanced_union(dfs)
 
     w = Window.partitionBy("col_id").orderBy(col("cnt").desc())
     top_n: DataFrame = (

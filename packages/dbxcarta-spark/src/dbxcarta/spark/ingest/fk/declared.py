@@ -63,8 +63,7 @@ def discover_declared(
     `prior_pairs` is empty by construction when declared runs first, but is
     accepted for signature uniformity with the other two strategies.
     """
-    from functools import reduce
-
+    from dbxcarta.spark.ingest.union import balanced_union
     from pyspark.sql.functions import col
 
     # Declared FKs are read per ingested catalog. Unity Catalog declared FKs
@@ -73,7 +72,7 @@ def discover_declared(
     catalogs = settings.resolved_catalogs()
 
     def _union(frames: list[DataFrame]) -> DataFrame:
-        return reduce(lambda a, b: a.unionByName(b), frames)
+        return balanced_union(frames)
 
     fk_pairs_df = _union(
         [
